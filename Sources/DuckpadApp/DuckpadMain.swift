@@ -1,5 +1,6 @@
 import AppKit
 import DuckpadApplication
+import DuckpadEditorAdapter
 import DuckpadInfrastructure
 import DuckpadPresentation
 
@@ -12,12 +13,18 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         installDevelopmentAppIcon()
         let store = InMemorySessionStore()
         let workspace = ScratchWorkspaceUseCase(store: store)
-        let controller = DuckpadWindowController(workspace: workspace)
+        let editor = ScintillaEditorAdapter()
+        let controller = DuckpadWindowController(
+            workspace: workspace,
+            editorAdapter: editor,
+            editorView: editor.view
+        )
         windowController = controller
         controller.showAndFocus()
 
         if ProcessInfo.processInfo.environment["DUCKPAD_SMOKE_EXIT"] == "1" {
-            print("Duckpad smoke window ready")
+            precondition(editor.activeScintillaView != nil, "production Scintilla view was not hosted")
+            print("Duckpad smoke window ready with Scintilla \(ScintillaEditorAdapter.engineVersion)")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 NSApplication.shared.terminate(nil)
             }

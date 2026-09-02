@@ -105,10 +105,22 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, @preconcurrency 
             return
         }
         let replacement = (textStorage.string as NSString).substring(with: editedRange)
+        guard let previous = snapshots[activeBuffer.bufferID] else {
+            restore(bufferID: activeBuffer.bufferID)
+            return
+        }
+        let previousNSString = previous.text as NSString
+        let previousRange = NSRange(location: editedRange.location, length: oldLength)
+        guard NSMaxRange(previousRange) <= previousNSString.length else {
+            restore(bufferID: activeBuffer.bufferID)
+            return
+        }
+        let utf8Location = previousNSString.substring(to: previousRange.location).utf8.count
+        let utf8Length = previousNSString.substring(with: previousRange).utf8.count
         let edit = EditorIncrementalEdit(
             bufferID: activeBuffer.bufferID,
             expectedRevision: activeBuffer.revision,
-            range: TextEditRange(location: editedRange.location, length: oldLength),
+            range: TextEditRange(location: utf8Location, length: utf8Length),
             replacement: replacement
         )
         switch onEdit?(edit) ?? .rejected(currentRevision: activeBuffer.revision) {

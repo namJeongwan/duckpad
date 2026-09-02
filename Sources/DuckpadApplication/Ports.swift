@@ -40,7 +40,10 @@ public protocol SessionStore: Sendable {
 }
 
 public struct TextEditRange: Equatable, Sendable {
+    /// Zero-based UTF-8 byte offset. Cocoa UTF-16 ranges must be converted at
+    /// the adapter boundary before entering Application.
     public let location: Int
+    /// Number of UTF-8 bytes replaced in the pre-edit snapshot.
     public let length: Int
 
     public init(location: Int, length: Int) {

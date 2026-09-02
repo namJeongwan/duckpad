@@ -56,7 +56,13 @@ private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
 public final class DuckpadWindowController: NSWindowController {
     private let workspace: ScratchWorkspaceUseCase
     let tabStrip = MultilineTabStripView(frame: .zero)
-    let editor = TextViewEditorAdapter()
+    private let fallbackEditor: TextViewEditorAdapter?
+    var editor: TextViewEditorAdapter {
+        precondition(fallbackEditor != nil, "NSTextView adapter is not active in production composition")
+        return fallbackEditor!
+    }
+    private let activeEditor: any EditorPort
+    private let editorHostView: NSView
     private var editorBinding: EditorBindingUseCase!
     private var errorPresenter: (any PersistenceErrorPresenting)!
     private var handledFailureIDs: Set<UUID> = []
@@ -64,10 +70,20 @@ public final class DuckpadWindowController: NSWindowController {
 
     public init(
         workspace: ScratchWorkspaceUseCase,
+        editorAdapter: (any EditorPort)? = nil,
+        editorView: NSView? = nil,
         errorPresenter: (any PersistenceErrorPresenting)? = nil,
         automaticallyStarts: Bool = true
     ) {
         self.workspace = workspace
+        let fallback = editorAdapter == nil ? TextViewEditorAdapter() : nil
+        precondition(
+            (editorAdapter == nil) == (editorView == nil),
+            "an injected editor port and view must be supplied together"
+        )
+        fallbackEditor = fallback
+        activeEditor = editorAdapter ?? fallback!
+        editorHostView = editorView ?? fallback!.scrollView
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -79,7 +95,7 @@ public final class DuckpadWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
         super.init(window: window)
         self.errorPresenter = configureContent(injectedPresenter: errorPresenter)
-        editorBinding = EditorBindingUseCase(workspace: workspace, editor: editor)
+        editorBinding = EditorBindingUseCase(workspace: workspace, editor: activeEditor)
         tabStrip.onAdd = { [weak self] in self?.performAdd() }
         tabStrip.onActivate = { [weak self] id in self?.performActivate(id) }
         tabStrip.onClose = { [weak self] id in self?.performClose(id) }
@@ -94,7 +110,7 @@ public final class DuckpadWindowController: NSWindowController {
 
     public override func close() {
         workspace.onChange = nil
-        editor.onEdit = nil
+        activeEditor.onEdit = nil
         editorBinding = nil
         errorPresenter = nil
         tabStrip.tearDownHostedViews()
@@ -141,7 +157,7 @@ public final class DuckpadWindowController: NSWindowController {
         let banner = PersistenceErrorBanner(frame: .zero)
         root.view.addSubview(banner)
         root.view.addSubview(tabStrip)
-        root.view.addSubview(editor.scrollView)
+        root.view.addSubview(editorHostView)
         NSLayoutConstraint.activate([
             banner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             banner.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
@@ -149,10 +165,10 @@ public final class DuckpadWindowController: NSWindowController {
             tabStrip.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             tabStrip.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             tabStrip.topAnchor.constraint(equalTo: banner.bottomAnchor),
-            editor.scrollView.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
-            editor.scrollView.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            editor.scrollView.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
-            editor.scrollView.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
+            editorHostView.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            editorHostView.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            editorHostView.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
+            editorHostView.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
         ])
         window?.contentViewController = root
         return injectedPresenter ?? banner
