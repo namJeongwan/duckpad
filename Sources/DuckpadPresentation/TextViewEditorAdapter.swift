@@ -66,6 +66,15 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, @preconcurrency 
         setTextWithoutEditing(snapshot.text)
     }
 
+    public func install(_ snapshot: EditorTextSnapshot) {
+        snapshots[snapshot.bufferID] = snapshot
+        undoManagers[snapshot.bufferID] = UndoManager()
+        guard activeBuffer?.bufferID == snapshot.bufferID else { return }
+        activeBuffer = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision)
+        (textView as? BufferTextView)?.activeUndoManager = undoManagers[snapshot.bufferID]
+        setTextWithoutEditing(snapshot.text)
+    }
+
     public func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? {
         snapshots[bufferID]
     }

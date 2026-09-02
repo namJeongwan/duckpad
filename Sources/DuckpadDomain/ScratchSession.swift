@@ -27,24 +27,31 @@ public struct BufferMetadata: Equatable, Sendable {
         isDirty = true
         return revision
     }
+
+    public mutating func markClean() { isDirty = false }
+
+    @discardableResult
+    public mutating func replaceContents() throws -> UInt64 {
+        guard revision < UInt64.max else { throw SessionError.revisionExhausted(bufferID: id) }
+        revision += 1
+        isDirty = false
+        return revision
+    }
 }
 
 public struct ScratchDocument: Equatable, Sendable {
     public let id: DocumentID
     public let bufferID: BufferID
     public var title: String
-    public var fileURL: URL?
 
     public init(
         id: DocumentID = DocumentID(),
         bufferID: BufferID,
-        title: String,
-        fileURL: URL? = nil
+        title: String
     ) {
         self.id = id
         self.bufferID = bufferID
         self.title = title
-        self.fileURL = fileURL
     }
 }
 
@@ -68,6 +75,7 @@ public enum SessionError: Error, Equatable, Sendable {
     case revisionConflict(bufferID: BufferID, expected: UInt64, actual: UInt64)
     case revisionExhausted(bufferID: BufferID)
     case duplicateBufferID(BufferID)
+    case duplicateFileBinding(String)
 }
 
 public struct ScratchSession: Equatable, Sendable {
@@ -75,6 +83,7 @@ public struct ScratchSession: Equatable, Sendable {
     public private(set) var tabs: [WorkspaceTab]
     public private(set) var documents: [DocumentID: ScratchDocument]
     public private(set) var buffers: [BufferID: BufferMetadata]
+    public private(set) var fileBindings: [DocumentID: FileBinding]
     public private(set) var activeTabID: TabID?
     private var nextUntitledNumber: Int
 
@@ -83,6 +92,7 @@ public struct ScratchSession: Equatable, Sendable {
         tabs = []
         documents = [:]
         buffers = [:]
+        fileBindings = [:]
         activeTabID = nil
         nextUntitledNumber = 1
     }
@@ -118,6 +128,24 @@ public struct ScratchSession: Equatable, Sendable {
         return tab.id
     }
 
+    @discardableResult
+    public mutating func addFile(binding: FileBinding, title: String) throws -> TabID {
+        if let existing = tabID(canonicalPath: binding.canonicalPath) {
+            try activate(tabID: existing)
+            return existing
+        }
+        var buffer = BufferMetadata()
+        while buffers[buffer.id] != nil { buffer = BufferMetadata() }
+        let document = ScratchDocument(bufferID: buffer.id, title: title)
+        let tab = WorkspaceTab(documentID: document.id)
+        buffers[buffer.id] = buffer
+        documents[document.id] = document
+        fileBindings[document.id] = binding
+        tabs.append(tab)
+        activeTabID = tab.id
+        return tab.id
+    }
+
     public mutating func activate(tabID: TabID) throws {
         guard tabs.contains(where: { $0.id == tabID }) else {
             throw SessionError.unknownTab(tabID)
@@ -140,6 +168,7 @@ public struct ScratchSession: Equatable, Sendable {
         let removed = tabs.remove(at: index)
         if let removedDocument = documents.removeValue(forKey: removed.documentID) {
             buffers.removeValue(forKey: removedDocument.bufferID)
+            fileBindings.removeValue(forKey: removedDocument.id)
         }
         if activeTabID == tabID {
             activeTabID = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id
@@ -174,5 +203,50 @@ public struct ScratchSession: Equatable, Sendable {
             throw SessionError.brokenBufferReference(document.bufferID)
         }
         return buffer
+    }
+
+
+    public func fileBinding(for tabID: TabID) throws -> FileBinding? {
+        let document = try document(for: tabID)
+        return fileBindings[document.id]
+    }
+
+    public func tabID(canonicalPath: String) -> TabID? {
+        tabs.first { tab in
+            fileBindings[tab.documentID]?.canonicalPath == canonicalPath
+        }?.id
+    }
+
+    public mutating func bindFile(
+        tabID: TabID,
+        binding: FileBinding,
+        title: String,
+        cleanAtRevision savedRevision: UInt64? = nil
+    ) throws {
+        let document = try document(for: tabID)
+        if let duplicate = self.tabID(canonicalPath: binding.canonicalPath), duplicate != tabID {
+            throw SessionError.duplicateFileBinding(binding.canonicalPath)
+        }
+        var updated = document
+        updated.title = title
+        documents[document.id] = updated
+        fileBindings[document.id] = binding
+        guard var buffer = buffers[document.bufferID] else {
+            throw SessionError.brokenBufferReference(document.bufferID)
+        }
+        if savedRevision == nil || savedRevision == buffer.revision { buffer.markClean() }
+        buffers[buffer.id] = buffer
+    }
+
+    @discardableResult
+    public mutating func replaceFileContents(tabID: TabID, binding: FileBinding, title: String) throws -> UInt64 {
+        try bindFile(tabID: tabID, binding: binding, title: title)
+        let document = try document(for: tabID)
+        guard var buffer = buffers[document.bufferID] else {
+            throw SessionError.brokenBufferReference(document.bufferID)
+        }
+        let revision = try buffer.replaceContents()
+        buffers[buffer.id] = buffer
+        return revision
     }
 }

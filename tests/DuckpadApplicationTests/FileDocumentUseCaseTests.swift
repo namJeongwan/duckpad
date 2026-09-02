@@ -1,0 +1,243 @@
+import DuckpadApplication
+import DuckpadDomain
+import Foundation
+import Testing
+
+private actor FileStoreFake: TextFileStore {
+    private var files: [String: FileReadResult] = [:]
+    private var serial: UInt64 = 0
+    private(set) var readCount = 0
+    private var blockNextWrite = false
+    private var blockedWriteEntered = false
+    private var releaseBlockedWrite = false
+    private var forcedWriteError: TextFileStoreError?
+
+    func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL {
+        url.standardizedFileURL
+    }
+
+    func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult {
+        readCount += 1
+        guard let file = files[url.standardizedFileURL.path] else { throw .notFound(url.path) }
+        return file
+    }
+
+    func writeAtomically(_ data: Data, to url: URL, expectedIdentity: FileIdentity?, overwrite: Bool) async throws(TextFileStoreError) -> FileWriteReceipt {
+        if let forcedWriteError { throw forcedWriteError }
+        if blockNextWrite {
+            blockNextWrite = false
+            blockedWriteEntered = true
+            while !releaseBlockedWrite { await Task.yield() }
+        }
+        let path = url.standardizedFileURL.path
+        let current = files[path]
+        if let expectedIdentity {
+            guard current?.identity == expectedIdentity else { throw .conflict(current: current?.identity) }
+        } else if current != nil && !overwrite {
+            throw .conflict(current: current?.identity)
+        }
+        serial += 1
+        let identity = makeIdentity(path: path, data: data, serial: serial)
+        files[path] = FileReadResult(data: data, identity: identity)
+        return FileWriteReceipt(identity: identity)
+    }
+
+    func seed(_ text: String, at url: URL, encoding: TextFileEncoding = .utf8, bom: ByteOrderMark = .absent) {
+        serial += 1
+        let data = TextFileCodec.encode(text, encoding: encoding, byteOrderMark: bom)
+        let path = url.standardizedFileURL.path
+        files[path] = FileReadResult(data: data, identity: makeIdentity(path: path, data: data, serial: serial))
+    }
+
+    func externalReplace(_ text: String, at url: URL) { seed(text, at: url) }
+    func text(at url: URL) -> String? { files[url.standardizedFileURL.path].flatMap { String(data: $0.data, encoding: .utf8) } }
+    func data(at url: URL) -> Data? { files[url.standardizedFileURL.path]?.data }
+    func setWriteError(_ error: TextFileStoreError?) { forcedWriteError = error }
+    func armBlockedWrite() { blockNextWrite = true; blockedWriteEntered = false; releaseBlockedWrite = false }
+    func waitForBlockedWrite() async { while !blockedWriteEntered { await Task.yield() } }
+    func releaseWrite() { releaseBlockedWrite = true }
+
+    private func makeIdentity(path: String, data: Data, serial: UInt64) -> FileIdentity {
+        FileIdentity(canonicalPath: path, device: 1, inode: 1, byteCount: UInt64(data.count), modifiedNanoseconds: Int64(serial), contentToken: "token-\(serial)-\(data.count)")
+    }
+}
+
+@MainActor
+private final class FileEditorFake: EditorPort {
+    var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
+    private var active: EditorBufferDescriptor?
+    private var values: [BufferID: EditorTextSnapshot] = [:]
+    func display(_ buffer: EditorBufferDescriptor) {
+        active = buffer
+        let text = values[buffer.bufferID]?.text ?? ""
+        values[buffer.bufferID] = EditorTextSnapshot(bufferID: buffer.bufferID, revision: buffer.revision, text: text)
+    }
+    func install(_ snapshot: EditorTextSnapshot) {
+        values[snapshot.bufferID] = snapshot
+        if active?.bufferID == snapshot.bufferID { active = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision) }
+    }
+    func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? { values[bufferID] }
+    func retire(bufferID: BufferID) { values.removeValue(forKey: bufferID) }
+    func setInputEnabled(_ isEnabled: Bool) {}
+    func focus() {}
+    @discardableResult
+    func replaceWith(_ text: String) -> EditorEditOutcome? {
+        guard let active, let old = values[active.bufferID] else { return nil }
+        let edit = EditorIncrementalEdit(bufferID: active.bufferID, expectedRevision: active.revision, range: TextEditRange(location: 0, length: old.text.utf8.count), replacement: text)
+        let outcome = onEdit?(edit)
+        guard case .accepted(let revision) = outcome else { return outcome }
+        self.active = EditorBufferDescriptor(bufferID: active.bufferID, revision: revision)
+        values[active.bufferID] = EditorTextSnapshot(bufferID: active.bufferID, revision: revision, text: text)
+        return outcome
+    }
+}
+
+@Test @MainActor func duplicateCanonicalOpenActivatesExistingDocument() async {
+    let sessionStore = FileSessionStoreFake()
+    let workspace = ScratchWorkspaceUseCase(store: sessionStore)
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    editor.display(workspace.snapshot().activeBuffer!)
+    _ = binding
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-duplicate.txt")
+    await files.seed("한글🙂", at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    guard case .opened(let first) = await useCase.open(url) else { Issue.record("first open failed"); return }
+    guard case .activatedExisting(let second) = await useCase.open(url) else { Issue.record("duplicate was not activated"); return }
+    #expect(first == second)
+    #expect(workspace.snapshot().tabs.count == 2)
+    #expect(await files.readCount == 1)
+}
+
+@Test @MainActor func saveAsBindsStableDocumentAndMarksItClean() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    editor.display(workspace.snapshot().activeBuffer!)
+    _ = binding
+    editor.replaceWith("저장🙂\r\n")
+    let files = FileStoreFake()
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let url = URL(fileURLWithPath: "/tmp/duckpad-save-as.txt")
+    #expect(await useCase.saveAs(url) == .saved(workspace.snapshot().tabs[0].id))
+    #expect(workspace.activeFileContext()?.binding?.canonicalPath == url.path)
+    #expect(workspace.snapshot().tabs[0].title == url.lastPathComponent)
+    #expect(workspace.snapshot().tabs[0].isDirty == false)
+    #expect(await files.text(at: url) == "저장🙂\r\n")
+}
+
+@Test @MainActor func externalModificationRequiresExplicitResolutionAndDoesNotOverwrite() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-conflict.txt")
+    await files.seed("original", at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    _ = await useCase.open(url)
+    editor.replaceWith("mine")
+    await files.externalReplace("external", at: url)
+    guard case .conflict = await useCase.saveActive() else { Issue.record("expected conflict"); return }
+    #expect(await files.text(at: url) == "external")
+    #expect(await useCase.resolveConflict(.cancel) == .cancelled(workspace.activeFileContext()!.tabID))
+    #expect(await files.text(at: url) == "external")
+    guard case .conflict = await useCase.saveActive() else { Issue.record("expected second conflict"); return }
+    #expect(editor.snapshot(for: workspace.activeFileContext()!.buffer.bufferID)?.text == "mine")
+    #expect(await useCase.resolveConflict(.overwrite) == .saved(workspace.activeFileContext()!.tabID))
+    #expect(await files.text(at: url) == "mine")
+}
+
+@Test @MainActor func editAcceptedDuringSaveRemainsDirtyAfterOlderSnapshotBecomesDurable() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    editor.display(workspace.snapshot().activeBuffer!)
+    editor.replaceWith("snapshot")
+    _ = await workspace.flushPersistence()
+    let files = FileStoreFake()
+    await files.armBlockedWrite()
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let url = URL(fileURLWithPath: "/tmp/duckpad-save-race.txt")
+    let save = Task { await useCase.saveAs(url) }
+    await files.waitForBlockedWrite()
+    #expect(editor.replaceWith("newer edit") == .accepted(newRevision: 2))
+    await files.releaseWrite()
+    guard case .saved = await save.value else { Issue.record("save failed"); return }
+    #expect(await files.text(at: url) == "snapshot")
+    #expect(workspace.snapshot().tabs[0].isDirty)
+    #expect(editor.snapshot(for: workspace.activeFileContext()!.buffer.bufferID)?.text == "newer edit")
+}
+
+@Test @MainActor func explicitFormatConversionPersistsAcrossFollowingOrdinarySave() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    editor.display(workspace.snapshot().activeBuffer!)
+    editor.replaceWith("한\n🙂")
+    _ = await workspace.flushPersistence()
+    let files = FileStoreFake()
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let url = URL(fileURLWithPath: "/tmp/duckpad-conversion.txt")
+    let conversion = TextFileConversion(encoding: .utf16LittleEndian, byteOrderMark: .absent, lineEnding: .crlf)
+    guard case .saved = await useCase.saveAs(url, conversion: conversion) else { Issue.record("conversion save failed"); return }
+    var decoded = try TextFileCodec.decode(await files.data(at: url)!, assuming: .utf16LittleEndian)
+    #expect(decoded.text == "한\r\n🙂")
+    #expect(workspace.activeFileContext()?.binding?.lineEnding == .crlf)
+
+    editor.replaceWith("한\n🙂\n다음")
+    _ = await workspace.flushPersistence()
+    guard case .saved = await useCase.saveActive() else { Issue.record("ordinary save failed"); return }
+    decoded = try TextFileCodec.decode(await files.data(at: url)!, assuming: .utf16LittleEndian)
+    #expect(decoded.text == "한\r\n🙂\r\n다음")
+    #expect(decoded.byteOrderMark == .absent)
+}
+
+@Test @MainActor func durabilityFailureDoesNotBindOrCleanLiveDocument() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    editor.display(workspace.snapshot().activeBuffer!)
+    editor.replaceWith("must remain dirty")
+    _ = await workspace.flushPersistence()
+    let files = FileStoreFake()
+    await files.setWriteError(.durabilityFailure(
+        state: .replacementVisibleDurabilityUncertain,
+        current: nil,
+        recoveryPath: "/tmp/recovery",
+        detail: "injected"
+    ))
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let outcome = await useCase.saveAs(URL(fileURLWithPath: "/tmp/duckpad-durability.txt"))
+    guard case .failed(.store(.durabilityFailure(let state, _, _, _))) = outcome else {
+        Issue.record("expected typed durability failure, got \(outcome)")
+        return
+    }
+    #expect(state == .replacementVisibleDurabilityUncertain)
+    #expect(workspace.activeFileContext()?.binding == nil)
+    #expect(workspace.snapshot().tabs[0].isDirty)
+    #expect(editor.snapshot(for: workspace.snapshot().tabs[0].buffer.bufferID)?.text == "must remain dirty")
+}
+
+private actor FileSessionStoreFake: SessionStore {
+    private var stored: StoredSession?
+    func loadSession() async throws(SessionStoreError) -> StoredSession? { stored }
+    func commitSession(_ session: ScratchSession, generation: PersistenceGeneration) async throws(SessionStoreError) -> SessionCommitResult {
+        if let stored, stored.generation >= generation { return .superseded(durableGeneration: stored.generation) }
+        stored = StoredSession(session: session, generation: generation)
+        return .committed
+    }
+}

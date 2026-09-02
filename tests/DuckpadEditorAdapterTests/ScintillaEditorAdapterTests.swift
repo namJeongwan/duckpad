@@ -273,7 +273,9 @@ struct ScintillaBridgeTests {
         view.insertCommittedText("A")
         #expect(view.snapshotReadCount == 0)
         view.insertCommittedText("B")
-        try? await Task.sleep(for: .milliseconds(20))
+        for _ in 0..<200 where view.revision != 1 {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
         #expect(view.snapshotReadCount == 0)
         #expect(view.revision == 1)
         #expect(adapter.snapshot(for: bufferID)?.text == "A")

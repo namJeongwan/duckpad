@@ -8,7 +8,7 @@ import Testing
     let buffer = try session.buffer(for: tabID)
     #expect(session.activeTabID == tabID)
     #expect(session.tabs.count == 1)
-    #expect(document.fileURL == nil)
+    #expect(try session.fileBinding(for: tabID) == nil)
     #expect(document.title == "new 1")
     #expect(document.bufferID == buffer.id)
     #expect(buffer.revision == 0)

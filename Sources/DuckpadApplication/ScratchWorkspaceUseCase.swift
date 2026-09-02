@@ -332,6 +332,69 @@ public final class ScratchWorkspaceUseCase {
         return WorkspaceSnapshot(sessionID: session.id, tabs: tabs, activeBuffer: tabs.first(where: \.isActive)?.buffer, persistence: persistenceState, startup: startupState)
     }
 
+    public func tabID(canonicalPath: String) -> TabID? {
+        session.tabID(canonicalPath: canonicalPath)
+    }
+
+    public func activeFileContext() -> FileWorkspaceContext? {
+        guard let tabID = session.activeTabID else { return nil }
+        return fileContext(tabID: tabID)
+    }
+
+    public func fileContext(tabID: TabID) -> FileWorkspaceContext? {
+        guard let document = try? session.document(for: tabID),
+              let buffer = try? session.buffer(for: tabID) else { return nil }
+        return FileWorkspaceContext(
+            tabID: tabID,
+            title: document.title,
+            buffer: EditorBufferDescriptor(bufferID: buffer.id, revision: buffer.revision),
+            binding: try? session.fileBinding(for: tabID)
+        )
+    }
+
+    @discardableResult
+    public func addOpenedFile(binding: FileBinding, title: String) async -> WorkspaceActionOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        var candidate = session
+        do {
+            _ = try candidate.addFile(binding: binding, title: title)
+            return await persistMutation(candidate, kind: .tabInserted(index: candidate.tabs.count - 1), retry: .saveCurrent)
+        } catch let error as SessionError { return .rejected(error) }
+        catch { preconditionFailure("ScratchSession only throws SessionError") }
+    }
+
+    @discardableResult
+    public func bindSavedFile(
+        tabID: TabID,
+        binding: FileBinding,
+        title: String,
+        savedRevision: UInt64
+    ) async -> WorkspaceActionOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        var candidate = session
+        do {
+            try candidate.bindFile(tabID: tabID, binding: binding, title: title, cleanAtRevision: savedRevision)
+            guard let index = candidate.tabs.firstIndex(where: { $0.id == tabID }) else { return .rejected(.unknownTab(tabID)) }
+            return await persistMutation(candidate, kind: .tabUpdated(index: index), retry: .saveCurrent)
+        } catch let error as SessionError { return .rejected(error) }
+        catch { preconditionFailure("ScratchSession only throws SessionError") }
+    }
+
+    @discardableResult
+    public func replaceFileContents(tabID: TabID, binding: FileBinding, title: String) async -> WorkspaceActionOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        var candidate = session
+        do {
+            _ = try candidate.replaceFileContents(tabID: tabID, binding: binding, title: title)
+            guard let index = candidate.tabs.firstIndex(where: { $0.id == tabID }) else { return .rejected(.unknownTab(tabID)) }
+            return await persistMutation(candidate, kind: .tabUpdated(index: index), retry: .saveCurrent)
+        } catch let error as SessionError { return .rejected(error) }
+        catch { preconditionFailure("ScratchSession only throws SessionError") }
+    }
+
     private func persistMutation(_ candidate: ScratchSession, kind: WorkspaceChangeKind, retry: PersistenceRetry) async -> WorkspaceActionOutcome {
         switch await save(candidate) {
         case .saved:
@@ -452,6 +515,15 @@ public final class EditorBindingUseCase {
 
     public func render(_ change: WorkspaceChange, requestFocus: Bool = false) {
         if case .tabRemoved(_, let bufferID) = change.kind { editor?.retire(bufferID: bufferID) }
+        if case .tabUpdated = change.kind {
+            editor?.setInputEnabled(change.snapshot.startup == .ready)
+            if requestFocus, change.snapshot.startup == .ready { editor?.focus() }
+            return
+        }
+        if case .persistence = change.kind {
+            editor?.setInputEnabled(change.snapshot.startup == .ready)
+            return
+        }
         render(change.snapshot, requestFocus: requestFocus)
     }
 

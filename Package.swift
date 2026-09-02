@@ -98,6 +98,15 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "DuckpadInfrastructureTests",
+            dependencies: [
+                "DuckpadApplication",
+                "DuckpadDomain",
+                "DuckpadInfrastructure",
+                .product(name: "Testing", package: "swift-testing"),
+            ]
+        ),
+        .testTarget(
             name: "DuckpadPresentationTests",
             dependencies: [
                 "DuckpadApplication",

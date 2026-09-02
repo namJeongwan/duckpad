@@ -123,6 +123,12 @@ private final class EditorFake: EditorPort {
             snapshots[buffer.bufferID] = EditorTextSnapshot(bufferID: buffer.bufferID, revision: buffer.revision, text: "")
         }
     }
+    func install(_ snapshot: EditorTextSnapshot) {
+        snapshots[snapshot.bufferID] = snapshot
+        if displayed?.bufferID == snapshot.bufferID {
+            displayed = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision)
+        }
+    }
     func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? {
         snapshots[bufferID]
     }

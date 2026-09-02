@@ -71,6 +71,16 @@ public final class ScintillaEditorAdapter: EditorPort {
         view.addSubview(editorView)
     }
 
+    public func install(_ snapshot: EditorTextSnapshot) {
+        snapshots[snapshot.bufferID] = snapshot
+        acceptedEdits[snapshot.bufferID] = []
+        guard let editorView = bufferViews[snapshot.bufferID] else { return }
+        load(snapshot, into: editorView)
+        if activeBuffer?.bufferID == snapshot.bufferID {
+            activeBuffer = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision)
+        }
+    }
+
     public func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? {
         if let activeBuffer, activeBuffer.bufferID == bufferID {
             storeSnapshot(bufferID: bufferID, revision: activeBuffer.revision)

@@ -3,6 +3,34 @@ import DuckpadApplication
 import DuckpadDomain
 
 @MainActor
+private final class FileDropView: NSView {
+    var onFiles: (([URL]) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        fileURLs(from: sender).isEmpty ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        let urls = fileURLs(from: sender)
+        guard !urls.isEmpty else { return false }
+        onFiles?(urls)
+        return true
+    }
+
+    private func fileURLs(from sender: any NSDraggingInfo) -> [URL] {
+        (sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+    }
+}
+
+@MainActor
 public protocol PersistenceErrorPresenting: AnyObject {
     func present(failure: PersistenceFailure, retry: @escaping @MainActor () -> Void)
 }
@@ -53,7 +81,7 @@ private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
 }
 
 @MainActor
-public final class DuckpadWindowController: NSWindowController {
+public final class DuckpadWindowController: NSWindowController, NSWindowDelegate {
     private let workspace: ScratchWorkspaceUseCase
     let tabStrip = MultilineTabStripView(frame: .zero)
     private let fallbackEditor: TextViewEditorAdapter?
@@ -63,16 +91,29 @@ public final class DuckpadWindowController: NSWindowController {
     }
     private let activeEditor: any EditorPort
     private let editorHostView: NSView
+    private let fileUseCase: FileDocumentUseCase?
+    private let filePanels: (any FilePanelPresenting)?
+    private let fileConflictPresenter: (any FileConflictPresenting)?
+    private let dirtyDecisionPresenter: (any DirtyDocumentDecisionPresenting)?
+    let terminationCoordinator: ApplicationTerminationCoordinator?
+    private let approvedWindowClose: @MainActor (NSWindow) -> Void
     private var editorBinding: EditorBindingUseCase!
     private var errorPresenter: (any PersistenceErrorPresenting)!
     private var handledFailureIDs: Set<UUID> = []
     private var startTask: Task<Void, Never>?
+    private var permitsNextWindowClose = false
 
     public init(
         workspace: ScratchWorkspaceUseCase,
         editorAdapter: (any EditorPort)? = nil,
         editorView: NSView? = nil,
         errorPresenter: (any PersistenceErrorPresenting)? = nil,
+        fileUseCase: FileDocumentUseCase? = nil,
+        filePanels: (any FilePanelPresenting)? = nil,
+        fileConflictPresenter: (any FileConflictPresenting)? = nil,
+        dirtyDecisionPresenter: (any DirtyDocumentDecisionPresenting)? = nil,
+        terminationCoordinator: ApplicationTerminationCoordinator? = nil,
+        approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
         automaticallyStarts: Bool = true
     ) {
         self.workspace = workspace
@@ -84,6 +125,12 @@ public final class DuckpadWindowController: NSWindowController {
         fallbackEditor = fallback
         activeEditor = editorAdapter ?? fallback!
         editorHostView = editorView ?? fallback!.scrollView
+        self.fileUseCase = fileUseCase
+        self.filePanels = filePanels
+        self.fileConflictPresenter = fileConflictPresenter
+        self.dirtyDecisionPresenter = dirtyDecisionPresenter
+        self.terminationCoordinator = terminationCoordinator
+        self.approvedWindowClose = approvedWindowClose ?? { $0.performClose(nil) }
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -94,6 +141,8 @@ public final class DuckpadWindowController: NSWindowController {
         window.minSize = NSSize(width: 420, height: 280)
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        terminationCoordinator?.attach(windowController: self)
+        window.delegate = self
         self.errorPresenter = configureContent(injectedPresenter: errorPresenter)
         editorBinding = EditorBindingUseCase(workspace: workspace, editor: activeEditor)
         tabStrip.onAdd = { [weak self] in self?.performAdd() }
@@ -109,6 +158,7 @@ public final class DuckpadWindowController: NSWindowController {
     }
 
     public override func close() {
+        window?.delegate = nil
         workspace.onChange = nil
         activeEditor.onEdit = nil
         editorBinding = nil
@@ -135,7 +185,7 @@ public final class DuckpadWindowController: NSWindowController {
         startTask = Task { [weak workspace] in _ = await workspace?.start() }
     }
 
-    func waitForStartup() async { await startTask?.value }
+    public func waitForStartup() async { await startTask?.value }
 
     func performAdd() {
         Task { [weak workspace] in _ = await workspace?.addScratch() }
@@ -149,11 +199,95 @@ public final class DuckpadWindowController: NSWindowController {
         Task { [weak self] in await self?.requestClose(tabID: id, decision: decision) }
     }
 
+    @objc public func performOpenFile(_ sender: Any? = nil) {
+        Task { [weak self] in await self?.routeOpenFile() }
+    }
+
+    @objc public func performSaveFile(_ sender: Any? = nil) {
+        Task { [weak self] in await self?.routeSaveFile() }
+    }
+
+    @objc public func performSaveFileAs(_ sender: Any? = nil) {
+        Task { [weak self] in await self?.routeSaveFileAs() }
+    }
+
+    public func routeOpenFile() async {
+        guard let fileUseCase, let url = await filePanels?.chooseOpenURL(attachedTo: window) else { return }
+        await handle(fileOutcome: await fileUseCase.open(url))
+    }
+
+    public func routeSaveFile() async {
+        guard let fileUseCase else { return }
+        let outcome = await fileUseCase.saveActive()
+        if case .requiresDestination = outcome {
+            await routeSaveFileAs()
+        } else {
+            _ = await resolve(fileOutcome: outcome)
+        }
+    }
+
+    public func routeSaveFileAs() async {
+        guard let fileUseCase, let context = workspace.activeFileContext(),
+              let url = await filePanels?.chooseSaveURL(suggestedName: context.title, attachedTo: window) else { return }
+        _ = await resolve(fileOutcome: await fileUseCase.saveAs(url))
+    }
+
+    public var hasDirtyDocuments: Bool {
+        workspace.snapshot().tabs.contains(where: \.isDirty)
+    }
+
+    /// Shared red-close/Cmd-Q gate. Discard is remembered only for this review;
+    /// a concurrently dirtied, previously saved tab is reviewed again.
+    public func reviewDirtyDocumentsForTermination() async -> Bool {
+        guard let presenter = dirtyDecisionPresenter else { return !hasDirtyDocuments }
+        while let tab = workspace.snapshot().tabs.first(where: \.isDirty) {
+            let decision = await presenter.decision(
+                for: tab,
+                saveAvailable: fileUseCase != nil,
+                attachedTo: window
+            )
+            switch decision {
+            case .cancel:
+                return false
+            case .discard:
+                guard case .closed = await workspace.close(tabID: tab.id, decision: .discard) else {
+                    return false
+                }
+            case .save:
+                guard await saveBeforeClosing(tabID: tab.id) else { return false }
+            }
+        }
+        return true
+    }
+
+    public func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if permitsNextWindowClose {
+            permitsNextWindowClose = false
+            return true
+        }
+        guard hasDirtyDocuments else { return true }
+        guard let terminationCoordinator else { return false }
+        terminationCoordinator.requestWindowClose { [weak self, weak sender] approved in
+            guard let self else { return }
+            guard approved, let sender else { return }
+            self.permitsNextWindowClose = true
+            self.approvedWindowClose(sender)
+        }
+        return false
+    }
+
     private func configureContent(
         injectedPresenter: (any PersistenceErrorPresenting)?
     ) -> any PersistenceErrorPresenting {
         let root = NSViewController()
-        root.view = NSView()
+        let dropView = FileDropView()
+        dropView.onFiles = { [weak self] urls in
+            guard let self, let fileUseCase = self.fileUseCase else { return }
+            Task { @MainActor in
+                for url in urls { await self.handle(fileOutcome: await fileUseCase.open(url)) }
+            }
+        }
+        root.view = dropView
         let banner = PersistenceErrorBanner(frame: .zero)
         root.view.addSubview(banner)
         root.view.addSubview(tabStrip)
@@ -179,12 +313,14 @@ public final class DuckpadWindowController: NSWindowController {
         let enabled = snapshot.startup == .ready
         tabStrip.setInteractionsEnabled(enabled)
         editorBinding.render(snapshot)
+        updateWindowTitle(snapshot)
     }
 
     private func handle(_ change: WorkspaceChange) {
         tabStrip.apply(change: change)
         tabStrip.setInteractionsEnabled(change.snapshot.startup == .ready)
         editorBinding.render(change)
+        updateWindowTitle(change.snapshot)
         guard let event = change.failureEvent, handledFailureIDs.insert(event.id).inserted else { return }
         errorPresenter.present(failure: event.failure) { [weak self] in
             guard let self else { return }
@@ -197,17 +333,70 @@ public final class DuckpadWindowController: NSWindowController {
         case .requiresDecision:
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "Discard changes to this scratch tab?"
-            alert.informativeText = "Saving to a file is not available yet. Cancel keeps the live editor buffer."
-            alert.addButton(withTitle: "Discard")
+            alert.messageText = "Save changes before closing?"
+            alert.informativeText = "Save writes the live editor buffer. Discard closes it without writing."
+            alert.addButton(withTitle: "Save")
             alert.addButton(withTitle: "Cancel")
-            let chosen: CloseDecision = alert.runModal() == .alertFirstButtonReturn ? .discard : .cancel
-            _ = await workspace.close(tabID: tabID, decision: chosen)
+            alert.addButton(withTitle: "Discard")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                if await saveBeforeClosing(tabID: tabID) { _ = await workspace.close(tabID: tabID) }
+            case .alertThirdButtonReturn:
+                _ = await workspace.close(tabID: tabID, decision: .discard)
+            default:
+                break
+            }
         case .saveUnavailable:
             let failure = PersistenceFailure(operation: .save, cause: .unavailable("File save is not implemented in Phase 1"))
             errorPresenter.present(failure: failure) {}
         case .cancelled, .closed, .rejected, .persistenceFailed:
             break
         }
+    }
+
+    private func handle(fileOutcome: FileOpenOutcome) async {
+        if case .failed(let failure) = fileOutcome {
+            fileConflictPresenter?.presentFileFailure(failure, attachedTo: window)
+        }
+    }
+
+    @discardableResult
+    private func resolve(fileOutcome: FileSaveOutcome) async -> FileSaveOutcome {
+        switch fileOutcome {
+        case .conflict:
+            guard let fileUseCase, let presenter = fileConflictPresenter else { return fileOutcome }
+            let resolution = await presenter.resolveExternalConflict(attachedTo: window)
+            return await resolve(fileOutcome: await fileUseCase.resolveConflict(resolution))
+        case .failed(let failure):
+            fileConflictPresenter?.presentFileFailure(failure, attachedTo: window)
+        case .saved, .requiresDestination, .cancelled:
+            break
+        }
+        return fileOutcome
+    }
+
+    private func saveBeforeClosing(tabID: TabID) async -> Bool {
+        guard let fileUseCase else { return false }
+        if workspace.snapshot().tabs.first(where: \.isActive)?.id != tabID {
+            guard case .applied = await workspace.activate(tabID: tabID) else { return false }
+        }
+        var outcome = await fileUseCase.saveActive()
+        if case .requiresDestination = outcome {
+            guard let context = workspace.activeFileContext(),
+                  let url = await filePanels?.chooseSaveURL(suggestedName: context.title, attachedTo: window) else { return false }
+            outcome = await fileUseCase.saveAs(url)
+        }
+        if case .saved = await resolve(fileOutcome: outcome) { return true }
+        return false
+    }
+
+    private func updateWindowTitle(_ snapshot: WorkspaceSnapshot) {
+        guard let active = snapshot.tabs.first(where: \.isActive) else {
+            window?.title = "Duckpad"
+            window?.isDocumentEdited = false
+            return
+        }
+        window?.title = "\(active.title) — Duckpad"
+        window?.isDocumentEdited = active.isDirty
     }
 }

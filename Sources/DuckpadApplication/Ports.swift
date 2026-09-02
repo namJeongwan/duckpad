@@ -102,6 +102,8 @@ public enum EditorEditOutcome: Equatable, Sendable {
 public protocol EditorPort: AnyObject {
     var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)? { get set }
     func display(_ buffer: EditorBufferDescriptor)
+    /// Explicit file-open/reload boundary. Never called on the normal edit path.
+    func install(_ snapshot: EditorTextSnapshot)
     func snapshot(for bufferID: BufferID) -> EditorTextSnapshot?
     func retire(bufferID: BufferID)
     func setInputEnabled(_ isEnabled: Bool)
