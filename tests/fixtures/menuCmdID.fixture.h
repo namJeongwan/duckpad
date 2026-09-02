@@ -1,0 +1,4 @@
+#define IDM_FILE (40000 + 1000)
+#define IDM_FILE_NEW (IDM_FILE + 1)
+// #define IDM_FILE_OLD_REMOVED (IDM_FILE + 2)
+#define IDM_PLATFORM_ONLY (40000 + 2)

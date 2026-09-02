@@ -1,0 +1,2907 @@
+{
+  "schema_version": 3,
+  "baseline_version": "npp-dda973d2b-parity-v3",
+  "parity_contract_sha256": "80f57a3342b7e8df138650f8d37d6a1544896e2cc7f9cf87f60a9bdb9b80b6dc",
+  "authority": "docs/wiki/01-product-philosophy-and-parity.md#3-\ub2e8\uc77c-\uaddc\ubc94-\ud328\ub9ac\ud2f0-\uc54c\uace0\ub9ac\uc998",
+  "source": {
+    "repository": "https://github.com/notepad-plus-plus/notepad-plus-plus.git",
+    "commit": "dda973d2b2da6bdcc7db9f18a7f5d2fbf6b07248",
+    "header_path": "PowerEditor/src/menuCmdID.h",
+    "file_sha256": "0b557be2da7ba2fd70a429c0bcc3b2974b0f0c311c477a647d9cb6c34a625719",
+    "symbol_fixture_path": "../../tests/fixtures/menuCmdID.v1.symbols",
+    "symbol_fixture_sha256": "ce5e411f47c2308eb32aa4b96c54af3987f35a0b24eea1b83199a2ac9339b793",
+    "workflow_fixture_path": "notepad-plus-plus-workflow-inventory.v1.json",
+    "workflow_fixture_sha256": "d0d5e650145c0b28c9c82561cf46d528531e33d83235b46e38a7b0f35cfe96b4",
+    "active_symbol_count": 530,
+    "active_symbol_set_sha256": "4b6175a767b9f35f5f8451bb682b166b76232f9b9fcf601c600ac3043fa4a476",
+    "extraction": "Active #define IDM_ symbols; commented defines excluded",
+    "workflow_surfaces": [
+      {
+        "id": "SURFACE.MAIN_MENU",
+        "path": "PowerEditor/src/Notepad_plus.rc",
+        "sha256": "1b91b63b9bb3d3e27083ec7ad2472844889742dddffec71cea6c29492efde093",
+        "role": "versioned user workflow surface"
+      },
+      {
+        "id": "SURFACE.DEFAULT_COMMANDS",
+        "path": "PowerEditor/src/Parameters.cpp",
+        "sha256": "bca148f9fb086e0a90d5b83cd83245210cf79396c2dbc9ebe3a0575f7df2e345",
+        "role": "versioned user workflow surface"
+      },
+      {
+        "id": "SURFACE.TAB_CONTEXT",
+        "path": "PowerEditor/src/tabContextMenu_example.xml",
+        "sha256": "88fa52c2941a3770991a9035db803f03b9c7969c21efd967f41d0465fb89954d",
+        "role": "versioned user workflow surface"
+      },
+      {
+        "id": "SURFACE.TOOLBAR",
+        "path": "PowerEditor/src/toolbarButtonsConf_example.xml",
+        "sha256": "30d6eb04d4fa2fa425d0d95274e4ee42d4d1dfe97b6f9c2e926545789d4ac8f8",
+        "role": "versioned user workflow surface"
+      },
+      {
+        "id": "SURFACE.DYNAMIC_HOST",
+        "path": "PowerEditor/src/Notepad_plus.cpp",
+        "sha256": "3cedb377ec8e84f858de58dee6e3803e3b5fdaa2ebb1eecbb99f5762d5a5b50d",
+        "role": "versioned user workflow surface"
+      }
+    ],
+    "workflow_inventory": [
+      {
+        "id": "WF.C1.F06",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C1.F06",
+        "selectors": [
+          "backupCurrentBuffer"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 2
+      },
+      {
+        "id": "WF.C2.F01",
+        "surface_id": "SURFACE.DEFAULT_COMMANDS",
+        "feature_id": "C2.F01",
+        "selectors": [
+          "multiLine"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 4
+      },
+      {
+        "id": "WF.C4.F03",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C4.F03",
+        "selectors": [
+          "FindRegex"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 3
+      },
+      {
+        "id": "WF.C4.F04",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C4.F04",
+        "selectors": [
+          "processAll\\("
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 11
+      },
+      {
+        "id": "WF.C5.F02",
+        "surface_id": "SURFACE.DEFAULT_COMMANDS",
+        "feature_id": "C5.F02",
+        "selectors": [
+          "getLangFromExt"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C5.F05",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C5.F05",
+        "selectors": [
+          "maintainIndentation"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C5.F09",
+        "surface_id": "SURFACE.DEFAULT_COMMANDS",
+        "feature_id": "C5.F09",
+        "selectors": [
+          "ExternalLangContainer"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C5.F10",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C5.F10",
+        "selectors": [
+          "launchFunctionList"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C6.F03",
+        "surface_id": "SURFACE.DEFAULT_COMMANDS",
+        "feature_id": "C6.F03",
+        "selectors": [
+          "_detectEncoding"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 3
+      },
+      {
+        "id": "WF.C6.F05",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C6.F05",
+        "selectors": [
+          "NPPN_FILEDELETED"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C6.F07",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C6.F07",
+        "selectors": [
+          "NPPN_READONLYCHANGED"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C6.F08",
+        "surface_id": "SURFACE.DEFAULT_COMMANDS",
+        "feature_id": "C6.F08",
+        "selectors": [
+          "largeFileRestriction"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 22
+      },
+      {
+        "id": "WF.C7.F06",
+        "surface_id": "SURFACE.TOOLBAR",
+        "feature_id": "C7.F06",
+        "selectors": [
+          "name=\"Document Map\""
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C7.F08",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C7.F08",
+        "selectors": [
+          "saveDockingParams"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 2
+      },
+      {
+        "id": "WF.C8.F01",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C8.F01",
+        "selectors": [
+          "loadPlugins"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C8.F02",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C8.F02",
+        "selectors": [
+          "initMenu"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 2
+      },
+      {
+        "id": "WF.C8.F03",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C8.F03",
+        "selectors": [
+          "NppData"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C8.F04",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C8.F04",
+        "selectors": [
+          "_pluginsManager\\.notify"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 5
+      },
+      {
+        "id": "WF.C8.F05",
+        "surface_id": "SURFACE.DEFAULT_COMMANDS",
+        "feature_id": "C8.F05",
+        "selectors": [
+          "_userLangArray"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 34
+      },
+      {
+        "id": "WF.C8.F06",
+        "surface_id": "SURFACE.TOOLBAR",
+        "feature_id": "C8.F06",
+        "selectors": [
+          "<Plugin hideAll"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C8.F07",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C8.F07",
+        "selectors": [
+          "_pluginsManager\\.init\\(nppData\\)"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C8.F08",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C8.F08",
+        "selectors": [
+          "pluginsLoadingTime"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 2
+      },
+      {
+        "id": "WF.C8.F10",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C8.F10",
+        "selectors": [
+          "getIncompatibleList"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C8.F11",
+        "surface_id": "SURFACE.DYNAMIC_HOST",
+        "feature_id": "C8.F11",
+        "selectors": [
+          "NPPM_MENUCOMMAND"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 3
+      },
+      {
+        "id": "WF.C9.F01",
+        "surface_id": "SURFACE.MAIN_MENU",
+        "feature_id": "C9.F01",
+        "selectors": [
+          "IDM_FILE_NEW"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 2
+      },
+      {
+        "id": "WF.C9.F03",
+        "surface_id": "SURFACE.DEFAULT_COMMANDS",
+        "feature_id": "C9.F03",
+        "selectors": [
+          "feedShortcut"
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 2
+      },
+      {
+        "id": "WF.C10.F02",
+        "surface_id": "SURFACE.DEFAULT_COMMANDS",
+        "feature_id": "C10.F02",
+        "selectors": [
+          "\"DarkMode\""
+        ],
+        "acceptance": "Source behavior is reproduced on supported macOS targets without omission.",
+        "expected_occurrences": 4
+      },
+      {
+        "id": "WF.C10.F05",
+        "surface_id": "SURFACE.MAIN_MENU",
+        "feature_id": "C10.F05",
+        "selectors": [
+          "POPUP \"&File\""
+        ],
+        "acceptance": "The complete command surface is keyboard reachable and its macOS controls expose correct accessibility names, roles, values, focus, and actions.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C2.F12",
+        "surface_id": "SURFACE.TOOLBAR",
+        "feature_id": "C2.F12",
+        "selectors": [
+          "name=\"Word wrap\""
+        ],
+        "acceptance": "Word wrap and wrap-marker display toggle independently across viewport resize without changing document bytes, selection, or undo history.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C2.F13",
+        "surface_id": "SURFACE.MAIN_MENU",
+        "feature_id": "C2.F13",
+        "selectors": [
+          "IDM_VIEW_HIDELINES"
+        ],
+        "acceptance": "Selected lines hide and reveal without deletion, selection-anchor loss, or an undo-history mutation.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C3.F13",
+        "surface_id": "SURFACE.MAIN_MENU",
+        "feature_id": "C3.F13",
+        "selectors": [
+          "IDM_VIEW_ALL_CHARACTERS"
+        ],
+        "acceptance": "Whitespace, EOL, and non-printing indicators toggle independently without changing document content.",
+        "expected_occurrences": 1
+      },
+      {
+        "id": "WF.C2.F02.CONTEXT",
+        "surface_id": "SURFACE.TAB_CONTEXT",
+        "feature_id": "C2.F02",
+        "selectors": [
+          "Move to (?:Start|End)"
+        ],
+        "acceptance": "Tab context actions move the active tab to either logical edge.",
+        "expected_occurrences": 2
+      }
+    ]
+  },
+  "checksum_policy": "The adjacent .sha256 file hashes this JSON byte-for-byte. No checksum field exists in this JSON, so verification is not self-referential.",
+  "implementation_states": {
+    "Missing": 0.0,
+    "Partial-0.25": 0.25,
+    "Partial-0.50": 0.5,
+    "Partial-0.75": 0.75,
+    "Full": 1.0
+  },
+  "categories": [
+    {
+      "id": "C1",
+      "title": "Documents, files, sessions, recovery",
+      "weight": 16
+    },
+    {
+      "id": "C2",
+      "title": "Tabs, windows, split views",
+      "weight": 14
+    },
+    {
+      "id": "C3",
+      "title": "Basic and advanced editing",
+      "weight": 14
+    },
+    {
+      "id": "C4",
+      "title": "Search, replace, marks",
+      "weight": 14
+    },
+    {
+      "id": "C5",
+      "title": "Languages, highlighting, completion",
+      "weight": 12
+    },
+    {
+      "id": "C6",
+      "title": "Encoding, EOL, file integrity",
+      "weight": 8
+    },
+    {
+      "id": "C7",
+      "title": "Navigation, workspace, panels",
+      "weight": 7
+    },
+    {
+      "id": "C8",
+      "title": "Plugins and extensibility",
+      "weight": 9
+    },
+    {
+      "id": "C9",
+      "title": "Macros, commands, tools",
+      "weight": 4
+    },
+    {
+      "id": "C10",
+      "title": "Settings, themes, accessibility",
+      "weight": 2
+    }
+  ],
+  "features": [
+    {
+      "id": "C1.F01",
+      "category": "C1",
+      "priority": "P0",
+      "title": "Instant untitled document",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:24",
+        "PowerEditor/src/ScintillaComponent/Buffer.cpp:1243-1258"
+      ],
+      "owner": "team:c1",
+      "acceptance": [
+        "Candidate demonstrates Instant untitled document on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C1.F02",
+      "category": "C1",
+      "priority": "P0",
+      "title": "Open, recent, drag and drop, Open With",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:25,43-49",
+        "PowerEditor/src/NppIO.cpp:213-470"
+      ],
+      "owner": "team:c1",
+      "acceptance": [
+        "Candidate demonstrates Open, recent, drag and drop, Open With on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C1.F03",
+      "category": "C1",
+      "priority": "P0",
+      "title": "Save, Save As, Save Copy, Save All",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:29-31,39"
+      ],
+      "owner": "team:c1",
+      "acceptance": [
+        "Candidate demonstrates Save, Save As, Save Copy, Save All on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C1.F04",
+      "category": "C1",
+      "priority": "P1",
+      "title": "Close current, all, others, left, right, unchanged, unpinned",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:26-28,32,42,48,50"
+      ],
+      "owner": "team:c1",
+      "acceptance": [
+        "Candidate demonstrates Close current, all, others, left, right, unchanged, unpinned on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C1.F05",
+      "category": "C1",
+      "priority": "P0",
+      "title": "Automatic session save and restore",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/Parameters.h:121-169,755,867-869",
+        "PowerEditor/src/NppIO.cpp:2490-2824"
+      ],
+      "owner": "team:c1",
+      "acceptance": [
+        "Candidate demonstrates Automatic session save and restore on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C1.F06",
+      "category": "C1",
+      "priority": "P0",
+      "title": "Periodic untitled and dirty recovery",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/ScintillaComponent/Buffer.cpp:1218-1280"
+      ],
+      "owner": "team:c1",
+      "acceptance": [
+        "Candidate demonstrates Periodic untitled and dirty recovery on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C1.F07",
+      "category": "C1",
+      "priority": "P1",
+      "title": "Named session import and export",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:36-37"
+      ],
+      "owner": "team:c1",
+      "acceptance": [
+        "Candidate demonstrates Named session import and export on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C1.F08",
+      "category": "C1",
+      "priority": "P1",
+      "title": "Tab rename and restore last closed",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:41,45",
+        "PowerEditor/src/Parameters.h:141-143"
+      ],
+      "owner": "team:c1",
+      "acceptance": [
+        "Candidate demonstrates Tab rename and restore last closed on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C1.F09",
+      "category": "C1",
+      "priority": "P1",
+      "title": "File rename and move to trash",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:40-41"
+      ],
+      "owner": "team:c1",
+      "acceptance": [
+        "Candidate demonstrates File rename and move to trash on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C1.F10",
+      "category": "C1",
+      "priority": "P2",
+      "title": "Print",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:33-34"
+      ],
+      "owner": "team:c1",
+      "acceptance": [
+        "Candidate demonstrates Print on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F01",
+      "category": "C2",
+      "priority": "P0",
+      "title": "Multiline wrapping tab bar",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/WinControls/TabBar/TabBar.cpp:40-52,616-623"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Fifty tabs wrap to three or more rows and reflow on resize while the active tab remains visible.",
+        "Selection, pin, close, drag reorder, keyboard traversal, accessibility order, and session restore remain correct across rows."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F02",
+      "category": "C2",
+      "priority": "P0",
+      "title": "Tab selection, close, reorder, drag",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/WinControls/TabBar/TabBar.cpp:700-772,1820-1853"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Pointer and keyboard selection, close, reorder, and drag preserve document identity and unsaved state.",
+        "First Tab, Last Tab, Move to Start, and Move to End select or reorder the correct logical tab without opening a new window."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F03",
+      "category": "C2",
+      "priority": "P0",
+      "title": "Pin, unpin, close unpinned",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:50,332"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Candidate demonstrates Pin, unpin, close unpinned on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F04",
+      "category": "C2",
+      "priority": "P0",
+      "title": "Unsaved, dirty, read-only, monitoring indicators",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/ScintillaComponent/Buffer.h:346-365,458-476"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Candidate demonstrates Unsaved, dirty, read-only, monitoring indicators on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F05",
+      "category": "C2",
+      "priority": "P1",
+      "title": "Overflow document switcher and search",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:355,368-378,661-663"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Candidate demonstrates Overflow document switcher and search on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F06",
+      "category": "C2",
+      "priority": "P2",
+      "title": "Per-tab color or group marker",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:394-401"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Candidate demonstrates Per-tab color or group marker on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F07",
+      "category": "C2",
+      "priority": "P1",
+      "title": "Horizontal and vertical split view",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/Notepad_plus.cpp:437-443",
+        "PowerEditor/src/menuCmdID.h:406-409"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Candidate demonstrates Horizontal and vertical split view on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F08",
+      "category": "C2",
+      "priority": "P1",
+      "title": "Synchronized scroll and zoom",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/Notepad_plus.cpp:2733-2750"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Candidate demonstrates Synchronized scroll and zoom on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F09",
+      "category": "C2",
+      "priority": "P2",
+      "title": "Document map or minimap rendering",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:359"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Candidate demonstrates Document map or minimap rendering on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F10",
+      "category": "C2",
+      "priority": "P1",
+      "title": "Multiple windows and new instance equivalent",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:408-409"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Candidate demonstrates Multiple windows and new instance equivalent on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F11",
+      "category": "C2",
+      "priority": "P2",
+      "title": "Distraction-free, full screen, floating equivalent",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:293,295,316,318"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Candidate demonstrates Distraction-free, full screen, floating equivalent on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F01",
+      "category": "C3",
+      "priority": "P0",
+      "title": "Clipboard, delete, select all, undo and redo",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:87-93"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Clipboard, delete, select all, undo and redo on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F02",
+      "category": "C3",
+      "priority": "P1",
+      "title": "Line duplicate, move, transpose, split and join",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:96-101"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Line duplicate, move, transpose, split and join on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F03",
+      "category": "C3",
+      "priority": "P1",
+      "title": "Indent, tabs and spaces, whitespace trim",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:94-95,110,128-140"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Indent, tabs and spaces, whitespace trim on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F04",
+      "category": "C3",
+      "priority": "P1",
+      "title": "Line and block comment toggle",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:108-109,121-122,133"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Line and block comment toggle on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F05",
+      "category": "C3",
+      "priority": "P1",
+      "title": "Unicode-aware case conversion",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:102-103,153-158"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Unicode-aware case conversion on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F06",
+      "category": "C3",
+      "priority": "P1",
+      "title": "Multiple selection and multiple cursors",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:176-185"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Multiple selection and multiple cursors on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F07",
+      "category": "C3",
+      "priority": "P1",
+      "title": "Rectangular and column editing",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:106,120,123,175"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Rectangular and column editing on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F08",
+      "category": "C3",
+      "priority": "P2",
+      "title": "Line sorting modes",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:145-152,164,166-169,186-191"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Line sorting modes on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F09",
+      "category": "C3",
+      "priority": "P2",
+      "title": "Remove empty and duplicate lines",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:141-142,163,165"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Remove empty and duplicate lines on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F10",
+      "category": "C3",
+      "priority": "P2",
+      "title": "Clipboard history",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:138"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Clipboard history on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F11",
+      "category": "C3",
+      "priority": "P2",
+      "title": "Date, path, rich and binary pasteboard operations",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:115-117,124-136,168,170-174"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Date, path, rich and binary pasteboard operations on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F12",
+      "category": "C3",
+      "priority": "P2",
+      "title": "Read-only and redaction operations",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:114,119,188-192"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Candidate demonstrates Read-only and redaction operations on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C4.F01",
+      "category": "C4",
+      "priority": "P0",
+      "title": "Find next, previous, selection prefill and wrap",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:203-204,212-216",
+        "PowerEditor/src/ScintillaComponent/FindReplaceDlg.h:63-89"
+      ],
+      "owner": "team:c4",
+      "acceptance": [
+        "Candidate demonstrates Find next, previous, selection prefill and wrap on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C4.F02",
+      "category": "C4",
+      "priority": "P0",
+      "title": "Replace, replace all and count all",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:205",
+        "PowerEditor/src/ScintillaComponent/FindReplaceDlg.h:283-297"
+      ],
+      "owner": "team:c4",
+      "acceptance": [
+        "Candidate demonstrates Replace, replace all and count all on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C4.F03",
+      "category": "C4",
+      "priority": "P0",
+      "title": "Regex and advanced search options",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/ScintillaComponent/FindReplaceDlg.h:63-106"
+      ],
+      "owner": "team:c4",
+      "acceptance": [
+        "Candidate demonstrates Regex and advanced search options on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C4.F04",
+      "category": "C4",
+      "priority": "P0",
+      "title": "Find in all open documents",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/ScintillaComponent/FindReplaceDlg.h:291-297"
+      ],
+      "owner": "team:c4",
+      "acceptance": [
+        "Candidate demonstrates Find in all open documents on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C4.F05",
+      "category": "C4",
+      "priority": "P1",
+      "title": "Find and replace in files",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:214",
+        "PowerEditor/src/ScintillaComponent/FindReplaceDlg.cpp:1639-1640"
+      ],
+      "owner": "team:c4",
+      "acceptance": [
+        "Candidate demonstrates Find and replace in files on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C4.F06",
+      "category": "C4",
+      "priority": "P1",
+      "title": "Results panel and result navigation",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:247-249",
+        "PowerEditor/src/ScintillaComponent/FindReplaceDlg.h:115"
+      ],
+      "owner": "team:c4",
+      "acceptance": [
+        "Candidate demonstrates Results panel and result navigation on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C4.F07",
+      "category": "C4",
+      "priority": "P1",
+      "title": "Marks, style sets and marked-line operations",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:217-271"
+      ],
+      "owner": "team:c4",
+      "acceptance": [
+        "Candidate demonstrates Marks, style sets and marked-line operations on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C4.F08",
+      "category": "C4",
+      "priority": "P1",
+      "title": "Bookmarks",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:207-210"
+      ],
+      "owner": "team:c4",
+      "acceptance": [
+        "Candidate demonstrates Bookmarks on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C4.F09",
+      "category": "C4",
+      "priority": "P1",
+      "title": "Go to line, offset and matching brace",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:206,211,255-256"
+      ],
+      "owner": "team:c4",
+      "acceptance": [
+        "Candidate demonstrates Go to line, offset and matching brace on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C4.F10",
+      "category": "C4",
+      "priority": "P2",
+      "title": "Change-history navigation",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:273-275"
+      ],
+      "owner": "team:c4",
+      "acceptance": [
+        "Candidate demonstrates Change-history navigation on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C5.F01",
+      "category": "C5",
+      "priority": "P0",
+      "title": "Broad built-in language grammar set",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:481-575"
+      ],
+      "owner": "team:c5",
+      "acceptance": [
+        "Candidate demonstrates Broad built-in language grammar set on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C5.F02",
+      "category": "C5",
+      "priority": "P0",
+      "title": "Language detection",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/ScintillaComponent/Buffer.cpp:328-350,1046-1047"
+      ],
+      "owner": "team:c5",
+      "acceptance": [
+        "Candidate demonstrates Language detection on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C5.F03",
+      "category": "C5",
+      "priority": "P0",
+      "title": "Syntax highlighting and theme styles",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:482",
+        "PowerEditor/src/stylers.model.xml"
+      ],
+      "owner": "team:c5",
+      "acceptance": [
+        "Candidate demonstrates Syntax highlighting and theme styles on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C5.F04",
+      "category": "C5",
+      "priority": "P1",
+      "title": "Folding and fold-state restore",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:294,313-353",
+        "PowerEditor/src/NppIO.cpp:2600-2607"
+      ],
+      "owner": "team:c5",
+      "acceptance": [
+        "Candidate demonstrates Folding and fold-state restore on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C5.F05",
+      "category": "C5",
+      "priority": "P1",
+      "title": "Language-aware comments, indent and braces",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/Notepad_plus.cpp:3715-3932"
+      ],
+      "owner": "team:c5",
+      "acceptance": [
+        "Candidate demonstrates Language-aware comments, indent and braces on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C5.F06",
+      "category": "C5",
+      "priority": "P1",
+      "title": "Current-document word completion",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:194-197"
+      ],
+      "owner": "team:c5",
+      "acceptance": [
+        "Candidate demonstrates Current-document word completion on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C5.F07",
+      "category": "C5",
+      "priority": "P1",
+      "title": "API completion and call tips",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:194-199",
+        "PowerEditor/src/ScintillaComponent/AutoCompletion.cpp"
+      ],
+      "owner": "team:c5",
+      "acceptance": [
+        "Candidate demonstrates API completion and call tips on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C5.F08",
+      "category": "C5",
+      "priority": "P1",
+      "title": "User-defined and importable languages",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:580-584",
+        "PowerEditor/src/Notepad_plus.cpp:606-613"
+      ],
+      "owner": "team:c5",
+      "acceptance": [
+        "Candidate demonstrates User-defined and importable languages on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C5.F09",
+      "category": "C5",
+      "priority": "P2",
+      "title": "External lexer equivalent",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:577-578",
+        "PowerEditor/src/ScintillaComponent/Buffer.cpp:1976-1979"
+      ],
+      "owner": "team:c5",
+      "acceptance": [
+        "Candidate demonstrates External lexer equivalent on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C5.F10",
+      "category": "C5",
+      "priority": "P1",
+      "title": "Function list and symbol provider",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:365"
+      ],
+      "owner": "team:c5",
+      "acceptance": [
+        "Candidate demonstrates Function list and symbol provider on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C6.F01",
+      "category": "C6",
+      "priority": "P0",
+      "title": "UTF-8 and UTF-16 read, write and convert",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:417-426"
+      ],
+      "owner": "team:c6",
+      "acceptance": [
+        "Candidate demonstrates UTF-8 and UTF-16 read, write and convert on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C6.F02",
+      "category": "C6",
+      "priority": "P1",
+      "title": "Legacy Western and CJK encodings",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:428-478"
+      ],
+      "owner": "team:c6",
+      "acceptance": [
+        "Candidate demonstrates Legacy Western and CJK encodings on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C6.F03",
+      "category": "C6",
+      "priority": "P1",
+      "title": "Encoding detection and manual override",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/Parameters.h:760",
+        "PowerEditor/src/EncodingMapper.cpp"
+      ],
+      "owner": "team:c6",
+      "acceptance": [
+        "Candidate demonstrates Encoding detection and manual override on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C6.F04",
+      "category": "C6",
+      "priority": "P0",
+      "title": "LF, CRLF and CR preservation and conversion",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:413-416"
+      ],
+      "owner": "team:c6",
+      "acceptance": [
+        "Candidate demonstrates LF, CRLF and CR preservation and conversion on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C6.F05",
+      "category": "C6",
+      "priority": "P0",
+      "title": "External modification and deletion detection",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/ScintillaComponent/Buffer.h:463-467"
+      ],
+      "owner": "team:c6",
+      "acceptance": [
+        "Candidate demonstrates External modification and deletion detection on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C6.F06",
+      "category": "C6",
+      "priority": "P0",
+      "title": "Reload, compare and keep workflow",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:38",
+        "PowerEditor/src/ScintillaComponent/Buffer.cpp:1218-1235"
+      ],
+      "owner": "team:c6",
+      "acceptance": [
+        "Candidate demonstrates Reload, compare and keep workflow on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C6.F07",
+      "category": "C6",
+      "priority": "P1",
+      "title": "Filesystem and user read-only states",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:114,119,188-189"
+      ],
+      "owner": "team:c6",
+      "acceptance": [
+        "Candidate demonstrates Filesystem and user read-only states on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C6.F08",
+      "category": "C6",
+      "priority": "P1",
+      "title": "Large-file safe mode",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/ScintillaComponent/Buffer.h:469",
+        "PowerEditor/src/ScintillaComponent/Buffer.cpp:958-981"
+      ],
+      "owner": "team:c6",
+      "acceptance": [
+        "Candidate demonstrates Large-file safe mode on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C7.F01",
+      "category": "C7",
+      "priority": "P0",
+      "title": "Searchable open-document list",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:278-281,355,645-659"
+      ],
+      "owner": "team:c7",
+      "acceptance": [
+        "Candidate demonstrates Searchable open-document list on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C7.F02",
+      "category": "C7",
+      "priority": "P1",
+      "title": "Recent files and recently closed tabs",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:45,126-127"
+      ],
+      "owner": "team:c7",
+      "acceptance": [
+        "Candidate demonstrates Recent files and recently closed tabs on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C7.F03",
+      "category": "C7",
+      "priority": "P1",
+      "title": "Folder workspace and file browser",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:43,46,49,366"
+      ],
+      "owner": "team:c7",
+      "acceptance": [
+        "Candidate demonstrates Folder workspace and file browser on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C7.F04",
+      "category": "C7",
+      "priority": "P1",
+      "title": "Saved project and workspace roots",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:361-363"
+      ],
+      "owner": "team:c7",
+      "acceptance": [
+        "Candidate demonstrates Saved project and workspace roots on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C7.F05",
+      "category": "C7",
+      "priority": "P1",
+      "title": "Function-list panel navigation",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:365,391"
+      ],
+      "owner": "team:c7",
+      "acceptance": [
+        "Candidate demonstrates Function-list panel navigation on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C7.F06",
+      "category": "C7",
+      "priority": "P2",
+      "title": "Document-map panel integration",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:359"
+      ],
+      "owner": "team:c7",
+      "acceptance": [
+        "Candidate demonstrates Document-map panel integration on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C7.F07",
+      "category": "C7",
+      "priority": "P2",
+      "title": "Unicode character inspector",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:137"
+      ],
+      "owner": "team:c7",
+      "acceptance": [
+        "Candidate demonstrates Unicode character inspector on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C7.F08",
+      "category": "C7",
+      "priority": "P1",
+      "title": "Dockable panel layout and restore",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/WinControls/DockingWnd/DockingManager.cpp",
+        "PowerEditor/src/Parameters.h:815,854-861"
+      ],
+      "owner": "team:c7",
+      "acceptance": [
+        "Candidate demonstrates Dockable panel layout and restore on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C8.F01",
+      "category": "C8",
+      "priority": "P0",
+      "title": "Versioned plugin manifest and discovery",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/MISC/PluginsManager/PluginsManager.cpp:317-405"
+      ],
+      "owner": "team:c8",
+      "acceptance": [
+        "Candidate demonstrates Versioned plugin manifest and discovery on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C8.F02",
+      "category": "C8",
+      "priority": "P0",
+      "title": "Plugin command, menu and keybinding contributions",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/MISC/PluginsManager/PluginsManager.h:101-109"
+      ],
+      "owner": "team:c8",
+      "acceptance": [
+        "Candidate demonstrates Plugin command, menu and keybinding contributions on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C8.F03",
+      "category": "C8",
+      "priority": "P0",
+      "title": "Plugin document and editor API",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/MISC/PluginsManager/PluginInterface.h:30-40"
+      ],
+      "owner": "team:c8",
+      "acceptance": [
+        "Candidate demonstrates Plugin document and editor API on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C8.F04",
+      "category": "C8",
+      "priority": "P0",
+      "title": "Plugin lifecycle and editor events",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/MISC/PluginsManager/PluginInterface.h:37-40,64-69"
+      ],
+      "owner": "team:c8",
+      "acceptance": [
+        "Candidate demonstrates Plugin lifecycle and editor events on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C8.F05",
+      "category": "C8",
+      "priority": "P1",
+      "title": "Plugin language providers",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:577-584"
+      ],
+      "owner": "team:c8",
+      "acceptance": [
+        "Candidate demonstrates Plugin language providers on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C8.F06",
+      "category": "C8",
+      "priority": "P1",
+      "title": "Plugin decorations, status and panels",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/MISC/PluginsManager/PluginsManager.h:121-125"
+      ],
+      "owner": "team:c8",
+      "acceptance": [
+        "Candidate demonstrates Plugin decorations, status and panels on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C8.F07",
+      "category": "C8",
+      "priority": "P0",
+      "title": "Plugin permission and capability model",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/MISC/PluginsManager/PluginInterface.h:30-40"
+      ],
+      "owner": "team:c8",
+      "acceptance": [
+        "Candidate demonstrates Plugin permission and capability model on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C8.F08",
+      "category": "C8",
+      "priority": "P0",
+      "title": "Plugin isolation and crash recovery",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/MISC/PluginsManager/PluginsManager.cpp:644-735"
+      ],
+      "owner": "team:c8",
+      "acceptance": [
+        "Candidate demonstrates Plugin isolation and crash recovery on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C8.F09",
+      "category": "C8",
+      "priority": "P1",
+      "title": "Plugin install, update, disable and remove UI",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:608,614-615"
+      ],
+      "owner": "team:c8",
+      "acceptance": [
+        "Candidate demonstrates Plugin install, update, disable and remove UI on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C8.F10",
+      "category": "C8",
+      "priority": "P1",
+      "title": "Plugin compatibility diagnostics",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/MISC/PluginsManager/PluginsManager.cpp:344-405"
+      ],
+      "owner": "team:c8",
+      "acceptance": [
+        "Candidate demonstrates Plugin compatibility diagnostics on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C8.F11",
+      "category": "C8",
+      "priority": "P2",
+      "title": "Notepad++ plugin source migration guide",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/MISC/PluginsManager/PluginInterface.h:20-69"
+      ],
+      "owner": "team:c8",
+      "acceptance": [
+        "Candidate demonstrates Notepad++ plugin source migration guide on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C9.F01",
+      "category": "C9",
+      "priority": "P0",
+      "title": "Command palette and command registry",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:20-663"
+      ],
+      "owner": "team:c9",
+      "acceptance": [
+        "Candidate demonstrates Command palette and command registry on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C9.F02",
+      "category": "C9",
+      "priority": "P1",
+      "title": "Macro record, play, save and repeat",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:104-118",
+        "PowerEditor/src/Notepad_plus.cpp:2725-2730"
+      ],
+      "owner": "team:c9",
+      "acceptance": [
+        "Candidate demonstrates Macro record, play, save and repeat on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C9.F03",
+      "category": "C9",
+      "priority": "P1",
+      "title": "Configurable keybindings",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:611,616-617"
+      ],
+      "owner": "team:c9",
+      "acceptance": [
+        "Candidate demonstrates Configurable keybindings on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C9.F04",
+      "category": "C9",
+      "priority": "P1",
+      "title": "External command and open-in-tool workflows",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:44,51,382-385"
+      ],
+      "owner": "team:c9",
+      "acceptance": [
+        "Candidate demonstrates External command and open-in-tool workflows on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C9.F05",
+      "category": "C9",
+      "priority": "P2",
+      "title": "Hash tools",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:620-632"
+      ],
+      "owner": "team:c9",
+      "acceptance": [
+        "Candidate demonstrates Hash tools on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C10.F01",
+      "category": "C10",
+      "priority": "P0",
+      "title": "Editor, tab, session and recovery settings",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:612-613",
+        "PowerEditor/src/Parameters.h:735-869"
+      ],
+      "owner": "team:c10",
+      "acceptance": [
+        "Candidate demonstrates Editor, tab, session and recovery settings on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C10.F02",
+      "category": "C10",
+      "priority": "P1",
+      "title": "System, light, dark and syntax themes",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:609",
+        "PowerEditor/src/NppDarkMode.cpp"
+      ],
+      "owner": "team:c10",
+      "acceptance": [
+        "Candidate demonstrates System, light, dark and syntax themes on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C10.F03",
+      "category": "C10",
+      "priority": "P1",
+      "title": "Shortcut editor",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:611,616-617"
+      ],
+      "owner": "team:c10",
+      "acceptance": [
+        "Candidate demonstrates Shortcut editor on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C10.F04",
+      "category": "C10",
+      "priority": "P2",
+      "title": "Localization and RTL",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:112-113",
+        "PowerEditor/src/localization.cpp"
+      ],
+      "owner": "team:c10",
+      "acceptance": [
+        "Candidate demonstrates Localization and RTL on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C10.F05",
+      "category": "C10",
+      "priority": "P0",
+      "title": "VoiceOver, keyboard access and Reduced Motion",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/WinControls/TabBar/TabBar.cpp:40-1853",
+        "macOS native acceptance workflow"
+      ],
+      "owner": "team:c10",
+      "acceptance": [
+        "Candidate demonstrates VoiceOver, keyboard access and Reduced Motion on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C10.F06",
+      "category": "C10",
+      "priority": "P2",
+      "title": "Settings import and export",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:608-609"
+      ],
+      "owner": "team:c10",
+      "acceptance": [
+        "Candidate demonstrates Settings import and export on every supported macOS target.",
+        "Mapped commands and workflows pass without data loss or undocumented exceptions."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F12",
+      "category": "C2",
+      "priority": "P0",
+      "title": "Editor word wrap and wrap-marker display",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:322-323"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "Word wrap toggles off/on and reflows after viewport resize on every supported macOS target.",
+        "Wrap markers toggle independently; document bytes, selection, cursor, and undo history remain unchanged.",
+        "Large-file mode either preserves responsive wrapping or exposes the documented disabled state without content loss."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C2.F13",
+      "category": "C2",
+      "priority": "P2",
+      "title": "Hide and reveal selected lines",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:326"
+      ],
+      "owner": "team:c2",
+      "acceptance": [
+        "A selected line range hides and reveals without deleting content or losing its selection anchor.",
+        "Save, reload, and undo behavior remains explicit while lines are hidden."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "C3.F13",
+      "category": "C3",
+      "priority": "P1",
+      "title": "Visible whitespace, EOL, and control characters",
+      "state": "Missing",
+      "workflow_sources": [
+        "PowerEditor/src/menuCmdID.h:319-329"
+      ],
+      "owner": "team:c3",
+      "acceptance": [
+        "Tab/space, EOL, and non-printing character indicators toggle independently on every supported macOS target.",
+        "Indicator toggles do not change document bytes, selection, or undo history."
+      ],
+      "evidence_ids": []
+    }
+  ],
+  "command_mapping_rules": [
+    {
+      "id": "META.BASES_AND_SENTINELS",
+      "match": {
+        "symbols": [
+          "IDM_FILE",
+          "IDM_FILEMENU_LASTONE",
+          "IDM_FILEMENU_EXISTCMDPOSITION",
+          "IDM_EDIT",
+          "IDM_SEARCH",
+          "IDM_MISC",
+          "IDM_VIEW",
+          "IDM_VIEW_FOLD",
+          "IDM_VIEW_UNFOLD",
+          "IDM_FORMAT",
+          "IDM_FORMAT_ENCODE",
+          "IDM_FORMAT_ENCODE_END",
+          "IDM_LANG",
+          "IDM_LANG_EXTERNAL",
+          "IDM_LANG_EXTERNAL_LIMIT",
+          "IDM_LANG_USER",
+          "IDM_LANG_USER_LIMIT",
+          "IDM_ABOUT",
+          "IDM_SETTING",
+          "IDM_TOOL",
+          "IDM_EXECUTE",
+          "IDM_SYSTRAYPOPUP",
+          "IDM_WINDOW_MRU_FIRST",
+          "IDM_WINDOW_MRU_LIMIT",
+          "IDM_DROPLIST_MRU_FIRST"
+        ]
+      },
+      "disposition": "non_command",
+      "rationale": "Namespace bases, dynamic ranges, menu containers, positions, or sentinels are not invokable user commands."
+    },
+    {
+      "id": "C1.NEW",
+      "match": {
+        "symbols": [
+          "IDM_FILE_NEW",
+          "IDM_SYSTRAYPOPUP_NEWDOC",
+          "IDM_SYSTRAYPOPUP_NEW_AND_PASTE"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C1.F01"
+    },
+    {
+      "id": "C1.OPEN",
+      "match": {
+        "symbols": [
+          "IDM_FILE_OPEN",
+          "IDM_FILE_OPEN_FOLDER",
+          "IDM_FILE_OPENFOLDERASWORKSPACE",
+          "IDM_FILE_OPEN_DEFAULT_VIEWER",
+          "IDM_FILE_CONTAININGFOLDERASWORKSPACE",
+          "IDM_SYSTRAYPOPUP_OPENFILE"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C1.F02"
+    },
+    {
+      "id": "C1.SAVE",
+      "match": {
+        "symbols": [
+          "IDM_FILE_SAVE",
+          "IDM_FILE_SAVEALL",
+          "IDM_FILE_SAVEAS",
+          "IDM_FILE_SAVECOPYAS"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C1.F03"
+    },
+    {
+      "id": "C1.CLOSE",
+      "match": {
+        "symbols": [
+          "IDM_FILE_CLOSE",
+          "IDM_FILE_CLOSEALL",
+          "IDM_FILE_CLOSEALL_BUT_CURRENT",
+          "IDM_FILE_CLOSEALL_TOLEFT",
+          "IDM_FILE_CLOSEALL_TORIGHT",
+          "IDM_FILE_CLOSEALL_UNCHANGED",
+          "IDM_FILE_CLOSEALL_BUT_PINNED"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C1.F04"
+    },
+    {
+      "id": "C1.SESSION_LIFECYCLE",
+      "match": {
+        "symbols": [
+          "IDM_FILE_EXIT"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C1.F05"
+    },
+    {
+      "id": "C1.NAMED_SESSION",
+      "match": {
+        "symbols": [
+          "IDM_FILE_LOADSESSION",
+          "IDM_FILE_SAVESESSION"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C1.F07"
+    },
+    {
+      "id": "C1.RESTORE_RENAME",
+      "match": {
+        "symbols": [
+          "IDM_FILE_RESTORELASTCLOSEDFILE"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C1.F08"
+    },
+    {
+      "id": "C1.FILE_MUTATION",
+      "match": {
+        "symbols": [
+          "IDM_FILE_DELETE",
+          "IDM_FILE_RENAME"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C1.F09"
+    },
+    {
+      "id": "C1.PRINT",
+      "match": {
+        "symbols": [
+          "IDM_FILE_PRINT",
+          "IDM_FILE_PRINTNOW"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C1.F10"
+    },
+    {
+      "id": "C6.RELOAD",
+      "match": {
+        "symbols": [
+          "IDM_FILE_RELOAD"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C6.F06"
+    },
+    {
+      "id": "C7.RECENT",
+      "match": {
+        "symbols": [
+          "IDM_OPEN_ALL_RECENT_FILE",
+          "IDM_CLEAN_RECENT_FILE_LIST"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C7.F02"
+    },
+    {
+      "id": "C9.EXTERNAL_FILE_COMMAND",
+      "match": {
+        "symbols": [
+          "IDM_FILE_OPEN_CMD",
+          "IDM_FILE_OPEN_POWERSHELL"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C9.F04"
+    },
+    {
+      "id": "C3.BASIC",
+      "match": {
+        "symbols": [
+          "IDM_EDIT_CUT",
+          "IDM_EDIT_COPY",
+          "IDM_EDIT_UNDO",
+          "IDM_EDIT_REDO",
+          "IDM_EDIT_PASTE",
+          "IDM_EDIT_DELETE",
+          "IDM_EDIT_SELECTALL"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F01"
+    },
+    {
+      "id": "C3.LINE",
+      "match": {
+        "regex": "IDM_EDIT_(?:DUP_LINE|TRANSPOSE_LINE|SPLIT_LINES|JOIN_LINES|LINE_UP|LINE_DOWN|BLANKLINEABOVECURRENT|BLANKLINEBELOWCURRENT)"
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F02"
+    },
+    {
+      "id": "C3.WHITESPACE",
+      "match": {
+        "regex": "IDM_EDIT_(?:INS_TAB|RMV_TAB|TRIMTRAILING|TRIMLINEHEAD|TRIM_BOTH|EOL2WS|TRIMALL|TAB2SW|SW2TAB_LEADING|SW2TAB_ALL)"
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F03"
+    },
+    {
+      "id": "C3.COMMENT",
+      "match": {
+        "regex": "IDM_EDIT_(?:BLOCK_COMMENT|STREAM_COMMENT|BLOCK_COMMENT_SET|BLOCK_UNCOMMENT|STREAM_UNCOMMENT)"
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F04"
+    },
+    {
+      "id": "C3.CASE",
+      "match": {
+        "regex": "IDM_EDIT_(?:UPPERCASE|LOWERCASE|PROPERCASE_FORCE|PROPERCASE_BLEND|SENTENCECASE_FORCE|SENTENCECASE_BLEND|INVERTCASE|RANDOMCASE)"
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F05"
+    },
+    {
+      "id": "C3.MULTISELECT",
+      "match": {
+        "regex": "IDM_EDIT_MULTISELECT(?:ALL|ALLMATCHCASE|ALLWHOLEWORD|ALLMATCHCASEWHOLEWORD|NEXT|NEXTMATCHCASE|NEXTWHOLEWORD|NEXTMATCHCASEWHOLEWORD|UNDO|SSKIP)"
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F06"
+    },
+    {
+      "id": "C3.COLUMN",
+      "match": {
+        "regex": "IDM_EDIT_(?:BEGINENDSELECT|COLUMNMODE|COLUMNMODETIP|BEGINENDSELECT_COLUMNMODE)"
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F07"
+    },
+    {
+      "id": "C3.SORT",
+      "match": {
+        "regex": "IDM_EDIT_SORTLINES_.*"
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F08"
+    },
+    {
+      "id": "C3.REMOVE_LINES",
+      "match": {
+        "regex": "IDM_EDIT_(?:REMOVEEMPTYLINES|REMOVEEMPTYLINESWITHBLANK|REMOVE_CONSECUTIVE_DUP_LINES|REMOVE_ANY_DUP_LINES)"
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F09"
+    },
+    {
+      "id": "C3.CLIPBOARD_HISTORY",
+      "match": {
+        "symbols": [
+          "IDM_EDIT_CLIPBOARDHISTORY_PANEL"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F10"
+    },
+    {
+      "id": "C3.PASTEBOARD_ADVANCED",
+      "match": {
+        "regex": "IDM_EDIT_(?:FULLPATHTOCLIP|FILENAMETOCLIP|CURRENTDIRTOCLIP|PASTE_AS_HTML|PASTE_AS_RTF|COPY_BINARY|CUT_BINARY|PASTE_BINARY|COPY_LINK|INSERT_DATETIME_SHORT|INSERT_DATETIME_LONG|INSERT_DATETIME_CUSTOMIZED|COPY_ALL_NAMES|COPY_ALL_PATHS)"
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F11"
+    },
+    {
+      "id": "C3.READONLY_REDACT",
+      "match": {
+        "regex": "IDM_EDIT_(?:TOGGLEREADONLY|TOGGLESYSTEMREADONLY|SETREADONLYFORALLDOCS|CLEARREADONLYFORALLDOCS|REDACT_SELECTION)"
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F12"
+    },
+    {
+      "id": "C7.CHAR_PANEL",
+      "match": {
+        "symbols": [
+          "IDM_EDIT_CHAR_PANEL"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C7.F07"
+    },
+    {
+      "id": "C9.SELECTED_EXTERNAL",
+      "match": {
+        "regex": "IDM_EDIT_(?:OPENSELECTEDFILETOEDIT|OPENSELECTEDFILEFOLDERINEXPLORER|SEARCHONINTERNET|CHANGESEARCHENGINE)"
+      },
+      "disposition": "feature",
+      "feature_id": "C9.F04"
+    },
+    {
+      "id": "C5.COMPLETION",
+      "match": {
+        "regex": "IDM_EDIT_(?:AUTOCOMPLETE|AUTOCOMPLETE_CURRENTFILE|AUTOCOMPLETE_PATH)"
+      },
+      "disposition": "feature",
+      "feature_id": "C5.F06"
+    },
+    {
+      "id": "C5.CALLTIP",
+      "match": {
+        "regex": "IDM_EDIT_(?:FUNCCALLTIP|FUNCCALLTIP_PREVIOUS|FUNCCALLTIP_NEXT)"
+      },
+      "disposition": "feature",
+      "feature_id": "C5.F07"
+    },
+    {
+      "id": "C10.TEXT_DIRECTION",
+      "match": {
+        "symbols": [
+          "IDM_EDIT_RTL",
+          "IDM_EDIT_LTR"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C10.F04"
+    },
+    {
+      "id": "C9.MACRO",
+      "match": {
+        "regex": "IDM_MACRO_.*"
+      },
+      "disposition": "feature",
+      "feature_id": "C9.F02"
+    },
+    {
+      "id": "C4.FIND",
+      "match": {
+        "regex": "IDM_SEARCH_(?:FIND|FINDNEXT|FINDPREV|FINDINCREMENT|VOLATILE_FINDNEXT|VOLATILE_FINDPREV|SETANDFINDNEXT|SETANDFINDPREV)"
+      },
+      "disposition": "feature",
+      "feature_id": "C4.F01"
+    },
+    {
+      "id": "C4.REPLACE",
+      "match": {
+        "symbols": [
+          "IDM_SEARCH_REPLACE"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C4.F02"
+    },
+    {
+      "id": "C4.FIND_FILES",
+      "match": {
+        "symbols": [
+          "IDM_SEARCH_FINDINFILES"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C4.F05"
+    },
+    {
+      "id": "C4.RESULTS",
+      "match": {
+        "regex": "(?:IDM_FOCUS_ON_FOUND_RESULTS|IDM_SEARCH_GOTO(?:NEXT|PREV)FOUND)"
+      },
+      "disposition": "feature",
+      "feature_id": "C4.F06"
+    },
+    {
+      "id": "C4.MARKS",
+      "match": {
+        "regex": "IDM_SEARCH_(?:CUTMARKEDLINES|COPYMARKEDLINES|PASTEMARKEDLINES|DELETEMARKEDLINES|MARKALLEXT[1-5]|UNMARKALLEXT[1-5]|CLEARALLMARKS|GOPREVMARKER[1-5]|GOPREVMARKER_DEF|GONEXTMARKER[1-5]|GONEXTMARKER_DEF|INVERSEMARKS|DELETEUNMARKEDLINES|MARK|STYLE[1-5]TOCLIP|ALLSTYLESTOCLIP|MARKEDTOCLIP|MARKONEEXT[1-5])"
+      },
+      "disposition": "feature",
+      "feature_id": "C4.F07"
+    },
+    {
+      "id": "C4.BOOKMARKS",
+      "match": {
+        "regex": "IDM_SEARCH_(?:TOGGLE_BOOKMARK|NEXT_BOOKMARK|PREV_BOOKMARK|CLEAR_BOOKMARKS)"
+      },
+      "disposition": "feature",
+      "feature_id": "C4.F08"
+    },
+    {
+      "id": "C4.GOTO",
+      "match": {
+        "regex": "IDM_SEARCH_(?:GOTOLINE|GOTOMATCHINGBRACE|FINDCHARINRANGE|SELECTMATCHINGBRACES)"
+      },
+      "disposition": "feature",
+      "feature_id": "C4.F09"
+    },
+    {
+      "id": "C4.CHANGE_HISTORY",
+      "match": {
+        "regex": "IDM_SEARCH_(?:CHANGED_NEXT|CHANGED_PREV|CLEAR_CHANGE_HISTORY)"
+      },
+      "disposition": "feature",
+      "feature_id": "C4.F10"
+    },
+    {
+      "id": "C7.DOCLIST",
+      "match": {
+        "regex": "IDM_DOCLIST_.*"
+      },
+      "disposition": "feature",
+      "feature_id": "C7.F01"
+    },
+    {
+      "id": "C2.VIEW_MODE",
+      "match": {
+        "regex": "IDM_VIEW_(?:POSTIT|DISTRACTIONFREE|FULLSCREENTOGGLE|ALWAYSONTOP)"
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F11"
+    },
+    {
+      "id": "C5.FOLD",
+      "match": {
+        "regex": "IDM_VIEW_(?:FOLDALL|UNFOLDALL|FOLD_CURRENT|UNFOLD_CURRENT|FOLD_[1-8]|UNFOLD_[1-8])"
+      },
+      "disposition": "feature",
+      "feature_id": "C5.F04"
+    },
+    {
+      "id": "C3.VISIBLE_CHARACTERS",
+      "match": {
+        "regex": "IDM_VIEW_(?:ALL_CHARACTERS|TAB_SPACE|EOL|NPC|NPC_CCUNIEOL)"
+      },
+      "disposition": "feature",
+      "feature_id": "C3.F13"
+    },
+    {
+      "id": "C2.WORD_WRAP",
+      "match": {
+        "symbols": [
+          "IDM_VIEW_WRAP",
+          "IDM_VIEW_WRAP_SYMBOL"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F12"
+    },
+    {
+      "id": "C5.INDENT_GUIDE",
+      "match": {
+        "symbols": [
+          "IDM_VIEW_INDENT_GUIDE"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C5.F05"
+    },
+    {
+      "id": "C2.HIDE_LINES",
+      "match": {
+        "symbols": [
+          "IDM_VIEW_HIDELINES"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F13"
+    },
+    {
+      "id": "C2.ZOOM_SYNC",
+      "match": {
+        "regex": "IDM_VIEW_(?:ZOOMIN|ZOOMOUT|ZOOM_SYNC|ZOOMRESTORE|SYNSCROLLV|SYNSCROLLH)"
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F08"
+    },
+    {
+      "id": "C2.PIN",
+      "match": {
+        "symbols": [
+          "IDM_PINTAB"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F03"
+    },
+    {
+      "id": "C2.DOC_MAP_RENDER",
+      "match": {
+        "symbols": [
+          "IDM_VIEW_DOC_MAP",
+          "IDM_VIEW_SUMMARY"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F09"
+    },
+    {
+      "id": "C7.DOC_LIST_PANEL",
+      "match": {
+        "symbols": [
+          "IDM_VIEW_DOCLIST",
+          "IDM_VIEW_SWITCHTO_DOCLIST"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C7.F01"
+    },
+    {
+      "id": "C2.SPLIT",
+      "match": {
+        "regex": "IDM_VIEW_(?:SWITCHTO_OTHER_VIEW|GOTO_ANOTHER_VIEW|CLONE_TO_ANOTHER_VIEW)"
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F07"
+    },
+    {
+      "id": "C7.PROJECT",
+      "match": {
+        "regex": "IDM_VIEW_(?:PROJECT_PANEL_[1-3]|SWITCHTO_PROJECT_PANEL_[1-3])"
+      },
+      "disposition": "feature",
+      "feature_id": "C7.F04"
+    },
+    {
+      "id": "C7.FUNCTION_LIST",
+      "match": {
+        "symbols": [
+          "IDM_VIEW_FUNC_LIST",
+          "IDM_VIEW_SWITCHTO_FUNC_LIST"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C7.F05"
+    },
+    {
+      "id": "C7.FILE_BROWSER",
+      "match": {
+        "symbols": [
+          "IDM_VIEW_FILEBROWSER",
+          "IDM_VIEW_SWITCHTO_FILEBROWSER"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C7.F03"
+    },
+    {
+      "id": "C2.TAB_NAV",
+      "match": {
+        "regex": "IDM_VIEW_TAB(?:[1-9]|_START|_END|_NEXT|_PREV|_MOVEFORWARD|_MOVEBACKWARD)"
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F02"
+    },
+    {
+      "id": "C2.MONITORING",
+      "match": {
+        "symbols": [
+          "IDM_VIEW_MONITORING"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F04"
+    },
+    {
+      "id": "C9.BROWSER",
+      "match": {
+        "regex": "IDM_VIEW_IN_(?:FIREFOX|CHROME|EDGE|IE)"
+      },
+      "disposition": "feature",
+      "feature_id": "C9.F04"
+    },
+    {
+      "id": "C2.TAB_COLOR",
+      "match": {
+        "regex": "IDM_VIEW_TAB_COLOUR_(?:NONE|[1-5])"
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F06"
+    },
+    {
+      "id": "C2.WINDOW_INSTANCE",
+      "match": {
+        "regex": "IDM_VIEW_(?:GOTO_NEW_INSTANCE|LOAD_IN_NEW_INSTANCE)"
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F10"
+    },
+    {
+      "id": "C2.TAB_MOVE_EDGES",
+      "match": {
+        "symbols": [
+          "IDM_VIEW_GOTO_START",
+          "IDM_VIEW_GOTO_END"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F02"
+    },
+    {
+      "id": "NA.HEADLESS_FUNCTION_EXPORT",
+      "match": {
+        "symbols": [
+          "IDM_EXPORT_FUNC_LIST_AND_QUIT"
+        ]
+      },
+      "disposition": "reviewed_na",
+      "rationale": "Headless export-and-quit maintenance entry is not an interactive editing workflow; exclusion remains provisional until an independent reviewer approves it.",
+      "independent_review": {
+        "status": "pending",
+        "reviewer_id": null,
+        "receipt_path": null,
+        "receipt_sha256": null
+      }
+    },
+    {
+      "id": "C6.EOL",
+      "match": {
+        "regex": "IDM_FORMAT_TO(?:DOS|UNIX|MAC)"
+      },
+      "disposition": "feature",
+      "feature_id": "C6.F04"
+    },
+    {
+      "id": "C6.UNICODE",
+      "match": {
+        "regex": "IDM_FORMAT_(?:ANSI|UTF_8|UTF_16BE|UTF_16LE|AS_UTF_8|CONV2_ANSI|CONV2_AS_UTF_8|CONV2_UTF_8|CONV2_UTF_16BE|CONV2_UTF_16LE)"
+      },
+      "disposition": "feature",
+      "feature_id": "C6.F01"
+    },
+    {
+      "id": "C6.LEGACY",
+      "match": {
+        "regex": "IDM_FORMAT_(?:WIN_[0-9]+|ISO_8859_[0-9]+|DOS_[0-9]+|BIG5|GB2312|SHIFT_JIS|KOREAN_WIN|EUC_KR|TIS_620|MAC_CYRILLIC|KOI8U_CYRILLIC|KOI8R_CYRILLIC)"
+      },
+      "disposition": "feature",
+      "feature_id": "C6.F02"
+    },
+    {
+      "id": "C5.LANGUAGE_STYLE",
+      "match": {
+        "symbols": [
+          "IDM_LANGSTYLE_CONFIG_DLG"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C5.F03"
+    },
+    {
+      "id": "C5.BUILTIN_LANGUAGE",
+      "match": {
+        "regex": "IDM_LANG_(?!(?:EXTERNAL|EXTERNAL_LIMIT|USER|USER_LIMIT|USER_DLG|OPENUDLDIR|UDLCOLLECTION_PROJECT_SITE)$)[A-Z0-9_]+"
+      },
+      "disposition": "feature",
+      "feature_id": "C5.F01"
+    },
+    {
+      "id": "C5.USER_LANGUAGE",
+      "match": {
+        "regex": "IDM_LANG_(?:USER_DLG|OPENUDLDIR|UDLCOLLECTION_PROJECT_SITE)"
+      },
+      "disposition": "feature",
+      "feature_id": "C5.F08"
+    },
+    {
+      "id": "NA.UPSTREAM_SUPPORT",
+      "match": {
+        "regex": "IDM_(?:HOMESWEETHOME|PROJECTPAGE|ONLINEDOCUMENT|FORUM|UPDATE_NPP|CONFUPDATERPROXY|CMDLINEARGUMENTS|DEBUGINFO)"
+      },
+      "disposition": "reviewed_na",
+      "rationale": "These entries target Notepad++-specific support, update, and diagnostic destinations; Duckpad owns separate product workflows and exclusion remains provisional until independent review.",
+      "independent_review": {
+        "status": "pending",
+        "reviewer_id": null,
+        "receipt_path": null,
+        "receipt_sha256": null
+      }
+    },
+    {
+      "id": "C8.IMPORT_PLUGIN",
+      "match": {
+        "symbols": [
+          "IDM_SETTING_IMPORTPLUGIN",
+          "IDM_SETTING_OPENPLUGINSDIR",
+          "IDM_SETTING_PLUGINADM"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C8.F09"
+    },
+    {
+      "id": "C10.IMPORT_THEME",
+      "match": {
+        "symbols": [
+          "IDM_SETTING_IMPORTSTYLETHEMES"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C10.F06"
+    },
+    {
+      "id": "NA.WINDOWS_TRAY_SETTING",
+      "match": {
+        "symbols": [
+          "IDM_SETTING_TRAYICON"
+        ]
+      },
+      "disposition": "reviewed_na",
+      "rationale": "Windows system-tray lifecycle has no required editor-parity result on macOS; exclusion remains provisional until independent review.",
+      "independent_review": {
+        "status": "pending",
+        "reviewer_id": null,
+        "receipt_path": null,
+        "receipt_sha256": null
+      }
+    },
+    {
+      "id": "C10.SHORTCUT_EDITOR",
+      "match": {
+        "regex": "IDM_SETTING_SHORTCUT_MAPPER(?:_MACRO|_RUN)?"
+      },
+      "disposition": "feature",
+      "feature_id": "C10.F03"
+    },
+    {
+      "id": "C10.PREFERENCES",
+      "match": {
+        "symbols": [
+          "IDM_SETTING_REMEMBER_LAST_SESSION",
+          "IDM_SETTING_PREFERENCE",
+          "IDM_SETTING_EDITCONTEXTMENU"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C10.F01"
+    },
+    {
+      "id": "C9.HASH",
+      "match": {
+        "regex": "IDM_TOOL_(?:MD5|SHA256|SHA1|SHA512)_.*"
+      },
+      "disposition": "feature",
+      "feature_id": "C9.F05"
+    },
+    {
+      "id": "NA.INTERNAL_SHORTCUT_VALIDATOR",
+      "match": {
+        "symbols": [
+          "IDM_EXECUTE_VALIDATE_SHORTCUTSXML"
+        ]
+      },
+      "disposition": "reviewed_na",
+      "rationale": "Internal shortcut-XML validation is a maintenance command rather than an end-user editing workflow; exclusion remains provisional until independent review.",
+      "independent_review": {
+        "status": "pending",
+        "reviewer_id": null,
+        "receipt_path": null,
+        "receipt_sha256": null
+      }
+    },
+    {
+      "id": "NA.WINDOWS_TRAY_COMMANDS",
+      "match": {
+        "regex": "IDM_SYSTRAYPOPUP_(?:ACTIVATE|CLOSE)"
+      },
+      "disposition": "reviewed_na",
+      "rationale": "Windows system-tray activation and close commands have no required editor-parity result on macOS; exclusion remains provisional until independent review.",
+      "independent_review": {
+        "status": "pending",
+        "reviewer_id": null,
+        "receipt_path": null,
+        "receipt_sha256": null
+      }
+    },
+    {
+      "id": "C7.WINDOW_LIST",
+      "match": {
+        "regex": "IDM_WINDOW_(?:WINDOWS|SORT_FN_ASC|SORT_FN_DSC|SORT_FP_ASC|SORT_FP_DSC|SORT_FT_ASC|SORT_FT_DSC|SORT_FS_ASC|SORT_FS_DSC|SORT_FD_ASC|SORT_FD_DSC|COPY_NAME|COPY_PATH)"
+      },
+      "disposition": "feature",
+      "feature_id": "C7.F01"
+    },
+    {
+      "id": "C2.DROPLIST",
+      "match": {
+        "symbols": [
+          "IDM_DROPLIST_LIST"
+        ]
+      },
+      "disposition": "feature",
+      "feature_id": "C2.F05"
+    }
+  ],
+  "ux_gates": [
+    {
+      "id": "G1",
+      "title": "Instant scratch",
+      "status": "Missing",
+      "owner": "team:quality",
+      "scenario": "Instant scratch",
+      "acceptance": [
+        "Instant scratch passes on every supported macOS target."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "G2",
+      "title": "Untitled survival",
+      "status": "Missing",
+      "owner": "team:quality",
+      "scenario": "Untitled survival",
+      "acceptance": [
+        "Untitled survival passes on every supported macOS target."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "G3",
+      "title": "Explicit discard",
+      "status": "Missing",
+      "owner": "team:quality",
+      "scenario": "Explicit discard",
+      "acceptance": [
+        "Explicit discard passes on every supported macOS target."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "G4",
+      "title": "Multiline tabs",
+      "status": "Missing",
+      "owner": "team:quality",
+      "scenario": "Multiline tabs",
+      "acceptance": [
+        "Multiline tabs passes on every supported macOS target."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "G5",
+      "title": "Search workflow",
+      "status": "Missing",
+      "owner": "team:quality",
+      "scenario": "Search workflow",
+      "acceptance": [
+        "Search workflow passes on every supported macOS target."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "G6",
+      "title": "Text fidelity",
+      "status": "Missing",
+      "owner": "team:quality",
+      "scenario": "Text fidelity",
+      "acceptance": [
+        "Text fidelity passes on every supported macOS target."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "G7",
+      "title": "External change safety",
+      "status": "Missing",
+      "owner": "team:quality",
+      "scenario": "External change safety",
+      "acceptance": [
+        "External change safety passes on every supported macOS target."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "G8",
+      "title": "Language breadth",
+      "status": "Missing",
+      "owner": "team:quality",
+      "scenario": "Language breadth",
+      "acceptance": [
+        "Language breadth passes on every supported macOS target."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "G9",
+      "title": "Plugin isolation",
+      "status": "Missing",
+      "owner": "team:quality",
+      "scenario": "Plugin isolation",
+      "acceptance": [
+        "Plugin isolation passes on every supported macOS target."
+      ],
+      "evidence_ids": []
+    },
+    {
+      "id": "G10",
+      "title": "macOS native behavior",
+      "status": "Missing",
+      "owner": "team:quality",
+      "scenario": "macOS native behavior",
+      "acceptance": [
+        "macOS native behavior passes on every supported macOS target."
+      ],
+      "evidence_ids": []
+    }
+  ],
+  "open_blocker_or_critical_defects": 0,
+  "release_gate_policy": {
+    "minimum_weighted_feature_parity": 90,
+    "require_all_p0_full": true,
+    "required_ux_gates": [
+      "G1",
+      "G10",
+      "G2",
+      "G3",
+      "G4",
+      "G5",
+      "G6",
+      "G7",
+      "G8",
+      "G9"
+    ],
+    "allow_pending_reviewed_na": false,
+    "maximum_open_blocker_or_critical_defects": 0
+  },
+  "candidate": {
+    "id": "unbuilt-local",
+    "status": "not_built",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "manifest_path": null
+  },
+  "review_policy": {
+    "reviewer_registry_path": "reviewer-identities.v1.json",
+    "reviewer_registry_sha256": "11a02a452b525a9081d754be6cd143f39d8dee6dd41a59ca88299c4ee4fa6b3d",
+    "reviewer_trust_model": "preprovisioned-local-v1",
+    "reviewer_onboarding": "parent-pinned-two-step",
+    "approval_registry_source": {
+      "kind": "external_genesis_v1",
+      "sha256": "11a02a452b525a9081d754be6cd143f39d8dee6dd41a59ca88299c4ee4fa6b3d"
+    },
+    "candidate_builder_ids": [
+      "/root",
+      "/root/philosophy_parity"
+    ]
+  },
+  "evidence_records": []
+}

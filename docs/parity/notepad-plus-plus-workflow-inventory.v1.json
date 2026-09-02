@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "fixture_version": "npp-dda973d2b-workflows-v1",
+  "source_commit": "dda973d2b2da6bdcc7db9f18a7f5d2fbf6b07248",
+  "surfaces": [
+    {
+      "id": "SURFACE.MAIN_MENU",
+      "path": "PowerEditor/src/Notepad_plus.rc",
+      "sha256": "1b91b63b9bb3d3e27083ec7ad2472844889742dddffec71cea6c29492efde093"
+    },
+    {
+      "id": "SURFACE.DEFAULT_COMMANDS",
+      "path": "PowerEditor/src/Parameters.cpp",
+      "sha256": "bca148f9fb086e0a90d5b83cd83245210cf79396c2dbc9ebe3a0575f7df2e345"
+    },
+    {
+      "id": "SURFACE.TAB_CONTEXT",
+      "path": "PowerEditor/src/tabContextMenu_example.xml",
+      "sha256": "88fa52c2941a3770991a9035db803f03b9c7969c21efd967f41d0465fb89954d"
+    },
+    {
+      "id": "SURFACE.TOOLBAR",
+      "path": "PowerEditor/src/toolbarButtonsConf_example.xml",
+      "sha256": "30d6eb04d4fa2fa425d0d95274e4ee42d4d1dfe97b6f9c2e926545789d4ac8f8"
+    },
+    {
+      "id": "SURFACE.DYNAMIC_HOST",
+      "path": "PowerEditor/src/Notepad_plus.cpp",
+      "sha256": "3cedb377ec8e84f858de58dee6e3803e3b5fdaa2ebb1eecbb99f5762d5a5b50d"
+    }
+  ],
+  "workflows": [
+    {
+      "id": "WF.C1.F06",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C1.F06",
+      "selector": "backupCurrentBuffer",
+      "expected_occurrences": 2
+    },
+    {
+      "id": "WF.C2.F01",
+      "surface_id": "SURFACE.DEFAULT_COMMANDS",
+      "feature_id": "C2.F01",
+      "selector": "multiLine",
+      "expected_occurrences": 4
+    },
+    {
+      "id": "WF.C4.F03",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C4.F03",
+      "selector": "FindRegex",
+      "expected_occurrences": 3
+    },
+    {
+      "id": "WF.C4.F04",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C4.F04",
+      "selector": "processAll\\(",
+      "expected_occurrences": 11
+    },
+    {
+      "id": "WF.C5.F02",
+      "surface_id": "SURFACE.DEFAULT_COMMANDS",
+      "feature_id": "C5.F02",
+      "selector": "getLangFromExt",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C5.F05",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C5.F05",
+      "selector": "maintainIndentation",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C5.F09",
+      "surface_id": "SURFACE.DEFAULT_COMMANDS",
+      "feature_id": "C5.F09",
+      "selector": "ExternalLangContainer",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C5.F10",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C5.F10",
+      "selector": "launchFunctionList",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C6.F03",
+      "surface_id": "SURFACE.DEFAULT_COMMANDS",
+      "feature_id": "C6.F03",
+      "selector": "_detectEncoding",
+      "expected_occurrences": 3
+    },
+    {
+      "id": "WF.C6.F05",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C6.F05",
+      "selector": "NPPN_FILEDELETED",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C6.F07",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C6.F07",
+      "selector": "NPPN_READONLYCHANGED",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C6.F08",
+      "surface_id": "SURFACE.DEFAULT_COMMANDS",
+      "feature_id": "C6.F08",
+      "selector": "largeFileRestriction",
+      "expected_occurrences": 22
+    },
+    {
+      "id": "WF.C7.F06",
+      "surface_id": "SURFACE.TOOLBAR",
+      "feature_id": "C7.F06",
+      "selector": "name=\"Document Map\"",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C7.F08",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C7.F08",
+      "selector": "saveDockingParams",
+      "expected_occurrences": 2
+    },
+    {
+      "id": "WF.C8.F01",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C8.F01",
+      "selector": "loadPlugins",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C8.F02",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C8.F02",
+      "selector": "initMenu",
+      "expected_occurrences": 2
+    },
+    {
+      "id": "WF.C8.F03",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C8.F03",
+      "selector": "NppData",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C8.F04",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C8.F04",
+      "selector": "_pluginsManager\\.notify",
+      "expected_occurrences": 5
+    },
+    {
+      "id": "WF.C8.F05",
+      "surface_id": "SURFACE.DEFAULT_COMMANDS",
+      "feature_id": "C8.F05",
+      "selector": "_userLangArray",
+      "expected_occurrences": 34
+    },
+    {
+      "id": "WF.C8.F06",
+      "surface_id": "SURFACE.TOOLBAR",
+      "feature_id": "C8.F06",
+      "selector": "<Plugin hideAll",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C8.F07",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C8.F07",
+      "selector": "_pluginsManager\\.init\\(nppData\\)",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C8.F08",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C8.F08",
+      "selector": "pluginsLoadingTime",
+      "expected_occurrences": 2
+    },
+    {
+      "id": "WF.C8.F10",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C8.F10",
+      "selector": "getIncompatibleList",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C8.F11",
+      "surface_id": "SURFACE.DYNAMIC_HOST",
+      "feature_id": "C8.F11",
+      "selector": "NPPM_MENUCOMMAND",
+      "expected_occurrences": 3
+    },
+    {
+      "id": "WF.C9.F01",
+      "surface_id": "SURFACE.MAIN_MENU",
+      "feature_id": "C9.F01",
+      "selector": "IDM_FILE_NEW",
+      "expected_occurrences": 2
+    },
+    {
+      "id": "WF.C9.F03",
+      "surface_id": "SURFACE.DEFAULT_COMMANDS",
+      "feature_id": "C9.F03",
+      "selector": "feedShortcut",
+      "expected_occurrences": 2
+    },
+    {
+      "id": "WF.C10.F02",
+      "surface_id": "SURFACE.DEFAULT_COMMANDS",
+      "feature_id": "C10.F02",
+      "selector": "\"DarkMode\"",
+      "expected_occurrences": 4
+    },
+    {
+      "id": "WF.C10.F05",
+      "surface_id": "SURFACE.MAIN_MENU",
+      "feature_id": "C10.F05",
+      "selector": "POPUP \"&File\"",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C2.F12",
+      "surface_id": "SURFACE.TOOLBAR",
+      "feature_id": "C2.F12",
+      "selector": "name=\"Word wrap\"",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C2.F13",
+      "surface_id": "SURFACE.MAIN_MENU",
+      "feature_id": "C2.F13",
+      "selector": "IDM_VIEW_HIDELINES",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C3.F13",
+      "surface_id": "SURFACE.MAIN_MENU",
+      "feature_id": "C3.F13",
+      "selector": "IDM_VIEW_ALL_CHARACTERS",
+      "expected_occurrences": 1
+    },
+    {
+      "id": "WF.C2.F02.CONTEXT",
+      "surface_id": "SURFACE.TAB_CONTEXT",
+      "feature_id": "C2.F02",
+      "selector": "Move to (?:Start|End)",
+      "expected_occurrences": 2
+    }
+  ]
+}

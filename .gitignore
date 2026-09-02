@@ -1,0 +1,64 @@
+# Reference source (keeps its own Git history)
+/notepad-plus-plus/
+
+# README names are intentionally withheld until explicitly authorized
+[Rr][Ee][Aa][Dd][Mm][Ee]*
+
+# macOS metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Swift Package Manager
+/.build/
+/.swiftpm/
+/Packages/
+
+# Xcode build products and indexes
+/build/
+/DerivedData/
+*.xcresult
+*.dSYM
+*.dSYM.zip
+*.ipa
+
+# Xcode per-user state
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+*.moved-aside
+
+# Local editor and tooling state
+.idea/
+.vscode/
+__pycache__/
+*.py[cod]
+*.swp
+*.swo
+*~
+
+# Duckpad runtime and recovery-test artifacts
+/.duckpad/
+/.duckpad-recovery/
+/recovery-artifacts/
+/test-recovery-artifacts/
+/TestResults/
+/coverage/
+/.coverage
+*.profraw
+*.profdata
+*.log
+
+# Local configuration, credentials, and signing material
+.env
+.env.*
+!.env.example
+*.xcconfig.local
+Secrets.xcconfig
+*.key
+*.pem
+*.p12
+*.mobileprovision

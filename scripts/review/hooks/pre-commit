@@ -1,0 +1,4 @@
+#!/bin/sh
+echo "Duckpad policy: raw git commit is blocked. Use scripts/review/local_commit.py after independent review." >&2
+echo "Using --no-verify is a policy violation and scripts/review/verify_candidate.py audit --all detects it." >&2
+exit 1

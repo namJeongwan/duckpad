@@ -1,0 +1,13 @@
+{
+  "identities": [
+    {
+      "id": "/root/phase1_code_review",
+      "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICiKpO8UMmWwPaGWukdXcGJau0KgDuJ5jQI88vpOmJmg",
+      "roles": [
+        "independent_commit_reviewer"
+      ],
+      "status": "active"
+    }
+  ],
+  "schema_version": 2
+}
