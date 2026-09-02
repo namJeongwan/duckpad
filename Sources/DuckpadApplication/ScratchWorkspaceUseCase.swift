@@ -168,6 +168,7 @@ public final class ScratchWorkspaceUseCase {
     private var hasStarted = false
     private var transactionBusy = false
     private var transactionWaiters: [CheckedContinuation<Void, Never>] = []
+    private var closeRecoveryCommitter: (@MainActor (ScratchSession) async -> RecoveryOutcome)?
 
     public var onChange: ((WorkspaceChange) -> Void)?
 
@@ -179,8 +180,29 @@ public final class ScratchWorkspaceUseCase {
         session = initial
     }
 
+    public func installCloseRecoveryCommitter(
+        _ committer: @escaping @MainActor (ScratchSession) async -> RecoveryOutcome
+    ) {
+        closeRecoveryCommitter = committer
+    }
+
     @discardableResult
     public func start() async -> PersistenceOutcome {
+        await start(restoring: nil, prepareForReady: {})
+    }
+
+    @discardableResult
+    public func start(
+        restoring stored: StoredSession,
+        prepareForReady: @MainActor () -> Void
+    ) async -> PersistenceOutcome {
+        await start(restoring: Optional(stored), prepareForReady: prepareForReady)
+    }
+
+    private func start(
+        restoring supplied: StoredSession?,
+        prepareForReady: @MainActor () -> Void
+    ) async -> PersistenceOutcome {
         await acquireTransaction()
         defer { releaseTransaction() }
         guard !hasStarted else {
@@ -191,13 +213,21 @@ public final class ScratchWorkspaceUseCase {
         startupState = .restoring
         publish(.reset)
         do {
-            if let stored = try await store.loadSession() {
+            let available: StoredSession?
+            if let supplied { available = supplied }
+            else { available = try await store.loadSession() }
+            if let stored = available {
                 generation = stored.generation
                 var loaded = stored.session
                 let needsSave = loaded.tabs.isEmpty
                 if needsSave { loaded.addUntitled() }
                 session = loaded
-                if needsSave { return finishStart(await save(loaded)) }
+                if needsSave {
+                    let outcome = await save(loaded)
+                    if case .saved = outcome { prepareForReady() }
+                    return finishStart(outcome)
+                }
+                prepareForReady()
                 persistenceState = .saved
                 startupState = .ready
                 publish(.reset)
@@ -280,6 +310,17 @@ public final class ScratchWorkspaceUseCase {
             if replacementCreated { candidate.addUntitled() }
             switch await save(candidate) {
             case .saved:
+                if let closeRecoveryCommitter {
+                    switch await closeRecoveryCommitter(candidate) {
+                    case .saved:
+                        break
+                    case .failed(let error):
+                        let failure = PersistenceFailure(operation: .save, cause: error)
+                        persistenceState = .failed(failure)
+                        publishFailure(failure, retry: .close(tabID, decision))
+                        return .persistenceFailed(failure)
+                    }
+                }
                 session = candidate
                 persistenceState = .saved
                 publish(.tabRemoved(index: removedIndex, retiredBufferID: buffer.id))
@@ -331,6 +372,8 @@ public final class ScratchWorkspaceUseCase {
         }
         return WorkspaceSnapshot(sessionID: session.id, tabs: tabs, activeBuffer: tabs.first(where: \.isActive)?.buffer, persistence: persistenceState, startup: startupState)
     }
+
+    public func recoverySession() -> ScratchSession { session }
 
     public func tabID(canonicalPath: String) -> TabID? {
         session.tabID(canonicalPath: canonicalPath)

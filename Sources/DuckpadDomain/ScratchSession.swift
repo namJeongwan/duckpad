@@ -1,6 +1,6 @@
 import Foundation
 
-public struct BufferMetadata: Equatable, Sendable {
+public struct BufferMetadata: Codable, Equatable, Sendable {
     public let id: BufferID
     public private(set) var revision: UInt64
     public private(set) var isDirty: Bool
@@ -39,7 +39,7 @@ public struct BufferMetadata: Equatable, Sendable {
     }
 }
 
-public struct ScratchDocument: Equatable, Sendable {
+public struct ScratchDocument: Codable, Equatable, Sendable {
     public let id: DocumentID
     public let bufferID: BufferID
     public var title: String
@@ -55,7 +55,7 @@ public struct ScratchDocument: Equatable, Sendable {
     }
 }
 
-public struct WorkspaceTab: Equatable, Sendable {
+public struct WorkspaceTab: Codable, Equatable, Sendable {
     public let id: TabID
     public let documentID: DocumentID
     public var isPinned: Bool
@@ -76,9 +76,10 @@ public enum SessionError: Error, Equatable, Sendable {
     case revisionExhausted(bufferID: BufferID)
     case duplicateBufferID(BufferID)
     case duplicateFileBinding(String)
+    case invalidRecoveryState(String)
 }
 
-public struct ScratchSession: Equatable, Sendable {
+public struct ScratchSession: Codable, Equatable, Sendable {
     public let id: SessionID
     public private(set) var tabs: [WorkspaceTab]
     public private(set) var documents: [DocumentID: ScratchDocument]
@@ -96,6 +97,47 @@ public struct ScratchSession: Equatable, Sendable {
         activeTabID = nil
         nextUntitledNumber = 1
     }
+
+    public init(
+        id: SessionID,
+        tabs: [WorkspaceTab],
+        documents: [DocumentID: ScratchDocument],
+        buffers: [BufferID: BufferMetadata],
+        fileBindings: [DocumentID: FileBinding],
+        activeTabID: TabID?,
+        nextUntitledNumber: Int
+    ) throws {
+        guard nextUntitledNumber > 0 else { throw SessionError.invalidRecoveryState("next untitled number") }
+        guard Set(tabs.map(\.id)).count == tabs.count else { throw SessionError.invalidRecoveryState("duplicate tab ID") }
+        guard Set(tabs.map(\.documentID)).count == tabs.count else {
+            throw SessionError.invalidRecoveryState("duplicate document ownership")
+        }
+        guard documents.allSatisfy({ $0.key == $0.value.id }) else { throw SessionError.invalidRecoveryState("document key mismatch") }
+        guard buffers.allSatisfy({ $0.key == $0.value.id }) else { throw SessionError.invalidRecoveryState("buffer key mismatch") }
+        guard Set(documents.values.map(\.bufferID)).count == documents.count else { throw SessionError.invalidRecoveryState("duplicate buffer ownership") }
+        guard tabs.allSatisfy({ documents[$0.documentID] != nil }) else { throw SessionError.invalidRecoveryState("broken tab document") }
+        guard documents.values.allSatisfy({ buffers[$0.bufferID] != nil }) else { throw SessionError.invalidRecoveryState("broken document buffer") }
+        guard Set(tabs.map(\.documentID)) == Set(documents.keys),
+              Set(documents.values.map(\.bufferID)) == Set(buffers.keys) else {
+            throw SessionError.invalidRecoveryState("orphan document or buffer")
+        }
+        guard fileBindings.keys.allSatisfy({ documents[$0] != nil }) else { throw SessionError.invalidRecoveryState("orphan file binding") }
+        guard Set(fileBindings.values.map(\.canonicalPath)).count == fileBindings.count else {
+            throw SessionError.invalidRecoveryState("duplicate file binding")
+        }
+        guard activeTabID == nil ? tabs.isEmpty : tabs.contains(where: { $0.id == activeTabID }) else {
+            throw SessionError.invalidRecoveryState("invalid active tab")
+        }
+        self.id = id
+        self.tabs = tabs
+        self.documents = documents
+        self.buffers = buffers
+        self.fileBindings = fileBindings
+        self.activeTabID = activeTabID
+        self.nextUntitledNumber = nextUntitledNumber
+    }
+
+    public var recoveryNextUntitledNumber: Int { nextUntitledNumber }
 
     @discardableResult
     public mutating func addUntitled() -> TabID {

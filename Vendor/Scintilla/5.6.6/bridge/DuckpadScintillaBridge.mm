@@ -171,6 +171,10 @@ NSString *DPScintillaResourcePath(NSString *name) {
     [_scintilla message:SCI_SETWRAPMODE wParam:value ? SC_WRAP_WORD : SC_WRAP_NONE];
 }
 - (NSUInteger)selectionCount { return (NSUInteger)[_scintilla message:SCI_GETSELECTIONS]; }
+- (NSUInteger)caretUTF8Position { return (NSUInteger)[_scintilla message:SCI_GETCURRENTPOS]; }
+- (NSUInteger)anchorUTF8Position { return (NSUInteger)[_scintilla message:SCI_GETANCHOR]; }
+- (NSUInteger)firstVisibleLine { return (NSUInteger)[_scintilla message:SCI_GETFIRSTVISIBLELINE]; }
+- (NSUInteger)horizontalScrollOffset { return (NSUInteger)[_scintilla message:SCI_GETXOFFSET]; }
 - (BOOL)canUndo { return [_scintilla message:SCI_CANUNDO] != 0; }
 - (BOOL)canRedo { return [_scintilla message:SCI_CANREDO] != 0; }
 - (BOOL)cursorResourcesAvailable {
@@ -182,6 +186,20 @@ NSString *DPScintillaResourcePath(NSString *name) {
 
 - (void)setPrimarySelectionUTF8Range:(NSRange)range {
     [_scintilla message:SCI_SETSEL wParam:(uptr_t)range.location lParam:(sptr_t)NSMaxRange(range)];
+}
+
+- (void)restoreCaretUTF8Position:(NSUInteger)caret
+                  anchorPosition:(NSUInteger)anchor
+                firstVisibleLine:(NSUInteger)firstVisibleLine
+          horizontalScrollOffset:(NSUInteger)horizontalScrollOffset
+                 wordWrapEnabled:(BOOL)wordWrapEnabled {
+    const NSUInteger length = (NSUInteger)[_scintilla message:SCI_GETLENGTH];
+    const NSUInteger safeCaret = MIN(caret, length);
+    const NSUInteger safeAnchor = MIN(anchor, length);
+    [_scintilla message:SCI_SETSEL wParam:(uptr_t)safeAnchor lParam:(sptr_t)safeCaret];
+    [_scintilla message:SCI_SETFIRSTVISIBLELINE wParam:(uptr_t)firstVisibleLine];
+    [_scintilla message:SCI_SETXOFFSET wParam:(uptr_t)horizontalScrollOffset];
+    [_scintilla message:SCI_SETWRAPMODE wParam:wordWrapEnabled ? SC_WRAP_WORD : SC_WRAP_NONE];
 }
 
 - (BOOL)addSelectionUTF8Range:(NSRange)range {

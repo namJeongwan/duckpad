@@ -77,3 +77,33 @@ import Testing
     #expect(try session.close(tabID: first) == second)
     #expect(session.tabs.map(\.id) == [second])
 }
+
+@Test func recoveredTabsCannotShareDocumentOrLeaveDanglingStateAfterClose() throws {
+    var valid = ScratchSession()
+    let first = valid.addUntitled()
+    let second = valid.addUntitled()
+    let sharedDocument = try valid.document(for: first).id
+    var invalidTabs = valid.tabs
+    invalidTabs[1] = WorkspaceTab(
+        id: invalidTabs[1].id,
+        documentID: sharedDocument,
+        isPinned: invalidTabs[1].isPinned
+    )
+
+    #expect(throws: SessionError.self) {
+        try ScratchSession(
+            id: valid.id,
+            tabs: invalidTabs,
+            documents: valid.documents,
+            buffers: valid.buffers,
+            fileBindings: valid.fileBindings,
+            activeTabID: second,
+            nextUntitledNumber: valid.recoveryNextUntitledNumber
+        )
+    }
+
+    _ = try valid.close(tabID: first)
+    #expect(valid.tabs.map(\.id) == [second])
+    #expect(try valid.document(for: second).id == valid.tabs[0].documentID)
+    #expect(try valid.buffer(for: second).id == valid.documents[valid.tabs[0].documentID]?.bufferID)
+}

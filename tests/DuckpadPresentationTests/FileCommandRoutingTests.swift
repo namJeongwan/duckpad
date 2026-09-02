@@ -14,6 +14,34 @@ private actor RoutingSessionStore: SessionStore {
     }
 }
 
+private actor RoutingRecoveryStore: RecoveryStore {
+    private var stored: StoredRecoveryArchive?
+    private var loadError: SessionStoreError?
+    private(set) var commitCount = 0
+    func loadLatest() async throws(SessionStoreError) -> StoredRecoveryArchive? {
+        if let loadError { throw loadError }
+        return stored
+    }
+    func commit(_ archive: RecoveryArchive, generation: PersistenceGeneration) async throws(SessionStoreError) -> SessionCommitResult {
+        stored = StoredRecoveryArchive(archive: archive, generation: generation)
+        commitCount += 1
+        return .committed
+    }
+    func reset() async throws(SessionStoreError) { stored = nil }
+    func setLoadError(_ error: SessionStoreError?) { loadError = error }
+}
+
+@MainActor
+private final class RecoveryErrorPresenterSpy: PersistenceErrorPresenting {
+    private(set) var failures: [PersistenceFailure] = []
+    private var retryAction: (@MainActor () -> Void)?
+    func present(failure: PersistenceFailure, retry: @escaping @MainActor () -> Void) {
+        failures.append(failure)
+        retryAction = retry
+    }
+    func retry() { retryAction?() }
+}
+
 private actor RoutingFileStore: TextFileStore {
     private var values: [String: FileReadResult] = [:]
     private var generation: UInt64 = 0
@@ -116,6 +144,77 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
     #expect(panels.saveRequests == 1)
     #expect(await files.text(at: saveAsURL) == "")
     #expect(panels.failures.isEmpty)
+}
+
+@Test @MainActor func cleanApplicationTerminationWaitsForFinalRecoveryFlush() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let recoveryStore = RoutingRecoveryStore()
+    let recovery = SessionRecoveryUseCase(
+        workspace: workspace,
+        editor: editor,
+        store: recoveryStore,
+        debounce: .seconds(60)
+    )
+    let coordinator = ApplicationTerminationCoordinator()
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        recoveryUseCase: recovery,
+        terminationCoordinator: coordinator,
+        automaticallyStarts: false
+    )
+    controller.start()
+    await controller.waitForStartup()
+
+    let approved = await withCheckedContinuation { continuation in
+        #expect(coordinator.applicationShouldTerminate { continuation.resume(returning: $0) } == .terminateLater)
+    }
+    #expect(approved)
+    #expect(await recoveryStore.commitCount == 1)
+    controller.close()
+}
+
+@Test @MainActor func corruptOnlyRecoveryIsVisibleDisabledAndResetRetryRestoresUsability() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let recoveryStore = RoutingRecoveryStore()
+    await recoveryStore.setLoadError(.corrupt("no valid recovery generation"))
+    let recovery = SessionRecoveryUseCase(
+        workspace: workspace,
+        editor: editor,
+        store: recoveryStore,
+        debounce: .seconds(60)
+    )
+    let presenter = RecoveryErrorPresenterSpy()
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        errorPresenter: presenter,
+        recoveryUseCase: recovery,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+
+    #expect(workspace.snapshot().startup == .restoring)
+    #expect(!editor.textView.isEditable)
+    #expect(presenter.failures.count == 1)
+    #expect(presenter.failures[0].operation == .load)
+
+    await recoveryStore.setLoadError(nil)
+    presenter.retry()
+    for _ in 0..<200 where workspace.snapshot().startup != .ready {
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(workspace.snapshot().startup == .ready)
+    #expect(editor.textView.isEditable)
+    #expect(workspace.snapshot().tabs.count == 1)
 }
 
 @Suite(.serialized)

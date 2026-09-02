@@ -41,6 +41,10 @@ typedef NS_ENUM(NSInteger, DPScintillaEditOrigin) {
 @property(nonatomic, getter=isInputEnabled) BOOL inputEnabled;
 @property(nonatomic, getter=isWordWrapEnabled) BOOL wordWrapEnabled;
 @property(nonatomic, readonly) NSUInteger selectionCount;
+@property(nonatomic, readonly) NSUInteger caretUTF8Position;
+@property(nonatomic, readonly) NSUInteger anchorUTF8Position;
+@property(nonatomic, readonly) NSUInteger firstVisibleLine;
+@property(nonatomic, readonly) NSUInteger horizontalScrollOffset;
 @property(nonatomic, readonly) BOOL canUndo;
 @property(nonatomic, readonly) BOOL canRedo;
 @property(nonatomic, readonly) BOOL cursorResourcesAvailable;
@@ -58,6 +62,11 @@ typedef NS_ENUM(NSInteger, DPScintillaEditOrigin) {
        resultingRevision:(uint64_t)resultingRevision
                     error:(NSError * _Nullable * _Nullable)error;
 - (void)setPrimarySelectionUTF8Range:(NSRange)range;
+- (void)restoreCaretUTF8Position:(NSUInteger)caret
+                  anchorPosition:(NSUInteger)anchor
+                firstVisibleLine:(NSUInteger)firstVisibleLine
+          horizontalScrollOffset:(NSUInteger)horizontalScrollOffset
+                 wordWrapEnabled:(BOOL)wordWrapEnabled;
 - (BOOL)addSelectionUTF8Range:(NSRange)range;
 - (void)insertCommittedText:(NSString *)text;
 - (void)setMarkedText:(NSString *)text

@@ -95,6 +95,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let filePanels: (any FilePanelPresenting)?
     private let fileConflictPresenter: (any FileConflictPresenting)?
     private let dirtyDecisionPresenter: (any DirtyDocumentDecisionPresenting)?
+    private let recoveryUseCase: SessionRecoveryUseCase?
     let terminationCoordinator: ApplicationTerminationCoordinator?
     private let approvedWindowClose: @MainActor (NSWindow) -> Void
     private var editorBinding: EditorBindingUseCase!
@@ -112,6 +113,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         filePanels: (any FilePanelPresenting)? = nil,
         fileConflictPresenter: (any FileConflictPresenting)? = nil,
         dirtyDecisionPresenter: (any DirtyDocumentDecisionPresenting)? = nil,
+        recoveryUseCase: SessionRecoveryUseCase? = nil,
         terminationCoordinator: ApplicationTerminationCoordinator? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
         automaticallyStarts: Bool = true
@@ -129,6 +131,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.filePanels = filePanels
         self.fileConflictPresenter = fileConflictPresenter
         self.dirtyDecisionPresenter = dirtyDecisionPresenter
+        self.recoveryUseCase = recoveryUseCase
         self.terminationCoordinator = terminationCoordinator
         self.approvedWindowClose = approvedWindowClose ?? { $0.performClose(nil) }
         let window = NSWindow(
@@ -182,7 +185,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     func start() {
-        startTask = Task { [weak workspace] in _ = await workspace?.start() }
+        startTask = Task { [weak self] in
+            guard let self else { return }
+            if let recoveryUseCase {
+                let outcome = await recoveryUseCase.start()
+                if case .failed(let failure) = outcome {
+                    presentRecoveryStartupFailure(failure)
+                }
+            } else {
+                _ = await workspace.start()
+            }
+        }
     }
 
     public func waitForStartup() async { await startTask?.value }
@@ -236,11 +249,34 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspace.snapshot().tabs.contains(where: \.isDirty)
     }
 
+    public var requiresTerminationReview: Bool { hasDirtyDocuments || recoveryUseCase != nil }
+
+    @discardableResult
+    public func flushRecovery(final: Bool = false) async -> Bool {
+        guard let recoveryUseCase else { return true }
+        let outcome = final
+            ? await recoveryUseCase.flushForTermination()
+            : await recoveryUseCase.flush()
+        switch outcome {
+        case .saved:
+            return true
+        case .failed(let error):
+            let failure = PersistenceFailure(operation: .save, cause: error)
+            errorPresenter.present(failure: failure) { [weak recoveryUseCase] in
+                Task {
+                    if final { _ = await recoveryUseCase?.flushForTermination() }
+                    else { _ = await recoveryUseCase?.flush() }
+                }
+            }
+            return false
+        }
+    }
+
     /// Shared red-close/Cmd-Q gate. Discard is remembered only for this review;
     /// a concurrently dirtied, previously saved tab is reviewed again.
     public func reviewDirtyDocumentsForTermination() async -> Bool {
-        guard let presenter = dirtyDecisionPresenter else { return !hasDirtyDocuments }
         while let tab = workspace.snapshot().tabs.first(where: \.isDirty) {
+            guard let presenter = dirtyDecisionPresenter else { return false }
             let decision = await presenter.decision(
                 for: tab,
                 saveAvailable: fileUseCase != nil,
@@ -257,7 +293,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 guard await saveBeforeClosing(tabID: tab.id) else { return false }
             }
         }
-        return true
+        return await flushRecovery(final: true)
     }
 
     public func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -265,7 +301,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             permitsNextWindowClose = false
             return true
         }
-        guard hasDirtyDocuments else { return true }
+        guard requiresTerminationReview else { return true }
         guard let terminationCoordinator else { return false }
         terminationCoordinator.requestWindowClose { [weak self, weak sender] approved in
             guard let self else { return }
@@ -274,6 +310,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             self.approvedWindowClose(sender)
         }
         return false
+    }
+
+    public func windowDidResignKey(_ notification: Notification) {
+        Task { [weak self] in _ = await self?.flushRecovery() }
     }
 
     private func configureContent(
@@ -321,10 +361,23 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         tabStrip.setInteractionsEnabled(change.snapshot.startup == .ready)
         editorBinding.render(change)
         updateWindowTitle(change.snapshot)
+        recoveryUseCase?.workspaceDidChange(change)
         guard let event = change.failureEvent, handledFailureIDs.insert(event.id).inserted else { return }
         errorPresenter.present(failure: event.failure) { [weak self] in
             guard let self else { return }
             Task { [weak workspace] in _ = await workspace?.retry(event.retry) }
+        }
+    }
+
+    private func presentRecoveryStartupFailure(_ failure: PersistenceFailure) {
+        errorPresenter.present(failure: failure) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, let recoveryUseCase = self.recoveryUseCase else { return }
+                let outcome = await recoveryUseCase.discardFailedRecoveryAndStart()
+                if case .failed(let retryFailure) = outcome {
+                    self.presentRecoveryStartupFailure(retryFailure)
+                }
+            }
         }
     }
 

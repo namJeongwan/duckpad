@@ -176,6 +176,35 @@ struct ScintillaBridgeTests {
     }
 
     @Test @MainActor
+    func recoveryJournalMiddleEditWorkIsIndependentOfDocumentSize() throws {
+        var work: [Int] = []
+        for size in [1_000_000, 10_000_000, 50_000_000] {
+            let adapter = ScintillaEditorAdapter()
+            let bufferID = BufferID()
+            let text = String(repeating: "a", count: size)
+            adapter.install(EditorTextSnapshot(bufferID: bufferID, revision: 0, text: text))
+            adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+            adapter.display(EditorBufferDescriptor(bufferID: bufferID, revision: 0))
+            let view = try #require(adapter.activeScintillaView)
+            view.setPrimarySelectionUTF8Range(NSRange(location: size / 2, length: 0))
+            view.resetInstrumentation()
+
+            view.insertCommittedText("x")
+
+            let capture = try #require(adapter.recoveryCapture(for: bufferID))
+            work.append(adapter.lastRecoveryJournalWorkByteCount)
+            #expect(adapter.recoveryJournalAppendCount == 1)
+            #expect(capture.baseUTF8.count == size)
+            #expect(capture.deltas.count == 1)
+            #expect(capture.deltas[0].replacementUTF8.count == 1)
+            #expect(view.snapshotReadCount == 0)
+            #expect(try capture.materializedSnapshot().utf8.count == size + 1)
+        }
+        #expect(Set(work).count == 1)
+        #expect(work.allSatisfy { $0 < 256 })
+    }
+
+    @Test @MainActor
     func typingUndoRedoAndMultiselectionEmitOwnedEdits() throws {
         let view = makeHostedView()
         try view.loadUTF8(Data("alpha beta".utf8), revision: 0)
@@ -279,6 +308,68 @@ struct ScintillaBridgeTests {
         #expect(view.snapshotReadCount == 0)
         #expect(view.revision == 1)
         #expect(adapter.snapshot(for: bufferID)?.text == "A")
+    }
+
+    @Test @MainActor
+    func recoverySnapshotUsesIncrementalUTF8AndRestoresViewStateWithoutFullRead() throws {
+        _ = NSApplication.shared
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        adapter.display(EditorBufferDescriptor(bufferID: bufferID, revision: 0))
+        let text = (0..<30).map { "line \($0) 한글🙂" }.joined(separator: "\n")
+        let view = try #require(adapter.activeScintillaView)
+        view.insertCommittedText(text)
+        view.restoreCaretUTF8Position(
+            18,
+            anchorPosition: 5,
+            firstVisibleLine: 7,
+            horizontalScrollOffset: 11,
+            wordWrapEnabled: false
+        )
+        view.resetInstrumentation()
+
+        let recovery = try #require(adapter.recoverySnapshot(for: bufferID))
+        #expect(recovery.utf8 == Data(text.utf8))
+        #expect(recovery.viewState.anchorUTF8 == 5)
+        #expect(recovery.viewState.caretUTF8 == 18)
+        #expect(recovery.viewState.wordWrapEnabled == false)
+        #expect(view.snapshotReadCount == 0)
+
+        let restored = ScintillaEditorAdapter()
+        restored.installRecovery(recovery)
+        restored.display(EditorBufferDescriptor(bufferID: bufferID, revision: 1))
+        let restoredView = try #require(restored.activeScintillaView)
+        #expect(restoredView.anchorUTF8Position == 5)
+        #expect(restoredView.caretUTF8Position == 18)
+        #expect(restoredView.isWordWrapEnabled == false)
+        #expect(restored.recoverySnapshot(for: bufferID)?.utf8 == Data(text.utf8))
+    }
+
+    @Test @MainActor
+    func directRecoveryInstallClampsUnsafeViewCoordinatesWithoutTrap() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        let bytes = Data("한🙂".utf8)
+        adapter.installRecovery(EditorRecoverySnapshot(
+            bufferID: bufferID,
+            revision: 3,
+            utf8: bytes,
+            viewState: EditorViewState(
+                anchorUTF8: 1,
+                caretUTF8: Int.max,
+                firstVisibleLine: -9,
+                horizontalScrollOffset: -3,
+                wordWrapEnabled: false
+            )
+        ))
+        adapter.display(EditorBufferDescriptor(bufferID: bufferID, revision: 3))
+        let view = try #require(adapter.activeScintillaView)
+        #expect(view.anchorUTF8Position == 0)
+        #expect(view.caretUTF8Position == bytes.count)
+        #expect(view.firstVisibleLine == 0)
+        #expect(view.horizontalScrollOffset == 0)
+        #expect(!view.isWordWrapEnabled)
     }
 
     @Test @MainActor

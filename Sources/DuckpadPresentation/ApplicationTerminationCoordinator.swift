@@ -35,7 +35,7 @@ public final class ApplicationTerminationCoordinator {
             reply(false)
             return
         }
-        guard windowController.hasDirtyDocuments else {
+        guard windowController.requiresTerminationReview else {
             reply(true)
             return
         }
@@ -53,7 +53,7 @@ public final class ApplicationTerminationCoordinator {
             applicationReplies.append(reply)
             return .terminateLater
         }
-        guard windowController.hasDirtyDocuments else { return .terminateNow }
+        guard windowController.requiresTerminationReview else { return .terminateNow }
         applicationReplies.append(reply)
         beginReview(using: windowController)
         return .terminateLater

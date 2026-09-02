@@ -1,4 +1,5 @@
 import DuckpadDomain
+import Foundation
 
 public enum SessionStoreError: Error, Equatable, Sendable {
     case unavailable(String)
@@ -108,4 +109,37 @@ public protocol EditorPort: AnyObject {
     func retire(bufferID: BufferID)
     func setInputEnabled(_ isEnabled: Bool)
     func focus()
+    func recoverySnapshot(for bufferID: BufferID) -> EditorRecoverySnapshot?
+    func recoveryCapture(for bufferID: BufferID) -> EditorRecoveryCapture?
+    func acknowledgeRecoverySnapshot(_ snapshot: EditorRecoverySnapshot)
+    func installRecovery(_ snapshot: EditorRecoverySnapshot)
+}
+
+public extension EditorPort {
+    func recoverySnapshot(for bufferID: BufferID) -> EditorRecoverySnapshot? {
+        guard let snapshot = snapshot(for: bufferID) else { return nil }
+        return EditorRecoverySnapshot(
+            bufferID: bufferID,
+            revision: snapshot.revision,
+            utf8: Data(snapshot.text.utf8)
+        )
+    }
+
+    func recoveryCapture(for bufferID: BufferID) -> EditorRecoveryCapture? {
+        guard let snapshot = recoverySnapshot(for: bufferID) else { return nil }
+        return EditorRecoveryCapture(
+            bufferID: snapshot.bufferID,
+            baseRevision: snapshot.revision,
+            revision: snapshot.revision,
+            baseUTF8: snapshot.utf8,
+            viewState: snapshot.viewState
+        )
+    }
+
+    func acknowledgeRecoverySnapshot(_ snapshot: EditorRecoverySnapshot) {}
+
+    func installRecovery(_ snapshot: EditorRecoverySnapshot) {
+        guard let text = String(data: snapshot.utf8, encoding: .utf8) else { return }
+        install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text))
+    }
 }

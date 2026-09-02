@@ -1,17 +1,17 @@
 import Foundation
 
-public enum TextFileEncoding: String, CaseIterable, Equatable, Sendable {
+public enum TextFileEncoding: String, CaseIterable, Codable, Equatable, Sendable {
     case utf8
     case utf16LittleEndian
     case utf16BigEndian
 }
 
-public enum ByteOrderMark: String, Equatable, Sendable {
+public enum ByteOrderMark: String, Codable, Equatable, Sendable {
     case absent
     case present
 }
 
-public enum LineEnding: String, Equatable, Sendable {
+public enum LineEnding: String, Codable, Equatable, Sendable {
     case none
     case lf
     case crlf
@@ -21,7 +21,7 @@ public enum LineEnding: String, Equatable, Sendable {
 
 /// Stable, adapter-produced identity of the bytes that were last read or saved.
 /// The opaque content token prevents timestamp-only conflict checks.
-public struct FileIdentity: Equatable, Sendable {
+public struct FileIdentity: Codable, Equatable, Sendable {
     public let canonicalPath: String
     public let device: UInt64
     public let inode: UInt64
@@ -48,7 +48,7 @@ public struct FileIdentity: Equatable, Sendable {
 
 /// File metadata is deliberately separate from ScratchDocument/BufferMetadata.
 /// A document remains stable while Save As replaces this binding.
-public struct FileBinding: Equatable, Sendable {
+public struct FileBinding: Codable, Equatable, Sendable {
     public let canonicalPath: String
     public var encoding: TextFileEncoding
     public var byteOrderMark: ByteOrderMark

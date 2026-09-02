@@ -23,6 +23,11 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 9 | [Parity checker](../../scripts/check_parity_baseline.py) + [reference-free tests](../../tests/test_parity_baseline.py) + [pinned integration tests](../../tests/test_parity_integration.py) + [command fixture](../../tests/fixtures/) + [frozen workflow fixture](../parity/notepad-plus-plus-workflow-inventory.v1.json) | **Pending approval** | duplicate-key fail-closed parsing, clean direct audit, workflow identity와 signed-release adversarial audit를 재현한다. |
 | 10 | [Review gate tools](../../scripts/review/) + [governance E2E](../../tests/governance/review-receipt-e2e.sh) | **Pending approval** | shipped bootstrap 없이 pre-provisioned trust, authenticated builder identity, parent-pinned reviewer onboarding, wrapper/hook/audit를 구현한다. |
 | 11 | [Phase 1 구현 foundation](04-implementation-foundation.md) | **Implemented; review pending** | Swift 6/AppKit executable, inward-only modules, typed scratch model, multiline tabs와 현재 Scintilla gap을 기록한다. |
+| 12 | [Scintilla 5.6.6 integration](05-scintilla-integration.md) | **Implemented; review pending** | 공식 standalone source provenance, 좁은 Objective-C++ façade, UTF-8/revision 계약, 실제 AppKit editor 검증을 기록한다. |
+| 13 | [Phase 3 file I/O](06-file-io.md) | **Implemented; review pending** | strict Unicode/EOL 보존, atomic save, external-conflict policy와 native macOS file commands를 기록한다. |
+| 14 | [Phase 4 session recovery](07-session-recovery.md) | **Content approved; exact receipt pending** | generation별 UTF-8 recovery, corrupt fallback, editor view state, crash autosave와 durable close/termination ordering candidate다. |
+| 15 | [Phase 4 independent code review](reviews/2026-09-02-phase-4-session-recovery-code-review.md) | **Rejected — superseded review evidence** | 최초 P4-01~P4-06 Major 판정과 당시 debug/release/smoke/adversarial evidence다. |
+| 16 | [Phase 4 remediation re-review](reviews/2026-09-02-phase-4-session-recovery-rereview.md) | **Content approved; exact receipt pending — latest Phase 4 evidence** | P4-01~P4-06 closure, focused/debug/release/fresh/smoke evidence와 exact 19-file scope를 기록한다. |
 
 상태 정의:
 
@@ -174,3 +179,35 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - **Authorization boundary:** 이 candidate의 ROOT 승인은 candidate registry가 아닌 이미 provision된 external genesis snapshot만 사용한다. versioned record는 이 commit 이후 parent-pinned candidate부터 onboarding 효력이 있다.
 - **Validation:** external/versioned registry byte equality와 digest `11a02a452b525a9081d754be6cd143f39d8dee6dd41a59ca88299c4ee4fa6b3d`, unchanged parity contract digest, parity 31/31, governance 7/7, pinned integration 7/7 및 default/direct checker 통과를 확인했다.
 - **Commit:** stage/commit하지 않았다. 최종 validation은 실행 후 기록한다.
+
+### 2026-09-02 — Phase 4 session/crash recovery
+
+- **Agent/role:** `/root/philosophy_parity`, product builder; 독립 review나 commit authorization 역할은 수행하지 않는다.
+- **Change:** [Phase 4 session recovery](07-session-recovery.md)에 recovery port/use case, generation/blob/manifest 저장소, startup restore, Scintilla view state, autosave/final flush와 forced-exit smoke 경계를 기록하고 실제 product composition에 연결했다.
+- **Safety:** injected test/smoke root만 사용하며 production 기본값은 `Application Support/Duckpad/Recovery`다. explicit discard/close는 recovery manifest durability 이후 live session에 반영한다. README/Notepad++ reference를 변경하지 않는다.
+- **Validation:** recovery-focused 19/19, debug full 86/86, release full 86/86, fresh scratch full 86/86 PASS. 강제 종료 write process(exit 86) 뒤 relaunch가 `crash 한글🙂`와 1 tab을 복구했다. forbidden README/gitlink/staging은 0건이고 ignored Notepad++ reference는 clean이다. 상세 명령과 evidence는 문서 07 Agent Work Log를 따른다.
+- **Commit:** stage/commit하지 않았다.
+
+### 2026-09-02 — Phase 4 independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent code reviewer; builder와 분리된 content verdict만 판정한다.
+- **Scope:** 현재 unstaged Phase 4 recovery vertical slice의 데이터 유실/원자성, generation fallback, startup/close/Quit ordering, revision concurrency, Scintilla hot path, Clean Architecture, temp-root/permissions, manifest/blob validation과 tests. 기존 unrelated unstaged 문서 04/vendor script는 제외하고 보존했다.
+- **Verdict:** **CHANGES_REQUIRED — 0 Blocker, 6 Major, 0 Minor.** P4-01 final-flush edit race, P4-02 missing blobs-directory sync, P4-03 duplicate tab/document ownership, P4-04 negative view-state crash, P4-05 O(file-size) recovery mirror edit, P4-06 unsurfaced corrupt-startup dead-end.
+- **Validation:** focused recovery 17 test functions/19 cases PASS; debug 86/86 PASS; release 86/86 PASS; forced-exit write 86 + relaunch verify 0 PASS. Negative view-state production restore는 exit 133을 재현했고 duplicate tab/document manifest는 2 tabs로 잘못 수용됨을 재현했다.
+- **Record:** 상세 finding/evidence는 [Phase 4 review](reviews/2026-09-02-phase-4-session-recovery-code-review.md). 리뷰 문서와 이 index 항목만 수정했으며 reviewed source/test를 수정·stage·commit하지 않았다.
+
+### 2026-09-02 — Phase 4 P4-01..P4-06 remediation
+
+- **Agent/role:** `/root/philosophy_parity`, product builder; 독립 reviewer verdict를 변경하지 않는다.
+- **Scope:** [Phase 4 session recovery](07-session-recovery.md)에 final-flush freshness, blob-directory durability, one-tab/one-document ownership, safe view-state validation, bounded recovery delta journal, corrupt-only startup reset/retry를 구현했다.
+- **Regression evidence:** targeted 9 test functions PASS(4-way interruption fault 포함), debug full 94/94, release full 94/94, fresh scratch full 94/94 PASS. forced-exit write(exit 86) 뒤 relaunch가 `remediated crash 한글🙂`와 1 tab을 복구했다.
+- **Safety:** README/Notepad++ reference/review verdict 문서를 변경하지 않았고 stage/commit하지 않았다. 새 독립 review 전까지 기존 `CHANGES_REQUIRED` verdict는 유지된다.
+
+### 2026-09-02 — Phase 4 remediation independent re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent code reviewer; builder와 분리된 content verdict만 판정한다.
+- **Scope:** 이전 review의 P4-01~P4-06만 현재 코드와 표적 테스트로 재검증했다. unrelated 문서 04/vendor script는 제외하고 보존했으며 새 기능 범위를 추가하지 않았다.
+- **Closure:** final flush freshness loop/input gate, blobs-directory sync, tab/document ownership, 음수·범위초과·UTF-8 경계 validation, 1/10/50 MiB bounded delta hot path/off-main materialization, corrupt-only startup reset/retry가 모두 닫혔다.
+- **Validation:** focused 24/24, debug 94/94, release 94/94, fresh scratch 94/94와 forced-exit/relaunch smoke가 통과했다. implementation/acceptance 19-file manifest SHA-256은 `a31d9408fa0844dbf397c2b4a17089f8591e753e3d578bd4542c3072cfaa3f03`이다.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major.** exact-candidate receipt 전까지 commit authorization은 부여하지 않는다. 상세 범위와 파일 목록은 [Phase 4 remediation re-review](reviews/2026-09-02-phase-4-session-recovery-rereview.md)에 기록했다.
+- **Safety:** 이 re-review 문서와 index status/work log만 수정했다. reviewed source/test를 수정·stage·commit하지 않았다.

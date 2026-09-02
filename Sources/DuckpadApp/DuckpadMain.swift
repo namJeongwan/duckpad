@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import DuckpadApplication
 import DuckpadEditorAdapter
 import DuckpadInfrastructure
@@ -14,6 +15,16 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         let store = InMemorySessionStore()
         let workspace = ScratchWorkspaceUseCase(store: store)
         let editor = ScintillaEditorAdapter()
+        let environment = ProcessInfo.processInfo.environment
+        let recoveryRoot = environment["DUCKPAD_RECOVERY_ROOT"].map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        } ?? LocalRecoveryStore.defaultRoot()
+        let recoveryStore = LocalRecoveryStore(root: recoveryRoot)
+        let recoveryUseCase = SessionRecoveryUseCase(
+            workspace: workspace,
+            editor: editor,
+            store: recoveryStore
+        )
         let fileStore = LocalTextFileStore()
         let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: fileStore)
         let panels = NativeFilePanelAdapter()
@@ -26,6 +37,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             filePanels: panels,
             fileConflictPresenter: panels,
             dirtyDecisionPresenter: panels,
+            recoveryUseCase: recoveryUseCase,
             terminationCoordinator: terminationCoordinator
         )
         windowController = controller
@@ -33,8 +45,31 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         installMainMenu(target: controller)
         controller.showAndFocus()
 
-        let environment = ProcessInfo.processInfo.environment
-        if let smokePath = environment["DUCKPAD_SMOKE_FILE"] {
+        if let expected = environment["DUCKPAD_RECOVERY_SMOKE_VERIFY"] {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                guard let active = workspace.snapshot().activeBuffer,
+                      let recovered = editor.recoverySnapshot(for: active.bufferID),
+                      String(data: recovered.utf8, encoding: .utf8) == expected else {
+                    preconditionFailure("recovery smoke verification failed")
+                }
+                print("Duckpad recovery smoke restored \(workspace.snapshot().tabs.count) tab(s)")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
+        } else if let text = environment["DUCKPAD_RECOVERY_SMOKE_WRITE"] {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                guard let view = editor.activeScintillaView else {
+                    preconditionFailure("recovery smoke editor missing")
+                }
+                view.insertCommittedText(text)
+                await recoveryUseCase.waitForPendingAutosave()
+                print("Duckpad recovery smoke autosaved before forced exit")
+                fflush(stdout)
+                Darwin._exit(86)
+            }
+        } else if let smokePath = environment["DUCKPAD_SMOKE_FILE"] {
             Task { @MainActor in
                 await controller.waitForStartup()
                 let open = await fileUseCase.open(URL(fileURLWithPath: smokePath))
@@ -57,6 +92,12 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         terminationCoordinator?.applicationShouldTerminate { approved in
             sender.reply(toApplicationShouldTerminate: approved)
         } ?? .terminateNow
+    }
+
+    func applicationWillResignActive(_ notification: Notification) {
+        Task { @MainActor [weak windowController] in
+            _ = await windowController?.flushRecovery()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

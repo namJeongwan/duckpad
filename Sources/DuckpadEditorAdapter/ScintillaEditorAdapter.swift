@@ -7,16 +7,28 @@ import DuckpadScintillaBridge
 /// buffer identity/revision/dirty metadata.
 @MainActor
 public final class ScintillaEditorAdapter: EditorPort {
+    private struct RecoveryBuffer {
+        var baseRevision: UInt64
+        var revision: UInt64
+        var baseUTF8: Data
+        var deltas: [EditorRecoveryDelta]
+        var byteCount: Int
+    }
+
     public static let engineVersion = "5.6.6"
     /// Stable host passed to Presentation. Each live buffer owns a Scintilla
     /// child view so switching/retiring another buffer cannot erase its undo stack.
     public let view: NSView
     public private(set) var activeScintillaView: DPScintillaEditorView?
     public private(set) var lastMutationError: (any Error)?
+    public private(set) var lastRecoveryJournalWorkByteCount = 0
+    public private(set) var recoveryJournalAppendCount = 0
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
 
     private var activeBuffer: EditorBufferDescriptor?
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
+    private var recoveryBuffers: [BufferID: RecoveryBuffer] = [:]
+    private var viewStates: [BufferID: EditorViewState] = [:]
     private var acceptedEdits: [BufferID: [EditorIncrementalEdit]] = [:]
     private var bufferViews: [BufferID: DPScintillaEditorView] = [:]
     private var isRecovering = false
@@ -43,6 +55,7 @@ public final class ScintillaEditorAdapter: EditorPort {
     public func display(_ buffer: EditorBufferDescriptor) {
         if activeBuffer == buffer { return }
         if let activeBuffer {
+            storeViewState(bufferID: activeBuffer.bufferID)
             storeSnapshot(bufferID: activeBuffer.bufferID, revision: activeBuffer.revision)
         }
         let stored = snapshots[buffer.bufferID]
@@ -53,6 +66,17 @@ public final class ScintillaEditorAdapter: EditorPort {
             text: stored.text
         )
         snapshots[buffer.bufferID] = snapshot
+        if recoveryBuffers[buffer.bufferID] == nil {
+            let bytes = Data(snapshot.text.utf8)
+            recoveryBuffers[buffer.bufferID] = RecoveryBuffer(
+                baseRevision: snapshot.revision,
+                revision: snapshot.revision,
+                baseUTF8: bytes,
+                deltas: [],
+                byteCount: bytes.count
+            )
+        }
+        viewStates[buffer.bufferID] = viewStates[buffer.bufferID] ?? EditorViewState()
         activeBuffer = buffer
         let editorView: DPScintillaEditorView
         if let existing = bufferViews[buffer.bufferID] {
@@ -63,6 +87,7 @@ public final class ScintillaEditorAdapter: EditorPort {
             bufferViews[buffer.bufferID] = editorView
             load(snapshot, into: editorView)
         }
+        restoreViewState(for: buffer.bufferID, in: editorView)
         activeScintillaView?.removeFromSuperview()
         activeScintillaView = editorView
         editorView.frame = view.bounds
@@ -73,6 +98,15 @@ public final class ScintillaEditorAdapter: EditorPort {
 
     public func install(_ snapshot: EditorTextSnapshot) {
         snapshots[snapshot.bufferID] = snapshot
+        let bytes = Data(snapshot.text.utf8)
+        recoveryBuffers[snapshot.bufferID] = RecoveryBuffer(
+            baseRevision: snapshot.revision,
+            revision: snapshot.revision,
+            baseUTF8: bytes,
+            deltas: [],
+            byteCount: bytes.count
+        )
+        viewStates[snapshot.bufferID] = viewStates[snapshot.bufferID] ?? EditorViewState()
         acceptedEdits[snapshot.bufferID] = []
         guard let editorView = bufferViews[snapshot.bufferID] else { return }
         load(snapshot, into: editorView)
@@ -88,8 +122,54 @@ public final class ScintillaEditorAdapter: EditorPort {
         return snapshots[bufferID]
     }
 
+    public func recoverySnapshot(for bufferID: BufferID) -> EditorRecoverySnapshot? {
+        try? recoveryCapture(for: bufferID)?.materializedSnapshot()
+    }
+
+    public func recoveryCapture(for bufferID: BufferID) -> EditorRecoveryCapture? {
+        if activeBuffer?.bufferID == bufferID { storeViewState(bufferID: bufferID) }
+        guard let recovery = recoveryBuffers[bufferID] else { return nil }
+        return EditorRecoveryCapture(
+            bufferID: bufferID,
+            baseRevision: recovery.baseRevision,
+            revision: recovery.revision,
+            baseUTF8: recovery.baseUTF8,
+            deltas: recovery.deltas,
+            viewState: viewStates[bufferID] ?? EditorViewState()
+        )
+    }
+
+    public func acknowledgeRecoverySnapshot(_ snapshot: EditorRecoverySnapshot) {
+        guard var recovery = recoveryBuffers[snapshot.bufferID],
+              snapshot.revision >= recovery.baseRevision,
+              snapshot.revision <= recovery.revision else { return }
+        var consumed = 0
+        var revision = recovery.baseRevision
+        while revision < snapshot.revision, consumed < recovery.deltas.count {
+            guard recovery.deltas[consumed].expectedRevision == revision else { return }
+            revision += 1
+            consumed += 1
+        }
+        guard revision == snapshot.revision else { return }
+        recovery.baseRevision = snapshot.revision
+        recovery.baseUTF8 = snapshot.utf8
+        recovery.deltas.removeFirst(consumed)
+        recoveryBuffers[snapshot.bufferID] = recovery
+    }
+
+    public func installRecovery(_ snapshot: EditorRecoverySnapshot) {
+        guard let text = String(data: snapshot.utf8, encoding: .utf8) else { return }
+        viewStates[snapshot.bufferID] = sanitized(snapshot.viewState, for: snapshot.utf8)
+        install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text))
+        if let editorView = bufferViews[snapshot.bufferID] {
+            restoreViewState(for: snapshot.bufferID, in: editorView)
+        }
+    }
+
     public func retire(bufferID: BufferID) {
         snapshots.removeValue(forKey: bufferID)
+        recoveryBuffers.removeValue(forKey: bufferID)
+        viewStates.removeValue(forKey: bufferID)
         acceptedEdits.removeValue(forKey: bufferID)
         let retiredView = bufferViews.removeValue(forKey: bufferID)
         retiredView?.onEdit = nil
@@ -130,6 +210,26 @@ public final class ScintillaEditorAdapter: EditorPort {
                 revision: newRevision
             )
             acceptedEdits[activeBuffer.bufferID, default: []].append(edit)
+            if var recovery = recoveryBuffers[activeBuffer.bufferID],
+               recovery.revision == edit.expectedRevision,
+               edit.range.location >= 0, edit.range.length >= 0,
+               edit.range.location <= recovery.byteCount,
+               edit.range.length <= recovery.byteCount - edit.range.location {
+                let replacement = Data(edit.replacement.utf8)
+                recovery.deltas.append(EditorRecoveryDelta(
+                    expectedRevision: edit.expectedRevision,
+                    range: edit.range,
+                    replacementUTF8: replacement
+                ))
+                recovery.revision = newRevision
+                recovery.byteCount = recovery.byteCount - edit.range.length + replacement.count
+                recoveryBuffers[activeBuffer.bufferID] = recovery
+                lastRecoveryJournalWorkByteCount = replacement.count
+                    + MemoryLayout<EditorRecoveryDelta>.stride
+                recoveryJournalAppendCount += 1
+            } else {
+                scheduleRecovery()
+            }
         case .accepted, .rejected:
             scheduleRecovery()
         }
@@ -139,6 +239,14 @@ public final class ScintillaEditorAdapter: EditorPort {
         guard let editorView = bufferViews[bufferID],
               let text = String(data: editorView.contentUTF8, encoding: .utf8) else { return }
         snapshots[bufferID] = EditorTextSnapshot(bufferID: bufferID, revision: revision, text: text)
+        let bytes = Data(text.utf8)
+        recoveryBuffers[bufferID] = RecoveryBuffer(
+            baseRevision: revision,
+            revision: revision,
+            baseUTF8: bytes,
+            deltas: [],
+            byteCount: bytes.count
+        )
         acceptedEdits[bufferID] = []
     }
 
@@ -151,6 +259,14 @@ public final class ScintillaEditorAdapter: EditorPort {
         guard let editorView = bufferViews[activeBuffer.bufferID] else { return }
         load(snapshot, into: editorView)
         snapshots[activeBuffer.bufferID] = snapshot
+        let bytes = Data(snapshot.text.utf8)
+        recoveryBuffers[activeBuffer.bufferID] = RecoveryBuffer(
+            baseRevision: snapshot.revision,
+            revision: snapshot.revision,
+            baseUTF8: bytes,
+            deltas: [],
+            byteCount: bytes.count
+        )
         acceptedEdits[activeBuffer.bufferID] = []
         self.activeBuffer = EditorBufferDescriptor(
             bufferID: activeBuffer.bufferID,
@@ -172,6 +288,45 @@ public final class ScintillaEditorAdapter: EditorPort {
         editorView.onEdit = { [weak self] edit in self?.receive(edit, bufferID: bufferID) }
         editorView.onError = { [weak self] error in self?.lastMutationError = error }
         return editorView
+    }
+
+    private func storeViewState(bufferID: BufferID) {
+        guard let editorView = bufferViews[bufferID] else { return }
+        viewStates[bufferID] = EditorViewState(
+            anchorUTF8: Int(clamping: editorView.anchorUTF8Position),
+            caretUTF8: Int(clamping: editorView.caretUTF8Position),
+            firstVisibleLine: Int(clamping: editorView.firstVisibleLine),
+            horizontalScrollOffset: Int(clamping: editorView.horizontalScrollOffset),
+            wordWrapEnabled: editorView.isWordWrapEnabled
+        )
+    }
+
+    private func restoreViewState(for bufferID: BufferID, in editorView: DPScintillaEditorView) {
+        let state = viewStates[bufferID] ?? EditorViewState()
+        editorView.restoreCaretUTF8Position(
+            UInt(clamping: state.caretUTF8),
+            anchorPosition: UInt(clamping: state.anchorUTF8),
+            firstVisibleLine: UInt(clamping: state.firstVisibleLine),
+            horizontalScrollOffset: UInt(clamping: state.horizontalScrollOffset),
+            wordWrapEnabled: state.wordWrapEnabled
+        )
+    }
+
+    private func sanitized(_ state: EditorViewState, for utf8: Data) -> EditorViewState {
+        func boundary(_ value: Int) -> Int {
+            var offset = min(max(value, 0), utf8.count)
+            while offset > 0, offset < utf8.count, (utf8[offset] & 0xC0) == 0x80 {
+                offset -= 1
+            }
+            return offset
+        }
+        return EditorViewState(
+            anchorUTF8: boundary(state.anchorUTF8),
+            caretUTF8: boundary(state.caretUTF8),
+            firstVisibleLine: max(0, state.firstVisibleLine),
+            horizontalScrollOffset: max(0, state.horizontalScrollOffset),
+            wordWrapEnabled: state.wordWrapEnabled
+        )
     }
 
     /// Replays only accepted bounded deltas if a later edit must be rejected.
