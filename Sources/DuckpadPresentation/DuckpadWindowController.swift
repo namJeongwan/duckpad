@@ -8,6 +8,11 @@ public struct TabWorkspaceSmokeState: Equatable, Sendable {
     public let selectedTabIsVisible: Bool
 }
 
+public struct SearchPanelSmokeState: Equatable, Sendable {
+    public let isVisible: Bool
+    public let height: Double
+}
+
 private enum CloseRetryContext {
     /// Stable IDs capture the exact single/bulk command target set without
     /// retaining a stale tab snapshot or AppKit object.
@@ -121,6 +126,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         return fallbackEditor!
     }
     private let activeEditor: any EditorPort
+    private let searchPanel = SearchPanelView(frame: .zero)
+    private var searchUseCase: SearchWorkspaceUseCase?
     private let editorHostView: NSView
     private let fileUseCase: FileDocumentUseCase?
     private let filePanels: (any FilePanelPresenting)?
@@ -137,6 +144,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var startTask: Task<Void, Never>?
     private var permitsNextWindowClose = false
     private var terminationRetrySaveTabID: TabID?
+    private var searchTask: Task<Void, Never>?
+    private var searchOperationID: UInt64 = 0
 
     public init(
         workspace: ScratchWorkspaceUseCase,
@@ -150,6 +159,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         pathActionHandler: (any TabPathActionHandling)? = nil,
         recoveryUseCase: SessionRecoveryUseCase? = nil,
         terminationCoordinator: ApplicationTerminationCoordinator? = nil,
+        searchUseCase: SearchWorkspaceUseCase? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
         automaticallyStarts: Bool = true
     ) {
@@ -168,6 +178,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.dirtyDecisionPresenter = dirtyDecisionPresenter
         self.pathActionHandler = pathActionHandler ?? NativeTabPathActionHandler()
         self.recoveryUseCase = recoveryUseCase
+        self.searchUseCase = searchUseCase
         tabCloseCoordinator = TabCloseCoordinator(workspace: workspace)
         self.terminationCoordinator = terminationCoordinator
         self.approvedWindowClose = approvedWindowClose ?? { $0.performClose(nil) }
@@ -190,6 +201,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         tabStrip.onClose = { [weak self] id in self?.performClose(id) }
         tabStrip.onMove = { [weak self] id, index in self?.performMove(id, to: index) }
         tabStrip.onContextAction = { [weak self] id, action in self?.performContextAction(action, for: id) }
+        searchPanel.onFind = { [weak self] query in self?.routeFind(query) }
+        searchPanel.onReplace = { [weak self] query in self?.routeReplace(query) }
+        searchPanel.onReplaceAll = { [weak self] query in self?.routeReplaceAll(query) }
+        searchPanel.onFindAll = { [weak self] query in self?.routeFindAll(query) }
+        searchPanel.onIncrementalQuery = { [weak self] query in self?.routeFindAll(query, incremental: true) }
+        searchPanel.onQueryInvalidated = { [weak self] in self?.cancelSearch() }
+        searchPanel.onActivateMatch = { [weak self] match in self?.routeActivateSearchMatch(match) }
+        searchPanel.onCancel = { [weak self] in self?.cancelSearch() }
+        searchPanel.onClose = { [weak self] in self?.closeSearchPanel() }
         workspace.onChange = { [weak self] change in self?.handle(change) }
         renderInitial(workspace.snapshot())
         if automaticallyStarts { start() }
@@ -197,6 +217,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     deinit {
         startTask?.cancel()
+        searchTask?.cancel()
     }
 
     public override func close() {
@@ -231,6 +252,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             tabCount: workspace.snapshot().tabs.count,
             rowCount: tabStrip.rowCount,
             selectedTabIsVisible: tabStrip.selectedTabIsVisible
+        )
+    }
+
+    public func searchPanelSmokeState() -> SearchPanelSmokeState {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        return SearchPanelSmokeState(
+            isVisible: !searchPanel.isHidden,
+            height: searchPanel.frame.height
         )
     }
 
@@ -297,6 +326,20 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performSaveFileAs(_ sender: Any? = nil) {
         Task { [weak self] in await self?.routeSaveFileAs() }
+    }
+
+    @objc public func performShowFind(_ sender: Any? = nil) { searchPanel.show(replace: false) }
+    @objc public func performShowReplace(_ sender: Any? = nil) { searchPanel.show(replace: true) }
+    @objc public func performFindNext(_ sender: Any? = nil) {
+        if searchPanel.isHidden { searchPanel.show(replace: false); return }
+        routeFind(searchPanel.currentQuery())
+    }
+    @objc public func performFindPrevious(_ sender: Any? = nil) {
+        if searchPanel.isHidden { searchPanel.show(replace: false); return }
+        routeFind(searchPanel.currentQuery(direction: .backward))
+    }
+    @objc public func performCloseFindPanel(_ sender: Any? = nil) {
+        closeSearchPanel()
     }
 
     public func routeOpenFile() async {
@@ -423,6 +466,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         let banner = PersistenceErrorBanner(frame: .zero)
         root.view.addSubview(banner)
         root.view.addSubview(tabStrip)
+        root.view.addSubview(searchPanel)
         root.view.addSubview(editorHostView)
         NSLayoutConstraint.activate([
             banner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
@@ -431,9 +475,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             tabStrip.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             tabStrip.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             tabStrip.topAnchor.constraint(equalTo: banner.bottomAnchor),
+            searchPanel.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            searchPanel.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            searchPanel.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
             editorHostView.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             editorHostView.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            editorHostView.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
+            editorHostView.topAnchor.constraint(equalTo: searchPanel.bottomAnchor),
             editorHostView.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
         ])
         window?.contentViewController = root
@@ -556,6 +603,135 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             guard let path = workspace.snapshot().tabs.first(where: { $0.id == tabID })?.fullPath else { return }
             pathActionHandler.openContainingFolder(for: path)
         }
+    }
+
+    private func routeFind(_ query: SearchQuery) {
+        guard !query.pattern.isEmpty, let searchUseCase else { return }
+        let operation = beginSearchOperation()
+        searchPanel.presentStatus("Searching…")
+        searchTask = Task { [weak self] in
+            do {
+                let match = try await searchUseCase.find(query)
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus(match == nil ? "No matches" : "Match selected")
+            } catch SearchFailure.cancelled { }
+            catch SearchFailure.noSelection {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Select a non-empty range to search")
+            }
+            catch SearchFailure.invalidSelection {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Selection changed; select a range again")
+            }
+            catch {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Search failed: \(error)")
+            }
+        }
+    }
+
+    private func routeFindAll(_ query: SearchQuery, incremental: Bool = false) {
+        guard !query.pattern.isEmpty, let searchUseCase else { return }
+        let operation = beginSearchOperation()
+        searchPanel.presentStatus("Searching…")
+        searchTask = Task { [weak self] in
+            do {
+                let result = try await searchUseCase.findAll(query)
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.present(result)
+            } catch SearchFailure.cancelled { }
+            catch SearchFailure.noSelection {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Select a non-empty range to search")
+            }
+            catch SearchFailure.invalidSelection {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Selection changed; select a range again")
+            }
+            catch {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Search failed: \(error)")
+            }
+        }
+    }
+
+    private func routeReplace(_ query: SearchQuery) {
+        guard !query.pattern.isEmpty, let searchUseCase else { return }
+        let operation = beginSearchOperation()
+        searchTask = Task { [weak self] in
+            do {
+                let next = try await searchUseCase.replaceCurrentThenFind(query)
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus(next == nil ? "Replaced; no next match" : "Replaced")
+            } catch SearchFailure.noSelection {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Select a non-empty range to replace")
+            }
+            catch SearchFailure.invalidSelection {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Selection changed; select a range again")
+            }
+            catch {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Replace failed: \(error)")
+            }
+        }
+    }
+
+    private func routeReplaceAll(_ query: SearchQuery) {
+        guard !query.pattern.isEmpty, let searchUseCase else { return }
+        let operation = beginSearchOperation()
+        searchTask = Task { [weak self] in
+            do {
+                let count = try await searchUseCase.replaceAll(query)
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Replaced \(count) match(es)")
+            } catch SearchFailure.noSelection {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Select a non-empty range to replace")
+            }
+            catch SearchFailure.invalidSelection {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Selection changed; select a range again")
+            }
+            catch {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Replace All failed: \(error)")
+            }
+        }
+    }
+
+    private func routeActivateSearchMatch(_ match: SearchMatch) {
+        guard let searchUseCase else { return }
+        let operation = beginSearchOperation()
+        searchTask = Task { [weak self] in
+            do {
+                try await searchUseCase.activate(match)
+                guard self?.searchOperationID == operation else { return }
+                self?.activeEditor.focus()
+            } catch {
+                guard self?.searchOperationID == operation else { return }
+                self?.searchPanel.presentStatus("Result is stale")
+            }
+        }
+    }
+
+    private func beginSearchOperation() -> UInt64 {
+        searchTask?.cancel()
+        searchOperationID &+= 1
+        return searchOperationID
+    }
+
+    private func cancelSearch() {
+        searchTask?.cancel()
+        searchTask = nil
+        searchOperationID &+= 1
+    }
+
+    private func closeSearchPanel() {
+        cancelSearch()
+        searchPanel.hide()
+        activeEditor.focus()
     }
 
     private func handle(

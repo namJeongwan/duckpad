@@ -58,6 +58,10 @@ NSString *DPScintillaResourcePath(NSString *name) {
     NSUInteger _snapshotReadCount;
     NSUInteger _incrementalNotificationCount;
     NSUInteger _incrementalPayloadByteCount;
+    NSData *_lastSearchPattern;
+    NSUInteger _lastZeroLengthSearchPosition;
+    BOOL _lastSearchWasZeroLength;
+    BOOL _lastSearchBackwards;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -118,6 +122,7 @@ NSString *DPScintillaResourcePath(NSString *name) {
     [_scintilla message:SCI_EMPTYUNDOBUFFER];
     _suppressEdit = NO;
     _revision = revision;
+    _lastSearchWasZeroLength = NO;
     [_scintilla setEditable:_requestedInputEnabled && revision != UINT64_MAX];
     _lastMutationError = nil;
     return YES;
@@ -161,6 +166,122 @@ NSString *DPScintillaResourcePath(NSString *name) {
     return YES;
 }
 
+- (BOOL)replaceUTF8Ranges:(NSArray<NSValue *> *)ranges
+         withReplacements:(NSArray<NSData *> *)replacements
+          expectedRevision:(uint64_t)expectedRevision
+                     error:(NSError **)error {
+    if (ranges.count != replacements.count) {
+        return [self fail:DPScintillaErrorInvalidRange description:@"Batch ranges and replacements differ" error:error];
+    }
+    if (expectedRevision != _revision) {
+        return [self fail:DPScintillaErrorStaleRevision description:@"Expected batch revision is stale" error:error];
+    }
+    if ((uint64_t)ranges.count > UINT64_MAX - _revision) {
+        return [self fail:DPScintillaErrorRevisionOverflow description:@"Batch exhausts document revision" error:error];
+    }
+    const NSUInteger documentLength = self.documentByteLength;
+    NSUInteger previousLocation = documentLength;
+    for (NSUInteger index = 0; index < ranges.count; index += 1) {
+        const NSRange range = ranges[index].rangeValue;
+        NSData *replacement = replacements[index];
+        if (range.location > documentLength || range.length > documentLength - range.location
+            || NSMaxRange(range) > previousLocation) {
+            return [self fail:DPScintillaErrorInvalidRange description:@"Batch ranges must be descending and non-overlapping" error:error];
+        }
+        if (![self isUTF8Boundary:range.location documentLength:documentLength]
+            || ![self isUTF8Boundary:NSMaxRange(range) documentLength:documentLength]) {
+            return [self fail:DPScintillaErrorInvalidUTF8Boundary description:@"Batch range splits UTF-8" error:error];
+        }
+        if ([[NSString alloc] initWithData:replacement encoding:NSUTF8StringEncoding] == nil) {
+            return [self fail:DPScintillaErrorInvalidUTF8 description:@"Batch replacement is not UTF-8" error:error];
+        }
+        previousLocation = range.location;
+    }
+    [_scintilla message:SCI_BEGINUNDOACTION];
+    for (NSUInteger index = 0; index < ranges.count; index += 1) {
+        const NSRange range = ranges[index].rangeValue;
+        NSData *replacement = replacements[index];
+        if (![self replaceUTF8Range:range
+                    withReplacement:replacement
+                   expectedRevision:_revision
+                  resultingRevision:_revision + 1
+                               error:error]) {
+            [_scintilla message:SCI_ENDUNDOACTION];
+            return NO;
+        }
+    }
+    [_scintilla message:SCI_ENDUNDOACTION];
+    return YES;
+}
+
+- (NSRange)searchUTF8:(NSData *)pattern
+            backwards:(BOOL)backwards
+            matchCase:(BOOL)matchCase
+            wholeWord:(BOOL)wholeWord
+    regularExpression:(BOOL)regularExpression
+       restrictToRange:(NSRange)restriction
+            wrapAround:(BOOL)wrapAround
+                 error:(NSError **)error {
+    if (pattern.length == 0) {
+        [self fail:DPScintillaErrorInvalidRange description:@"Search pattern is empty" error:error];
+        return NSMakeRange(NSNotFound, 0);
+    }
+    if ([[NSString alloc] initWithData:pattern encoding:NSUTF8StringEncoding] == nil) {
+        [self fail:DPScintillaErrorInvalidUTF8 description:@"Search pattern is not valid UTF-8" error:error];
+        return NSMakeRange(NSNotFound, 0);
+    }
+    const NSUInteger documentLength = self.documentByteLength;
+    const BOOL restricted = restriction.location != NSNotFound;
+    if (restricted && (restriction.location > documentLength
+        || restriction.length > documentLength - restriction.location)) {
+        [self fail:DPScintillaErrorInvalidRange description:@"Search range is outside the document" error:error];
+        return NSMakeRange(NSNotFound, 0);
+    }
+    const NSUInteger lower = restricted ? restriction.location : 0;
+    const NSUInteger upper = restricted ? NSMaxRange(restriction) : documentLength;
+    const NSUInteger anchor = MIN(self.anchorUTF8Position, documentLength);
+    const NSUInteger caret = MIN(self.caretUTF8Position, documentLength);
+    NSUInteger start = backwards ? MIN(anchor, caret) : MAX(anchor, caret);
+    start = MIN(MAX(start, lower), upper);
+    if (_lastSearchWasZeroLength && _lastSearchBackwards == backwards
+        && [_lastSearchPattern isEqualToData:pattern]
+        && start == _lastZeroLengthSearchPosition) {
+        const NSInteger advanced = [_scintilla message:backwards ? SCI_POSITIONBEFORE : SCI_POSITIONAFTER
+                                                  wParam:(uptr_t)start];
+        if (advanced >= (NSInteger)lower && advanced <= (NSInteger)upper) {
+            start = (NSUInteger)advanced;
+        }
+    }
+    int flags = 0;
+    if (matchCase) flags |= SCFIND_MATCHCASE;
+    if (wholeWord) flags |= SCFIND_WHOLEWORD;
+    if (regularExpression) flags |= SCFIND_REGEXP | SCFIND_CXX11REGEX;
+    [_scintilla message:SCI_SETSEARCHFLAGS wParam:(uptr_t)flags];
+
+    const auto run = ^NSInteger(NSUInteger from, NSUInteger to) {
+        [_scintilla message:SCI_SETTARGETSTART wParam:(uptr_t)from];
+        [_scintilla message:SCI_SETTARGETEND wParam:(uptr_t)to];
+        return [_scintilla message:SCI_SEARCHINTARGET
+                             wParam:(uptr_t)pattern.length
+                             lParam:(sptr_t)pattern.bytes];
+    };
+    NSInteger found = backwards ? run(start, lower) : run(start, upper);
+    if (found < 0 && wrapAround) {
+        found = backwards ? run(upper, start) : run(lower, start);
+    }
+    if (found < 0) {
+        _lastSearchWasZeroLength = NO;
+        return NSMakeRange(NSNotFound, 0);
+    }
+    const NSUInteger resultStart = (NSUInteger)[_scintilla message:SCI_GETTARGETSTART];
+    const NSUInteger resultEnd = (NSUInteger)[_scintilla message:SCI_GETTARGETEND];
+    _lastSearchPattern = [pattern copy];
+    _lastSearchBackwards = backwards;
+    _lastSearchWasZeroLength = resultStart == resultEnd;
+    _lastZeroLengthSearchPosition = resultStart;
+    return NSMakeRange(resultStart, resultEnd - resultStart);
+}
+
 - (BOOL)isInputEnabled { return [_scintilla isEditable]; }
 - (void)setInputEnabled:(BOOL)value {
     _requestedInputEnabled = value;
@@ -186,6 +307,7 @@ NSString *DPScintillaResourcePath(NSString *name) {
 
 - (void)setPrimarySelectionUTF8Range:(NSRange)range {
     [_scintilla message:SCI_SETSEL wParam:(uptr_t)range.location lParam:(sptr_t)NSMaxRange(range)];
+    [_scintilla message:SCI_SCROLLCARET];
 }
 
 - (void)restoreCaretUTF8Position:(NSUInteger)caret
@@ -225,6 +347,8 @@ NSString *DPScintillaResourcePath(NSString *name) {
 - (void)paste { if ([self preflightUserMutation]) [_scintilla message:SCI_PASTE]; }
 - (void)undo { if ([self preflightUserMutation]) [_scintilla message:SCI_UNDO]; }
 - (void)redo { if ([self preflightUserMutation]) [_scintilla message:SCI_REDO]; }
+- (void)beginGroupedUndo { [_scintilla message:SCI_BEGINUNDOACTION]; }
+- (void)endGroupedUndo { [_scintilla message:SCI_ENDUNDOACTION]; }
 - (void)focusEditor { [self.window makeFirstResponder:[_scintilla content]]; }
 
 - (void)notification:(SCNotification *)notification {

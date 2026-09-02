@@ -7,6 +7,47 @@ import DuckpadPresentation
 import DuckpadScintillaBridge
 import Testing
 
+private actor DelayedSearchSessionStore: SessionStore {
+    private var session: ScratchSession?
+    private var generation = PersistenceGeneration(rawValue: 0)
+    private var blockNextCommit = false
+    private var blockedCommitEntered = false
+    private var releaseBlockedCommit = false
+
+    func loadSession() async throws(SessionStoreError) -> StoredSession? {
+        session.map { StoredSession(session: $0, generation: generation) }
+    }
+
+    func commitSession(
+        _ session: ScratchSession,
+        generation: PersistenceGeneration
+    ) async throws(SessionStoreError) -> SessionCommitResult {
+        if blockNextCommit {
+            blockNextCommit = false
+            blockedCommitEntered = true
+            while !releaseBlockedCommit { await Task.yield() }
+        }
+        guard generation > self.generation else {
+            return .superseded(durableGeneration: self.generation)
+        }
+        self.session = session
+        self.generation = generation
+        return .committed
+    }
+
+    func arm() {
+        blockNextCommit = true
+        blockedCommitEntered = false
+        releaseBlockedCommit = false
+    }
+
+    func waitUntilBlocked() async {
+        while !blockedCommitEntered { await Task.yield() }
+    }
+
+    func release() { releaseBlockedCommit = true }
+}
+
 @Suite(.serialized)
 struct ScintillaBridgeTests {
     @Test @MainActor
@@ -407,6 +448,367 @@ struct ScintillaBridgeTests {
         adapter.focus()
         #expect(adapter.activeScintillaView?.hasEditorFocus == true)
         controller.close()
+    }
+
+    @Test @MainActor
+    func nativeLiteralSearchAndReservedReplaceAllUseUTF8AndOneUndoGroup() async throws {
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        _ = await workspace.start()
+        let adapter = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        let descriptor = try #require(workspace.snapshot().activeBuffer)
+        adapter.install(EditorTextSnapshot(bufferID: descriptor.bufferID, revision: descriptor.revision, text: "한글 duck 🦆 duck"))
+        adapter.display(descriptor)
+        let port = adapter as any SearchEditorPort
+        let first = try port.findActive(ActiveSearchRequest(
+            patternUTF8: Data("duck".utf8),
+            options: SearchOptions(matchCase: true),
+            restrictTo: nil
+        ))
+        #expect(first == SearchUTF8Range(location: 7, length: 4))
+
+        let search = SearchWorkspaceUseCase(workspace: workspace, editor: adapter, regexEngine: ICURegexEngine())
+        let count = try await search.replaceAll(SearchQuery(pattern: "duck", replacement: "오리"))
+        #expect(count == 2)
+        #expect(adapter.snapshot(for: descriptor.bufferID)?.text == "한글 오리 🦆 오리")
+        #expect(workspace.snapshot().activeBuffer?.revision == 2)
+        #expect(workspace.snapshot().tabs.first?.isDirty == true)
+        #expect(adapter.activeScintillaView?.canUndo == true)
+        adapter.activeScintillaView?.undo()
+        await Task.yield()
+        #expect(adapter.snapshot(for: descriptor.bufferID)?.text == "한글 duck 🦆 duck")
+        // Scintilla emits delete+insert for each of the two grouped inverse edits.
+        #expect(workspace.snapshot().activeBuffer?.revision == 6)
+        #expect(adapter.recoverySnapshot(for: descriptor.bufferID).flatMap { String(data: $0.utf8, encoding: .utf8) } == "한글 duck 🦆 duck")
+        withExtendedLifetime(binding) {}
+    }
+
+    @Test @MainActor
+    func cancelledReplaceAllWaitingForWorkspaceReservationNeverMutatesEditorOrRecovery() async throws {
+        let store = DelayedSearchSessionStore()
+        let workspace = ScratchWorkspaceUseCase(store: store)
+        _ = await workspace.start()
+        let adapter = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        let tab = try #require(workspace.snapshot().tabs.first)
+        adapter.install(EditorTextSnapshot(
+            bufferID: tab.buffer.bufferID,
+            revision: tab.buffer.revision,
+            text: "duck duck"
+        ))
+        adapter.display(tab.buffer)
+        let originalRecovery = try #require(adapter.recoverySnapshot(for: tab.buffer.bufferID))
+        let originalCanUndo = adapter.activeScintillaView?.canUndo
+        let search = SearchWorkspaceUseCase(
+            workspace: workspace,
+            editor: adapter,
+            regexEngine: ICURegexEngine()
+        )
+
+        await store.arm()
+        let blocker = Task { await workspace.setPinned(tab.id, isPinned: true) }
+        await store.waitUntilBlocked()
+        let replacement = Task {
+            try await search.replaceAll(SearchQuery(pattern: "duck", replacement: "goose"))
+        }
+        await Task.yield()
+        replacement.cancel()
+        await store.release()
+        _ = await blocker.value
+
+        do {
+            _ = try await replacement.value
+            Issue.record("cancelled reservation waiter must not replace text")
+        } catch let failure as SearchFailure {
+            #expect(failure == .cancelled)
+        }
+        #expect(adapter.snapshot(for: tab.buffer.bufferID)?.text == "duck duck")
+        #expect(workspace.snapshot().activeBuffer?.revision == tab.buffer.revision)
+        #expect(adapter.activeScintillaView?.canUndo == originalCanUndo)
+        #expect(adapter.recoverySnapshot(for: tab.buffer.bufferID) == originalRecovery)
+        withExtendedLifetime(binding) {}
+    }
+
+    @Test @MainActor
+    func activationCommittedBeforeReplaceReservationRejectsStaleTargetWithoutMutation() async throws {
+        let store = DelayedSearchSessionStore()
+        let workspace = ScratchWorkspaceUseCase(store: store)
+        _ = await workspace.start()
+        let first = try #require(workspace.snapshot().tabs.first)
+        _ = await workspace.addScratch()
+        let second = try #require(workspace.snapshot().tabs.last)
+        let adapter = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        workspace.onChange = { binding.render($0) }
+        adapter.install(EditorTextSnapshot(
+            bufferID: second.buffer.bufferID,
+            revision: second.buffer.revision,
+            text: "duck duck"
+        ))
+        adapter.display(second.buffer)
+        let originalRecovery = try #require(adapter.recoverySnapshot(for: second.buffer.bufferID))
+        let search = SearchWorkspaceUseCase(
+            workspace: workspace,
+            editor: adapter,
+            regexEngine: ICURegexEngine()
+        )
+
+        await store.arm()
+        let activation = Task { await workspace.activate(tabID: first.id) }
+        await store.waitUntilBlocked()
+        let replacement = Task {
+            try await search.replaceAll(SearchQuery(pattern: "duck", replacement: "goose"))
+        }
+        await Task.yield()
+        await store.release()
+        #expect(await activation.value == .applied(.saved))
+
+        do {
+            _ = try await replacement.value
+            Issue.record("replacement captured before activation must be refused")
+        } catch let failure as SearchFailure {
+            #expect(failure == .staleRevision(expected: second.buffer.revision, actual: first.buffer.revision))
+        }
+        #expect(workspace.snapshot().activeBuffer?.bufferID == first.buffer.bufferID)
+        #expect(adapter.snapshot(for: second.buffer.bufferID)?.text == "duck duck")
+        #expect(adapter.recoverySnapshot(for: second.buffer.bufferID) == originalRecovery)
+        #expect(adapter.activeScintillaView?.canUndo == false)
+    }
+
+    @Test @MainActor
+    func directionalRegexWholeWordSkipsEmbeddedUnicodeWordCandidates() async throws {
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        _ = await workspace.start()
+        let adapter = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        let descriptor = try #require(workspace.snapshot().activeBuffer)
+        let text = "duckling duck"
+        adapter.install(EditorTextSnapshot(
+            bufferID: descriptor.bufferID, revision: descriptor.revision, text: text
+        ))
+        adapter.display(descriptor)
+        let view = try #require(adapter.activeScintillaView)
+        let search = SearchWorkspaceUseCase(
+            workspace: workspace, editor: adapter, regexEngine: ICURegexEngine()
+        )
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+        var options = SearchOptions(
+            mode: .regularExpression, matchCase: true, wholeWord: true,
+            wrapAround: false, direction: .forward
+        )
+        #expect(try await search.find(SearchQuery(pattern: "duck", options: options)) == SearchUTF8Range(location: 9, length: 4))
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: text.utf8.count, length: 0))
+        options.direction = .backward
+        #expect(try await search.find(SearchQuery(pattern: "duck", options: options)) == SearchUTF8Range(location: 9, length: 4))
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: text.utf8.count, length: 0))
+        options.direction = .forward
+        options.wrapAround = true
+        #expect(try await search.find(SearchQuery(pattern: "duck", options: options)) == SearchUTF8Range(location: 9, length: 4))
+        withExtendedLifetime(binding) {}
+    }
+
+    @Test @MainActor
+    func terminalZeroLengthRegexProgressesAndOnlyWrapsOncePerCommand() async throws {
+        func fixture(_ text: String) async throws -> (
+            SearchWorkspaceUseCase, ScintillaEditorAdapter, EditorBindingUseCase
+        ) {
+            let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+            _ = await workspace.start()
+            let adapter = ScintillaEditorAdapter()
+            let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+            let descriptor = try #require(workspace.snapshot().activeBuffer)
+            adapter.install(EditorTextSnapshot(
+                bufferID: descriptor.bufferID, revision: descriptor.revision, text: text
+            ))
+            adapter.display(descriptor)
+            return (
+                SearchWorkspaceUseCase(
+                    workspace: workspace, editor: adapter, regexEngine: ICURegexEngine()
+                ),
+                adapter,
+                binding
+            )
+        }
+
+        let (endSearch, _, endBinding) = try await fixture("a")
+        let noWrap = SearchOptions(
+            mode: .regularExpression, matchCase: true,
+            wrapAround: false, direction: .forward
+        )
+        #expect(try await endSearch.find(SearchQuery(pattern: "$", options: noWrap)) == SearchUTF8Range(location: 1, length: 0))
+        #expect(try await endSearch.find(SearchQuery(pattern: "$", options: noWrap)) == nil)
+        #expect(try await endSearch.find(SearchQuery(pattern: "$", options: noWrap)) == nil)
+        var wrap = noWrap
+        wrap.wrapAround = true
+        #expect(try await endSearch.find(SearchQuery(pattern: "$", options: wrap)) == SearchUTF8Range(location: 1, length: 0))
+        #expect(try await endSearch.find(SearchQuery(pattern: "$", options: wrap)) == SearchUTF8Range(location: 1, length: 0))
+        withExtendedLifetime(endBinding) {}
+
+        let (startSearch, startAdapter, startBinding) = try await fixture("a")
+        startAdapter.activeScintillaView?.setPrimarySelectionUTF8Range(NSRange(location: 1, length: 0))
+        var backward = noWrap
+        backward.direction = .backward
+        #expect(try await startSearch.find(SearchQuery(pattern: "^", options: backward)) == SearchUTF8Range(location: 0, length: 0))
+        #expect(try await startSearch.find(SearchQuery(pattern: "^", options: backward)) == nil)
+        withExtendedLifetime(startBinding) {}
+
+        let (lookSearch, _, lookBinding) = try await fixture("🦆🦆")
+        #expect(try await lookSearch.find(SearchQuery(pattern: "(?=🦆)", options: noWrap)) == SearchUTF8Range(location: 0, length: 0))
+        #expect(try await lookSearch.find(SearchQuery(pattern: "(?=🦆)", options: noWrap)) == SearchUTF8Range(location: 4, length: 0))
+        #expect(try await lookSearch.find(SearchQuery(pattern: "(?=🦆)", options: noWrap)) == nil)
+        withExtendedLifetime(lookBinding) {}
+
+        let (emptySearch, _, emptyBinding) = try await fixture("")
+        #expect(try await emptySearch.find(SearchQuery(pattern: "^$", options: noWrap)) == SearchUTF8Range(location: 0, length: 0))
+        #expect(try await emptySearch.find(SearchQuery(pattern: "^$", options: noWrap)) == nil)
+        withExtendedLifetime(emptyBinding) {}
+    }
+
+    @Test @MainActor
+    func selectionReplaceAllAndReplaceCurrentKeepOriginalSearchScope() async throws {
+        func fixture() async throws -> (
+            ScratchWorkspaceUseCase, ScintillaEditorAdapter,
+            EditorBindingUseCase, SearchWorkspaceUseCase
+        ) {
+            let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+            _ = await workspace.start()
+            let adapter = ScintillaEditorAdapter()
+            let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+            let descriptor = try #require(workspace.snapshot().activeBuffer)
+            adapter.install(EditorTextSnapshot(
+                bufferID: descriptor.bufferID, revision: descriptor.revision,
+                text: "duck x duck y duck"
+            ))
+            adapter.display(descriptor)
+            adapter.activeScintillaView?.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 11))
+            return (
+                workspace, adapter, binding,
+                SearchWorkspaceUseCase(
+                    workspace: workspace, editor: adapter, regexEngine: ICURegexEngine()
+                )
+            )
+        }
+        let options = SearchOptions(
+            mode: .regularExpression, matchCase: true, wrapAround: false,
+            direction: .forward, scope: .selection
+        )
+
+        let (allWorkspace, allAdapter, allBinding, allSearch) = try await fixture()
+        #expect(try await allSearch.find(SearchQuery(pattern: "duck", options: options)) == SearchUTF8Range(location: 0, length: 4))
+        let replaced = try await allSearch.replaceAll(
+            SearchQuery(pattern: "duck", replacement: "goose", options: options)
+        )
+        #expect(replaced == 2)
+        #expect(allAdapter.snapshot(for: allWorkspace.snapshot().activeBuffer!.bufferID)?.text == "goose x goose y duck")
+        withExtendedLifetime(allBinding) {}
+
+        let (oneWorkspace, oneAdapter, oneBinding, oneSearch) = try await fixture()
+        #expect(try await oneSearch.find(SearchQuery(pattern: "duck", options: options)) == SearchUTF8Range(location: 0, length: 4))
+        let next = try await oneSearch.replaceCurrentThenFind(
+            SearchQuery(pattern: "duck", replacement: "goose", options: options)
+        )
+        #expect(next == SearchUTF8Range(location: 8, length: 4))
+        #expect(oneAdapter.snapshot(for: oneWorkspace.snapshot().activeBuffer!.bufferID)?.text == "goose x duck y duck")
+        withExtendedLifetime(oneBinding) {}
+    }
+
+    @Test @MainActor
+    func selectionOperationsFailClosedWhenNoNonemptyScopeExists() async throws {
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        _ = await workspace.start()
+        let adapter = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        let descriptor = try #require(workspace.snapshot().activeBuffer)
+        adapter.install(EditorTextSnapshot(
+            bufferID: descriptor.bufferID, revision: descriptor.revision,
+            text: "duck duck"
+        ))
+        adapter.display(descriptor)
+        adapter.activeScintillaView?.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+        let search = SearchWorkspaceUseCase(
+            workspace: workspace, editor: adapter, regexEngine: ICURegexEngine()
+        )
+        let query = SearchQuery(
+            pattern: "duck", replacement: "goose",
+            options: SearchOptions(
+                mode: .regularExpression, matchCase: true,
+                wrapAround: false, scope: .selection
+            )
+        )
+        let originalText = adapter.snapshot(for: descriptor.bufferID)
+        let originalRevision = workspace.snapshot().activeBuffer?.revision
+        let originalUndo = adapter.activeScintillaView?.canUndo
+        let originalRecovery = adapter.recoverySnapshot(for: descriptor.bufferID)
+
+        do { _ = try await search.find(query); Issue.record("Find must require a non-empty selection") }
+        catch let failure as SearchFailure { #expect(failure == .noSelection) }
+        do { _ = try await search.findAll(query); Issue.record("Find All must require a non-empty selection") }
+        catch let failure as SearchFailure { #expect(failure == .noSelection) }
+        do { _ = try await search.replaceCurrentThenFind(query); Issue.record("Replace must require a non-empty selection") }
+        catch let failure as SearchFailure { #expect(failure == .noSelection) }
+        do { _ = try await search.replaceAll(query); Issue.record("Replace All must require a non-empty selection") }
+        catch let failure as SearchFailure { #expect(failure == .noSelection) }
+
+        #expect(adapter.snapshot(for: descriptor.bufferID) == originalText)
+        #expect(workspace.snapshot().activeBuffer?.revision == originalRevision)
+        #expect(adapter.activeScintillaView?.canUndo == originalUndo)
+        #expect(adapter.recoverySnapshot(for: descriptor.bufferID) == originalRecovery)
+        withExtendedLifetime(binding) {}
+    }
+
+    @Test @MainActor
+    func revisionInvalidatedSelectionCannotFallThroughToWholeDocumentReplacement() async throws {
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        _ = await workspace.start()
+        let adapter = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        let descriptor = try #require(workspace.snapshot().activeBuffer)
+        adapter.install(EditorTextSnapshot(
+            bufferID: descriptor.bufferID, revision: descriptor.revision,
+            text: "duck x duck y duck"
+        ))
+        adapter.display(descriptor)
+        let view = try #require(adapter.activeScintillaView)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 11))
+        let search = SearchWorkspaceUseCase(
+            workspace: workspace, editor: adapter, regexEngine: ICURegexEngine()
+        )
+        let query = SearchQuery(
+            pattern: "duck", replacement: "goose",
+            options: SearchOptions(
+                mode: .regularExpression, matchCase: true,
+                wrapAround: false, scope: .selection
+            )
+        )
+        #expect(try await search.find(query) == SearchUTF8Range(location: 0, length: 4))
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: Int(view.documentByteLength), length: 0))
+        view.insertCommittedText("!")
+        await workspace.waitForPendingPersistence()
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+        let acceptedText = adapter.snapshot(for: descriptor.bufferID)
+        let acceptedRevision = workspace.snapshot().activeBuffer?.revision
+        let acceptedRecovery = adapter.recoverySnapshot(for: descriptor.bufferID)
+        #expect(adapter.activeScintillaView?.canUndo == true)
+
+        do {
+            _ = try await search.replaceAll(query)
+            Issue.record("stale retained scope plus collapsed selection must fail closed")
+        } catch let failure as SearchFailure {
+            #expect(failure == .invalidSelection)
+        }
+        #expect(adapter.snapshot(for: descriptor.bufferID) == acceptedText)
+        #expect(workspace.snapshot().activeBuffer?.revision == acceptedRevision)
+        #expect(adapter.activeScintillaView?.canUndo == true)
+        #expect(adapter.recoverySnapshot(for: descriptor.bufferID) == acceptedRecovery)
+
+        view.undo()
+        await Task.yield()
+        #expect(adapter.snapshot(for: descriptor.bufferID)?.text == "duck x duck y duck")
+        withExtendedLifetime(binding) {}
     }
 
     @Test

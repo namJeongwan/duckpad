@@ -18,6 +18,11 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "DuckpadICUBridge",
+            publicHeadersPath: "include",
+            linkerSettings: [.linkedLibrary("icucore")]
+        ),
+        .target(
             name: "DuckpadScintillaBridge",
             path: "Vendor/Scintilla/5.6.6",
             sources: [
@@ -55,7 +60,7 @@ let package = Package(
         .target(name: "DuckpadApplication", dependencies: ["DuckpadDomain"]),
         .target(
             name: "DuckpadInfrastructure",
-            dependencies: ["DuckpadApplication", "DuckpadDomain"]
+            dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadICUBridge"]
         ),
         .target(
             name: "DuckpadPresentation",
@@ -94,6 +99,7 @@ let package = Package(
             dependencies: [
                 "DuckpadApplication",
                 "DuckpadDomain",
+                "DuckpadInfrastructure",
                 .product(name: "Testing", package: "swift-testing"),
             ]
         ),

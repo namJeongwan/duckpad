@@ -61,6 +61,18 @@ typedef NS_ENUM(NSInteger, DPScintillaEditOrigin) {
         expectedRevision:(uint64_t)expectedRevision
        resultingRevision:(uint64_t)resultingRevision
                     error:(NSError * _Nullable * _Nullable)error;
+- (BOOL)replaceUTF8Ranges:(NSArray<NSValue *> *)ranges
+         withReplacements:(NSArray<NSData *> *)replacements
+          expectedRevision:(uint64_t)expectedRevision
+                     error:(NSError * _Nullable * _Nullable)error;
+- (NSRange)searchUTF8:(NSData *)pattern
+            backwards:(BOOL)backwards
+            matchCase:(BOOL)matchCase
+            wholeWord:(BOOL)wholeWord
+              regularExpression:(BOOL)regularExpression
+          restrictToRange:(NSRange)restriction
+            wrapAround:(BOOL)wrapAround
+                 error:(NSError * _Nullable * _Nullable)error;
 - (void)setPrimarySelectionUTF8Range:(NSRange)range;
 - (void)restoreCaretUTF8Position:(NSUInteger)caret
                   anchorPosition:(NSUInteger)anchor
@@ -78,6 +90,8 @@ typedef NS_ENUM(NSInteger, DPScintillaEditOrigin) {
 - (void)paste;
 - (void)undo;
 - (void)redo;
+- (void)beginGroupedUndo;
+- (void)endGroupedUndo;
 - (void)focusEditor;
 - (void)resetInstrumentation;
 @end

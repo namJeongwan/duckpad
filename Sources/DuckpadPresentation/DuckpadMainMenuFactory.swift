@@ -26,6 +26,16 @@ public enum DuckpadMainMenuFactory {
         add("Close Tab", #selector(DuckpadWindowController.performCloseActiveTab(_:)), "w", target, to: fileMenu)
         fileItem.submenu = fileMenu
 
+        let searchItem = NSMenuItem()
+        mainMenu.addItem(searchItem)
+        let searchMenu = NSMenu(title: "Search")
+        add("Find…", #selector(DuckpadWindowController.performShowFind(_:)), "f", target, to: searchMenu)
+        add("Find Next", #selector(DuckpadWindowController.performFindNext(_:)), "g", target, to: searchMenu)
+        add("Find Previous", #selector(DuckpadWindowController.performFindPrevious(_:)), "g", target, modifiers: [.command, .shift], to: searchMenu)
+        add("Replace…", #selector(DuckpadWindowController.performShowReplace(_:)), "h", target, to: searchMenu)
+        add("Close Find Panel", #selector(DuckpadWindowController.performCloseFindPanel(_:)), "\u{1b}", target, modifiers: [], to: searchMenu)
+        searchItem.submenu = searchMenu
+
         let tabItem = NSMenuItem()
         mainMenu.addItem(tabItem)
         let tabMenu = NSMenu(title: "Tabs")

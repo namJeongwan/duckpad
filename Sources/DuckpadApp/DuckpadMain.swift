@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import DuckpadApplication
+import DuckpadDomain
 import DuckpadEditorAdapter
 import DuckpadInfrastructure
 import DuckpadPresentation
@@ -27,6 +28,11 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         )
         let fileStore = LocalTextFileStore()
         let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: fileStore)
+        let searchUseCase = SearchWorkspaceUseCase(
+            workspace: workspace,
+            editor: editor,
+            regexEngine: ICURegexEngine()
+        )
         let panels = NativeFilePanelAdapter()
         let terminationCoordinator = ApplicationTerminationCoordinator()
         let controller = DuckpadWindowController(
@@ -38,7 +44,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             fileConflictPresenter: panels,
             dirtyDecisionPresenter: panels,
             recoveryUseCase: recoveryUseCase,
-            terminationCoordinator: terminationCoordinator
+            terminationCoordinator: terminationCoordinator,
+            searchUseCase: searchUseCase
         )
         windowController = controller
         self.terminationCoordinator = terminationCoordinator
@@ -48,7 +55,32 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         installMainMenu(target: controller)
         controller.showAndFocus()
 
-        if environment["DUCKPAD_TAB_SMOKE"] == "1" {
+        if environment["DUCKPAD_SEARCH_SMOKE"] == "1" {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                guard let view = editor.activeScintillaView else {
+                    preconditionFailure("search smoke editor missing")
+                }
+                view.insertCommittedText("duck 한글🙂 duck")
+                let regex = SearchQuery(
+                    pattern: "한글(?=🙂)",
+                    options: SearchOptions(mode: .regularExpression, matchCase: true)
+                )
+                guard try await searchUseCase.find(regex) != nil else {
+                    preconditionFailure("search smoke regex find failed")
+                }
+                let replaced = try await searchUseCase.replaceAll(
+                    SearchQuery(pattern: "duck", replacement: "goose", options: SearchOptions(matchCase: true))
+                )
+                guard replaced == 2,
+                      editor.snapshot(for: workspace.snapshot().activeBuffer!.bufferID)?.text == "goose 한글🙂 goose" else {
+                    preconditionFailure("search smoke replace failed")
+                }
+                print("Duckpad search smoke ready: ICU regex + 2 grouped replacements")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
+        } else if environment["DUCKPAD_TAB_SMOKE"] == "1" {
             Task { @MainActor in
                 await controller.waitForStartup()
                 for _ in 1..<50 { _ = await workspace.addScratch() }

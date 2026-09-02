@@ -32,6 +32,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 18 | [Phase 5 independent code review](reviews/2026-09-02-phase-5-multiline-tabs-code-review.md) | **Rejected — superseded review evidence** | 최초 P5-01~P5-03 Major와 당시 debug/release/smoke/adversarial evidence를 기록한다. |
 | 19 | [Phase 5 remediation re-review](reviews/2026-09-02-phase-5-multiline-tabs-rereview.md) | **Rejected — superseded review evidence** | P5-01/P5-02 closure와 P5-03 termination Retry 잔여 Major를 기록한다. |
 | 20 | [Phase 5 final remediation re-review](reviews/2026-09-02-phase-5-multiline-tabs-final-rereview.md) | **Content approved; exact receipt pending — latest Phase 5 evidence** | P5-01~P5-03 closure, 새 native terminate cycle/latest revision/final flush와 repeated debug/release/AppKit evidence를 기록한다. |
+| 21 | [Phase 6 search and replace](09-search-replace.md) | **Implemented; review pending** | non-modal macOS search UI, ICU hard-budget regex, UTF-8 result model, open-document results, and revision-reserved grouped replacement를 기록한다. |
+| 22 | [Phase 6 independent code review](reviews/2026-09-03-phase-6-search-replace-code-review.md) | **Rejected — superseded review evidence** | regex Whole Word, terminal zero-length progress, fixed selection Replace All의 최초 3 Major와 당시 debug/release/smoke/probe evidence를 기록한다. |
+| 23 | [Phase 6 remediation re-review](reviews/2026-09-03-phase-6-search-replace-rereview.md) | **Rejected — superseded review evidence** | P6-01/P6-02 closure와 당시 selection nil/invalidation이 전체 문서 치환으로 확장되던 P6-03 잔여 Major를 기록한다. |
+| 24 | [Phase 6 final remediation re-review](reviews/2026-09-03-phase-6-search-replace-final-rereview.md) | **Content approved — latest Phase 6 evidence** | 공통 typed selection preflight, 무변경/undo/recovery 보존, P6-01~P6-03 closure와 132-test evidence를 기록한다. |
 
 상태 정의:
 
@@ -87,6 +91,53 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 6 header EOF hygiene confirmation
+
+- **Agent/role:** `/root/phase1_code_review`, independent final reviewer.
+- **Evidence/result:** `DuckpadICUBridge.h`의 EOF extra blank line 1개 제거 전후 whitespace-token/preprocessor identity를 확인했다. Current header SHA-256 `47ebceea76a66224b7f08081cd716dc837600286a6d20f0fb54be78e74bbab61`, updated 18-file manifest `075ca691d0ab93fff63ac28bd9fcb2d1fca4a200fa103aa0d95ff3aa8af30f14`; diff-check/build PASS. Semantic/API/ABI change 없음, Phase 6 **APPROVED (0 Blocker, 0 Major)** 유지.
+- **Mutation:** final review/index evidence만 갱신; source/test/stage/commit 없음.
+
+### 2026-09-03 — Phase 6 final remediation re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent final reviewer; source/test/staging/commit authority 없음.
+- **Result:** 공통 throwing selection preflight가 Find/Find All/Replace/Replace All의 empty scope를 `.noSelection`, stale retained scope를 `.invalidSelection`으로 fail closed함을 확인했다. whole-document broadening 없이 text/revision/undo/recovery가 보존되고 기존 undo도 정상 동작했다. P6-01/P6-02 회귀도 없어 **APPROVED (0 Blocker, 0 Major)**.
+- **Evidence:** focused 5/5, debug/release 132/132, production search smoke, independent debug/release typed-failure probes PASS. 상세는 [final remediation re-review](reviews/2026-09-03-phase-6-search-replace-final-rereview.md)에 기록했다.
+- **Preserved:** 문서 04/vendor script와 모든 source/test bytes, README/ignored Notepad++ reference; stage/commit 없음. final review evidence와 index만 변경했다.
+
+### 2026-09-03 — Phase 6 remediation re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent remediation reviewer; source/test/staging/commit authority 없음.
+- **Result:** P6-01 Unicode Whole Word directional과 P6-02 terminal/BOF zero-length progression은 closure 확인. P6-03 original selection reuse와 Replace Current revision/length rebase도 통과했으나, nil/empty 또는 revision-invalidated selection restriction이 unrestricted Replace All로 확장되어 **CHANGES_REQUIRED (0 Blocker, 1 Major)** 판정했다.
+- **Evidence:** focused 3/3, debug/release 130/130, production search smoke PASS. 독립 probe에서 empty selection 3/3 전체 치환 및 invalidated selection의 old-scope 밖 치환을 재현했다. 상세 내용은 [remediation re-review](reviews/2026-09-03-phase-6-search-replace-rereview.md)에 기록했다.
+- **Preserved:** 문서 04/vendor script와 모든 source/test bytes, README/ignored Notepad++ reference; stage/commit 없음. rereview evidence와 index만 변경했다.
+
+### 2026-09-03 — Phase 6 independent content review
+
+- **Agent/role:** `/root/phase1_code_review`, independent content reviewer; source/test/staging/commit authority 없음.
+- **Scope/result:** Phase 6 product/acceptance 18 files와 index evidence만 검토했다. `SearchUseCase`의 regex Whole Word 누락(P6-01), terminal zero-length 재선택(P6-02), original selection scope 대신 current match만 치환(P6-03)을 독립 debug/release probe로 재현해 **CHANGES_REQUIRED (0 Blocker, 3 Major)** 판정했다.
+- **Validation:** debug 127/127, release 127/127, production ICU/Scintilla search smoke, scoped `git diff --check` PASS. 세 probe는 양 configuration에서 동일 재현했다. 상세 evidence와 fix는 [독립 리뷰](reviews/2026-09-03-phase-6-search-replace-code-review.md)에 기록했다.
+- **Preserved:** 기존 unstaged 문서 04와 vendor script, source/tests, README/ignored Notepad++ reference; stage/commit 없음. 리뷰 문서와 index evidence만 변경했다.
+
+### 2026-09-03 — Phase 6 search/replace implementation
+
+- **Agent/role:** `/root/philosophy_parity`, product builder; independent review/staging/commit은 수행하지 않는다.
+- **Implementation:** AppKit-free search models and orchestration, ICU hard-budget regex Infrastructure adapter, narrow Scintilla target/search and grouped replacement façade, revision-reserved workspace transaction, non-modal search/results UI and native macOS menu routing을 [Phase 6 문서](09-search-replace.md)에 구현·기록했다.
+- **Safety/performance:** recovery base+deltas를 off-main에서 materialize하고 open documents를 sequential bounded stream으로 처리한다. search generation/task cancellation과 TabID/BufferID/revision revalidation을 거치며 incomplete/capped replacement scan은 native mutation 전에 실패한다. Directional ICU edge search는 global result cap과 무관하게 한 match만 찾고, grouped Replace All은 native undo 한 번으로 원문과 recovery bytes를 복원한다. Delayed-store cancellation과 선행 tab activation adversary에서 reservation 전 native mutation이 없음을 검증했다.
+- **Validation:** final reservation adversaries 2/2, debug/release/fresh scratch full 각각 127/127, production search smoke와 AppKit/Scintilla 50-tab/8-row/active-visible smoke PASS. Extended hex/octal/decimal, all-open Replace All, folder search, marks, persistent indicator highlight는 deferred이며 완료로 주장하지 않는다.
+- **Preserved:** 기존 unstaged 문서 04와 vendor script, ignored Notepad++ reference. README/stage/commit 없음.
+
+### 2026-09-03 — Phase 6 P6-01~P6-03 remediation
+
+- **Agent/role:** `/root/philosophy_parity`, remediation builder. 독립 reviewer verdict 문서는 수정하지 않았다.
+- **Fixes:** directional regex Whole Word를 동일 `L/M/N/Pc` ICU streaming predicate로 통일했다. terminal zero-length Find는 direction을 포함한 persistent identity와 explicit exhausted region으로 반복 재선택을 막는다. selection-only Find/Replace는 replacement field와 result selection에 흔들리지 않는 original tab/buffer/revision-bound scope를 공유하며 Replace Current 뒤 길이/revision을 rebase한다.
+- **Validation:** focused 3/3, debug/release/fresh full 각각 130/130 PASS. Production search smoke 및 50-tab/8-row/active-visible smoke PASS. README/NPP/gitlink/cache/staging 없음; 기존 unstaged 문서 04/vendor script 보존.
+
+### 2026-09-03 — Phase 6 selection fail-closed follow-up
+
+- **Agent/role:** `/root/philosophy_parity`, residual P6-03 remediation builder.
+- **Fix:** `.selection` Find/Find All/Replace/Replace All 공통 preflight가 initial/collapsed absence를 typed `.noSelection`, stale tab/buffer/revision/query scope와 collapsed current selection을 `.invalidSelection`으로 거부한다. nil restriction의 whole-document fallback은 불가능하며 UI도 no-match/success 대신 selection 조치 메시지를 표시한다.
+- **Validation:** focused 2/2, debug/release/fresh full 각각 132/132 PASS; search smoke와 50-tab/8-row/active-visible smoke PASS. text/revision/undo/recovery 불변 및 기존 undo 보존을 실제 Scintilla adapter에서 검증했다. stage/commit 없음; 기존 unstaged 문서 04/vendor script 보존.
 
 ### repository-bootstrap
 

@@ -562,4 +562,28 @@ struct FileLifecycleTests {
         #expect(controller.window?.isVisible == true)
         controller.close()
     }
+
+    @Test @MainActor func searchMenuRoutesAndPanelCollapsesWithoutBlankEditorStrip() {
+        let controller = DuckpadWindowController(
+            workspace: ScratchWorkspaceUseCase(store: RoutingSessionStore()),
+            automaticallyStarts: false
+        )
+        controller.showWindow(nil)
+        let menu = DuckpadMainMenuFactory.make(target: controller)
+        let search = menu.items.compactMap { $0.submenu }.first(where: { $0.title == "Search" })
+        #expect(search?.items.first(where: { $0.title == "Find…" })?.keyEquivalent == "f")
+        #expect(search?.items.first(where: { $0.title == "Find Next" })?.keyEquivalent == "g")
+        let previousModifiers = search?.items.first(where: { $0.title == "Find Previous" })?.keyEquivalentModifierMask
+        #expect(previousModifiers?.contains(.command) == true)
+        #expect(previousModifiers?.contains(.shift) == true)
+        #expect(search?.items.first(where: { $0.title == "Replace…" })?.keyEquivalent == "h")
+
+        controller.performShowFind()
+        #expect(controller.searchPanelSmokeState().isVisible)
+        #expect(controller.searchPanelSmokeState().height > 0)
+        controller.performCloseFindPanel()
+        #expect(!controller.searchPanelSmokeState().isVisible)
+        #expect(controller.searchPanelSmokeState().height == 0)
+        controller.close()
+    }
 }

@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: EditorPort {
+public final class ScintillaEditorAdapter: SearchEditorPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -187,6 +187,132 @@ public final class ScintillaEditorAdapter: EditorPort {
 
     public func focus() { activeScintillaView?.focusEditor() }
 
+    public func activeSelectionUTF8Range() -> SearchUTF8Range? {
+        guard let editorView = activeScintillaView else { return nil }
+        let lower = min(editorView.anchorUTF8Position, editorView.caretUTF8Position)
+        let upper = max(editorView.anchorUTF8Position, editorView.caretUTF8Position)
+        return SearchUTF8Range(location: Int(clamping: lower), length: Int(clamping: upper - lower))
+    }
+
+    public func findActive(_ request: ActiveSearchRequest) throws(SearchFailure) -> SearchUTF8Range? {
+        guard let editorView = activeScintillaView else { return nil }
+        let restriction = request.restrictTo.map {
+            NSRange(location: $0.location, length: $0.length)
+        } ?? NSRange(location: NSNotFound, length: 0)
+        var failure: NSError?
+        let range = editorView.searchUTF8(
+            request.patternUTF8,
+            backwards: request.direction == .backward,
+            matchCase: request.matchCase,
+            wholeWord: request.wholeWord,
+            regularExpression: request.mode == .regularExpression,
+            restrictTo: restriction,
+            wrapAround: request.wrapAround,
+            error: &failure
+        )
+        if let failure {
+            if request.mode == .regularExpression {
+                throw .invalidRegularExpression(failure.localizedDescription)
+            }
+            throw .invalidUTF8Range
+        }
+        guard range.location != NSNotFound else { return nil }
+        return SearchUTF8Range(location: range.location, length: range.length)
+    }
+
+    public func selectAndReveal(_ range: SearchUTF8Range) {
+        guard range.location >= 0, range.length >= 0 else { return }
+        activeScintillaView?.setPrimarySelectionUTF8Range(
+            NSRange(location: range.location, length: range.length)
+        )
+    }
+
+    public func replaceActive(
+        range: SearchUTF8Range,
+        with replacementUTF8: Data,
+        expectedRevision: UInt64
+    ) -> EditorEditOutcome {
+        guard let activeBuffer, let editorView = activeScintillaView,
+              activeBuffer.revision == expectedRevision, expectedRevision < .max,
+              range.location >= 0, range.length >= 0 else {
+            return .rejected(currentRevision: activeBuffer?.revision ?? expectedRevision)
+        }
+        do {
+            try editorView.replaceUTF8Range(
+                NSRange(location: range.location, length: range.length),
+                withReplacement: replacementUTF8,
+                expectedRevision: expectedRevision,
+                resultingRevision: expectedRevision + 1
+            )
+        } catch {
+            lastMutationError = error
+            return .rejected(currentRevision: activeBuffer.revision)
+        }
+        guard let replacement = String(data: replacementUTF8, encoding: .utf8) else {
+            scheduleRecovery()
+            return .rejected(currentRevision: activeBuffer.revision)
+        }
+        let edit = EditorIncrementalEdit(
+            bufferID: activeBuffer.bufferID,
+            expectedRevision: expectedRevision,
+            range: TextEditRange(location: range.location, length: range.length),
+            replacement: replacement
+        )
+        let outcome = onEdit?(edit) ?? .rejected(currentRevision: expectedRevision)
+        guard case .accepted(let revision) = outcome, revision == expectedRevision + 1 else {
+            scheduleRecovery()
+            return outcome
+        }
+        self.activeBuffer = EditorBufferDescriptor(bufferID: activeBuffer.bufferID, revision: revision)
+        acceptedEdits[activeBuffer.bufferID, default: []].append(edit)
+        appendRecovery(edit, resultingRevision: revision)
+        return outcome
+    }
+
+    public func replaceActiveBatch(
+        _ replacements: [SearchReplacementEdit],
+        expectedRevision: UInt64,
+        accept: ([EditorIncrementalEdit]) -> EditorEditOutcome
+    ) -> EditorEditOutcome {
+        guard let activeBuffer, let editorView = activeScintillaView,
+              activeBuffer.revision == expectedRevision,
+              UInt64(replacements.count) <= UInt64.max - expectedRevision else {
+            return .rejected(currentRevision: activeBuffer?.revision ?? expectedRevision)
+        }
+        var revision = expectedRevision
+        let edits: [EditorIncrementalEdit] = replacements.map { replacement in
+            defer { revision += 1 }
+            return EditorIncrementalEdit(
+                bufferID: activeBuffer.bufferID,
+                expectedRevision: revision,
+                range: TextEditRange(location: replacement.range.location, length: replacement.range.length),
+                replacement: String(decoding: replacement.replacementUTF8, as: UTF8.self)
+            )
+        }
+        do {
+            try editorView.replaceUTF8Ranges(
+                replacements.map { NSValue(range: NSRange(location: $0.range.location, length: $0.range.length)) },
+                withReplacements: replacements.map(\.replacementUTF8),
+                expectedRevision: expectedRevision
+            )
+        } catch {
+            lastMutationError = error
+            return .rejected(currentRevision: activeBuffer.revision)
+        }
+        let outcome = accept(edits)
+        guard case .accepted(let resultingRevision) = outcome,
+              resultingRevision == expectedRevision + UInt64(edits.count) else {
+            scheduleRecovery()
+            return outcome
+        }
+        self.activeBuffer = EditorBufferDescriptor(bufferID: activeBuffer.bufferID, revision: resultingRevision)
+        for edit in edits {
+            acceptedEdits[activeBuffer.bufferID, default: []].append(edit)
+            appendRecovery(edit, resultingRevision: edit.expectedRevision + 1)
+        }
+        return outcome
+    }
+
     private func receive(_ bridgeEdit: DPScintillaEdit, bufferID: BufferID) {
         guard !isRecovering, let activeBuffer, activeBuffer.bufferID == bufferID,
               bridgeEdit.baseRevision == activeBuffer.revision,
@@ -210,29 +336,32 @@ public final class ScintillaEditorAdapter: EditorPort {
                 revision: newRevision
             )
             acceptedEdits[activeBuffer.bufferID, default: []].append(edit)
-            if var recovery = recoveryBuffers[activeBuffer.bufferID],
-               recovery.revision == edit.expectedRevision,
-               edit.range.location >= 0, edit.range.length >= 0,
-               edit.range.location <= recovery.byteCount,
-               edit.range.length <= recovery.byteCount - edit.range.location {
-                let replacement = Data(edit.replacement.utf8)
-                recovery.deltas.append(EditorRecoveryDelta(
-                    expectedRevision: edit.expectedRevision,
-                    range: edit.range,
-                    replacementUTF8: replacement
-                ))
-                recovery.revision = newRevision
-                recovery.byteCount = recovery.byteCount - edit.range.length + replacement.count
-                recoveryBuffers[activeBuffer.bufferID] = recovery
-                lastRecoveryJournalWorkByteCount = replacement.count
-                    + MemoryLayout<EditorRecoveryDelta>.stride
-                recoveryJournalAppendCount += 1
-            } else {
-                scheduleRecovery()
-            }
+            appendRecovery(edit, resultingRevision: newRevision)
         case .accepted, .rejected:
             scheduleRecovery()
         }
+    }
+
+    private func appendRecovery(_ edit: EditorIncrementalEdit, resultingRevision: UInt64) {
+        guard var recovery = recoveryBuffers[edit.bufferID],
+              recovery.revision == edit.expectedRevision,
+              edit.range.location >= 0, edit.range.length >= 0,
+              edit.range.location <= recovery.byteCount,
+              edit.range.length <= recovery.byteCount - edit.range.location else {
+            scheduleRecovery()
+            return
+        }
+        let replacement = Data(edit.replacement.utf8)
+        recovery.deltas.append(EditorRecoveryDelta(
+            expectedRevision: edit.expectedRevision,
+            range: edit.range,
+            replacementUTF8: replacement
+        ))
+        recovery.revision = resultingRevision
+        recovery.byteCount = recovery.byteCount - edit.range.length + replacement.count
+        recoveryBuffers[edit.bufferID] = recovery
+        lastRecoveryJournalWorkByteCount = replacement.count + MemoryLayout<EditorRecoveryDelta>.stride
+        recoveryJournalAppendCount += 1
     }
 
     private func storeSnapshot(bufferID: BufferID, revision: UInt64) {

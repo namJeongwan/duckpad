@@ -142,6 +142,13 @@ public enum CloseOutcome: Equatable, Sendable {
     case persistenceFailed(PersistenceFailure)
 }
 
+public struct EditorBatchReservation: Equatable, Sendable {
+    fileprivate let id: UUID
+    fileprivate let bufferID: BufferID
+    fileprivate let expectedRevision: UInt64
+    fileprivate let editCount: Int
+}
+
 private actor OrderedSessionWriter {
     private let store: any SessionStore
     private var tail: Task<PersistenceOutcome, Never>?
@@ -188,6 +195,7 @@ public final class ScratchWorkspaceUseCase {
     private var pendingEditTask: Task<Void, Never>?
     private var hasStarted = false
     private var transactionBusy = false
+    private var editorBatchReservationID: UUID?
     private var transactionWaiters: [CheckedContinuation<Void, Never>] = []
     private var closeRecoveryCommitter: (@MainActor (ScratchSession) async -> RecoveryOutcome)?
 
@@ -487,6 +495,65 @@ public final class ScratchWorkspaceUseCase {
             let current = (try? session.buffer(for: tabID).revision) ?? edit.expectedRevision
             return .rejected(currentRevision: current)
         }
+    }
+
+    public func reserveEditorBatch(
+        bufferID: BufferID,
+        expectedRevision: UInt64,
+        editCount: Int
+    ) async -> EditorBatchReservation? {
+        guard editCount > 0, UInt64(editCount) <= UInt64.max - expectedRevision else { return nil }
+        await acquireTransaction()
+        guard !Task.isCancelled, startupState == .ready,
+              let activeTab = session.activeTabID,
+              let buffer = try? session.buffer(for: activeTab),
+              buffer.id == bufferID, buffer.revision == expectedRevision else {
+            releaseTransaction()
+            return nil
+        }
+        let reservation = EditorBatchReservation(
+            id: UUID(), bufferID: bufferID,
+            expectedRevision: expectedRevision, editCount: editCount
+        )
+        editorBatchReservationID = reservation.id
+        return reservation
+    }
+
+    public func commitEditorBatch(
+        _ reservation: EditorBatchReservation,
+        edits: [EditorIncrementalEdit]
+    ) -> EditorEditOutcome {
+        guard editorBatchReservationID == reservation.id,
+              edits.count == reservation.editCount,
+              let activeTab = session.activeTabID,
+              let index = session.tabs.firstIndex(where: { $0.id == activeTab }) else {
+            return .rejected(currentRevision: snapshot().activeBuffer?.revision ?? reservation.expectedRevision)
+        }
+        var candidate = session
+        var expected = reservation.expectedRevision
+        do {
+            for edit in edits {
+                guard edit.bufferID == reservation.bufferID, edit.expectedRevision == expected else {
+                    return .rejected(currentRevision: (try? session.buffer(for: activeTab).revision) ?? expected)
+                }
+                expected = try candidate.recordEdit(in: activeTab, expectedRevision: expected)
+            }
+            session = candidate
+            editorBatchReservationID = nil
+            releaseTransaction()
+            persistenceState = .pending
+            schedulePersistence()
+            publish(.tabUpdated(index: index))
+            return .accepted(newRevision: expected)
+        } catch {
+            return .rejected(currentRevision: (try? session.buffer(for: activeTab).revision) ?? expected)
+        }
+    }
+
+    public func cancelEditorBatch(_ reservation: EditorBatchReservation) {
+        guard editorBatchReservationID == reservation.id else { return }
+        editorBatchReservationID = nil
+        releaseTransaction()
     }
 
     @discardableResult
