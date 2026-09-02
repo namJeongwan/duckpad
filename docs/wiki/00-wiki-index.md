@@ -28,6 +28,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 14 | [Phase 4 session recovery](07-session-recovery.md) | **Content approved; exact receipt pending** | generation별 UTF-8 recovery, corrupt fallback, editor view state, crash autosave와 durable close/termination ordering candidate다. |
 | 15 | [Phase 4 independent code review](reviews/2026-09-02-phase-4-session-recovery-code-review.md) | **Rejected — superseded review evidence** | 최초 P4-01~P4-06 Major 판정과 당시 debug/release/smoke/adversarial evidence다. |
 | 16 | [Phase 4 remediation re-review](reviews/2026-09-02-phase-4-session-recovery-rereview.md) | **Content approved; exact receipt pending — latest Phase 4 evidence** | P4-01~P4-06 closure, focused/debug/release/fresh/smoke evidence와 exact 19-file scope를 기록한다. |
+| 17 | [Phase 5 multiline tab workspace](08-multiline-tabs.md) | **Content approved; exact receipt pending** | native multiline wrapping, pin/MRU/order, shared loss-safe close gate, drag/context/accessibility와 500-tab layout contract를 기록한다. |
+| 18 | [Phase 5 independent code review](reviews/2026-09-02-phase-5-multiline-tabs-code-review.md) | **Rejected — superseded review evidence** | 최초 P5-01~P5-03 Major와 당시 debug/release/smoke/adversarial evidence를 기록한다. |
+| 19 | [Phase 5 remediation re-review](reviews/2026-09-02-phase-5-multiline-tabs-rereview.md) | **Rejected — superseded review evidence** | P5-01/P5-02 closure와 P5-03 termination Retry 잔여 Major를 기록한다. |
+| 20 | [Phase 5 final remediation re-review](reviews/2026-09-02-phase-5-multiline-tabs-final-rereview.md) | **Content approved; exact receipt pending — latest Phase 5 evidence** | P5-01~P5-03 closure, 새 native terminate cycle/latest revision/final flush와 repeated debug/release/AppKit evidence를 기록한다. |
 
 상태 정의:
 
@@ -211,3 +215,54 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - **Validation:** focused 24/24, debug 94/94, release 94/94, fresh scratch 94/94와 forced-exit/relaunch smoke가 통과했다. implementation/acceptance 19-file manifest SHA-256은 `a31d9408fa0844dbf397c2b4a17089f8591e753e3d578bd4542c3072cfaa3f03`이다.
 - **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major.** exact-candidate receipt 전까지 commit authorization은 부여하지 않는다. 상세 범위와 파일 목록은 [Phase 4 remediation re-review](reviews/2026-09-02-phase-4-session-recovery-rereview.md)에 기록했다.
 - **Safety:** 이 re-review 문서와 index status/work log만 수정했다. reviewed source/test를 수정·stage·commit하지 않았다.
+
+### 2026-09-02 — Phase 5 multiline-tab workspace
+
+- **Agent/role:** `/root/philosophy_parity`, product builder; 독립 review나 commit authorization 역할을 수행하지 않는다.
+- **Change:** [Phase 5 multiline tab workspace](08-multiline-tabs.md)에 cached multirow layout, dynamic width/overflow, active visibility, pin/MRU/reorder, mouse/keyboard/context/accessibility와 shared loss-safe close coordinator를 구현·기록했다.
+- **Safety decisions:** dirty decision은 reviewed revision을 workspace transaction 안에서 재검증한다. 중복 close/termination은 동일 gate를 사용하고, workspace failure의 actionable retry를 duplicate banner가 덮지 않는다. Phase 4 recovery에서 `activationHistory`가 없는 schema-v1 archive는 active-only MRU로 migration한다.
+- **Architecture guard:** Russell `/root/clean_architecture`의 WIP findings(O(n²) layout, cache engine invalidation, close race/TOCTOU, active-close MRU, drag event/index, recovery compatibility, menu wiring, failure duplication)를 구현과 targeted tests에 반영했다.
+- **Scope truth:** context menu는 Close/Others/Right만 이번 acceptance다. Close All/Left/Unchanged/Unpinned와 전체 Notepad++ close workflow Full 주장은 후속 review 전까지 deferred다.
+- **Validation:** targeted Phase 5와 debug/release/fresh 전체 112/112 PASS. 실제 AppKit smoke는 temporary recovery root에서 50 tabs/17 wrapped rows, active visible, exit 0을 확인했다. 상세 명령은 문서 08의 Agent Work Log를 따른다.
+- **Commit:** stage/commit하지 않았다.
+
+### 2026-09-02 — Phase 5 independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent code reviewer; builder와 분리된 content verdict만 판정한다.
+- **Scope:** 현재 unstaged Phase 5 multiline-tab 15-file implementation/acceptance slice의 wrap/cache/resize, 500 tabs, pin/MRU/recovery migration, single/bulk/termination close, AppKit mouse/drag/menu/context/accessibility/path wiring과 Clean Architecture를 검토했다. unrelated 문서 04/vendor script는 제외·보존했다.
+- **Verdict:** **CHANGES_REQUIRED — 0 Blocker, 3 Major, 0 Minor.** P5-01 failed-activation selection divergence, P5-02 O(n) visible/cache query contract violation, P5-03 duplicate non-actionable close-save failure presentation.
+- **Validation:** focused 32/32, debug 112/112, release 112/112와 production 50-tab/17-row/active-visible smoke가 통과했다. 별도 `/tmp` AppKit probe는 activation persistence failure 뒤 Domain active와 collection selection 불일치를 재현했다.
+- **Record:** 상세 finding/evidence와 exact file list는 [Phase 5 review](reviews/2026-09-02-phase-5-multiline-tabs-code-review.md)에 기록했다. 이 review 문서와 index 항목만 수정했고 reviewed source/test를 수정·stage·commit하지 않았다.
+
+### 2026-09-02 — Phase 5 P5-01..P5-03 remediation
+
+- **Agent/role:** `/root/philosophy_parity`, focused product builder; reviewer verdict와 status를 임의로 변경하지 않는다.
+- **Change:** [Phase 5 multiline tab workspace](08-multiline-tabs.md)의 세 Major만 수정했다. failed activation은 authoritative selection/accessibility/visibility로 되돌리며 delegate recursion을 막는다. layout은 cached row ranges와 binary search로 visible rect에 교차하는 row/item만 조회하고 rowCount를 O(1)로 반환한다. close-save failure는 file presenter의 functional retry 소유권을 typed `alreadyPresented/workspaceFailure`로 전달해 generic empty retry로 중복 표시하지 않는다.
+- **Regression evidence:** failing session store AppKit selection test, 500/5,000-tab visible query work-count test, single close latest-revision retry와 termination exactly-once presentation test를 추가했다. focused 4/4와 debug/release/fresh full 각각 115/115가 통과했다. temporary recovery root AppKit smoke는 50 tabs/17 rows와 exit 0을 확인했다.
+- **Safety:** README/Notepad++ reference와 review verdict를 변경하지 않고 stage/commit하지 않았다. 기존 unstaged 문서 04/vendor script를 보존했다.
+
+### 2026-09-02 — Phase 5 remediation independent re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent focused re-reviewer; builder와 분리된 content verdict만 판정한다.
+- **Scope:** 이전 review의 P5-01~P5-03만 현재 코드와 targeted evidence로 재검증했다. unrelated 문서 04/vendor script는 제외·보존했고 새 기능 범위를 추가하지 않았다.
+- **Closure:** P5-01 authoritative selection/accessibility/visibility 복구와 recursion 방지, P5-02 O(1) rowCount 및 O(log rows + visible) spatial query는 닫혔다. P5-03은 single-close exactly-once/latest-revision Retry는 닫혔지만 termination Retry가 ordinary single close로 전환되어 종료 review/final flush를 재개하지 않는 Major가 남았다.
+- **Validation:** focused 4/4, debug 115/115, release 115/115, production 50-tab/17-row smoke와 external failed-activation AppKit probe가 통과했다. current 17-file product/acceptance manifest SHA-256은 `a4b5c225e9c0417df74df629b0bc6dda582fa418727e7ee1ec0b2ec4ac452ab3`이다.
+- **Verdict:** **CHANGES_REQUIRED — 0 Blocker, 1 Major, 0 Minor.** 상세 위치/수정 방향은 [Phase 5 remediation re-review](reviews/2026-09-02-phase-5-multiline-tabs-rereview.md)에 기록했다.
+- **Safety:** 이 re-review 문서와 index 항목만 수정했다. reviewed source/test, README/reference를 수정하지 않았고 stage/commit하지 않았다.
+
+### 2026-09-02 — Phase 5 final remediation independent re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent final focused re-reviewer; builder와 분리된 content verdict만 판정한다.
+- **Scope/closure:** P5-03 termination Retry가 app-installed native termination handler를 통해 새 `.terminateLater`/reply cycle을 시작하고, 최신 accepted revision 저장, 남은 dirty tab review, durable recovery/final flush를 완료하는지 검증했다. stable ID와 weak capture, old-reply clear/deferred early Retry가 stale capture/double reply를 막는다. P5-01/P5-02도 closed 상태를 유지한다.
+- **Synchronization evidence:** 최초 post-edit polling은 transaction-busy로 이미 reject된 test edit를 살릴 수 없어 full-suite debug 두 번/release 한 번에서 재현됐다. 새 edit 전에 pending workspace persistence를 drain하고 active tab/editor를 검증한 뒤 revision `+1`을 즉시 단언하도록 고친 현재 bytes를 다시 검증했다.
+- **Validation:** focused 5/5 및 5회 반복 25/25, debug 116/116, release 116/116, external failed-activation AppKit probe와 production 50-tab/17-row smoke가 통과했다. exact 18-file product/acceptance manifest SHA-256은 `b2758b324d67e8a58e1bd7e0f315e8b3fe63960c79fc3091c50bb35e672110b1`이다.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** exact staged candidate와 canonical signed receipt 전까지 commit authorization은 부여하지 않는다. 상세 evidence는 [Phase 5 final remediation re-review](reviews/2026-09-02-phase-5-multiline-tabs-final-rereview.md)에 기록했다.
+- **Safety:** 이 final re-review 문서와 index status/work log만 수정했다. reviewed source/test, README/reference를 수정하지 않았고 stage/commit하지 않았다.
+
+### 2026-09-02 — Phase 5 P5-03 termination Retry continuation remediation
+
+- **Agent/role:** `/root/philosophy_parity`, focused product builder; latest reviewer verdict/status를 임의로 변경하지 않는다.
+- **Change:** ordinary/bulk close Retry는 initiating stable TabID target set과 remaining order를 유지한다. termination Retry는 ordinary close로 전환하지 않고 App delegate handler를 통해 새 native terminate request를 시작하며, shared coordinator가 실패 tab의 최신 revision 저장, 남은 dirty review와 final recovery flush를 이어간다.
+- **Regression evidence:** 실제 Retry closure invocation 뒤 initial false reply 1회, 새 `terminateLater`, newest revision file save, remaining tab review, recovery durable commit/final flush와 new true reply를 검증했다. ordinary single-close latest-revision test도 유지된다. focused 2/2와 debug/release/fresh full 각각 116/116 PASS; AppKit smoke는 50 tabs/17 rows와 exit 0을 확인했다.
+- **Deterministic synchronization:** newest edit 전에 workspace pending persistence를 명시적으로 await하고 active tab/editor state를 확인한 뒤, edit 직후 revision 증가와 content 수용을 동기적으로 검증한다. termination completion은 checked continuation으로 기다린다. isolated 10/10, debug full 3회 연속, release/fresh 116/116과 AppKit smoke가 통과했다.
+- **Safety:** [Phase 5 문서](08-multiline-tabs.md)와 P5-03 source/test만 수정했다. re-review verdict, README/Notepad++ reference, stage/commit은 건드리지 않았고 기존 unstaged 문서 04/vendor script를 보존했다.

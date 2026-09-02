@@ -1,5 +1,18 @@
 import AppKit
 
+/// Converts AppKit's pre-removal `.before` insertion index to the Domain's
+/// final-index move contract. This makes every drag direction, including a
+/// drop after the last item, deterministic and directly testable.
+public enum TabDropDestination {
+    public static func finalIndex(sourceIndex: Int, insertionIndex: Int, itemCount: Int) -> Int? {
+        guard itemCount > 0,
+              (0..<itemCount).contains(sourceIndex),
+              (0...itemCount).contains(insertionIndex) else { return nil }
+        let adjusted = sourceIndex < insertionIndex ? insertionIndex - 1 : insertionIndex
+        return min(max(adjusted, 0), itemCount - 1)
+    }
+}
+
 public struct TabFlowLayoutResult: Equatable, Sendable {
     public let frames: [CGRect]
     public let rowIndices: [Int]
@@ -104,26 +117,56 @@ public struct TabStripViewportPolicy: Equatable, Sendable {
 
 @MainActor
 public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
+    private struct RowCache {
+        let itemRange: Range<Int>
+        let minY: CGFloat
+        let maxY: CGFloat
+    }
     public var itemWidths: [CGFloat] = [] {
-        didSet { invalidateLayout() }
+        didSet {
+            guard itemWidths != oldValue else { return }
+            widthsVersion &+= 1
+            invalidateLayout()
+        }
     }
     public var engine = TabFlowLayoutEngine() {
-        didSet { invalidateLayout() }
+        didSet {
+            widthsVersion &+= 1
+            invalidateLayout()
+        }
     }
     public var onContentHeightChange: ((CGFloat) -> Void)?
 
     private var attributes: [NSCollectionViewLayoutAttributes] = []
+    private var rowIndices: [Int] = []
+    private var rows: [RowCache] = []
+    private var cachedRowCount = 0
     private var calculatedSize = NSSize(width: 0, height: 42)
+    private var widthsVersion: UInt64 = 0
+    private var preparedWidthsVersion: UInt64 = .max
+    private var preparedWidth: CGFloat = -.greatestFiniteMagnitude
+    public private(set) var layoutGeneration: UInt64 = 0
+    public private(set) var lastElementsQueryVisitedRows = 0
+    public private(set) var lastElementsQueryInspectedItems = 0
+    public var rowCount: Int { cachedRowCount }
 
     public override func prepare() {
         super.prepare()
         guard let collectionView else { return }
+        let width = collectionView.bounds.width
+        guard preparedWidthsVersion != widthsVersion || preparedWidth != width else { return }
         let result = engine.layout(itemWidths: itemWidths, containerWidth: collectionView.bounds.width)
         attributes = result.frames.enumerated().map { index, frame in
             let item = NSCollectionViewLayoutAttributes(forItemWith: IndexPath(item: index, section: 0))
             item.frame = frame
             return item
         }
+        rowIndices = result.rowIndices
+        cachedRowCount = result.rowCount
+        rows = Self.makeRows(frames: result.frames, rowIndices: result.rowIndices)
+        preparedWidthsVersion = widthsVersion
+        preparedWidth = width
+        layoutGeneration &+= 1
         let newSize = NSSize(width: collectionView.bounds.width, height: result.contentHeight)
         if calculatedSize != newSize {
             calculatedSize = newSize
@@ -134,7 +177,29 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
     public override var collectionViewContentSize: NSSize { calculatedSize }
 
     public override func layoutAttributesForElements(in rect: NSRect) -> [NSCollectionViewLayoutAttributes] {
-        attributes.filter { $0.frame.intersects(rect) }
+        lastElementsQueryVisitedRows = 0
+        lastElementsQueryInspectedItems = 0
+        guard !rows.isEmpty else { return [] }
+        var lower = 0
+        var upper = rows.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if rows[middle].maxY < rect.minY { lower = middle + 1 }
+            else { upper = middle }
+        }
+        var visible: [NSCollectionViewLayoutAttributes] = []
+        var rowIndex = lower
+        while rowIndex < rows.count, rows[rowIndex].minY <= rect.maxY {
+            let row = rows[rowIndex]
+            lastElementsQueryVisitedRows += 1
+            for itemIndex in row.itemRange {
+                lastElementsQueryInspectedItems += 1
+                let item = attributes[itemIndex]
+                if item.frame.intersects(rect) { visible.append(item) }
+            }
+            rowIndex += 1
+        }
+        return visible
     }
 
     public override func layoutAttributesForItem(at indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
@@ -142,17 +207,48 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
     }
 
     public func row(forItemAt index: Int) -> Int? {
-        guard itemWidths.indices.contains(index),
-              let collectionView else {
-            return nil
+        rowIndices.indices.contains(index) ? rowIndices[index] : nil
+    }
+
+    public func updateItemWidth(_ width: CGFloat, at index: Int) {
+        guard itemWidths.indices.contains(index), itemWidths[index] != width else { return }
+        itemWidths[index] = width
+    }
+
+    public func destinationIndex(at point: NSPoint) -> Int {
+        guard !attributes.isEmpty else { return 0 }
+        if let containing = attributes.firstIndex(where: { $0.frame.contains(point) }) {
+            return containing
         }
-        return engine.layout(
-            itemWidths: itemWidths,
-            containerWidth: collectionView.bounds.width
-        ).rowIndices[index]
+        let sameOrNextRow = attributes.enumerated().min { lhs, rhs in
+            let lhsDistance = hypot(lhs.element.frame.midX - point.x, lhs.element.frame.midY - point.y)
+            let rhsDistance = hypot(rhs.element.frame.midX - point.x, rhs.element.frame.midY - point.y)
+            return lhsDistance < rhsDistance
+        }
+        return sameOrNextRow?.offset ?? attributes.count - 1
     }
 
     public override func shouldInvalidateLayout(forBoundsChange newBounds: NSRect) -> Bool {
         newBounds.width != collectionView?.bounds.width
+    }
+
+    private static func makeRows(frames: [CGRect], rowIndices: [Int]) -> [RowCache] {
+        guard !frames.isEmpty else { return [] }
+        var result: [RowCache] = []
+        var start = 0
+        while start < frames.count {
+            let row = rowIndices[start]
+            var end = start + 1
+            var minY = frames[start].minY
+            var maxY = frames[start].maxY
+            while end < frames.count, rowIndices[end] == row {
+                minY = min(minY, frames[end].minY)
+                maxY = max(maxY, frames[end].maxY)
+                end += 1
+            }
+            result.append(RowCache(itemRange: start..<end, minY: minY, maxY: maxY))
+            start = end
+        }
+        return result
     }
 }

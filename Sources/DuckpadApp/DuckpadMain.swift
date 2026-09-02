@@ -42,10 +42,32 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         )
         windowController = controller
         self.terminationCoordinator = terminationCoordinator
+        terminationCoordinator.installApplicationRetryHandler {
+            NSApplication.shared.terminate(nil)
+        }
         installMainMenu(target: controller)
         controller.showAndFocus()
 
-        if let expected = environment["DUCKPAD_RECOVERY_SMOKE_VERIFY"] {
+        if environment["DUCKPAD_TAB_SMOKE"] == "1" {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                for _ in 1..<50 { _ = await workspace.addScratch() }
+                let tabs = workspace.snapshot().tabs
+                _ = await workspace.setPinned(tabs[0].id, isPinned: true)
+                _ = await workspace.moveTab(tabs[10].id, to: 40)
+                _ = await workspace.navigateTabs(.lastUsed)
+                controller.window?.setContentSize(NSSize(width: 300, height: 360))
+                let state = controller.tabWorkspaceSmokeState()
+                precondition(state.tabCount == 50, "tab smoke lost a document")
+                precondition(state.rowCount > 1, "tab smoke did not wrap")
+                precondition(state.selectedTabIsVisible, "tab smoke hid the active tab")
+                print("Duckpad tab smoke ready: \(state.tabCount) tabs, \(state.rowCount) rows")
+                if environment["DUCKPAD_SMOKE_EXIT"] == "1" {
+                    fflush(stdout)
+                    Darwin._exit(0)
+                }
+            }
+        } else if let expected = environment["DUCKPAD_RECOVERY_SMOKE_VERIFY"] {
             Task { @MainActor in
                 await controller.waitForStartup()
                 guard let active = workspace.snapshot().activeBuffer,
@@ -103,29 +125,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     private func installMainMenu(target: DuckpadWindowController) {
-        let mainMenu = NSMenu()
-        let appItem = NSMenuItem()
-        mainMenu.addItem(appItem)
-        let appMenu = NSMenu()
-        appMenu.addItem(
-            withTitle: "Quit Duckpad",
-            action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "q"
-        )
-        appItem.submenu = appMenu
-
-        let fileItem = NSMenuItem()
-        mainMenu.addItem(fileItem)
-        let fileMenu = NSMenu(title: "File")
-        let open = fileMenu.addItem(withTitle: "Open…", action: #selector(DuckpadWindowController.performOpenFile(_:)), keyEquivalent: "o")
-        open.target = target
-        let save = fileMenu.addItem(withTitle: "Save", action: #selector(DuckpadWindowController.performSaveFile(_:)), keyEquivalent: "s")
-        save.target = target
-        let saveAs = fileMenu.addItem(withTitle: "Save As…", action: #selector(DuckpadWindowController.performSaveFileAs(_:)), keyEquivalent: "s")
-        saveAs.keyEquivalentModifierMask = [.command, .shift]
-        saveAs.target = target
-        fileItem.submenu = fileMenu
-        NSApplication.shared.mainMenu = mainMenu
+        NSApplication.shared.mainMenu = DuckpadMainMenuFactory.make(target: target)
     }
 
     private func installDevelopmentAppIcon() {

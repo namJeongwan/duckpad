@@ -10,7 +10,11 @@ public protocol FilePanelPresenting: AnyObject {
 @MainActor
 public protocol FileConflictPresenting: AnyObject {
     func resolveExternalConflict(attachedTo window: NSWindow?) async -> FileConflictResolution
-    func presentFileFailure(_ failure: FileOperationFailure, attachedTo window: NSWindow?)
+    func presentFileFailure(
+        _ failure: FileOperationFailure,
+        attachedTo window: NSWindow?,
+        retry: @escaping @MainActor () -> Void
+    )
 }
 
 @MainActor
@@ -51,14 +55,24 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
         }
     }
 
-    public func presentFileFailure(_ failure: FileOperationFailure, attachedTo window: NSWindow?) {
+    public func presentFileFailure(
+        _ failure: FileOperationFailure,
+        attachedTo window: NSWindow?,
+        retry: @escaping @MainActor () -> Void
+    ) {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Duckpad could not complete the file operation."
         alert.informativeText = String(describing: failure)
-        alert.addButton(withTitle: "OK")
-        if let window { alert.beginSheetModal(for: window) }
-        else { _ = alert.runModal() }
+        alert.addButton(withTitle: "Retry")
+        alert.addButton(withTitle: "Cancel")
+        if let window {
+            alert.beginSheetModal(for: window) { response in
+                if response == .alertFirstButtonReturn { retry() }
+            }
+        } else if alert.runModal() == .alertFirstButtonReturn {
+            retry()
+        }
     }
 
     public func decision(for tab: TabSnapshot, saveAvailable: Bool, attachedTo window: NSWindow?) async -> CloseDecision {

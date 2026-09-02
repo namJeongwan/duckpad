@@ -8,14 +8,16 @@ public struct TabSnapshot: Equatable, Sendable {
     public let isDirty: Bool
     public let isPinned: Bool
     public let buffer: EditorBufferDescriptor
+    public let fullPath: String?
 
-    public init(id: TabID, title: String, isActive: Bool, isDirty: Bool, isPinned: Bool, buffer: EditorBufferDescriptor) {
+    public init(id: TabID, title: String, isActive: Bool, isDirty: Bool, isPinned: Bool, buffer: EditorBufferDescriptor, fullPath: String? = nil) {
         self.id = id
         self.title = title
         self.isActive = isActive
         self.isDirty = isDirty
         self.isPinned = isPinned
         self.buffer = buffer
+        self.fullPath = fullPath
     }
 }
 
@@ -68,7 +70,9 @@ public enum PersistenceRetry: Equatable, Sendable {
     case saveCurrent
     case addScratch
     case activate(TabID)
-    case close(TabID, CloseDecision?)
+    case close(TabID, CloseDecision?, expectedRevision: UInt64?)
+    case moveTab(TabID, Int)
+    case pinTab(TabID, Bool)
 }
 
 public struct PersistenceFailureEvent: Equatable, Sendable {
@@ -89,7 +93,23 @@ public enum WorkspaceChangeKind: Equatable, Sendable {
     case activeTabChanged(previousIndex: Int?, currentIndex: Int)
     case tabUpdated(index: Int)
     case tabRemoved(index: Int, retiredBufferID: BufferID)
+    case tabsReordered(fromIndex: Int, toIndex: Int)
     case persistence
+}
+
+public enum TabNavigationCommand: Equatable, Sendable {
+    case next
+    case previous
+    case lastUsed
+}
+
+public enum TabCloseScope: Equatable, Sendable {
+    case current
+    case all
+    case others
+    case left
+    case right
+    case unpinned
 }
 
 public struct WorkspaceChange: Equatable, Sendable {
@@ -116,6 +136,7 @@ public enum CloseOutcome: Equatable, Sendable {
     case requiresDecision(saveAvailable: Bool)
     case cancelled
     case saveUnavailable
+    case reviewStale(currentRevision: UInt64)
     case closed(activeTabID: TabID, replacementCreated: Bool, persistence: PersistenceOutcome)
     case rejected(SessionError)
     case persistenceFailed(PersistenceFailure)
@@ -255,8 +276,12 @@ public final class ScratchWorkspaceUseCase {
             return outcome(from: await addScratch())
         case .activate(let id):
             return outcome(from: await activate(tabID: id))
-        case .close(let id, let decision):
-            return outcome(from: await close(tabID: id, decision: decision))
+        case .close(let id, let decision, let expectedRevision):
+            return outcome(from: await close(tabID: id, decision: decision, expectedRevision: expectedRevision))
+        case .moveTab(let id, let index):
+            return outcome(from: await moveTab(id, to: index))
+        case .pinTab(let id, let pinned):
+            return outcome(from: await setPinned(id, isPinned: pinned))
         }
     }
 
@@ -273,6 +298,10 @@ public final class ScratchWorkspaceUseCase {
     public func activate(tabID: TabID) async -> WorkspaceActionOutcome {
         await acquireTransaction()
         defer { releaseTransaction() }
+        return await activateLocked(tabID: tabID)
+    }
+
+    private func activateLocked(tabID: TabID) async -> WorkspaceActionOutcome {
         var candidate = session
         let previous = candidate.tabs.firstIndex { $0.id == candidate.activeTabID }
         do {
@@ -283,7 +312,110 @@ public final class ScratchWorkspaceUseCase {
         catch { preconditionFailure("ScratchSession only throws SessionError") }
     }
 
-    public func close(tabID: TabID, decision: CloseDecision? = nil) async -> CloseOutcome {
+    @discardableResult
+    public func navigateTabs(_ command: TabNavigationCommand) async -> WorkspaceActionOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        guard !session.tabs.isEmpty else { return .rejected(.invalidRecoveryState("no tabs")) }
+        let activeIndex = session.tabs.firstIndex(where: { $0.id == session.activeTabID }) ?? 0
+        let target: TabID
+        switch command {
+        case .next:
+            target = session.tabs[(activeIndex + 1) % session.tabs.count].id
+        case .previous:
+            target = session.tabs[(activeIndex - 1 + session.tabs.count) % session.tabs.count].id
+        case .lastUsed:
+            target = session.lastUsedTabID
+                ?? session.tabs[(activeIndex - 1 + session.tabs.count) % session.tabs.count].id
+        }
+        return await activateLocked(tabID: target)
+    }
+
+    @discardableResult
+    public func moveTab(_ tabID: TabID, to proposedIndex: Int) async -> WorkspaceActionOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        var candidate = session
+        guard let source = candidate.tabs.firstIndex(where: { $0.id == tabID }) else {
+            return .rejected(.unknownTab(tabID))
+        }
+        do {
+            let destination = try candidate.moveTab(tabID: tabID, to: proposedIndex)
+            guard source != destination else { return .applied(.saved) }
+            return await persistMutation(
+                candidate,
+                kind: .tabsReordered(fromIndex: source, toIndex: destination),
+                retry: .moveTab(tabID, proposedIndex)
+            )
+        } catch let error as SessionError { return .rejected(error) }
+        catch { preconditionFailure("ScratchSession only throws SessionError") }
+    }
+
+    @discardableResult
+    public func moveActiveTab(by offset: Int) async -> WorkspaceActionOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        guard let active = session.activeTabID,
+              let index = session.tabs.firstIndex(where: { $0.id == active }) else {
+            return .rejected(.invalidRecoveryState("no active tab"))
+        }
+        let destination = min(max(index + offset, 0), session.tabs.count - 1)
+        var candidate = session
+        do {
+            let actual = try candidate.moveTab(tabID: active, to: destination)
+            guard actual != index else { return .applied(.saved) }
+            return await persistMutation(
+                candidate,
+                kind: .tabsReordered(fromIndex: index, toIndex: actual),
+                retry: .moveTab(active, destination)
+            )
+        } catch let error as SessionError { return .rejected(error) }
+        catch { preconditionFailure("ScratchSession only throws SessionError") }
+    }
+
+    @discardableResult
+    public func setPinned(_ tabID: TabID, isPinned: Bool) async -> WorkspaceActionOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        var candidate = session
+        guard let source = candidate.tabs.firstIndex(where: { $0.id == tabID }) else {
+            return .rejected(.unknownTab(tabID))
+        }
+        do {
+            let destination = try candidate.setPinned(tabID: tabID, isPinned: isPinned)
+            guard session.tabs[source].isPinned != isPinned else { return .applied(.saved) }
+            return await persistMutation(
+                candidate,
+                kind: .tabsReordered(fromIndex: source, toIndex: destination),
+                retry: .pinTab(tabID, isPinned)
+            )
+        } catch let error as SessionError { return .rejected(error) }
+        catch { preconditionFailure("ScratchSession only throws SessionError") }
+    }
+
+    public func tabIDs(for scope: TabCloseScope, relativeTo anchor: TabID) -> [TabID] {
+        guard let anchorIndex = session.tabs.firstIndex(where: { $0.id == anchor }) else { return [] }
+        switch scope {
+        case .current:
+            return [anchor]
+        case .all:
+            return session.tabs.filter { !$0.isPinned || $0.id == anchor }.map(\.id)
+        case .others:
+            return session.tabs.filter { $0.id != anchor && !$0.isPinned }.map(\.id)
+        case .left:
+            return session.tabs[..<anchorIndex].filter { !$0.isPinned }.map(\.id)
+        case .right:
+            return session.tabs[(anchorIndex + 1)...].filter { !$0.isPinned }.map(\.id)
+        case .unpinned:
+            return session.tabs.filter { !$0.isPinned }.map(\.id)
+        }
+    }
+
+    public func close(
+        tabID: TabID,
+        decision: CloseDecision? = nil,
+        expectedRevision: UInt64? = nil
+    ) async -> CloseOutcome {
         await acquireTransaction()
         defer { releaseTransaction() }
         guard let removedIndex = session.tabs.firstIndex(where: { $0.id == tabID }) else {
@@ -293,6 +425,9 @@ public final class ScratchWorkspaceUseCase {
         do { buffer = try session.buffer(for: tabID) }
         catch let error as SessionError { return .rejected(error) }
         catch { preconditionFailure("ScratchSession only throws SessionError") }
+        if let expectedRevision, buffer.revision != expectedRevision {
+            return .reviewStale(currentRevision: buffer.revision)
+        }
 
         if buffer.isDirty {
             switch decision {
@@ -317,7 +452,7 @@ public final class ScratchWorkspaceUseCase {
                     case .failed(let error):
                         let failure = PersistenceFailure(operation: .save, cause: error)
                         persistenceState = .failed(failure)
-                        publishFailure(failure, retry: .close(tabID, decision))
+                        publishFailure(failure, retry: .close(tabID, decision, expectedRevision: expectedRevision))
                         return .persistenceFailed(failure)
                     }
                 }
@@ -327,7 +462,7 @@ public final class ScratchWorkspaceUseCase {
                 return .closed(activeTabID: candidate.activeTabID!, replacementCreated: replacementCreated, persistence: .saved)
             case .failed(let failure):
                 persistenceState = .failed(failure)
-                publishFailure(failure, retry: .close(tabID, decision))
+                publishFailure(failure, retry: .close(tabID, decision, expectedRevision: expectedRevision))
                 return .persistenceFailed(failure)
             }
         } catch let error as SessionError { return .rejected(error) }
@@ -368,7 +503,15 @@ public final class ScratchWorkspaceUseCase {
     public func snapshot() -> WorkspaceSnapshot {
         let tabs = session.tabs.compactMap { tab -> TabSnapshot? in
             guard let document = try? session.document(for: tab.id), let buffer = try? session.buffer(for: tab.id) else { return nil }
-            return TabSnapshot(id: tab.id, title: document.title, isActive: tab.id == session.activeTabID, isDirty: buffer.isDirty, isPinned: tab.isPinned, buffer: EditorBufferDescriptor(bufferID: buffer.id, revision: buffer.revision))
+            return TabSnapshot(
+                id: tab.id,
+                title: document.title,
+                isActive: tab.id == session.activeTabID,
+                isDirty: buffer.isDirty,
+                isPinned: tab.isPinned,
+                buffer: EditorBufferDescriptor(bufferID: buffer.id, revision: buffer.revision),
+                fullPath: session.fileBindings[document.id]?.canonicalPath
+            )
         }
         return WorkspaceSnapshot(sessionID: session.id, tabs: tabs, activeBuffer: tabs.first(where: \.isActive)?.buffer, persistence: persistenceState, startup: startupState)
     }

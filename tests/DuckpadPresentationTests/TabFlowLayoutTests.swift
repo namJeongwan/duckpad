@@ -9,12 +9,14 @@ private actor PresentationStore: SessionStore {
     private var generation = PersistenceGeneration(rawValue: 0)
     private var failure: SessionStoreError?
     private var failLoad = false
+    private var commitAttempts = 0
     init(session: ScratchSession? = nil) { self.session = session }
     func loadSession() async throws(SessionStoreError) -> StoredSession? {
         if failLoad, let failure { throw failure }
         return session.map { StoredSession(session: $0, generation: generation) }
     }
     func commitSession(_ session: ScratchSession, generation: PersistenceGeneration) async throws(SessionStoreError) -> SessionCommitResult {
+        commitAttempts += 1
         if let failure { throw failure }
         guard generation > self.generation else { return .superseded(durableGeneration: self.generation) }
         self.session = session
@@ -25,6 +27,7 @@ private actor PresentationStore: SessionStore {
         self.failure = failure
         failLoad = forLoad
     }
+    func attempts() -> Int { commitAttempts }
 }
 
 private actor DelayedPresentationStore: SessionStore {
@@ -130,6 +133,15 @@ private func descendantButtons(of view: NSView) -> [NSButton] {
     return direct + view.subviews.flatMap(descendantButtons)
 }
 
+@MainActor
+private func menuItem(_ title: String, in menu: NSMenu) -> NSMenuItem? {
+    for item in menu.items {
+        if item.title == title { return item }
+        if let submenu = item.submenu, let found = menuItem(title, in: submenu) { return found }
+    }
+    return nil
+}
+
 @Test func tabsWrapAcrossRowsWhilePreservingOrder() {
     let engine = TabFlowLayoutEngine(
         rowHeight: 30,
@@ -169,8 +181,199 @@ private func descendantButtons(of view: NSView) -> [NSButton] {
     #expect(result.rowCount == 2)
 }
 
+@Test @MainActor func visibleAttributeQueriesInspectOnlyIntersectingRowsAtScale() {
+    for count in [500, 5_000] {
+        let layout = MultilineTabCollectionLayout()
+        let collection = NSCollectionView(frame: NSRect(x: 0, y: 0, width: 500, height: 200))
+        collection.collectionViewLayout = layout
+        layout.itemWidths = Array(repeating: 120, count: count)
+        layout.prepare()
+        let target = count / 2
+        guard let item = layout.layoutAttributesForItem(
+            at: IndexPath(item: target, section: 0)
+        ) else {
+            Issue.record("layout did not cache target item")
+            continue
+        }
+        let rect = NSRect(x: 0, y: item.frame.minY, width: 500, height: layout.engine.rowHeight)
+        let visible = layout.layoutAttributesForElements(in: rect)
+
+        #expect(!visible.isEmpty)
+        #expect(layout.rowCount > 1)
+        #expect(layout.lastElementsQueryVisitedRows <= 2)
+        #expect(layout.lastElementsQueryInspectedItems <= 10)
+        #expect(layout.lastElementsQueryInspectedItems < count / 10)
+    }
+}
+
+@Test func appKitBeforeDropIndexConvertsToStableFinalIndexInEveryDirection() {
+    #expect(TabDropDestination.finalIndex(sourceIndex: 1, insertionIndex: 4, itemCount: 5) == 3)
+    #expect(TabDropDestination.finalIndex(sourceIndex: 4, insertionIndex: 1, itemCount: 5) == 1)
+    #expect(TabDropDestination.finalIndex(sourceIndex: 0, insertionIndex: 5, itemCount: 5) == 4)
+    #expect(TabDropDestination.finalIndex(sourceIndex: 3, insertionIndex: 0, itemCount: 5) == 0)
+    #expect(TabDropDestination.finalIndex(sourceIndex: 9, insertionIndex: 0, itemCount: 5) == nil)
+}
+
 @Suite(.serialized)
 struct AppKitHostedTests {
+@Test @MainActor func failedActivationRestoresAuthoritativeSelectionWithoutRecursion() async {
+    let store = PresentationStore()
+    let workspace = ScratchWorkspaceUseCase(store: store)
+    let presenter = ErrorPresenterSpy()
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        errorPresenter: presenter,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    _ = await workspace.addScratch()
+    let ids = workspace.snapshot().tabs.map(\.id)
+    _ = await workspace.activate(tabID: ids[0])
+    controller.editor.textView.textStorage?.replaceCharacters(
+        in: NSRange(location: 0, length: 0),
+        with: "authoritative A"
+    )
+    for _ in 0..<1_000 where workspace.snapshot().tabs.first(where: { $0.id == ids[0] })?.buffer.revision == 0 {
+        await Task.yield()
+    }
+    await workspace.waitForPendingPersistence()
+    let before = await store.attempts()
+    await store.setFailure(.unavailable("activation persistence offline"))
+
+    let requested = IndexPath(item: 1, section: 0)
+    controller.tabStrip.hostedCollectionView.selectionIndexPaths = [requested]
+    controller.tabStrip.collectionView(
+        controller.tabStrip.hostedCollectionView,
+        didSelectItemsAt: [requested]
+    )
+    for _ in 0..<1_000 where presenter.failures.isEmpty { await Task.yield() }
+    for _ in 0..<20 { await Task.yield() }
+
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.id == ids[0])
+    #expect(controller.editor.textView.string == "authoritative A")
+    #expect(controller.tabStrip.hostedCollectionView.selectionIndexPaths == [
+        IndexPath(item: 0, section: 0),
+    ])
+    #expect(controller.tabStrip.selectedTabIsVisible)
+    #expect(await store.attempts() == before + 1)
+    let activeItem = controller.tabStrip.hostedCollectionView.item(
+        at: IndexPath(item: 0, section: 0)
+    )
+    #expect((activeItem?.view.accessibilityValue() as? String)?.contains("selected") == true)
+}
+
+@Test @MainActor func mainMenuPublishesNativeTabSelectorsAndExactShortcuts() {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    let menu = DuckpadMainMenuFactory.make(target: controller)
+
+    let close = menuItem("Close Tab", in: menu)
+    #expect(close?.action == #selector(DuckpadWindowController.performCloseActiveTab(_:)))
+    #expect(close?.keyEquivalent == "w")
+    #expect(close?.keyEquivalentModifierMask == [.command])
+
+    let mru = menuItem("Last Used Tab", in: menu)
+    let reverseMRU = menuItem("Previous in Tab History", in: menu)
+    #expect(mru?.action == #selector(DuckpadWindowController.performLastUsedTab(_:)))
+    #expect(mru?.keyEquivalent == "\t")
+    #expect(mru?.keyEquivalentModifierMask == [.control])
+    #expect(reverseMRU?.action == #selector(DuckpadWindowController.performLastUsedTab(_:)))
+    #expect(reverseMRU?.keyEquivalentModifierMask == [.control, .shift])
+
+    let moveLeft = menuItem("Move Tab Left", in: menu)
+    let moveRight = menuItem("Move Tab Right", in: menu)
+    #expect(moveLeft?.action == #selector(DuckpadWindowController.performMoveActiveTabLeft(_:)))
+    #expect(moveLeft?.keyEquivalent == "[")
+    #expect(moveLeft?.keyEquivalentModifierMask == [.command, .shift])
+    #expect(moveRight?.action == #selector(DuckpadWindowController.performMoveActiveTabRight(_:)))
+    #expect(moveRight?.keyEquivalent == "]")
+    #expect(moveRight?.keyEquivalentModifierMask == [.command, .shift])
+}
+
+@Test @MainActor func layoutCacheIsSinglePassOOneLookupAndInvalidatesForEngineChanges() {
+    let tabs = makeTabs(count: 500, activeIndex: 250)
+    let (window, _, strip) = hostStrip(width: 560, height: 360, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let initialGeneration = strip.flowLayout.layoutGeneration
+    for index in 0..<500 {
+        #expect(strip.flowLayout.row(forItemAt: index) != nil)
+        _ = strip.flowLayout.layoutAttributesForItem(at: IndexPath(item: index, section: 0))
+    }
+    #expect(strip.flowLayout.layoutGeneration == initialGeneration)
+
+    let oldHeight = strip.flowLayout.layoutAttributesForItem(
+        at: IndexPath(item: 0, section: 0)
+    )?.frame.height
+    var changedEngine = strip.flowLayout.engine
+    changedEngine.rowHeight += 7
+    changedEngine.horizontalSpacing += 2
+    strip.flowLayout.engine = changedEngine
+    strip.hostedCollectionView.layoutSubtreeIfNeeded()
+    #expect(strip.flowLayout.layoutGeneration == initialGeneration + 1)
+    #expect(strip.flowLayout.layoutAttributesForItem(
+        at: IndexPath(item: 0, section: 0)
+    )?.frame.height == oldHeight.map { $0 + 7 })
+}
+
+@Test @MainActor func collectionExposesDragWriterAndRoutesMiddleClickAndDrop() {
+    let tabs = makeTabs(count: 12, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 300, height: 320, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    var closed: TabID?
+    var move: (TabID, Int)?
+    strip.onClose = { closed = $0 }
+    strip.onMove = { move = ($0, $1) }
+
+    let writer = strip.collectionView(
+        strip.hostedCollectionView,
+        pasteboardWriterForItemAt: IndexPath(item: 0, section: 0)
+    )
+    #expect(writer != nil)
+    strip.performMiddleClick(tabID: tabs[4].id)
+    strip.performDrop(tabID: tabs[1].id, to: 9)
+    #expect(closed == tabs[4].id)
+    #expect(move?.0 == tabs[1].id)
+    #expect(move?.1 == 9)
+}
+
+@Test @MainActor func headlessCollectionPasteboardAcceptsCrossRowDropAtEnd() {
+    let tabs = makeTabs(count: 12, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 300, height: 320, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let pasteboard = NSPasteboard(name: .init("duckpad.tab.drag.test.\(UUID().uuidString)"))
+    pasteboard.clearContents()
+    guard let writer = strip.collectionView(
+        strip.hostedCollectionView,
+        pasteboardWriterForItemAt: IndexPath(item: 1, section: 0)
+    ) else {
+        Issue.record("collection did not expose a drag writer")
+        return
+    }
+    #expect(pasteboard.writeObjects([writer]))
+    var move: (TabID, Int)?
+    strip.onMove = { move = ($0, $1) }
+
+    #expect(strip.acceptDrop(from: pasteboard, insertionIndex: tabs.count))
+    #expect(move?.0 == tabs[1].id)
+    #expect(move?.1 == tabs.count - 1)
+}
+
 @Test @MainActor func appKitHostedResizeCapsOverflowAndKeepsSelectedTabVisible() {
     let tabs = makeTabs(count: 500, activeIndex: 499)
     let (window, root, strip) = hostStrip(width: 700, height: 300, tabs: tabs)
@@ -407,6 +610,35 @@ struct AppKitHostedTests {
     #expect(operationPresenter.failures.count == 4)
     controller.window?.contentViewController = nil
     controller.close()
+}
+
+@Test @MainActor func routedClosePersistenceFailureIsPresentedOnceWithActionableRetry() async throws {
+    var restored = ScratchSession()
+    let dirtyTab = restored.addUntitled()
+    _ = try restored.recordEdit(in: dirtyTab, expectedRevision: 0)
+    let store = PresentationStore(session: restored)
+    let workspace = ScratchWorkspaceUseCase(store: store)
+    let presenter = ErrorPresenterSpy()
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        errorPresenter: presenter,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    await store.setFailure(.unavailable("close persistence offline"))
+
+    controller.performClose(dirtyTab, decision: .discard)
+    for _ in 0..<1_000 where presenter.failures.isEmpty { await Task.yield() }
+    #expect(presenter.failures.count == 1)
+    #expect(presenter.retries.count == 1)
+    #expect(workspace.snapshot().tabs.first?.id == dirtyTab)
+    await store.setFailure(nil)
+    presenter.retries[0]()
+    for _ in 0..<1_000 where workspace.snapshot().tabs.first?.id == dirtyTab { await Task.yield() }
+    #expect(workspace.snapshot().tabs.first?.id != dirtyTab)
+    #expect(presenter.failures.count == 1)
 }
 
 @Test @MainActor func realControllerDisablesEditorUntilDelayedRestoreCompletes() async {

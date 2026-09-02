@@ -2,6 +2,19 @@ import AppKit
 import DuckpadApplication
 import DuckpadDomain
 
+public struct TabWorkspaceSmokeState: Equatable, Sendable {
+    public let tabCount: Int
+    public let rowCount: Int
+    public let selectedTabIsVisible: Bool
+}
+
+private enum CloseRetryContext {
+    /// Stable IDs capture the exact single/bulk command target set without
+    /// retaining a stale tab snapshot or AppKit object.
+    case tabs([TabID])
+    case termination
+}
+
 @MainActor
 private final class FileDropView: NSView {
     var onFiles: (([URL]) -> Void)?
@@ -33,6 +46,24 @@ private final class FileDropView: NSView {
 @MainActor
 public protocol PersistenceErrorPresenting: AnyObject {
     func present(failure: PersistenceFailure, retry: @escaping @MainActor () -> Void)
+}
+
+@MainActor
+public protocol TabPathActionHandling: AnyObject {
+    func copyFullPath(_ path: String)
+    func openContainingFolder(for path: String)
+}
+
+@MainActor
+private final class NativeTabPathActionHandler: TabPathActionHandling {
+    func copyFullPath(_ path: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(path, forType: .string)
+    }
+
+    func openContainingFolder(for path: String) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
 }
 
 @MainActor
@@ -95,7 +126,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let filePanels: (any FilePanelPresenting)?
     private let fileConflictPresenter: (any FileConflictPresenting)?
     private let dirtyDecisionPresenter: (any DirtyDocumentDecisionPresenting)?
+    private let pathActionHandler: any TabPathActionHandling
     private let recoveryUseCase: SessionRecoveryUseCase?
+    private let tabCloseCoordinator: TabCloseCoordinator
     let terminationCoordinator: ApplicationTerminationCoordinator?
     private let approvedWindowClose: @MainActor (NSWindow) -> Void
     private var editorBinding: EditorBindingUseCase!
@@ -103,6 +136,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var handledFailureIDs: Set<UUID> = []
     private var startTask: Task<Void, Never>?
     private var permitsNextWindowClose = false
+    private var terminationRetrySaveTabID: TabID?
 
     public init(
         workspace: ScratchWorkspaceUseCase,
@@ -113,6 +147,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         filePanels: (any FilePanelPresenting)? = nil,
         fileConflictPresenter: (any FileConflictPresenting)? = nil,
         dirtyDecisionPresenter: (any DirtyDocumentDecisionPresenting)? = nil,
+        pathActionHandler: (any TabPathActionHandling)? = nil,
         recoveryUseCase: SessionRecoveryUseCase? = nil,
         terminationCoordinator: ApplicationTerminationCoordinator? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
@@ -131,7 +166,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.filePanels = filePanels
         self.fileConflictPresenter = fileConflictPresenter
         self.dirtyDecisionPresenter = dirtyDecisionPresenter
+        self.pathActionHandler = pathActionHandler ?? NativeTabPathActionHandler()
         self.recoveryUseCase = recoveryUseCase
+        tabCloseCoordinator = TabCloseCoordinator(workspace: workspace)
         self.terminationCoordinator = terminationCoordinator
         self.approvedWindowClose = approvedWindowClose ?? { $0.performClose(nil) }
         let window = NSWindow(
@@ -151,6 +188,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         tabStrip.onAdd = { [weak self] in self?.performAdd() }
         tabStrip.onActivate = { [weak self] id in self?.performActivate(id) }
         tabStrip.onClose = { [weak self] id in self?.performClose(id) }
+        tabStrip.onMove = { [weak self] id, index in self?.performMove(id, to: index) }
+        tabStrip.onContextAction = { [weak self] id, action in self?.performContextAction(action, for: id) }
         workspace.onChange = { [weak self] change in self?.handle(change) }
         renderInitial(workspace.snapshot())
         if automaticallyStarts { start() }
@@ -184,6 +223,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         editorBinding.render(workspace.snapshot(), requestFocus: true)
     }
 
+    public func tabWorkspaceSmokeState() -> TabWorkspaceSmokeState {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        tabStrip.layoutSubtreeIfNeeded()
+        tabStrip.hostedCollectionView.layoutSubtreeIfNeeded()
+        return TabWorkspaceSmokeState(
+            tabCount: workspace.snapshot().tabs.count,
+            rowCount: tabStrip.rowCount,
+            selectedTabIsVisible: tabStrip.selectedTabIsVisible
+        )
+    }
+
     func start() {
         startTask = Task { [weak self] in
             guard let self else { return }
@@ -212,6 +262,31 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         Task { [weak self] in await self?.requestClose(tabID: id, decision: decision) }
     }
 
+    @objc public func performCloseActiveTab(_ sender: Any? = nil) {
+        guard let id = workspace.snapshot().tabs.first(where: \.isActive)?.id else { return }
+        performClose(id)
+    }
+
+    @objc public func performNextTab(_ sender: Any? = nil) {
+        Task { [weak workspace] in _ = await workspace?.navigateTabs(.next) }
+    }
+
+    @objc public func performPreviousTab(_ sender: Any? = nil) {
+        Task { [weak workspace] in _ = await workspace?.navigateTabs(.previous) }
+    }
+
+    @objc public func performLastUsedTab(_ sender: Any? = nil) {
+        Task { [weak workspace] in _ = await workspace?.navigateTabs(.lastUsed) }
+    }
+
+    @objc public func performMoveActiveTabLeft(_ sender: Any? = nil) {
+        Task { [weak workspace] in _ = await workspace?.moveActiveTab(by: -1) }
+    }
+
+    @objc public func performMoveActiveTabRight(_ sender: Any? = nil) {
+        Task { [weak workspace] in _ = await workspace?.moveActiveTab(by: 1) }
+    }
+
     @objc public func performOpenFile(_ sender: Any? = nil) {
         Task { [weak self] in await self?.routeOpenFile() }
     }
@@ -226,7 +301,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public func routeOpenFile() async {
         guard let fileUseCase, let url = await filePanels?.chooseOpenURL(attachedTo: window) else { return }
-        await handle(fileOutcome: await fileUseCase.open(url))
+        await handle(fileOutcome: await fileUseCase.open(url)) { [weak self] in
+            Task { @MainActor [weak self] in await self?.routeOpenFile() }
+        }
     }
 
     public func routeSaveFile() async {
@@ -235,14 +312,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         if case .requiresDestination = outcome {
             await routeSaveFileAs()
         } else {
-            _ = await resolve(fileOutcome: outcome)
+            _ = await resolve(fileOutcome: outcome) { [weak self] in
+                Task { @MainActor [weak self] in await self?.routeSaveFile() }
+            }
         }
     }
 
     public func routeSaveFileAs() async {
         guard let fileUseCase, let context = workspace.activeFileContext(),
               let url = await filePanels?.chooseSaveURL(suggestedName: context.title, attachedTo: window) else { return }
-        _ = await resolve(fileOutcome: await fileUseCase.saveAs(url))
+        _ = await resolve(fileOutcome: await fileUseCase.saveAs(url)) { [weak self] in
+            Task { @MainActor [weak self] in await self?.routeSaveFileAs() }
+        }
     }
 
     public var hasDirtyDocuments: Bool {
@@ -275,23 +356,27 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     /// Shared red-close/Cmd-Q gate. Discard is remembered only for this review;
     /// a concurrently dirtied, previously saved tab is reviewed again.
     public func reviewDirtyDocumentsForTermination() async -> Bool {
-        while let tab = workspace.snapshot().tabs.first(where: \.isDirty) {
-            guard let presenter = dirtyDecisionPresenter else { return false }
-            let decision = await presenter.decision(
-                for: tab,
-                saveAvailable: fileUseCase != nil,
-                attachedTo: window
-            )
-            switch decision {
-            case .cancel:
-                return false
-            case .discard:
-                guard case .closed = await workspace.close(tabID: tab.id, decision: .discard) else {
-                    return false
-                }
-            case .save:
-                guard await saveBeforeClosing(tabID: tab.id) else { return false }
+        guard dirtyDecisionPresenter != nil || !hasDirtyDocuments else { return false }
+        let retrySaveTabID = terminationRetrySaveTabID
+        terminationRetrySaveTabID = nil
+        let outcome = await tabCloseCoordinator.reviewDirtyForTermination(
+            saveAvailable: fileUseCase != nil,
+            decision: { [weak self] tab, saveAvailable in
+                if tab.id == retrySaveTabID { return .save }
+                return await self?.closeDecision(for: tab, saveAvailable: saveAvailable) ?? .cancel
+            },
+            save: { [weak self] id, revision in
+                await self?.saveBeforeClosing(
+                    tabID: id,
+                    expectedRevision: revision,
+                    retryContext: .termination
+                )
+                    ?? .failed(PersistenceFailure(operation: .save, cause: .unavailable("window closed")))
             }
+        )
+        guard case .completed = outcome else {
+            if case .failed(let failure) = outcome { presentCloseFailure(failure) }
+            return false
         }
         return await flushRecovery(final: true)
     }
@@ -324,7 +409,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         dropView.onFiles = { [weak self] urls in
             guard let self, let fileUseCase = self.fileUseCase else { return }
             Task { @MainActor in
-                for url in urls { await self.handle(fileOutcome: await fileUseCase.open(url)) }
+                for url in urls {
+                    await self.handle(fileOutcome: await fileUseCase.open(url)) { [weak self] in
+                        Task { @MainActor [weak self] in
+                            guard let self, let fileUseCase = self.fileUseCase else { return }
+                            await self.handle(fileOutcome: await fileUseCase.open(url)) {}
+                        }
+                    }
+                }
             }
         }
         root.view = dropView
@@ -381,66 +473,187 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    private func requestClose(tabID: TabID, decision: CloseDecision?) async {
-        switch await workspace.close(tabID: tabID, decision: decision) {
-        case .requiresDecision:
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = "Save changes before closing?"
-            alert.informativeText = "Save writes the live editor buffer. Discard closes it without writing."
-            alert.addButton(withTitle: "Save")
-            alert.addButton(withTitle: "Cancel")
-            alert.addButton(withTitle: "Discard")
-            switch alert.runModal() {
-            case .alertFirstButtonReturn:
-                if await saveBeforeClosing(tabID: tabID) { _ = await workspace.close(tabID: tabID) }
-            case .alertThirdButtonReturn:
-                _ = await workspace.close(tabID: tabID, decision: .discard)
-            default:
-                break
+    private func requestClose(tabID: TabID, decision forcedDecision: CloseDecision?) async {
+        await requestClose(
+            tabIDs: [tabID],
+            retryingSaveTabID: nil,
+            forcedDecision: forcedDecision
+        )
+    }
+
+    private func requestClose(
+        tabIDs: [TabID],
+        retryingSaveTabID: TabID?,
+        forcedDecision: CloseDecision? = nil
+    ) async {
+        let outcome = await tabCloseCoordinator.close(
+            tabIDs: tabIDs,
+            saveAvailable: fileUseCase != nil,
+            decision: { [weak self] tab, saveAvailable in
+                if tab.id == retryingSaveTabID { return .save }
+                if let forcedDecision { return forcedDecision }
+                return await self?.closeDecision(for: tab, saveAvailable: saveAvailable) ?? .cancel
+            },
+            save: { [weak self] id, revision in
+                await self?.saveBeforeClosing(
+                    tabID: id,
+                    expectedRevision: revision,
+                    retryContext: .tabs(tabIDs)
+                )
+                    ?? .failed(PersistenceFailure(operation: .save, cause: .unavailable("window closed")))
             }
-        case .saveUnavailable:
-            let failure = PersistenceFailure(operation: .save, cause: .unavailable("File save is not implemented in Phase 1"))
-            errorPresenter.present(failure: failure) {}
-        case .cancelled, .closed, .rejected, .persistenceFailed:
-            break
+        )
+        if case .failed(let failure) = outcome { presentCloseFailure(failure) }
+    }
+
+    private func requestClose(scope: TabCloseScope, relativeTo tabID: TabID) async {
+        let targets = workspace.tabIDs(for: scope, relativeTo: tabID)
+        await requestClose(
+            tabIDs: targets,
+            retryingSaveTabID: nil
+        )
+    }
+
+    private func closeDecision(for tab: TabSnapshot, saveAvailable: Bool) async -> CloseDecision {
+        if let dirtyDecisionPresenter {
+            return await dirtyDecisionPresenter.decision(
+                for: tab,
+                saveAvailable: saveAvailable,
+                attachedTo: window
+            )
+        }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Save changes to \(tab.title) before closing?"
+        alert.informativeText = "Discard closes this exact reviewed revision without writing."
+        if saveAvailable { alert.addButton(withTitle: "Save") }
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Discard")
+        let response = alert.runModal()
+        if saveAvailable, response == .alertFirstButtonReturn { return .save }
+        let discardResponse: NSApplication.ModalResponse = saveAvailable ? .alertThirdButtonReturn : .alertSecondButtonReturn
+        return response == discardResponse ? .discard : .cancel
+    }
+
+    private func presentCloseFailure(_ failure: PersistenceFailure) {
+        errorPresenter.present(failure: failure) {}
+    }
+
+    private func performMove(_ tabID: TabID, to index: Int) {
+        Task { [weak workspace] in _ = await workspace?.moveTab(tabID, to: index) }
+    }
+
+    private func performContextAction(_ action: TabContextAction, for tabID: TabID) {
+        switch action {
+        case .close(let scope):
+            Task { [weak self] in await self?.requestClose(scope: scope, relativeTo: tabID) }
+        case .setPinned(let pinned):
+            Task { [weak workspace] in _ = await workspace?.setPinned(tabID, isPinned: pinned) }
+        case .copyFullPath:
+            guard let path = workspace.snapshot().tabs.first(where: { $0.id == tabID })?.fullPath else { return }
+            pathActionHandler.copyFullPath(path)
+        case .openContainingFolder:
+            guard let path = workspace.snapshot().tabs.first(where: { $0.id == tabID })?.fullPath else { return }
+            pathActionHandler.openContainingFolder(for: path)
         }
     }
 
-    private func handle(fileOutcome: FileOpenOutcome) async {
+    private func handle(
+        fileOutcome: FileOpenOutcome,
+        retry: @escaping @MainActor () -> Void
+    ) async {
+        if case .failed(.workspace) = fileOutcome { return }
         if case .failed(let failure) = fileOutcome {
-            fileConflictPresenter?.presentFileFailure(failure, attachedTo: window)
+            fileConflictPresenter?.presentFileFailure(failure, attachedTo: window, retry: retry)
         }
     }
 
     @discardableResult
-    private func resolve(fileOutcome: FileSaveOutcome) async -> FileSaveOutcome {
+    private func resolve(
+        fileOutcome: FileSaveOutcome,
+        retry: @escaping @MainActor () -> Void
+    ) async -> FileSaveOutcome {
         switch fileOutcome {
         case .conflict:
             guard let fileUseCase, let presenter = fileConflictPresenter else { return fileOutcome }
             let resolution = await presenter.resolveExternalConflict(attachedTo: window)
-            return await resolve(fileOutcome: await fileUseCase.resolveConflict(resolution))
+            return await resolve(fileOutcome: await fileUseCase.resolveConflict(resolution), retry: retry)
+        case .failed(.workspace):
+            break
         case .failed(let failure):
-            fileConflictPresenter?.presentFileFailure(failure, attachedTo: window)
+            fileConflictPresenter?.presentFileFailure(failure, attachedTo: window, retry: retry)
         case .saved, .requiresDestination, .cancelled:
             break
         }
         return fileOutcome
     }
 
-    private func saveBeforeClosing(tabID: TabID) async -> Bool {
-        guard let fileUseCase else { return false }
+    private func saveBeforeClosing(
+        tabID: TabID,
+        expectedRevision: UInt64,
+        retryContext: CloseRetryContext
+    ) async -> TabCloseSaveOutcome {
+        guard let reviewed = workspace.snapshot().tabs.first(where: { $0.id == tabID }) else {
+            return .cancelled
+        }
+        guard reviewed.buffer.revision == expectedRevision else {
+            return .reviewStale(currentRevision: reviewed.buffer.revision)
+        }
+        guard let fileUseCase else {
+            return .failed(PersistenceFailure(operation: .save, cause: .unavailable("file save unavailable")))
+        }
         if workspace.snapshot().tabs.first(where: \.isActive)?.id != tabID {
-            guard case .applied = await workspace.activate(tabID: tabID) else { return false }
+            switch await workspace.activate(tabID: tabID) {
+            case .applied:
+                break
+            case .persistenceFailed(let failure):
+                return .workspaceFailure(failure)
+            case .rejected(let error):
+                return .failed(PersistenceFailure(
+                    operation: .save,
+                    cause: .corrupt("close-save activation rejected: \(error)")
+                ))
+            }
         }
         var outcome = await fileUseCase.saveActive()
         if case .requiresDestination = outcome {
             guard let context = workspace.activeFileContext(),
-                  let url = await filePanels?.chooseSaveURL(suggestedName: context.title, attachedTo: window) else { return false }
+                  let url = await filePanels?.chooseSaveURL(suggestedName: context.title, attachedTo: window) else {
+                return .cancelled
+            }
             outcome = await fileUseCase.saveAs(url)
         }
-        if case .saved = await resolve(fileOutcome: outcome) { return true }
-        return false
+        if case .failed(.workspace(let failure)) = outcome { return .workspaceFailure(failure) }
+        let resolved = await resolve(fileOutcome: outcome) { [weak self] in
+            guard let self else { return }
+            self.retryClose(retryContext, failedSaveTabID: tabID)
+        }
+        switch resolved {
+        case .saved:
+            return .saved
+        case .cancelled, .requiresDestination, .conflict:
+            return .cancelled
+        case .failed(.workspace(let failure)):
+            return .workspaceFailure(failure)
+        case .failed(let failure):
+            if fileConflictPresenter != nil { return .alreadyPresented }
+            return .failed(PersistenceFailure(
+                operation: .save,
+                cause: .unavailable("file save failed: \(failure)")
+            ))
+        }
+    }
+
+    private func retryClose(_ context: CloseRetryContext, failedSaveTabID: TabID) {
+        switch context {
+        case .tabs(let tabIDs):
+            Task { @MainActor [weak self] in
+                await self?.requestClose(tabIDs: tabIDs, retryingSaveTabID: failedSaveTabID)
+            }
+        case .termination:
+            terminationRetrySaveTabID = failedSaveTabID
+            terminationCoordinator?.retryApplicationTermination()
+        }
     }
 
     private func updateWindowTitle(_ snapshot: WorkspaceSnapshot) {

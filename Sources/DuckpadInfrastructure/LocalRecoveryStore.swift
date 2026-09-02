@@ -135,6 +135,7 @@ public actor LocalRecoveryStore: RecoveryStore {
             buffers: manifest.session.buffers,
             fileBindings: manifest.session.fileBindings,
             activeTabID: manifest.session.activeTabID,
+            activationHistory: manifest.session.activationHistory,
             nextUntitledNumber: manifest.session.recoveryNextUntitledNumber
         )
         guard Set(manifest.buffers.map(\.bufferID)).count == manifest.buffers.count,

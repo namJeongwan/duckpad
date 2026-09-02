@@ -500,3 +500,45 @@ private final class EditorFake: EditorPort {
     #expect(editor.insert("accepted-after-recovery") == .accepted(newRevision: 1))
     #expect(binding.activeTextSnapshot()?.text == "accepted-after-recovery")
 }
+
+@Test @MainActor func queuedNavigationComputesTargetAfterBlockedMoveCommits() async {
+    let store = AdversarialStore()
+    let workspace = ScratchWorkspaceUseCase(store: store)
+    _ = await workspace.start()
+    _ = await workspace.addScratch()
+    _ = await workspace.addScratch()
+    let original = workspace.snapshot().tabs.map(\.id)
+    #expect(workspace.snapshot().tabs.last?.isActive == true)
+    await store.armBlockingCommit()
+
+    let move = Task { await workspace.moveActiveTab(by: -1) }
+    await store.waitUntilCommitEntered()
+    let navigate = Task { await workspace.navigateTabs(.previous) }
+    await store.releaseCommit()
+
+    #expect(await move.value == .applied(.saved))
+    #expect(await navigate.value == .applied(.saved))
+    #expect(workspace.snapshot().tabs.map(\.id) == [original[0], original[2], original[1]])
+    #expect(workspace.snapshot().tabs.first?.isActive == true)
+    #expect(await store.maximumConcurrentCommits == 1)
+}
+
+@Test @MainActor func keyboardCommandsUseVisualOrderMRUAndSerializedMove() async {
+    let workspace = ScratchWorkspaceUseCase(store: StoreSpy())
+    _ = await workspace.start()
+    _ = await workspace.addScratch()
+    _ = await workspace.addScratch()
+    let ids = workspace.snapshot().tabs.map(\.id)
+    _ = await workspace.activate(tabID: ids[0])
+    _ = await workspace.activate(tabID: ids[1])
+    _ = await workspace.activate(tabID: ids[2])
+
+    #expect(await workspace.navigateTabs(.lastUsed) == .applied(.saved))
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.id == ids[1])
+    #expect(await workspace.navigateTabs(.next) == .applied(.saved))
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.id == ids[2])
+    #expect(await workspace.navigateTabs(.previous) == .applied(.saved))
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.id == ids[1])
+    #expect(await workspace.moveActiveTab(by: -1) == .applied(.saved))
+    #expect(workspace.snapshot().tabs.map(\.id) == [ids[1], ids[0], ids[2]])
+}

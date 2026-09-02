@@ -6,6 +6,8 @@ public final class ApplicationTerminationCoordinator {
     private var inFlightReview: Task<Void, Never>?
     private var windowCloseReply: (@MainActor (Bool) -> Void)?
     private var applicationReplies: [@MainActor (Bool) -> Void] = []
+    private var applicationRetryHandler: (@MainActor () -> Void)?
+    private var retryApplicationAfterReview = false
 
     public init() {}
 
@@ -20,6 +22,23 @@ public final class ApplicationTerminationCoordinator {
             "a termination coordinator cannot be shared by different windows"
         )
         self.windowController = windowController
+    }
+
+    /// The app delegate installs a handler that starts a new native termination
+    /// request. A file Retry therefore receives a new terminateLater/reply pair
+    /// instead of being downgraded to an ordinary tab close.
+    public func installApplicationRetryHandler(
+        _ handler: @escaping @MainActor () -> Void
+    ) {
+        applicationRetryHandler = handler
+    }
+
+    public func retryApplicationTermination() {
+        guard inFlightReview == nil else {
+            retryApplicationAfterReview = true
+            return
+        }
+        applicationRetryHandler?()
     }
 
     /// Registers the red-window-close caller with the same review used by Cmd-Q.
@@ -75,5 +94,8 @@ public final class ApplicationTerminationCoordinator {
         inFlightReview = nil
         windowReply?(approved)
         for reply in appReplies { reply(approved) }
+        guard retryApplicationAfterReview else { return }
+        retryApplicationAfterReview = false
+        applicationRetryHandler?()
     }
 }

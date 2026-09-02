@@ -77,6 +77,7 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
     private(set) var openRequests = 0
     private(set) var saveRequests = 0
     private(set) var failures: [FileOperationFailure] = []
+    private(set) var fileFailureRetries: [@MainActor () -> Void] = []
     var decisions: [CloseDecision] = []
     var blocksDecisions = false
     private(set) var decisionTabs: [String] = []
@@ -84,7 +85,15 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
     func chooseOpenURL(attachedTo window: NSWindow?) async -> URL? { openRequests += 1; return openURL }
     func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL? { saveRequests += 1; return saveURL }
     func resolveExternalConflict(attachedTo window: NSWindow?) async -> FileConflictResolution { .cancel }
-    func presentFileFailure(_ failure: FileOperationFailure, attachedTo window: NSWindow?) { failures.append(failure) }
+    func presentFileFailure(
+        _ failure: FileOperationFailure,
+        attachedTo window: NSWindow?,
+        retry: @escaping @MainActor () -> Void
+    ) {
+        failures.append(failure)
+        fileFailureRetries.append(retry)
+    }
+    func retryLastFileFailure() { fileFailureRetries.last?() }
     func decision(for tab: TabSnapshot, saveAvailable: Bool, attachedTo window: NSWindow?) async -> CloseDecision {
         decisionTabs.append(tab.title)
         if blocksDecisions {
@@ -225,6 +234,8 @@ struct FileLifecycleTests {
         saveURL: URL? = nil,
         writeError: TextFileStoreError? = nil,
         blocksDecisions: Bool = false,
+        errorPresenter: (any PersistenceErrorPresenting)? = nil,
+        recoveryStore: RoutingRecoveryStore? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil
     ) async -> (DuckpadWindowController, ScratchWorkspaceUseCase, TextViewEditorAdapter, PanelFake, RoutingFileStore) {
         _ = NSApplication.shared
@@ -233,6 +244,14 @@ struct FileLifecycleTests {
         let files = RoutingFileStore()
         await files.setWriteError(writeError)
         let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+        let recoveryUseCase = recoveryStore.map {
+            SessionRecoveryUseCase(
+                workspace: workspace,
+                editor: editor,
+                store: $0,
+                debounce: .seconds(60)
+            )
+        }
         let panels = PanelFake()
         panels.decisions = decisions
         panels.blocksDecisions = blocksDecisions
@@ -242,10 +261,12 @@ struct FileLifecycleTests {
             workspace: workspace,
             editorAdapter: editor,
             editorView: editor.scrollView,
+            errorPresenter: errorPresenter,
             fileUseCase: fileUseCase,
             filePanels: panels,
             fileConflictPresenter: panels,
             dirtyDecisionPresenter: panels,
+            recoveryUseCase: recoveryUseCase,
             terminationCoordinator: terminationCoordinator,
             approvedWindowClose: approvedWindowClose,
             automaticallyStarts: false
@@ -319,10 +340,12 @@ struct FileLifecycleTests {
         cancelController.close()
 
         let failure = TextFileStoreError.io("injected save failure")
+        let workspaceFailures = RecoveryErrorPresenterSpy()
         let (failureController, failureWorkspace, failureEditor, failurePanels, _) = await makeController(
             decisions: [.save],
             saveURL: URL(fileURLWithPath: "/tmp/duckpad-terminate-failure.txt"),
-            writeError: failure
+            writeError: failure,
+            errorPresenter: workspaceFailures
         )
         failureController.showWindow(nil)
         dirty(failureEditor, with: "still dirty")
@@ -334,7 +357,125 @@ struct FileLifecycleTests {
         #expect(failureWorkspace.snapshot().tabs[0].isDirty)
         #expect(failureController.window?.isVisible == true)
         #expect(failurePanels.failures.count == 1)
+        #expect(failurePanels.fileFailureRetries.count == 1)
+        #expect(workspaceFailures.failures.isEmpty)
         failureController.close()
+    }
+
+    @Test @MainActor func routedCloseSaveFailurePresentsOnceAndRetriesLatestRevision() async {
+        let saveURL = URL(fileURLWithPath: "/tmp/duckpad-close-retry.txt")
+        let genericPresenter = RecoveryErrorPresenterSpy()
+        let (controller, workspace, editor, panels, files) = await makeController(
+            decisions: [.save],
+            saveURL: saveURL,
+            writeError: .io("first write fails"),
+            errorPresenter: genericPresenter
+        )
+        defer { controller.close() }
+
+        dirty(editor, with: "reviewed")
+        let originalTab = workspace.snapshot().tabs[0]
+        controller.performClose(originalTab.id)
+        for _ in 0..<200 where panels.failures.isEmpty {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(workspace.snapshot().tabs.contains(where: { $0.id == originalTab.id }))
+        #expect(workspace.snapshot().tabs.first(where: { $0.id == originalTab.id })?.isDirty == true)
+        #expect(panels.failures.count == 1)
+        #expect(panels.fileFailureRetries.count == 1)
+        #expect(genericPresenter.failures.isEmpty)
+
+        // The retry starts a fresh serialized review. It must save the text and
+        // revision accepted after the failed attempt, not the stale review.
+        dirty(editor, with: "newest revision 🙂")
+        await files.setWriteError(nil)
+        panels.retryLastFileFailure()
+        for _ in 0..<200 where workspace.snapshot().tabs.contains(where: { $0.id == originalTab.id }) {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(!workspace.snapshot().tabs.contains(where: { $0.id == originalTab.id }))
+        #expect(await files.text(at: saveURL) == "newest revision 🙂")
+        #expect(panels.failures.count == 1)
+        #expect(genericPresenter.failures.isEmpty)
+    }
+
+    @Test @MainActor func terminationFileRetryResumesReviewFlushAndNewTerminateReply() async {
+        let saveURL = URL(fileURLWithPath: "/tmp/duckpad-termination-retry.txt")
+        let recoveryStore = RoutingRecoveryStore()
+        let genericPresenter = RecoveryErrorPresenterSpy()
+        let (controller, workspace, editor, panels, files) = await makeController(
+            decisions: [.save, .discard],
+            saveURL: saveURL,
+            writeError: .io("first termination save fails"),
+            errorPresenter: genericPresenter,
+            recoveryStore: recoveryStore
+        )
+        defer { controller.close() }
+
+        dirty(editor, with: "first reviewed revision")
+        let firstTabID = workspace.snapshot().tabs[0].id
+        _ = await workspace.addScratch()
+        let secondTabID = workspace.snapshot().tabs.first(where: \.isActive)!.id
+        dirty(editor, with: "second tab remains to review")
+
+        let coordinator = controller.terminationCoordinator!
+        var retryRequests = 0
+        var retryGateReply: NSApplication.TerminateReply?
+
+        var initialReplyCount = 0
+        let initialReply = await withCheckedContinuation { continuation in
+            #expect(coordinator.applicationShouldTerminate {
+                initialReplyCount += 1
+                continuation.resume(returning: $0)
+            } == .terminateLater)
+        }
+        #expect(!initialReply)
+        #expect(initialReplyCount == 1)
+        #expect(panels.failures.count == 1)
+        #expect(panels.fileFailureRetries.count == 1)
+        #expect(genericPresenter.failures.isEmpty)
+        #expect(workspace.snapshot().tabs.contains(where: { $0.id == firstTabID }))
+        #expect(workspace.snapshot().tabs.contains(where: { $0.id == secondTabID }))
+
+        // saveBeforeClosing activated the failed tab. Edit it after the first
+        // reply to prove Retry reviews and persists the latest revision. Drain
+        // the explicit workspace persistence seam first: an edit attempted
+        // during that transaction is correctly rejected and cannot be made
+        // reliable by polling after the fact.
+        await workspace.waitForPendingPersistence()
+        #expect(workspace.snapshot().tabs.first(where: \.isActive)?.id == firstTabID)
+        #expect(editor.textView.string == "first reviewed revision")
+        let failedRevision = workspace.snapshot().tabs.first(where: { $0.id == firstTabID })!.buffer.revision
+        dirty(editor, with: "newest termination revision 🙂")
+        #expect(workspace.snapshot().tabs.first(where: { $0.id == firstTabID })!.buffer.revision == failedRevision + 1)
+        #expect(editor.textView.string == "newest termination revision 🙂")
+        await files.setWriteError(nil)
+        let recoveryCommitsBeforeRetry = await recoveryStore.commitCount
+        let retriedTerminationReply = await withCheckedContinuation { continuation in
+            coordinator.installApplicationRetryHandler { [weak coordinator] in
+                guard let coordinator else { return }
+                retryRequests += 1
+                retryGateReply = coordinator.applicationShouldTerminate {
+                    continuation.resume(returning: $0)
+                }
+            }
+            panels.retryLastFileFailure()
+        }
+
+        #expect(retryRequests == 1)
+        #expect(retryGateReply == .terminateLater)
+        #expect(retriedTerminationReply)
+        #expect(await files.text(at: saveURL) == "newest termination revision 🙂")
+        #expect(workspace.snapshot().tabs.contains(where: { $0.id == firstTabID }))
+        #expect(!workspace.snapshot().tabs.contains(where: { $0.id == secondTabID }))
+        #expect(!controller.hasDirtyDocuments)
+        #expect(panels.decisionTabs.count == 2)
+        #expect(Set(panels.decisionTabs).count == 2)
+        #expect(await recoveryStore.commitCount == recoveryCommitsBeforeRetry + 2)
+        #expect(panels.failures.count == 1)
+        #expect(genericPresenter.failures.isEmpty)
     }
 
     @Test @MainActor func appTerminationReviewsEveryDirtyTabSerially() async {

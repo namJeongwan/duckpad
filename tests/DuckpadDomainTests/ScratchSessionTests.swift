@@ -1,4 +1,5 @@
 import DuckpadDomain
+import Foundation
 import Testing
 
 @Test func createsTypedUntitledScratchWithoutOwningText() throws {
@@ -76,6 +77,52 @@ import Testing
     try session.activate(tabID: first)
     #expect(try session.close(tabID: first) == second)
     #expect(session.tabs.map(\.id) == [second])
+}
+
+@Test func closingActiveTabUsesMostRecentlyUsedLiveTab() throws {
+    var session = ScratchSession()
+    let first = session.addUntitled()
+    let second = session.addUntitled()
+    let third = session.addUntitled()
+    try session.activate(tabID: first)
+    try session.activate(tabID: second)
+    try session.activate(tabID: third)
+
+    #expect(try session.close(tabID: third) == second)
+    #expect(session.activeTabID == second)
+    #expect(session.activationHistory.last == second)
+    #expect(session.lastUsedTabID == first)
+}
+
+@Test func pinAndMoveKeepStableLeadingGroups() throws {
+    var session = ScratchSession()
+    let first = session.addUntitled()
+    let second = session.addUntitled()
+    let third = session.addUntitled()
+    let fourth = session.addUntitled()
+
+    #expect(try session.setPinned(tabID: third, isPinned: true) == 0)
+    #expect(session.tabs.map(\.id) == [third, first, second, fourth])
+    #expect(try session.moveTab(tabID: fourth, to: 0) == 1)
+    #expect(session.tabs.map(\.id) == [third, fourth, first, second])
+    #expect(try session.moveTab(tabID: third, to: 3) == 0)
+    #expect(try session.setPinned(tabID: third, isPinned: false) == 0)
+    #expect(session.tabs.allSatisfy { !$0.isPinned })
+}
+
+@Test func phaseFourSessionWithoutActivationHistoryMigratesToActiveOnlyMRU() throws {
+    var session = ScratchSession()
+    _ = session.addUntitled()
+    let active = session.addUntitled()
+    let encoded = try JSONEncoder().encode(session)
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    object.removeValue(forKey: "activationHistory")
+    let phaseFourJSON = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+
+    let restored = try JSONDecoder().decode(ScratchSession.self, from: phaseFourJSON)
+    #expect(restored.activeTabID == active)
+    #expect(restored.activationHistory == [active])
+    #expect(restored.tabs.map(\.id) == session.tabs.map(\.id))
 }
 
 @Test func recoveredTabsCannotShareDocumentOrLeaveDanglingStateAfterClose() throws {

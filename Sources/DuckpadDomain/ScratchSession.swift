@@ -76,16 +76,22 @@ public enum SessionError: Error, Equatable, Sendable {
     case revisionExhausted(bufferID: BufferID)
     case duplicateBufferID(BufferID)
     case duplicateFileBinding(String)
+    case invalidTabDestination(Int)
     case invalidRecoveryState(String)
 }
 
 public struct ScratchSession: Codable, Equatable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case id, tabs, documents, buffers, fileBindings, activeTabID, activationHistory, nextUntitledNumber
+    }
+
     public let id: SessionID
     public private(set) var tabs: [WorkspaceTab]
     public private(set) var documents: [DocumentID: ScratchDocument]
     public private(set) var buffers: [BufferID: BufferMetadata]
     public private(set) var fileBindings: [DocumentID: FileBinding]
     public private(set) var activeTabID: TabID?
+    public private(set) var activationHistory: [TabID]
     private var nextUntitledNumber: Int
 
     public init(id: SessionID = SessionID()) {
@@ -95,6 +101,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         buffers = [:]
         fileBindings = [:]
         activeTabID = nil
+        activationHistory = []
         nextUntitledNumber = 1
     }
 
@@ -105,12 +112,16 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         buffers: [BufferID: BufferMetadata],
         fileBindings: [DocumentID: FileBinding],
         activeTabID: TabID?,
+        activationHistory: [TabID]? = nil,
         nextUntitledNumber: Int
     ) throws {
         guard nextUntitledNumber > 0 else { throw SessionError.invalidRecoveryState("next untitled number") }
         guard Set(tabs.map(\.id)).count == tabs.count else { throw SessionError.invalidRecoveryState("duplicate tab ID") }
         guard Set(tabs.map(\.documentID)).count == tabs.count else {
             throw SessionError.invalidRecoveryState("duplicate document ownership")
+        }
+        guard !zip(tabs, tabs.dropFirst()).contains(where: { !$0.isPinned && $1.isPinned }) else {
+            throw SessionError.invalidRecoveryState("pinned tabs must form a leading group")
         }
         guard documents.allSatisfy({ $0.key == $0.value.id }) else { throw SessionError.invalidRecoveryState("document key mismatch") }
         guard buffers.allSatisfy({ $0.key == $0.value.id }) else { throw SessionError.invalidRecoveryState("buffer key mismatch") }
@@ -128,13 +139,63 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         guard activeTabID == nil ? tabs.isEmpty : tabs.contains(where: { $0.id == activeTabID }) else {
             throw SessionError.invalidRecoveryState("invalid active tab")
         }
+        let recoveredHistory = activationHistory ?? activeTabID.map { [$0] } ?? []
+        guard Set(recoveredHistory).count == recoveredHistory.count,
+              recoveredHistory.allSatisfy({ id in tabs.contains(where: { $0.id == id }) }),
+              activeTabID == nil ? recoveredHistory.isEmpty : recoveredHistory.last == activeTabID else {
+            throw SessionError.invalidRecoveryState("invalid activation history")
+        }
         self.id = id
         self.tabs = tabs
         self.documents = documents
         self.buffers = buffers
         self.fileBindings = fileBindings
         self.activeTabID = activeTabID
+        self.activationHistory = recoveredHistory
         self.nextUntitledNumber = nextUntitledNumber
+    }
+
+    /// Phase 4 recovery manifests predate MRU history. Decode those archives
+    /// as an active-only history while encoding all new archives explicitly.
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try values.decode(SessionID.self, forKey: .id)
+        let tabs = try values.decode([WorkspaceTab].self, forKey: .tabs)
+        let documents = try values.decode([DocumentID: ScratchDocument].self, forKey: .documents)
+        let buffers = try values.decode([BufferID: BufferMetadata].self, forKey: .buffers)
+        let fileBindings = try values.decode([DocumentID: FileBinding].self, forKey: .fileBindings)
+        let activeTabID = try values.decodeIfPresent(TabID.self, forKey: .activeTabID)
+        let activationHistory = try values.decodeIfPresent([TabID].self, forKey: .activationHistory)
+        let nextUntitledNumber = try values.decode(Int.self, forKey: .nextUntitledNumber)
+        do {
+            try self.init(
+                id: id,
+                tabs: tabs,
+                documents: documents,
+                buffers: buffers,
+                fileBindings: fileBindings,
+                activeTabID: activeTabID,
+                activationHistory: activationHistory,
+                nextUntitledNumber: nextUntitledNumber
+            )
+        } catch {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Invalid Duckpad session: \(error)"
+            ))
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(tabs, forKey: .tabs)
+        try values.encode(documents, forKey: .documents)
+        try values.encode(buffers, forKey: .buffers)
+        try values.encode(fileBindings, forKey: .fileBindings)
+        try values.encodeIfPresent(activeTabID, forKey: .activeTabID)
+        try values.encode(activationHistory, forKey: .activationHistory)
+        try values.encode(nextUntitledNumber, forKey: .nextUntitledNumber)
     }
 
     public var recoveryNextUntitledNumber: Int { nextUntitledNumber }
@@ -167,6 +228,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         documents[document.id] = document
         tabs.append(tab)
         activeTabID = tab.id
+        recordActivation(tab.id)
         return tab.id
     }
 
@@ -185,6 +247,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         fileBindings[document.id] = binding
         tabs.append(tab)
         activeTabID = tab.id
+        recordActivation(tab.id)
         return tab.id
     }
 
@@ -193,6 +256,45 @@ public struct ScratchSession: Codable, Equatable, Sendable {
             throw SessionError.unknownTab(tabID)
         }
         activeTabID = tabID
+        recordActivation(tabID)
+    }
+
+    /// Reorders a tab without allowing pinned and ordinary groups to cross.
+    /// Returns the actual final index after group-boundary clamping.
+    @discardableResult
+    public mutating func moveTab(tabID: TabID, to proposedIndex: Int) throws -> Int {
+        guard let source = tabs.firstIndex(where: { $0.id == tabID }) else {
+            throw SessionError.unknownTab(tabID)
+        }
+        guard tabs.indices.contains(proposedIndex) else {
+            throw SessionError.invalidTabDestination(proposedIndex)
+        }
+        let tab = tabs[source]
+        let pinnedCount = tabs.prefix(while: \.isPinned).count
+        let allowed: ClosedRange<Int> = tab.isPinned
+            ? 0...max(0, pinnedCount - 1)
+            : min(pinnedCount, tabs.count - 1)...(tabs.count - 1)
+        let destination = min(max(proposedIndex, allowed.lowerBound), allowed.upperBound)
+        guard source != destination else { return source }
+        tabs.remove(at: source)
+        tabs.insert(tab, at: destination)
+        return destination
+    }
+
+    /// Pinning is represented in Domain state so recovery restores both the
+    /// leading pinned group and stable order within each group.
+    @discardableResult
+    public mutating func setPinned(tabID: TabID, isPinned: Bool) throws -> Int {
+        guard let source = tabs.firstIndex(where: { $0.id == tabID }) else {
+            throw SessionError.unknownTab(tabID)
+        }
+        guard tabs[source].isPinned != isPinned else { return source }
+        var tab = tabs.remove(at: source)
+        tab.isPinned = isPinned
+        let pinnedCount = tabs.prefix(while: \.isPinned).count
+        let destination = pinnedCount
+        tabs.insert(tab, at: destination)
+        return destination
     }
 
     @discardableResult
@@ -208,14 +310,28 @@ public struct ScratchSession: Codable, Equatable, Sendable {
             throw SessionError.dirtyBufferRequiresDecision(buffer.id)
         }
         let removed = tabs.remove(at: index)
+        activationHistory.removeAll(where: { $0 == removed.id })
         if let removedDocument = documents.removeValue(forKey: removed.documentID) {
             buffers.removeValue(forKey: removedDocument.bufferID)
             fileBindings.removeValue(forKey: removedDocument.id)
         }
         if activeTabID == tabID {
-            activeTabID = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id
+            let deterministicNeighbor = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id
+            activeTabID = activationHistory.reversed().first(where: { historyID in
+                tabs.contains(where: { $0.id == historyID })
+            }) ?? deterministicNeighbor
+            if let activeTabID { recordActivation(activeTabID) }
         }
         return activeTabID
+    }
+
+    public var lastUsedTabID: TabID? {
+        activationHistory.reversed().first(where: { $0 != activeTabID })
+    }
+
+    private mutating func recordActivation(_ tabID: TabID) {
+        activationHistory.removeAll(where: { $0 == tabID })
+        activationHistory.append(tabID)
     }
 
     @discardableResult
