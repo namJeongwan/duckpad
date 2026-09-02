@@ -281,7 +281,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             refreshVisibleItems()
             scrollSelectedTabVisible()
             return
-        case .tabUpdated(let index):
+        case .tabUpdated(let index), .bufferEdited(let index):
             guard tabs.count == change.snapshot.tabs.count,
                   tabs.indices.contains(index) else {
                 apply(tabs: change.snapshot.tabs)

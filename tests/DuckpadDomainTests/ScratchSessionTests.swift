@@ -16,6 +16,40 @@ import Testing
     #expect(!buffer.isDirty)
 }
 
+@Test func languageOverrideRoundTripsAndSurvivesFileBinding() throws {
+    var session = ScratchSession()
+    let tab = session.addUntitled()
+    let swift = LanguageID(rawValue: "swift")
+    try session.setLanguageOverride(.manual(swift), for: tab)
+    let binding = FileBinding(
+        canonicalPath: "/tmp/sample.txt",
+        encoding: .utf8,
+        byteOrderMark: .absent,
+        lineEnding: .lf,
+        observedIdentity: FileIdentity(
+            canonicalPath: "/tmp/sample.txt", device: 1, inode: 2,
+            byteCount: 0, modifiedNanoseconds: 0, contentToken: "empty"
+        )
+    )
+    try session.bindFile(tabID: tab, binding: binding, title: "sample.txt")
+    let decoded = try JSONDecoder().decode(ScratchSession.self, from: JSONEncoder().encode(session))
+    #expect(try decoded.languageOverride(for: tab) == .manual(swift))
+    var automatic = decoded
+    try automatic.setLanguageOverride(.automatic, for: tab)
+    #expect(try automatic.languageOverride(for: tab) == .automatic)
+}
+
+@Test func legacySessionWithoutLanguageOverridesMigratesToAutomatic() throws {
+    var session = ScratchSession()
+    let tab = session.addUntitled()
+    let encoded = try JSONEncoder().encode(session)
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    object.removeValue(forKey: "languageOverrides")
+    let legacy = try JSONSerialization.data(withJSONObject: object)
+    let decoded = try JSONDecoder().decode(ScratchSession.self, from: legacy)
+    #expect(try decoded.languageOverride(for: tab) == .automatic)
+}
+
 @Test func incrementalEditAdvancesOnlyExpectedBufferRevision() throws {
     var session = ScratchSession()
     let first = session.addUntitled()

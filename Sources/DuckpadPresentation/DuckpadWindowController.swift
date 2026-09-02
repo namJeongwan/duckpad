@@ -13,6 +13,11 @@ public struct SearchPanelSmokeState: Equatable, Sendable {
     public let height: Double
 }
 
+public struct LanguageStatusSmokeState: Equatable, Sendable {
+    public let text: String
+    public let isWarning: Bool
+}
+
 private enum CloseRetryContext {
     /// Stable IDs capture the exact single/bulk command target set without
     /// retaining a stale tab snapshot or AppKit object.
@@ -127,7 +132,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
     private let activeEditor: any EditorPort
     private let searchPanel = SearchPanelView(frame: .zero)
+    private let languageStatus = NSTextField(labelWithString: "Plain Text")
     private var searchUseCase: SearchWorkspaceUseCase?
+    private var languageUseCase: LanguageWorkspaceUseCase?
     private let editorHostView: NSView
     private let fileUseCase: FileDocumentUseCase?
     private let filePanels: (any FilePanelPresenting)?
@@ -146,6 +153,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var terminationRetrySaveTabID: TabID?
     private var searchTask: Task<Void, Never>?
     private var searchOperationID: UInt64 = 0
+    private var languageValidated = false
+    private var languageDetectionTask: Task<Void, Never>?
+    private var appliedThemePalette: EditorThemePalette?
 
     public init(
         workspace: ScratchWorkspaceUseCase,
@@ -160,6 +170,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         recoveryUseCase: SessionRecoveryUseCase? = nil,
         terminationCoordinator: ApplicationTerminationCoordinator? = nil,
         searchUseCase: SearchWorkspaceUseCase? = nil,
+        languageUseCase: LanguageWorkspaceUseCase? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
         automaticallyStarts: Bool = true
     ) {
@@ -179,6 +190,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.pathActionHandler = pathActionHandler ?? NativeTabPathActionHandler()
         self.recoveryUseCase = recoveryUseCase
         self.searchUseCase = searchUseCase
+        self.languageUseCase = languageUseCase
         tabCloseCoordinator = TabCloseCoordinator(workspace: workspace)
         self.terminationCoordinator = terminationCoordinator
         self.approvedWindowClose = approvedWindowClose ?? { $0.performClose(nil) }
@@ -211,6 +223,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         searchPanel.onCancel = { [weak self] in self?.cancelSearch() }
         searchPanel.onClose = { [weak self] in self?.closeSearchPanel() }
         workspace.onChange = { [weak self] change in self?.handle(change) }
+        languageUseCase?.onStateChange = { [weak self] state in self?.renderLanguageState(state) }
         renderInitial(workspace.snapshot())
         if automaticallyStarts { start() }
     }
@@ -218,12 +231,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     deinit {
         startTask?.cancel()
         searchTask?.cancel()
+        languageDetectionTask?.cancel()
     }
 
     public override func close() {
         window?.delegate = nil
         workspace.onChange = nil
         activeEditor.onEdit = nil
+        languageUseCase?.onStateChange = nil
         editorBinding = nil
         errorPresenter = nil
         tabStrip.tearDownHostedViews()
@@ -261,6 +276,36 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             isVisible: !searchPanel.isHidden,
             height: searchPanel.frame.height
         )
+    }
+
+    public func languageStatusSmokeState() -> LanguageStatusSmokeState {
+        LanguageStatusSmokeState(
+            text: languageStatus.stringValue,
+            isWarning: languageStatus.textColor == .systemOrange
+        )
+    }
+
+    public var languageDefinitions: [LanguageDefinition] { languageUseCase?.registry.definitions ?? [] }
+
+    @objc public func performAutomaticLanguage(_ sender: Any?) {
+        Task { @MainActor [weak self] in _ = await self?.languageUseCase?.setOverride(.automatic) }
+    }
+
+    @objc public func performChooseLanguage(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String else { return }
+        Task { @MainActor [weak self] in
+            _ = await self?.languageUseCase?.setOverride(.manual(LanguageID(rawValue: raw)))
+        }
+    }
+
+    @objc public func performToggleLineComment(_ sender: Any?) { _ = languageUseCase?.toggleLineComment() }
+
+    @objc public func performShowLanguageChooser(_ sender: Any?) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Choose Language"
+        alert.informativeText = "Use the Language menu to choose from \(languageDefinitions.count) bundled languages."
+        alert.beginSheetModal(for: window)
     }
 
     func start() {
@@ -468,6 +513,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         root.view.addSubview(tabStrip)
         root.view.addSubview(searchPanel)
         root.view.addSubview(editorHostView)
+        languageStatus.translatesAutoresizingMaskIntoConstraints = false
+        languageStatus.font = .systemFont(ofSize: 11)
+        languageStatus.textColor = .secondaryLabelColor
+        languageStatus.alignment = .right
+        languageStatus.setAccessibilityIdentifier("duckpad.language.status")
+        root.view.addSubview(languageStatus)
         NSLayoutConstraint.activate([
             banner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             banner.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
@@ -482,6 +533,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             editorHostView.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             editorHostView.topAnchor.constraint(equalTo: searchPanel.bottomAnchor),
             editorHostView.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
+            languageStatus.trailingAnchor.constraint(equalTo: root.view.trailingAnchor, constant: -10),
+            languageStatus.bottomAnchor.constraint(equalTo: root.view.bottomAnchor, constant: -5),
         ])
         window?.contentViewController = root
         return injectedPresenter ?? banner
@@ -498,13 +551,43 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func handle(_ change: WorkspaceChange) {
         tabStrip.apply(change: change)
         tabStrip.setInteractionsEnabled(change.snapshot.startup == .ready)
+        let firstLanguageValidation = change.snapshot.startup == .ready && !languageValidated
+        var registryReady = true
+        if firstLanguageValidation {
+            languageValidated = true
+            registryReady = languageUseCase?.validateRegistry() ?? false
+        }
         editorBinding.render(change)
         updateWindowTitle(change.snapshot)
         recoveryUseCase?.workspaceDidChange(change)
+        if change.snapshot.startup == .ready, case .bufferEdited = change.kind {
+            languageDetectionTask?.cancel()
+            languageDetectionTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(180))
+                guard !Task.isCancelled else { return }
+                _ = self?.languageUseCase?.refreshActive()
+            }
+        } else if change.snapshot.startup == .ready, shouldRefreshLanguage(for: change) {
+            if firstLanguageValidation {
+                if registryReady { _ = languageUseCase?.refreshActive() }
+            } else { _ = languageUseCase?.refreshActive() }
+        }
+        updateLanguageTheme()
         guard let event = change.failureEvent, handledFailureIDs.insert(event.id).inserted else { return }
         errorPresenter.present(failure: event.failure) { [weak self] in
             guard let self else { return }
             Task { [weak workspace] in _ = await workspace?.retry(event.retry) }
+        }
+    }
+
+    private func shouldRefreshLanguage(for change: WorkspaceChange) -> Bool {
+        switch change.kind {
+        case .reset, .tabInserted, .activeTabChanged, .tabRemoved:
+            return true
+        case .tabUpdated(let index):
+            return change.snapshot.tabs.indices.contains(index) && change.snapshot.tabs[index].isActive
+        case .bufferEdited, .persistence, .tabsReordered:
+            return false
         }
     }
 
@@ -840,5 +923,35 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         window?.title = "\(active.title) — Duckpad"
         window?.isDocumentEdited = active.isDirty
+    }
+
+    private func renderLanguageState(_ state: LanguageServiceState) {
+        switch state {
+        case .ready(let detection, let fallback):
+            let name = languageUseCase?.registry[detection.languageID]?.displayName ?? detection.languageID.rawValue
+            let tier = languageUseCase?.registry[detection.languageID]?.supportTier
+            let suffix = tier == .structural ? " · structural" : ""
+            languageStatus.stringValue = fallback ? "\(name) · styling paused (large file)" : name + suffix
+            languageStatus.textColor = .secondaryLabelColor
+        case .unavailableManual(let requestedID, let fallbackID):
+            let fallbackName = languageUseCase?.registry[fallbackID]?.displayName ?? fallbackID.rawValue
+            languageStatus.stringValue = "Unavailable language: \(requestedID.rawValue) · using \(fallbackName)"
+            languageStatus.textColor = .systemOrange
+        case .degraded(let reason):
+            languageStatus.stringValue = "Plain Text · \(reason)"
+            languageStatus.textColor = .systemOrange
+        }
+    }
+
+    private func updateLanguageTheme() {
+        guard let appearance = window?.effectiveAppearance else { return }
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let highContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        let palette: EditorThemePalette = highContrast
+            ? (dark ? .highContrastDark : .highContrastLight)
+            : (dark ? .dark : .light)
+        guard palette != appliedThemePalette else { return }
+        appliedThemePalette = palette
+        languageUseCase?.applyTheme(palette)
     }
 }

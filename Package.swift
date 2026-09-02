@@ -23,7 +23,20 @@ let package = Package(
             linkerSettings: [.linkedLibrary("icucore")]
         ),
         .target(
+            name: "DuckpadLexilla",
+            path: "Vendor/Lexilla/5.5.3",
+            sources: ["src/Lexilla.cxx", "lexlib", "lexers"],
+            publicHeadersPath: "include",
+            cxxSettings: [
+                .headerSearchPath("lexlib"),
+                .headerSearchPath("scintilla/include"),
+                .define("LEXILLA_NO_EXPORT"),
+                .define("NDEBUG", .when(configuration: .release)),
+            ]
+        ),
+        .target(
             name: "DuckpadScintillaBridge",
+            dependencies: ["DuckpadLexilla"],
             path: "Vendor/Scintilla/5.6.6",
             sources: [
                 "bridge/DuckpadScintillaBridge.mm",
@@ -60,7 +73,8 @@ let package = Package(
         .target(name: "DuckpadApplication", dependencies: ["DuckpadDomain"]),
         .target(
             name: "DuckpadInfrastructure",
-            dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadICUBridge"]
+            dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadICUBridge"],
+            resources: [.process("Resources/Languages.json")]
         ),
         .target(
             name: "DuckpadPresentation",

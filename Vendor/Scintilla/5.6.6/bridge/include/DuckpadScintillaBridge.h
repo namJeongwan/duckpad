@@ -19,6 +19,13 @@ typedef NS_ENUM(NSInteger, DPScintillaEditOrigin) {
     DPScintillaEditOriginRedo = 2,
 };
 
+typedef NS_ENUM(NSInteger, DPScintillaPalette) {
+    DPScintillaPaletteLight = 0,
+    DPScintillaPaletteDark = 1,
+    DPScintillaPaletteHighContrastLight = 2,
+    DPScintillaPaletteHighContrastDark = 3,
+};
+
 /// An owned edit value. `range` is measured in UTF-8 bytes, never UTF-16.
 @interface DPScintillaEdit : NSObject
 @property(nonatomic, readonly) NSRange range;
@@ -52,6 +59,18 @@ typedef NS_ENUM(NSInteger, DPScintillaEditOrigin) {
 @property(nonatomic, readonly) NSUInteger snapshotReadCount;
 @property(nonatomic, readonly) NSUInteger incrementalNotificationCount;
 @property(nonatomic, readonly) NSUInteger incrementalPayloadByteCount;
+@property(nonatomic, readonly, copy) NSString *lexerName;
+@property(nonatomic, readonly) BOOL languageStylingFallback;
+@property(nonatomic, readonly) NSUInteger languageConfigurationCount;
+@property(nonatomic, readonly) NSUInteger commentCommandInspectedByteCount;
+@property(nonatomic, readonly) NSUInteger synchronouslyStyledByteCount;
+@property(nonatomic, readonly) NSUInteger configuredTabWidth;
+@property(nonatomic, readonly) BOOL configuredUseTabs;
+@property(nonatomic, readonly) BOOL configuredFoldingEnabled;
+@property(nonatomic, readonly) BOOL configuredBraceMatchingEnabled;
+@property(nonatomic, readonly) NSInteger highlightedBraceUTF8Position;
+@property(nonatomic, readonly) NSInteger matchingBraceUTF8Position;
+@property(nonatomic, readonly) NSInteger badBraceUTF8Position;
 
 - (BOOL)loadUTF8:(NSData *)content
          revision:(uint64_t)revision
@@ -93,6 +112,23 @@ typedef NS_ENUM(NSInteger, DPScintillaEditOrigin) {
 - (void)beginGroupedUndo;
 - (void)endGroupedUndo;
 - (void)focusEditor;
+- (BOOL)applyLexerNamed:(NSString *)lexerName
+               keywords:(NSArray<NSString *> *)keywords
+                tabWidth:(NSUInteger)tabWidth
+                 useTabs:(BOOL)useTabs
+                 folding:(BOOL)folding
+           braceMatching:(BOOL)braceMatching
+        maximumStyleBytes:(NSUInteger)maximumStyleBytes;
+- (NSData *)contentPrefixUTF8WithMaximumLength:(NSUInteger)maximumLength;
+- (void)applyPalette:(DPScintillaPalette)palette;
+- (NSInteger)styleAtUTF8Position:(NSUInteger)position;
+- (NSUInteger)foregroundColorForStyle:(NSInteger)style;
+- (NSInteger)foldLevelAtLine:(NSUInteger)line;
+- (BOOL)isFoldExpandedAtLine:(NSUInteger)line;
+- (void)toggleFoldAtLine:(NSUInteger)line;
+- (void)updateBraceHighlight;
+- (BOOL)toggleLineCommentsWithPrefixUTF8:(NSData *)prefix;
++ (BOOL)supportsLexerNamed:(NSString *)lexerName;
 - (void)resetInstrumentation;
 @end
 

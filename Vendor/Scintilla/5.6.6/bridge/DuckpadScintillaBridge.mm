@@ -3,6 +3,13 @@
 #import "ScintillaView.h"
 
 #include <limits>
+#include <algorithm>
+#include <cctype>
+#include <string>
+#include <utility>
+#include <vector>
+#include "ILexer.h"
+#include "Lexilla.h"
 
 NSErrorDomain const DPScintillaErrorDomain = @"app.duckpad.scintilla";
 static NSURL *DPScintillaResourceDirectory;
@@ -62,6 +69,19 @@ NSString *DPScintillaResourcePath(NSString *name) {
     NSUInteger _lastZeroLengthSearchPosition;
     BOOL _lastSearchWasZeroLength;
     BOOL _lastSearchBackwards;
+    NSString *_lexerName;
+    BOOL _languageStylingFallback;
+    NSUInteger _languageConfigurationCount;
+    NSUInteger _maximumStyleBytes;
+    BOOL _foldingEnabled;
+    BOOL _braceMatchingEnabled;
+    DPScintillaPalette _palette;
+    std::vector<std::pair<int, int>> _semanticStyleRoles;
+    NSUInteger _commentCommandInspectedByteCount;
+    NSUInteger _synchronouslyStyledByteCount;
+    NSInteger _highlightedBraceUTF8Position;
+    NSInteger _matchingBraceUTF8Position;
+    NSInteger _badBraceUTF8Position;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -76,6 +96,28 @@ NSString *DPScintillaResourcePath(NSString *name) {
                      wParam:SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT];
         [_scintilla message:SCI_SETWRAPMODE wParam:SC_WRAP_WORD];
         [_scintilla setFontName:@"Menlo" size:13 bold:NO italic:NO];
+        _lexerName = @"null";
+        _maximumStyleBytes = 16 * 1024 * 1024;
+        _foldingEnabled = YES;
+        _braceMatchingEnabled = YES;
+        _highlightedBraceUTF8Position = -1;
+        _matchingBraceUTF8Position = -1;
+        _badBraceUTF8Position = -1;
+        [_scintilla message:SCI_SETMARGINTYPEN wParam:0 lParam:SC_MARGIN_NUMBER];
+        [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:44];
+        [_scintilla message:SCI_SETMARGINTYPEN wParam:1 lParam:SC_MARGIN_SYMBOL];
+        [_scintilla message:SCI_SETMARGINMASKN wParam:1 lParam:SC_MASK_FOLDERS];
+        [_scintilla message:SCI_SETMARGINSENSITIVEN wParam:1 lParam:1];
+        [_scintilla message:SCI_SETMARGINWIDTHN wParam:1 lParam:14];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEROPEN lParam:SC_MARK_BOXMINUS];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDER lParam:SC_MARK_BOXPLUS];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERSUB lParam:SC_MARK_VLINE];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERTAIL lParam:SC_MARK_LCORNER];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEREND lParam:SC_MARK_BOXPLUSCONNECTED];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEROPENMID lParam:SC_MARK_BOXMINUSCONNECTED];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERMIDTAIL lParam:SC_MARK_TCORNER];
+        [_scintilla message:SCI_SETINDENTATIONGUIDES wParam:SC_IV_LOOKBOTH];
+        [self applyPalette:DPScintillaPaletteLight];
         _requestedInputEnabled = YES;
         self.accessibilityIdentifier = @"duckpad.editor.scintilla";
     }
@@ -91,6 +133,16 @@ NSString *DPScintillaResourcePath(NSString *name) {
 - (NSUInteger)snapshotReadCount { return _snapshotReadCount; }
 - (NSUInteger)incrementalNotificationCount { return _incrementalNotificationCount; }
 - (NSUInteger)incrementalPayloadByteCount { return _incrementalPayloadByteCount; }
+- (NSString *)lexerName { return _lexerName; }
+- (BOOL)languageStylingFallback { return _languageStylingFallback; }
+- (NSUInteger)languageConfigurationCount { return _languageConfigurationCount; }
+- (NSUInteger)commentCommandInspectedByteCount { return _commentCommandInspectedByteCount; }
+- (NSUInteger)synchronouslyStyledByteCount { return _synchronouslyStyledByteCount; }
+- (NSUInteger)configuredTabWidth { return (NSUInteger)[_scintilla message:SCI_GETTABWIDTH]; }
+- (BOOL)configuredUseTabs { return [_scintilla message:SCI_GETUSETABS] != 0; }
+- (NSInteger)highlightedBraceUTF8Position { return _highlightedBraceUTF8Position; }
+- (NSInteger)matchingBraceUTF8Position { return _matchingBraceUTF8Position; }
+- (NSInteger)badBraceUTF8Position { return _badBraceUTF8Position; }
 
 - (NSData *)contentUTF8 {
     _snapshotReadCount += 1;
@@ -351,7 +403,241 @@ NSString *DPScintillaResourcePath(NSString *name) {
 - (void)endGroupedUndo { [_scintilla message:SCI_ENDUNDOACTION]; }
 - (void)focusEditor { [self.window makeFirstResponder:[_scintilla content]]; }
 
++ (BOOL)supportsLexerNamed:(NSString *)lexerName {
+    if (lexerName.length == 0) return NO;
+    Scintilla::ILexer5 *lexer = CreateLexer(lexerName.UTF8String);
+    if (lexer == nullptr) return NO;
+    lexer->Release();
+    return YES;
+}
+
+- (BOOL)applyLexerNamed:(NSString *)lexerName
+               keywords:(NSArray<NSString *> *)keywords
+                tabWidth:(NSUInteger)tabWidth
+                 useTabs:(BOOL)useTabs
+                 folding:(BOOL)folding
+           braceMatching:(BOOL)braceMatching
+        maximumStyleBytes:(NSUInteger)maximumStyleBytes {
+    _languageConfigurationCount += 1;
+    _maximumStyleBytes = maximumStyleBytes;
+    const BOOL overBudget = self.documentByteLength > maximumStyleBytes;
+    _braceMatchingEnabled = braceMatching && !overBudget;
+    NSString *effectiveName = overBudget ? @"null" : lexerName;
+    Scintilla::ILexer5 *lexer = CreateLexer(effectiveName.UTF8String);
+    if (lexer == nullptr) return NO;
+    _semanticStyleRoles.clear();
+    const int namedStyles = lexer->NamedStyles();
+    for (int style = 0; style < namedStyles; style += 1) {
+        std::string semantic;
+        if (const char *name = lexer->NameOfStyle(style)) semantic += name;
+        if (const char *tags = lexer->TagsOfStyle(style)) semantic += tags;
+        if (const char *description = lexer->DescriptionOfStyle(style)) semantic += description;
+        std::transform(semantic.begin(), semantic.end(), semantic.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        int role = 0;
+        if (semantic.find("comment") != std::string::npos) role = 1;
+        else if (semantic.find("number") != std::string::npos) role = 2;
+        else if (semantic.find("keyword") != std::string::npos || semantic.find("word") != std::string::npos) role = 3;
+        else if (semantic.find("string") != std::string::npos || semantic.find("character") != std::string::npos) role = 4;
+        else if (semantic.find("operator") != std::string::npos || semantic.find("brace") != std::string::npos) role = 5;
+        else if (semantic.find("error") != std::string::npos || semantic.find("bad") != std::string::npos) role = 6;
+        _semanticStyleRoles.emplace_back(style, role);
+    }
+    [_scintilla message:SCI_SETILEXER wParam:0 lParam:reinterpret_cast<sptr_t>(lexer)];
+    _lexerName = [effectiveName copy];
+    _languageStylingFallback = overBudget && ![lexerName isEqualToString:@"null"];
+    [_scintilla message:SCI_SETTABWIDTH wParam:MAX(1, MIN(tabWidth, 16))];
+    [_scintilla message:SCI_SETUSETABS wParam:useTabs ? 1 : 0];
+    const BOOL effectiveFolding = folding && !overBudget;
+    _foldingEnabled = effectiveFolding;
+    [_scintilla message:SCI_SETPROPERTY
+                     wParam:reinterpret_cast<uptr_t>("fold")
+                     lParam:reinterpret_cast<sptr_t>(effectiveFolding ? "1" : "0")];
+    [_scintilla message:SCI_SETMARGINWIDTHN wParam:1 lParam:effectiveFolding ? 14 : 0];
+    if (!_braceMatchingEnabled) [self updateBraceHighlight];
+    for (NSUInteger index = 0; index < 16; index += 1) {
+        [_scintilla message:SCI_SETKEYWORDS wParam:index lParam:reinterpret_cast<sptr_t>("")];
+    }
+    for (NSUInteger index = 0; index < keywords.count; index += 1) {
+        [_scintilla message:SCI_SETKEYWORDS
+                     wParam:index
+                     lParam:reinterpret_cast<sptr_t>(keywords[index].UTF8String)];
+    }
+    [self applyPalette:_palette];
+    [_scintilla message:SCI_SETIDLESTYLING wParam:SC_IDLESTYLING_AFTERVISIBLE];
+    if (!overBudget) {
+        const NSUInteger styleEnd = MIN(self.documentByteLength, 262144);
+        [_scintilla message:SCI_COLOURISE wParam:0 lParam:styleEnd];
+        _synchronouslyStyledByteCount += styleEnd;
+    }
+    return YES;
+}
+
+- (void)applyPalette:(DPScintillaPalette)palette {
+    _palette = palette;
+    const BOOL dark = palette == DPScintillaPaletteDark || palette == DPScintillaPaletteHighContrastDark;
+    const BOOL highContrast = palette == DPScintillaPaletteHighContrastLight || palette == DPScintillaPaletteHighContrastDark;
+    const int foreground = dark ? 0xE8E8E8 : 0x202020;
+    const int background = dark ? 0x1E1E1E : 0xFFFFFF;
+    const int comment = dark ? 0x7FD47F : 0x397A32;
+    const int number = dark ? 0xD7A0F8 : 0x7C2F8E;
+    const int keyword = dark ? 0xFFB36B : 0xA23B00;
+    const int stringColour = dark ? 0x7DD6E8 : 0x176A7A;
+    const int operatorColour = dark ? 0xA9C7FF : 0x204F9B;
+    const int errorColour = dark ? 0x8080FF : 0x2020D0;
+    [_scintilla message:SCI_STYLESETFORE wParam:STYLE_DEFAULT lParam:foreground];
+    [_scintilla message:SCI_STYLESETBACK wParam:STYLE_DEFAULT lParam:background];
+    [_scintilla message:SCI_STYLESETFONT wParam:STYLE_DEFAULT lParam:reinterpret_cast<sptr_t>("Menlo")];
+    [_scintilla message:SCI_STYLESETSIZE wParam:STYLE_DEFAULT lParam:13];
+    [_scintilla message:SCI_STYLECLEARALL];
+    [_scintilla message:SCI_STYLESETFORE wParam:STYLE_BRACELIGHT lParam:dark ? 0x80FFFF : 0x7A3D00];
+    [_scintilla message:SCI_STYLESETBACK wParam:STYLE_BRACELIGHT lParam:dark ? 0x503000 : 0xB8F1FF];
+    [_scintilla message:SCI_STYLESETBOLD wParam:STYLE_BRACELIGHT lParam:1];
+    [_scintilla message:SCI_STYLESETFORE wParam:STYLE_BRACEBAD lParam:dark ? 0xA0A0FF : 0x0000CC];
+    [_scintilla message:SCI_STYLESETBACK wParam:STYLE_BRACEBAD lParam:dark ? 0x302060 : 0xD8D8FF];
+    [_scintilla message:SCI_STYLESETBOLD wParam:STYLE_BRACEBAD lParam:1];
+    for (int marker = SC_MARKNUM_FOLDEREND; marker <= SC_MARKNUM_FOLDEROPEN; marker += 1) {
+        [_scintilla message:SCI_MARKERSETFORE wParam:marker lParam:dark ? 0xE8E8E8 : 0x303030];
+        [_scintilla message:SCI_MARKERSETBACK wParam:marker lParam:dark ? 0x505050 : 0xD8D8D8];
+    }
+    for (const auto &[style, role] : _semanticStyleRoles) {
+        if (style == STYLE_BRACELIGHT || style == STYLE_BRACEBAD || style == STYLE_DEFAULT) continue;
+        int colour = foreground;
+        switch (role) {
+            case 1: colour = comment; break;
+            case 2: colour = number; break;
+            case 3: colour = keyword; break;
+            case 4: colour = stringColour; break;
+            case 5: colour = operatorColour; break;
+            case 6: colour = errorColour; break;
+            default: break;
+        }
+        [_scintilla message:SCI_STYLESETFORE wParam:style lParam:colour];
+        [_scintilla message:SCI_STYLESETBOLD wParam:style lParam:highContrast && role == 3];
+    }
+    [_scintilla message:SCI_SETCARETFORE wParam:highContrast ? (dark ? 0xFFFFFF : 0x000000) : foreground];
+    [_scintilla message:SCI_SETSELBACK wParam:1 lParam:dark ? 0x704020 : 0xFFD8B0];
+    [_scintilla setNeedsDisplay:YES];
+}
+
+- (NSData *)contentPrefixUTF8WithMaximumLength:(NSUInteger)maximumLength {
+    const NSUInteger count = MIN(self.documentByteLength, maximumLength);
+    NSMutableData *bytes = [NSMutableData dataWithLength:count + 1];
+    [_scintilla message:SCI_GETTEXT wParam:count + 1 lParam:reinterpret_cast<sptr_t>(bytes.mutableBytes)];
+    bytes.length = count;
+    return bytes;
+}
+
+- (NSInteger)styleAtUTF8Position:(NSUInteger)position {
+    if (position >= self.documentByteLength) return -1;
+    return [_scintilla message:SCI_GETSTYLEAT wParam:position];
+}
+- (NSUInteger)foregroundColorForStyle:(NSInteger)style { return (NSUInteger)[_scintilla message:SCI_STYLEGETFORE wParam:style]; }
+- (BOOL)configuredFoldingEnabled { return _foldingEnabled; }
+- (BOOL)configuredBraceMatchingEnabled { return _braceMatchingEnabled; }
+
+- (NSInteger)foldLevelAtLine:(NSUInteger)line {
+    return [_scintilla message:SCI_GETFOLDLEVEL wParam:line];
+}
+- (BOOL)isFoldExpandedAtLine:(NSUInteger)line { return [_scintilla message:SCI_GETFOLDEXPANDED wParam:line] != 0; }
+
+- (void)toggleFoldAtLine:(NSUInteger)line { [_scintilla message:SCI_TOGGLEFOLD wParam:line]; }
+
+- (void)updateBraceHighlight {
+    if (!_braceMatchingEnabled) {
+        [_scintilla message:SCI_BRACEHIGHLIGHT wParam:-1 lParam:-1];
+        _highlightedBraceUTF8Position = -1;
+        _matchingBraceUTF8Position = -1;
+        _badBraceUTF8Position = -1;
+        return;
+    }
+    const NSInteger caret = [_scintilla message:SCI_GETCURRENTPOS];
+    NSInteger brace = -1;
+    const auto isBrace = [](NSInteger character) {
+        return character == '(' || character == ')' || character == '[' || character == ']'
+            || character == '{' || character == '}';
+    };
+    if (caret > 0) {
+        const NSInteger before = [_scintilla message:SCI_GETCHARAT wParam:caret - 1];
+        if (isBrace(before)) brace = caret - 1;
+    }
+    if (brace < 0) {
+        const NSInteger at = [_scintilla message:SCI_GETCHARAT wParam:caret];
+        if (isBrace(at)) brace = caret;
+    }
+    if (brace < 0) {
+        [_scintilla message:SCI_BRACEHIGHLIGHT wParam:-1 lParam:-1];
+        _highlightedBraceUTF8Position = -1;
+        _matchingBraceUTF8Position = -1;
+        _badBraceUTF8Position = -1;
+        return;
+    }
+    const NSInteger matching = [_scintilla message:SCI_BRACEMATCH wParam:brace lParam:0];
+    if (matching < 0) {
+        [_scintilla message:SCI_BRACEBADLIGHT wParam:brace];
+        _highlightedBraceUTF8Position = -1;
+        _matchingBraceUTF8Position = -1;
+        _badBraceUTF8Position = brace;
+    } else {
+        [_scintilla message:SCI_BRACEHIGHLIGHT wParam:brace lParam:matching];
+        _highlightedBraceUTF8Position = brace;
+        _matchingBraceUTF8Position = matching;
+        _badBraceUTF8Position = -1;
+    }
+}
+
+- (BOOL)toggleLineCommentsWithPrefixUTF8:(NSData *)prefix {
+    if (prefix.length == 0 || [[NSString alloc] initWithData:prefix encoding:NSUTF8StringEncoding] == nil) return NO;
+    const NSInteger anchor = [_scintilla message:SCI_GETANCHOR];
+    const NSInteger caret = [_scintilla message:SCI_GETCURRENTPOS];
+    const NSInteger lower = MIN(anchor, caret);
+    const NSInteger upper = MAX(anchor, caret);
+    NSInteger firstLine = [_scintilla message:SCI_LINEFROMPOSITION wParam:lower];
+    NSInteger lastLine = [_scintilla message:SCI_LINEFROMPOSITION wParam:upper];
+    if (upper > lower && [_scintilla message:SCI_POSITIONFROMLINE wParam:lastLine] == upper) lastLine -= 1;
+    if (lastLine < firstLine) lastLine = firstLine;
+
+    struct LineEdit { NSUInteger position; BOOL remove; };
+    std::vector<LineEdit> edits;
+    BOOL allCommented = YES;
+    for (NSInteger line = firstLine; line <= lastLine; line += 1) {
+        const NSInteger start = [_scintilla message:SCI_POSITIONFROMLINE wParam:line];
+        const NSInteger end = [_scintilla message:SCI_GETLINEENDPOSITION wParam:line];
+        const NSInteger indent = [_scintilla message:SCI_GETLINEINDENTPOSITION wParam:line];
+        if (end <= indent) continue;
+        BOOL hasPrefix = indent + (NSInteger)prefix.length <= end;
+        for (NSUInteger index = 0; hasPrefix && index < prefix.length; index += 1) {
+            const NSInteger character = [_scintilla message:SCI_GETCHARAT wParam:indent + index];
+            _commentCommandInspectedByteCount += 1;
+            if (character != ((const unsigned char *)prefix.bytes)[index]) hasPrefix = NO;
+        }
+        edits.push_back({static_cast<NSUInteger>(indent), hasPrefix});
+        if (!hasPrefix) allCommented = NO;
+        _commentCommandInspectedByteCount += static_cast<NSUInteger>(MAX(0, indent - start));
+    }
+    if (edits.empty()) return YES;
+    [_scintilla message:SCI_BEGINUNDOACTION];
+    for (auto iterator = edits.rbegin(); iterator != edits.rend(); ++iterator) {
+        const NSUInteger removeLength = allCommented ? prefix.length : 0;
+        [_scintilla message:SCI_SETTARGETSTART wParam:iterator->position];
+        [_scintilla message:SCI_SETTARGETEND wParam:iterator->position + removeLength];
+        static const char empty = '\0';
+        const void *bytes = allCommented ? static_cast<const void *>(&empty) : prefix.bytes;
+        const NSUInteger length = allCommented ? 0 : prefix.length;
+        [_scintilla message:SCI_REPLACETARGET wParam:length lParam:reinterpret_cast<sptr_t>(bytes)];
+    }
+    [_scintilla message:SCI_ENDUNDOACTION];
+    return YES;
+}
+
 - (void)notification:(SCNotification *)notification {
+    if (notification->nmhdr.code == SCN_MARGINCLICK && notification->margin == 1) {
+        const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:notification->position];
+        [_scintilla message:SCI_TOGGLEFOLD wParam:line];
+        return;
+    }
+    if (notification->nmhdr.code == SCN_UPDATEUI) {
+        [self updateBraceHighlight];
+    }
     if (_suppressEdit || notification->nmhdr.code != SCN_MODIFIED) return;
     const int flags = notification->modificationType;
     const BOOL inserted = (flags & SC_MOD_INSERTTEXT) != 0;
@@ -424,6 +710,8 @@ NSString *DPScintillaResourcePath(NSString *name) {
     _snapshotReadCount = 0;
     _incrementalNotificationCount = 0;
     _incrementalPayloadByteCount = 0;
+    _synchronouslyStyledByteCount = 0;
+    _commentCommandInspectedByteCount = 0;
 }
 
 - (BOOL)fail:(DPScintillaErrorCode)code description:(NSString *)description error:(NSError **)error {

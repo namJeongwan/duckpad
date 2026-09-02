@@ -1,0 +1,4 @@
+# Preserve the exact official Lexilla 5.5.3 source bytes. Its upstream archive
+# contains historical whitespace that must not be normalized to satisfy a
+# repository diagnostic; Duckpad-owned paths retain Git's strict defaults.
+/Vendor/Lexilla/5.5.3/** whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

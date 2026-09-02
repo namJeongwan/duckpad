@@ -36,6 +36,7 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 22 | [Phase 6 independent code review](reviews/2026-09-03-phase-6-search-replace-code-review.md) | **Rejected — superseded review evidence** | regex Whole Word, terminal zero-length progress, fixed selection Replace All의 최초 3 Major와 당시 debug/release/smoke/probe evidence를 기록한다. |
 | 23 | [Phase 6 remediation re-review](reviews/2026-09-03-phase-6-search-replace-rereview.md) | **Rejected — superseded review evidence** | P6-01/P6-02 closure와 당시 selection nil/invalidation이 전체 문서 치환으로 확장되던 P6-03 잔여 Major를 기록한다. |
 | 24 | [Phase 6 final remediation re-review](reviews/2026-09-03-phase-6-search-replace-final-rereview.md) | **Content approved — latest Phase 6 evidence** | 공통 typed selection preflight, 무변경/undo/recovery 보존, P6-01~P6-03 closure와 132-test evidence를 기록한다. |
+| 25 | [Phase 7 language and Lexilla integration](10-language-support.md) | **Implemented; review pending** | official Lexilla 5.5.3 provenance, 78-language registry/detection, exact 20-language keyword-complete tier, persisted overrides, bounded semantic styling, fold/brace/indent/comment UX를 기록한다. |
 
 상태 정의:
 
@@ -91,6 +92,25 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 7 language and Lexilla integration
+
+- **Agent/role:** `/root/philosophy_parity`, product builder; independent review/staging/commit은 수행하지 않는다.
+- **Implementation:** official standalone Lexilla 5.5.3을 pinned SHA로 재현 가능하게 vendor하고, Domain/Application/Infrastructure/EditorAdapter/Presentation에 language registry, deterministic detection, document override/recovery, semantic palette, line/fold/brace/indent/comment UX를 [Phase 7 문서](10-language-support.md)에 구현·기록했다.
+- **Guard collaboration:** Russell (`/root/clean_architecture`)의 WIP architecture guard findings를 반영해 semantic style metadata, exact shebang, ambiguity, runtime lexer resolution, explicit support/capability tiers, large-file zero-sync fallback, full configuration cache, persistence/theme no-op, bounded grouped comment command로 hardening했다.
+- **Validation:** focused Phase 7 18/18 PASS, 전체 debug/release/fresh 각 150/150 PASS, x86_64 macOS 13 release build/link PASS 및 production language smoke PASS를 확인했다. 상세 command/evidence는 Phase 7 문서의 final log에 기록했다. README/NPP/stage/commit 없음; 기존 unstaged 문서 04/vendor script 보존.
+
+### 2026-09-03 — Phase 7 P7-01 remediation
+
+- **Agent/role:** `/root/philosophy_parity`, product builder; 독립 review 문서는 수정하지 않았고 stage/commit 권한도 사용하지 않았다.
+- **Finding/remediation:** reviewer의 P7-01에 따라 제거된 registry ID를 가진 persisted manual override를 typed unavailable 상태로 승격했다. Plain Text/null lexer 안전 fallback은 유지하되 ID를 Auto로 바꾸지 않고, controller status에 missing ID/fallback warning을 표시하며 메뉴에는 Auto와 현재 available choices를 유지한다.
+- **Acceptance:** Application 및 hosted WindowController/status/menu 회귀 테스트가 unknown recovery, 무변경 text/revision/recovery, explicit Auto reset/redetection을 검증한다. focused Phase 7 20/20 PASS, full debug/release/fresh 각 152/152 PASS, native release language smoke PASS를 [Phase 7 문서](10-language-support.md)에 기록했다.
+
+### 2026-09-03 — Phase 7 upstream whitespace policy correction
+
+- **Agent/role:** `/root/philosophy_parity`, builder. 임시 whitespace 환경 우회로 생성한 candidate `00788bcd…`는 사용·commit하지 않고 index를 `HEAD`로 복원했다. task가 저장한 `core.whitespace`/`apply.whitespace` config는 없다.
+- **Policy:** official byte identity를 깨는 source 정리 대신 tracked `.gitattributes`를 정확한 `Vendor/Lexilla/5.5.3/**`에만 한정했다. upstream에 이미 존재하는 blank-at-EOL/EOF 및 space-before-tab 진단만 비활성화하며 Duckpad/nonvendor 경로는 strict default를 유지한다. EOL/filter/content 변환은 없다.
+- **Evidence/review boundary:** clean temp root의 vendor script 재실행 결과 165파일 `diff -qr` PASS, generated provenance를 제외한 164 official 파일의 current/reproduced digest는 동일한 `6c44a2b96fc27c52ebcedec5a2dfe5b8f5f62e7eb6c30b7d50773446c2b6162d`다. vendor attribute/no-diagnostic, nonvendor unspecified/strict rejection, normal-config isolated 192-path cached check와 real empty-index check가 모두 기대대로 동작했다. 새 `.gitattributes`와 문서 bytes가 independent review를 받기 전에는 stage/prepare/commit하지 않는다.
 
 ### 2026-09-03 — Phase 6 header EOF hygiene confirmation
 
@@ -317,3 +337,29 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - **Regression evidence:** 실제 Retry closure invocation 뒤 initial false reply 1회, 새 `terminateLater`, newest revision file save, remaining tab review, recovery durable commit/final flush와 new true reply를 검증했다. ordinary single-close latest-revision test도 유지된다. focused 2/2와 debug/release/fresh full 각각 116/116 PASS; AppKit smoke는 50 tabs/17 rows와 exit 0을 확인했다.
 - **Deterministic synchronization:** newest edit 전에 workspace pending persistence를 명시적으로 await하고 active tab/editor state를 확인한 뒤, edit 직후 revision 증가와 content 수용을 동기적으로 검증한다. termination completion은 checked continuation으로 기다린다. isolated 10/10, debug full 3회 연속, release/fresh 116/116과 AppKit smoke가 통과했다.
 - **Safety:** [Phase 5 문서](08-multiline-tabs.md)와 P5-03 source/test만 수정했다. re-review verdict, README/Notepad++ reference, stage/commit은 건드리지 않았고 기존 unstaged 문서 04/vendor script를 보존했다.
+
+### 2026-09-03 — Phase 7 language/Lexilla independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent Phase 7 content reviewer; builder와 분리된 verdict만 판정한다.
+- **Scope:** 현재 unstaged Phase 7 language/Lexilla 188-file product/acceptance manifest의 official provenance/license/reproduction, 78-language registry/detection/migration, Clean Architecture, production wiring/menu/status, semantic style/fold/brace/comment, 16/50 MiB bounds, tests/build/smoke를 검토했다. 기존 unrelated 문서 04/vendor-Scintilla script는 제외·보존했다.
+- **Verdict:** **CHANGES_REQUIRED — 0 Blocker, 1 Major, 0 Minor.** P7-01은 recovery의 unknown persisted manual language를 detector가 unavailable로 식별하고도 service/controller가 ordinary Plain Text ready 상태로 축소하여 unavailable ID/reason을 UI에서 숨기는 결함이다.
+- **Validation:** official Lexilla 5.5.3 tar SHA와 165-file vendor subset/header identity PASS; registry 78 = keywordComplete 20 + structural 57 + plain 1, distinct lexer 64/runtime resolution PASS; focused 18/18, debug/release/fresh 150/150, language smoke, arm64 minOS 13 및 x86_64 cross-build를 검증했다.
+- **Record:** 상세 finding/evidence와 exact manifest digest는 [Phase 7 review](reviews/2026-09-03-phase-7-language-lexilla-code-review.md)에 기록했다. 이 review 문서와 index entry만 수정했고 reviewed source/test를 수정·stage·commit하지 않았다.
+
+### 2026-09-03 — Phase 7 P7-01 independent remediation re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent focused re-reviewer; builder와 분리된 content verdict만 판정한다.
+- **Scope/closure:** P7-01만 재검증했다. unknown persisted manual ID는 세션에 그대로 남고 typed `unavailableManual`로 노출되며, editor에는 안전한 Plain Text/null lexer가 적용된다. hosted UI는 missing ID와 fallback을 warning으로 표시하고 menu는 Auto와 현재 available choices만 제공한다. 명시적 Auto만 override를 제거하고 shebang 언어를 재감지한다.
+- **Invariants:** unavailable refresh와 표시가 text/revision/undo/recovery를 바꾸지 않으며 line-comment edit도 실행하지 않는다. 기존 real Scintilla language/theme invariant test도 유지된다.
+- **Validation:** focused 20/20, debug 152/152, release 152/152, production language smoke, official Lexilla subset/header byte identity와 diff/stage hygiene가 통과했다. current 188-file product/acceptance path+byte digest는 `5084e062667752851bc79a983b464588bc2d62d74cc4371beb38bf2368408f86`이다.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** exact-candidate receipt 전까지 commit authorization은 부여하지 않는다. 상세 evidence는 [Phase 7 P7-01 re-review](reviews/2026-09-03-phase-7-language-lexilla-rereview.md)에 기록했다.
+- **Safety:** 이 re-review 문서와 index entry만 수정했다. reviewed source/test를 수정·stage·commit하지 않았다.
+
+### 2026-09-03 — Phase 7 upstream whitespace policy independent confirmation
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; abandoned candidate나 builder의 환경 우회를 신뢰하지 않고 현재 bytes를 재검증했다.
+- **Policy:** root `.gitattributes`의 `/Vendor/Lexilla/5.5.3/** whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab`만 적용된다. 다른 version/vendor/Duckpad 경로는 `unspecified`이고 text/EOL/filter/encoding transform은 없다. 세 vendor diagnostic fixture는 허용되고 동등한 nonvendor fixture는 strict error로 거절됐다.
+- **Reproduction/hygiene:** current vendor script를 새 temp root에서 실행하여 165/165 `diff -qr` byte identity PASS; official archive SHA 고정도 유지된다. eventual 192-path alternate index의 cached check PASS, real index 0, whitespace git config override 0이다.
+- **Regression/content:** P7-01의 네 source/test SHA는 직전 approval과 동일하고 post-policy focused 20/20 PASS다. full current Phase 7 content approval을 유지한다.
+- **Manifest/verdict:** 189-file product/acceptance path digest `c1dd9781d9212530d35290250def28264272308985538bf558830e52ea84f840`, path+byte digest `f17f16b381359b6c73e8d5a9395d2ddfd372da1e82d43a404b2d5fd45fa234be`; **APPROVED — 0 Blocker, 0 Major, 0 Minor.** 상세 evidence는 [Phase 7 re-review](reviews/2026-09-03-phase-7-language-lexilla-rereview.md)에 추가했다.
+- **Safety:** review evidence/index만 수정했고 source/test/stage/commit은 변경하지 않았다.

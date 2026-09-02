@@ -33,6 +33,21 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             editor: editor,
             regexEngine: ICURegexEngine()
         )
+        let languageRegistry: LanguageRegistry
+        let languageConfigurationIssue: String?
+        do {
+            languageRegistry = try LanguageManifestLoader().loadBundled()
+            languageConfigurationIssue = nil
+        } catch {
+            languageRegistry = LanguageManifestLoader.fallbackRegistry
+            languageConfigurationIssue = "Language registry degraded: \(error)"
+        }
+        let languageUseCase = LanguageWorkspaceUseCase(
+            registry: languageRegistry,
+            workspace: workspace,
+            editor: editor,
+            configurationIssue: languageConfigurationIssue
+        )
         let panels = NativeFilePanelAdapter()
         let terminationCoordinator = ApplicationTerminationCoordinator()
         let controller = DuckpadWindowController(
@@ -45,7 +60,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             dirtyDecisionPresenter: panels,
             recoveryUseCase: recoveryUseCase,
             terminationCoordinator: terminationCoordinator,
-            searchUseCase: searchUseCase
+            searchUseCase: searchUseCase,
+            languageUseCase: languageUseCase
         )
         windowController = controller
         self.terminationCoordinator = terminationCoordinator
@@ -55,7 +71,30 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         installMainMenu(target: controller)
         controller.showAndFocus()
 
-        if environment["DUCKPAD_SEARCH_SMOKE"] == "1" {
+        if environment["DUCKPAD_LANGUAGE_SMOKE"] == "1" {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                guard let view = editor.activeScintillaView else {
+                    preconditionFailure("language smoke editor missing")
+                }
+                view.insertCommittedText("let duck = \"한글 🦆\"\n")
+                _ = await languageUseCase.setOverride(.manual(LanguageID(rawValue: "swift")))
+                guard editor.activeLanguageID.rawValue == "swift", view.lexerName == "cpp",
+                      view.style(atUTF8Position: 0) == 5 else {
+                    preconditionFailure("Swift Lexilla styling smoke failed")
+                }
+                let revision = view.revision
+                languageUseCase.applyTheme(.dark)
+                guard view.revision == revision else { preconditionFailure("theme mutated text revision") }
+                _ = await languageUseCase.setOverride(.manual(LanguageID(rawValue: "python")))
+                guard editor.activeLanguageID.rawValue == "python", view.lexerName == "python" else {
+                    preconditionFailure("Python lexer switch smoke failed")
+                }
+                print("Duckpad language smoke ready: Lexilla 5.5.3 Swift/Python + dark palette")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
+        } else if environment["DUCKPAD_SEARCH_SMOKE"] == "1" {
             Task { @MainActor in
                 await controller.waitForStartup()
                 guard let view = editor.activeScintillaView else {

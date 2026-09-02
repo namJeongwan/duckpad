@@ -76,7 +76,7 @@ public final class SessionRecoveryUseCase {
         switch change.kind {
         case .persistence:
             return
-        case .reset, .tabInserted, .activeTabChanged, .tabUpdated, .tabRemoved, .tabsReordered:
+        case .reset, .tabInserted, .activeTabChanged, .tabUpdated, .bufferEdited, .tabRemoved, .tabsReordered:
             changeSerial &+= 1
             scheduleAutosave()
         }

@@ -115,6 +115,53 @@ public protocol EditorPort: AnyObject {
     func installRecovery(_ snapshot: EditorRecoverySnapshot)
 }
 
+public enum EditorThemePalette: Equatable, Sendable {
+    case light
+    case dark
+    case highContrastLight
+    case highContrastDark
+}
+
+public struct EditorLanguageConfiguration: Equatable, Sendable {
+    public let languageID: LanguageID
+    public let lexerName: String
+    public let keywords: [String]
+    public let indentation: LanguageIndentation
+    public let folding: Bool
+    public let braceMatching: Bool
+    public let maximumStyleBytes: Int
+
+    public init(
+        languageID: LanguageID,
+        lexerName: String,
+        keywords: [String] = [],
+        indentation: LanguageIndentation,
+        folding: Bool,
+        braceMatching: Bool,
+        maximumStyleBytes: Int = 16 * 1_024 * 1_024
+    ) {
+        self.languageID = languageID
+        self.lexerName = lexerName
+        self.keywords = keywords
+        self.indentation = indentation
+        self.folding = folding
+        self.braceMatching = braceMatching
+        self.maximumStyleBytes = max(1_024, maximumStyleBytes)
+    }
+}
+
+@MainActor
+public protocol LanguageEditorPort: EditorPort {
+    var activeLanguageID: LanguageID { get }
+    var isLanguageStylingFallback: Bool { get }
+    var activeDocumentByteLength: Int { get }
+    func detectionPrefix(maximumBytes: Int) -> Data
+    func supportsLexer(named name: String) -> Bool
+    @discardableResult func applyLanguage(_ configuration: EditorLanguageConfiguration) -> Bool
+    func applyTheme(_ palette: EditorThemePalette)
+    func toggleLineComment(prefix: String) -> EditorEditOutcome
+}
+
 public extension EditorPort {
     func recoverySnapshot(for bufferID: BufferID) -> EditorRecoverySnapshot? {
         guard let snapshot = snapshot(for: bufferID) else { return nil }

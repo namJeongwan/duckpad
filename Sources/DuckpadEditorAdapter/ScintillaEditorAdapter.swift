@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -31,6 +31,8 @@ public final class ScintillaEditorAdapter: SearchEditorPort {
     private var viewStates: [BufferID: EditorViewState] = [:]
     private var acceptedEdits: [BufferID: [EditorIncrementalEdit]] = [:]
     private var bufferViews: [BufferID: DPScintillaEditorView] = [:]
+    private var languageConfigurations: [BufferID: EditorLanguageConfiguration] = [:]
+    private var themePalette: EditorThemePalette = .light
     private var isRecovering = false
     private var inputEnabled = true
 
@@ -88,6 +90,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort {
             load(snapshot, into: editorView)
         }
         restoreViewState(for: buffer.bufferID, in: editorView)
+        applyStoredLanguage(to: editorView, bufferID: buffer.bufferID)
         activeScintillaView?.removeFromSuperview()
         activeScintillaView = editorView
         editorView.frame = view.bounds
@@ -171,6 +174,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort {
         recoveryBuffers.removeValue(forKey: bufferID)
         viewStates.removeValue(forKey: bufferID)
         acceptedEdits.removeValue(forKey: bufferID)
+        languageConfigurations.removeValue(forKey: bufferID)
         let retiredView = bufferViews.removeValue(forKey: bufferID)
         retiredView?.onEdit = nil
         retiredView?.removeFromSuperview()
@@ -186,6 +190,63 @@ public final class ScintillaEditorAdapter: SearchEditorPort {
     }
 
     public func focus() { activeScintillaView?.focusEditor() }
+
+    public var activeLanguageID: LanguageID {
+        guard let id = activeBuffer?.bufferID else { return .plainText }
+        return languageConfigurations[id]?.languageID ?? .plainText
+    }
+
+    public var isLanguageStylingFallback: Bool {
+        activeScintillaView?.languageStylingFallback ?? false
+    }
+    public var activeDocumentByteLength: Int {
+        Int(clamping: activeScintillaView?.documentByteLength ?? 0)
+    }
+
+    public func detectionPrefix(maximumBytes: Int) -> Data {
+        activeScintillaView?.contentPrefixUTF8(withMaximumLength: UInt(max(0, maximumBytes))) ?? Data()
+    }
+
+    public func supportsLexer(named name: String) -> Bool {
+        DPScintillaEditorView.supportsLexerNamed(name)
+    }
+
+    @discardableResult
+    public func applyLanguage(_ configuration: EditorLanguageConfiguration) -> Bool {
+        guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return false }
+        guard editorView.applyLexerNamed(
+            configuration.lexerName,
+            keywords: configuration.keywords,
+            tabWidth: UInt(configuration.indentation.width),
+            useTabs: configuration.indentation.useTabs,
+            folding: configuration.folding,
+            braceMatching: configuration.braceMatching,
+            maximumStyleBytes: UInt(configuration.maximumStyleBytes)
+        ) else { return false }
+        languageConfigurations[bufferID] = configuration
+        editorView.apply(nativePalette(themePalette))
+        return true
+    }
+
+    public func applyTheme(_ palette: EditorThemePalette) {
+        themePalette = palette
+        let native = nativePalette(palette)
+        bufferViews.values.forEach { $0.apply(native) }
+    }
+
+    public func toggleLineComment(prefix: String) -> EditorEditOutcome {
+        guard !prefix.isEmpty, let activeBuffer, let editorView = activeScintillaView else {
+            return .rejected(currentRevision: activeBuffer?.revision ?? 0)
+        }
+        let oldRevision = activeBuffer.revision
+        guard editorView.toggleLineComments(withPrefixUTF8: Data(prefix.utf8)) else {
+            return .rejected(currentRevision: oldRevision)
+        }
+        guard let revision = self.activeBuffer?.revision, revision > oldRevision else {
+            return .rejected(currentRevision: self.activeBuffer?.revision ?? oldRevision)
+        }
+        return .accepted(newRevision: revision)
+    }
 
     public func activeSelectionUTF8Range() -> SearchUTF8Range? {
         guard let editorView = activeScintillaView else { return nil }
@@ -417,6 +478,31 @@ public final class ScintillaEditorAdapter: SearchEditorPort {
         editorView.onEdit = { [weak self] edit in self?.receive(edit, bufferID: bufferID) }
         editorView.onError = { [weak self] error in self?.lastMutationError = error }
         return editorView
+    }
+
+    private func applyStoredLanguage(to editorView: DPScintillaEditorView, bufferID: BufferID) {
+        let configuration = languageConfigurations[bufferID] ?? EditorLanguageConfiguration(
+            languageID: .plainText, lexerName: "null", indentation: .init(),
+            folding: false, braceMatching: false
+        )
+        _ = editorView.applyLexerNamed(
+            configuration.lexerName, keywords: configuration.keywords,
+            tabWidth: UInt(configuration.indentation.width),
+            useTabs: configuration.indentation.useTabs,
+            folding: configuration.folding,
+            braceMatching: configuration.braceMatching,
+            maximumStyleBytes: UInt(configuration.maximumStyleBytes)
+        )
+        editorView.apply(nativePalette(themePalette))
+    }
+
+    private func nativePalette(_ palette: EditorThemePalette) -> DPScintillaPalette {
+        switch palette {
+        case .light: .light
+        case .dark: .dark
+        case .highContrastLight: .highContrastLight
+        case .highContrastDark: .highContrastDark
+        }
     }
 
     private func storeViewState(bufferID: BufferID) {

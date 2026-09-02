@@ -82,7 +82,7 @@ public enum SessionError: Error, Equatable, Sendable {
 
 public struct ScratchSession: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
-        case id, tabs, documents, buffers, fileBindings, activeTabID, activationHistory, nextUntitledNumber
+        case id, tabs, documents, buffers, fileBindings, languageOverrides, activeTabID, activationHistory, nextUntitledNumber
     }
 
     public let id: SessionID
@@ -90,6 +90,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
     public private(set) var documents: [DocumentID: ScratchDocument]
     public private(set) var buffers: [BufferID: BufferMetadata]
     public private(set) var fileBindings: [DocumentID: FileBinding]
+    public private(set) var languageOverrides: [DocumentID: LanguageOverride]
     public private(set) var activeTabID: TabID?
     public private(set) var activationHistory: [TabID]
     private var nextUntitledNumber: Int
@@ -100,6 +101,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         documents = [:]
         buffers = [:]
         fileBindings = [:]
+        languageOverrides = [:]
         activeTabID = nil
         activationHistory = []
         nextUntitledNumber = 1
@@ -111,6 +113,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         documents: [DocumentID: ScratchDocument],
         buffers: [BufferID: BufferMetadata],
         fileBindings: [DocumentID: FileBinding],
+        languageOverrides: [DocumentID: LanguageOverride] = [:],
         activeTabID: TabID?,
         activationHistory: [TabID]? = nil,
         nextUntitledNumber: Int
@@ -133,6 +136,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
             throw SessionError.invalidRecoveryState("orphan document or buffer")
         }
         guard fileBindings.keys.allSatisfy({ documents[$0] != nil }) else { throw SessionError.invalidRecoveryState("orphan file binding") }
+        guard languageOverrides.keys.allSatisfy({ documents[$0] != nil }) else { throw SessionError.invalidRecoveryState("orphan language override") }
         guard Set(fileBindings.values.map(\.canonicalPath)).count == fileBindings.count else {
             throw SessionError.invalidRecoveryState("duplicate file binding")
         }
@@ -150,6 +154,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         self.documents = documents
         self.buffers = buffers
         self.fileBindings = fileBindings
+        self.languageOverrides = languageOverrides
         self.activeTabID = activeTabID
         self.activationHistory = recoveredHistory
         self.nextUntitledNumber = nextUntitledNumber
@@ -164,6 +169,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         let documents = try values.decode([DocumentID: ScratchDocument].self, forKey: .documents)
         let buffers = try values.decode([BufferID: BufferMetadata].self, forKey: .buffers)
         let fileBindings = try values.decode([DocumentID: FileBinding].self, forKey: .fileBindings)
+        let languageOverrides = try values.decodeIfPresent([DocumentID: LanguageOverride].self, forKey: .languageOverrides) ?? [:]
         let activeTabID = try values.decodeIfPresent(TabID.self, forKey: .activeTabID)
         let activationHistory = try values.decodeIfPresent([TabID].self, forKey: .activationHistory)
         let nextUntitledNumber = try values.decode(Int.self, forKey: .nextUntitledNumber)
@@ -174,6 +180,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
                 documents: documents,
                 buffers: buffers,
                 fileBindings: fileBindings,
+                languageOverrides: languageOverrides,
                 activeTabID: activeTabID,
                 activationHistory: activationHistory,
                 nextUntitledNumber: nextUntitledNumber
@@ -193,6 +200,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         try values.encode(documents, forKey: .documents)
         try values.encode(buffers, forKey: .buffers)
         try values.encode(fileBindings, forKey: .fileBindings)
+        try values.encode(languageOverrides, forKey: .languageOverrides)
         try values.encodeIfPresent(activeTabID, forKey: .activeTabID)
         try values.encode(activationHistory, forKey: .activationHistory)
         try values.encode(nextUntitledNumber, forKey: .nextUntitledNumber)
@@ -314,6 +322,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         if let removedDocument = documents.removeValue(forKey: removed.documentID) {
             buffers.removeValue(forKey: removedDocument.bufferID)
             fileBindings.removeValue(forKey: removedDocument.id)
+            languageOverrides.removeValue(forKey: removedDocument.id)
         }
         if activeTabID == tabID {
             let deterministicNeighbor = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id
@@ -367,6 +376,21 @@ public struct ScratchSession: Codable, Equatable, Sendable {
     public func fileBinding(for tabID: TabID) throws -> FileBinding? {
         let document = try document(for: tabID)
         return fileBindings[document.id]
+    }
+
+    public func languageOverride(for tabID: TabID) throws -> LanguageOverride {
+        let document = try document(for: tabID)
+        return languageOverrides[document.id] ?? .automatic
+    }
+
+    public mutating func setLanguageOverride(_ override: LanguageOverride, for tabID: TabID) throws {
+        let document = try document(for: tabID)
+        switch override {
+        case .automatic:
+            languageOverrides.removeValue(forKey: document.id)
+        case .manual:
+            languageOverrides[document.id] = override
+        }
     }
 
     public func tabID(canonicalPath: String) -> TabID? {

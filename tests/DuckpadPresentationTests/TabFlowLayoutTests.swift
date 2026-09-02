@@ -72,6 +72,51 @@ private final class WeakBox<Value: AnyObject> {
 }
 
 @MainActor
+private final class HostedLanguageEditorFake: LanguageEditorPort {
+    var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
+    var supportedLexers: Set<String> = []
+    var prefix = Data()
+    var configurations: [EditorLanguageConfiguration] = []
+    private(set) var mutationCount = 0
+    private var activeBuffer: EditorBufferDescriptor?
+    private var snapshots: [BufferID: EditorTextSnapshot] = [:]
+
+    var activeLanguageID: LanguageID { configurations.last?.languageID ?? .plainText }
+    var isLanguageStylingFallback: Bool { false }
+    var activeDocumentByteLength: Int {
+        guard let activeBuffer else { return 0 }
+        return snapshots[activeBuffer.bufferID]?.text.utf8.count ?? 0
+    }
+
+    func display(_ buffer: EditorBufferDescriptor) {
+        activeBuffer = buffer
+        if snapshots[buffer.bufferID] == nil {
+            snapshots[buffer.bufferID] = EditorTextSnapshot(
+                bufferID: buffer.bufferID,
+                revision: buffer.revision,
+                text: "preserved 🦆 text"
+            )
+        }
+    }
+    func install(_ snapshot: EditorTextSnapshot) { snapshots[snapshot.bufferID] = snapshot }
+    func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? { snapshots[bufferID] }
+    func retire(bufferID: BufferID) { snapshots.removeValue(forKey: bufferID) }
+    func setInputEnabled(_ isEnabled: Bool) {}
+    func focus() {}
+    func detectionPrefix(maximumBytes: Int) -> Data { Data(prefix.prefix(maximumBytes)) }
+    func supportsLexer(named name: String) -> Bool { supportedLexers.contains(name) }
+    func applyLanguage(_ configuration: EditorLanguageConfiguration) -> Bool {
+        configurations.append(configuration)
+        return true
+    }
+    func applyTheme(_ palette: EditorThemePalette) {}
+    func toggleLineComment(prefix: String) -> EditorEditOutcome {
+        mutationCount += 1
+        return .rejected(currentRevision: activeBuffer?.revision ?? 0)
+    }
+}
+
+@MainActor
 private func makeAndCloseController(
     workspace: ScratchWorkspaceUseCase
 ) -> (WeakBox<DuckpadWindowController>, WeakBox<NSWindow>) {
@@ -216,6 +261,76 @@ private func menuItem(_ title: String, in menu: NSMenu) -> NSMenuItem? {
 
 @Suite(.serialized)
 struct AppKitHostedTests {
+@Test @MainActor func unavailableRecoveredLanguageIsVisibleAndAutoResetIsExplicit() async throws {
+    let missingID = LanguageID(rawValue: "removed-language")
+    var restored = ScratchSession()
+    let tabID = restored.addUntitled()
+    try restored.setLanguageOverride(.manual(missingID), for: tabID)
+    let store = PresentationStore(session: restored)
+    let workspace = ScratchWorkspaceUseCase(store: store)
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = ["null", "python"]
+    editor.prefix = Data("#!/usr/bin/env python3\nprint('duck')".utf8)
+    let registry = try LanguageRegistry(definitions: [
+        LanguageDefinition(
+            id: .plainText, displayName: "Plain Text", group: "Text",
+            lexerName: "null", supportTier: .plain
+        ),
+        LanguageDefinition(
+            id: LanguageID(rawValue: "python"), displayName: "Python", group: "Code",
+            lexerName: "python", supportTier: .keywordComplete,
+            keywordLists: ["def return"], extensions: ["py"], shebangTokens: ["python3"]
+        ),
+    ])
+    let service = LanguageWorkspaceUseCase(
+        registry: registry,
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(frame: .zero),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+
+    controller.start()
+    await controller.waitForStartup()
+    let beforeSession = workspace.recoverySession()
+    let beforeBuffer = workspace.snapshot().activeBuffer
+    let beforeText = try #require(beforeBuffer.flatMap { editor.snapshot(for: $0.bufferID) })
+
+    #expect(service.state == .unavailableManual(requestedID: missingID, fallback: .plainText))
+    #expect(editor.configurations.last?.lexerName == "null")
+    #expect(controller.languageStatusSmokeState().isWarning)
+    #expect(controller.languageStatusSmokeState().text.contains("removed-language"))
+    #expect(controller.languageStatusSmokeState().text.contains("using Plain Text"))
+    #expect(workspace.recoverySession() == beforeSession)
+    #expect(workspace.snapshot().activeBuffer == beforeBuffer)
+    #expect(editor.snapshot(for: beforeText.bufferID) == beforeText)
+    #expect(editor.mutationCount == 0)
+
+    let menu = DuckpadMainMenuFactory.make(target: controller)
+    #expect(menuItem("Auto", in: menu)?.action == #selector(DuckpadWindowController.performAutomaticLanguage(_:)))
+    #expect(menuItem("Python", in: menu)?.representedObject as? String == "python")
+    #expect(menuItem("removed-language", in: menu) == nil)
+
+    #expect(await service.setOverride(.automatic) == .applied(.saved))
+    guard case .ready(let detection, _) = service.state else {
+        Issue.record("explicit Auto did not clear the unavailable warning")
+        return
+    }
+    #expect(detection.languageID.rawValue == "python")
+    #expect(!controller.languageStatusSmokeState().isWarning)
+    #expect(controller.languageStatusSmokeState().text == "Python")
+    #expect(try workspace.recoverySession().languageOverride(for: tabID) == .automatic)
+    #expect(workspace.snapshot().activeBuffer?.revision == beforeBuffer?.revision)
+    #expect(editor.snapshot(for: beforeText.bufferID) == beforeText)
+    #expect(editor.mutationCount == 0)
+}
+
 @Test @MainActor func failedActivationRestoresAuthoritativeSelectionWithoutRecursion() async {
     let store = PresentationStore()
     let workspace = ScratchWorkspaceUseCase(store: store)
@@ -292,6 +407,19 @@ struct AppKitHostedTests {
     #expect(moveRight?.action == #selector(DuckpadWindowController.performMoveActiveTabRight(_:)))
     #expect(moveRight?.keyEquivalent == "]")
     #expect(moveRight?.keyEquivalentModifierMask == [.command, .shift])
+
+    let automaticLanguage = menuItem("Auto", in: menu)
+    let plainText = menuItem("Plain Text", in: menu)
+    let toggleComment = menuItem("Toggle Line Comment", in: menu)
+    let languagePalette = menuItem("Language Command Palette…", in: menu)
+    #expect(automaticLanguage?.action == #selector(DuckpadWindowController.performAutomaticLanguage(_:)))
+    #expect(plainText?.action == #selector(DuckpadWindowController.performChooseLanguage(_:)))
+    #expect(plainText?.representedObject as? String == LanguageID.plainText.rawValue)
+    #expect(toggleComment?.action == #selector(DuckpadWindowController.performToggleLineComment(_:)))
+    #expect(toggleComment?.keyEquivalent == "/")
+    #expect(toggleComment?.keyEquivalentModifierMask == [.command])
+    #expect(languagePalette?.action == #selector(DuckpadWindowController.performShowLanguageChooser(_:)))
+    #expect(languagePalette?.keyEquivalentModifierMask == [.command, .shift])
 }
 
 @Test @MainActor func layoutCacheIsSinglePassOOneLookupAndInvalidatesForEngineChanges() {

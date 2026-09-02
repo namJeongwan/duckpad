@@ -73,6 +73,7 @@ public enum PersistenceRetry: Equatable, Sendable {
     case close(TabID, CloseDecision?, expectedRevision: UInt64?)
     case moveTab(TabID, Int)
     case pinTab(TabID, Bool)
+    case languageOverride(TabID, LanguageOverride)
 }
 
 public struct PersistenceFailureEvent: Equatable, Sendable {
@@ -92,6 +93,7 @@ public enum WorkspaceChangeKind: Equatable, Sendable {
     case tabInserted(index: Int)
     case activeTabChanged(previousIndex: Int?, currentIndex: Int)
     case tabUpdated(index: Int)
+    case bufferEdited(index: Int)
     case tabRemoved(index: Int, retiredBufferID: BufferID)
     case tabsReordered(fromIndex: Int, toIndex: Int)
     case persistence
@@ -290,6 +292,8 @@ public final class ScratchWorkspaceUseCase {
             return outcome(from: await moveTab(id, to: index))
         case .pinTab(let id, let pinned):
             return outcome(from: await setPinned(id, isPinned: pinned))
+        case .languageOverride(let id, let override):
+            return outcome(from: await setLanguageOverride(override, for: id))
         }
     }
 
@@ -489,7 +493,7 @@ public final class ScratchWorkspaceUseCase {
             let revision = try session.recordEdit(in: tabID, expectedRevision: edit.expectedRevision)
             persistenceState = .pending
             schedulePersistence()
-            publish(.tabUpdated(index: index))
+            publish(.bufferEdited(index: index))
             return .accepted(newRevision: revision)
         } catch {
             let current = (try? session.buffer(for: tabID).revision) ?? edit.expectedRevision
@@ -543,7 +547,7 @@ public final class ScratchWorkspaceUseCase {
             releaseTransaction()
             persistenceState = .pending
             schedulePersistence()
-            publish(.tabUpdated(index: index))
+            publish(.bufferEdited(index: index))
             return .accepted(newRevision: expected)
         } catch {
             return .rejected(currentRevision: (try? session.buffer(for: activeTab).revision) ?? expected)
@@ -592,6 +596,42 @@ public final class ScratchWorkspaceUseCase {
     public func activeFileContext() -> FileWorkspaceContext? {
         guard let tabID = session.activeTabID else { return nil }
         return fileContext(tabID: tabID)
+    }
+
+    public func activeLanguageContext() -> ActiveLanguageContext? {
+        guard let tabID = session.activeTabID,
+              let document = try? session.document(for: tabID),
+              let buffer = try? session.buffer(for: tabID) else { return nil }
+        let binding = try? session.fileBinding(for: tabID)
+        return ActiveLanguageContext(
+            tabID: tabID,
+            documentID: document.id,
+            buffer: EditorBufferDescriptor(bufferID: buffer.id, revision: buffer.revision),
+            filename: binding?.canonicalPath ?? document.title,
+            override: (try? session.languageOverride(for: tabID)) ?? .automatic
+        )
+    }
+
+    @discardableResult
+    public func setLanguageOverride(
+        _ override: LanguageOverride,
+        for tabID: TabID
+    ) async -> WorkspaceActionOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        var candidate = session
+        do {
+            try candidate.setLanguageOverride(override, for: tabID)
+            guard let index = candidate.tabs.firstIndex(where: { $0.id == tabID }) else {
+                return .rejected(.unknownTab(tabID))
+            }
+            return await persistMutation(
+                candidate,
+                kind: .tabUpdated(index: index),
+                retry: .languageOverride(tabID, override)
+            )
+        } catch let error as SessionError { return .rejected(error) }
+        catch { preconditionFailure("ScratchSession only throws SessionError") }
     }
 
     public func fileContext(tabID: TabID) -> FileWorkspaceContext? {
@@ -769,6 +809,11 @@ public final class EditorBindingUseCase {
     public func render(_ change: WorkspaceChange, requestFocus: Bool = false) {
         if case .tabRemoved(_, let bufferID) = change.kind { editor?.retire(bufferID: bufferID) }
         if case .tabUpdated = change.kind {
+            editor?.setInputEnabled(change.snapshot.startup == .ready)
+            if requestFocus, change.snapshot.startup == .ready { editor?.focus() }
+            return
+        }
+        if case .bufferEdited = change.kind {
             editor?.setInputEnabled(change.snapshot.startup == .ready)
             if requestFocus, change.snapshot.startup == .ready { editor?.focus() }
             return
