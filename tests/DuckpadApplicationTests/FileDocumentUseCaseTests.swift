@@ -311,6 +311,45 @@ private final class FileEditorFake: EditorPort, EditorSelectionPort {
     #expect(await files.text(at: url) == "mine")
 }
 
+@Test @MainActor func independentWindowsDetectSameFileSaveConflicts() async {
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-multiwindow-conflict.txt")
+    await files.seed("shared original", at: url)
+
+    let firstWorkspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let firstEditor = FileEditorFake()
+    let firstBinding = EditorBindingUseCase(workspace: firstWorkspace, editor: firstEditor)
+    firstWorkspace.onChange = { firstBinding.render($0) }
+    _ = firstBinding
+    _ = await firstWorkspace.start()
+    let firstFiles = FileDocumentUseCase(workspace: firstWorkspace, editor: firstEditor, store: files)
+
+    let secondWorkspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let secondEditor = FileEditorFake()
+    let secondBinding = EditorBindingUseCase(workspace: secondWorkspace, editor: secondEditor)
+    secondWorkspace.onChange = { secondBinding.render($0) }
+    _ = secondBinding
+    _ = await secondWorkspace.start()
+    let secondFiles = FileDocumentUseCase(workspace: secondWorkspace, editor: secondEditor, store: files)
+
+    guard case .opened = await firstFiles.open(url),
+          case .opened = await secondFiles.open(url) else {
+        Issue.record("both independent windows must open the shared file")
+        return
+    }
+    firstEditor.replaceWith("saved by first window")
+    secondEditor.replaceWith("unsaved in second window")
+    #expect(await firstFiles.saveActive() == .saved(firstWorkspace.activeFileContext()!.tabID))
+
+    guard case .conflict = await secondFiles.saveActive() else {
+        Issue.record("second window silently overwrote a newer file identity")
+        return
+    }
+    #expect(await files.text(at: url) == "saved by first window")
+    #expect(secondEditor.snapshot(for: secondWorkspace.activeFileContext()!.buffer.bufferID)?.text == "unsaved in second window")
+    #expect(secondWorkspace.snapshot().tabs.first(where: \.isActive)?.isDirty == true)
+}
+
 @Test @MainActor func oversizedExternalComparisonPreservesPendingConflict() async {
     let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
     let editor = FileEditorFake()

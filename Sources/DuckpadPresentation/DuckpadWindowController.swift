@@ -184,7 +184,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var extensionUseCase: ExtensionWorkspaceUseCase?
     private var workspaceBrowserUseCase: WorkspaceBrowserUseCase?
     private var extensionState = ExtensionRegistryState(items: [])
+    private var hasTornDownWindow = false
     public var onExtensionCommandsChanged: (() -> Void)?
+    public var onNewWindowRequested: (() -> Void)?
+    public var onBecameKey: (() -> Void)?
+    public var onClosed: (() -> Void)?
     private let editorHostView: NSView
     private let fileUseCase: FileDocumentUseCase?
     private let filePanels: (any FilePanelPresenting)?
@@ -272,7 +276,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         window.minSize = NSSize(width: 420, height: 280)
         window.isReleasedWhenClosed = false
         super.init(window: window)
-        terminationCoordinator?.attach(windowController: self)
         window.delegate = self
         self.errorPresenter = configureContent(injectedPresenter: errorPresenter)
         editorBinding = EditorBindingUseCase(workspace: workspace, editor: activeEditor)
@@ -327,6 +330,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             self?.reviewCapabilities(for: item, allow: false)
         }
         renderInitial(workspace.snapshot())
+        terminationCoordinator?.attach(windowController: self)
         if automaticallyStarts { start() }
     }
 
@@ -342,6 +346,22 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public override func close() {
+        guard !hasTornDownWindow else { return }
+        window?.delegate = nil
+        super.close()
+        tearDownWindow()
+    }
+
+    private func tearDownWindow() {
+        guard !hasTornDownWindow else { return }
+        hasTornDownWindow = true
+        if let terminationCoordinator, let recoveryUseCase {
+            terminationCoordinator.trackWindowCloseCleanup {
+                if case .saved = await recoveryUseCase.reset() { return true }
+                return false
+            }
+        }
+        terminationCoordinator?.detach(windowController: self)
         workspaceBrowserUseCase?.suspendCommands()
         workspaceRestoreTask?.cancel()
         workspaceRestoreTask = nil
@@ -358,8 +378,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         let closingWindow = window
         closingWindow?.contentViewController = nil
         closingWindow?.windowController = nil
-        super.close()
         window = nil
+        onClosed?()
+        onClosed = nil
     }
 
     @available(*, unavailable)
@@ -538,6 +559,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performNewScratch(_ sender: Any? = nil) {
         performAdd()
+    }
+
+    @objc public func performNewWindow(_ sender: Any? = nil) {
+        guard !terminationReviewInProgress else { return }
+        onNewWindowRequested?()
     }
 
     func performActivate(_ id: TabID) {
@@ -795,6 +821,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         if menuItem.action == #selector(performNewScratch(_:)) {
             return workspace.snapshot().startup == .ready && !terminationReviewInProgress
+        }
+        if menuItem.action == #selector(performNewWindow(_:)) {
+            return !terminationReviewInProgress
         }
         if menuItem.action == #selector(performRestoreLastClosedTab(_:)) {
             return workspaceInteractionsAreActionable && workspace.canRestoreRecentlyClosedTab
@@ -1211,6 +1240,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         return approved
     }
 
+    func cancelPreparedTerminationReview() {
+        guard terminationReviewInProgress else { return }
+        terminationReviewInProgress = false
+        extensionUseCase?.resumeInvocations()
+        Task { @MainActor [weak workspaceBrowserUseCase] in
+            await workspaceBrowserUseCase?.resumeCommandsAndReconcile()
+        }
+        let snapshot = workspace.snapshot()
+        updateWorkspaceInteractionAdmission(snapshot)
+        editorBinding.render(snapshot)
+    }
+
     private func waitForAcceptedWorkspaceTasks() async {
         while let task = pendingNewScratchTasks.values.first
             ?? pendingCloseTasks.values.first
@@ -1229,13 +1270,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         guard requiresTerminationReview else { return true }
         guard let terminationCoordinator else { return false }
-        terminationCoordinator.requestWindowClose { [weak self, weak sender] approved in
+        terminationCoordinator.requestWindowClose(windowController: self) { [weak self, weak sender] approved in
             guard let self else { return }
             guard approved, let sender else { return }
             self.permitsNextWindowClose = true
             self.approvedWindowClose(sender)
         }
         return false
+    }
+
+    public func windowDidBecomeKey(_ notification: Notification) {
+        onBecameKey?()
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        tearDownWindow()
     }
 
     public func windowDidResignKey(_ notification: Notification) {

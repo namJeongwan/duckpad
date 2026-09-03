@@ -357,6 +357,130 @@ func incompleteGenerationNeverReplacesPrevious(_ fault: RecoveryStoreFault) asyn
     #expect(try await store.loadLatest() == nil)
 }
 
+@Test func verifiedRecoveryRootStaysBoundAfterPathIsSwappedToSymlink() async throws {
+    let container = recoveryRoot()
+    try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: container) }
+    let name = UUID().uuidString.lowercased()
+    let root = container.appendingPathComponent(name, isDirectory: true)
+    let outside = container.appendingPathComponent("outside", isDirectory: true)
+    let parked = container.appendingPathComponent("parked", isDirectory: true)
+    let original = try recoveryArchive(text: "descriptor-bound original")
+    let foreign = try recoveryArchive(text: "foreign symlink target")
+    _ = try await LocalRecoveryStore(root: root).commit(
+        original,
+        generation: PersistenceGeneration(rawValue: 1)
+    )
+    _ = try await LocalRecoveryStore(root: outside).commit(
+        foreign,
+        generation: PersistenceGeneration(rawValue: 1)
+    )
+    let verified = try #require(LocalRecoveryStore.discoverVerifiedRoots(in: container).first)
+
+    try FileManager.default.moveItem(at: root, to: parked)
+    try FileManager.default.createSymbolicLink(at: root, withDestinationURL: outside)
+    let store = LocalRecoveryStore(verifiedRoot: verified)
+
+    #expect(try await store.loadLatest()?.archive == original)
+    do {
+        try await store.reset()
+        Issue.record("reset followed a replacement instead of rejecting its identity")
+    } catch {
+        guard case .unavailable = error else { Issue.record("unexpected reset error: \(error)"); return }
+    }
+    #expect(try await LocalRecoveryStore(root: outside).loadLatest()?.archive == foreign)
+    #expect(FileManager.default.fileExists(atPath: root.path))
+}
+
+@Test func verifiedRecoveryRootResetRecreatesTheSamePrivateEntry() async throws {
+    let container = recoveryRoot()
+    try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: container) }
+    let root = container.appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
+    let first = try recoveryArchive(text: "before reset")
+    _ = try await LocalRecoveryStore(root: root).commit(
+        first,
+        generation: PersistenceGeneration(rawValue: 1)
+    )
+    let verified = try #require(LocalRecoveryStore.discoverVerifiedRoots(in: container).first)
+    let store = LocalRecoveryStore(verifiedRoot: verified)
+
+    try await store.reset()
+    #expect(!FileManager.default.fileExists(atPath: root.path))
+    #expect(try await store.loadLatest() == nil)
+    let second = try recoveryArchive(text: "after reset")
+    #expect(try await store.commit(second, generation: PersistenceGeneration(rawValue: 1)) == .committed)
+    #expect(try await store.loadLatest()?.archive == second)
+}
+
+@Test func verifiedRecoveryRootRejectsPathReplacementWithRegularFile() async throws {
+    let container = recoveryRoot()
+    try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: container) }
+    let root = container.appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
+    let parked = container.appendingPathComponent("parked-file-swap", isDirectory: true)
+    let archive = try recoveryArchive(text: "open descriptor remains authoritative")
+    _ = try await LocalRecoveryStore(root: root).commit(
+        archive,
+        generation: PersistenceGeneration(rawValue: 1)
+    )
+    let verified = try #require(LocalRecoveryStore.discoverVerifiedRoots(in: container).first)
+    try FileManager.default.moveItem(at: root, to: parked)
+    let replacement = Data("do not remove me".utf8)
+    try replacement.write(to: root)
+    let store = LocalRecoveryStore(verifiedRoot: verified)
+
+    #expect(try await store.loadLatest()?.archive == archive)
+    await #expect(throws: SessionStoreError.self) { try await store.reset() }
+    #expect(try Data(contentsOf: root) == replacement)
+}
+
+@Test func verifiedRecoveryRootResetRejectsReplacementAfterRecursiveRemoval() async throws {
+    let container = recoveryRoot()
+    try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: container) }
+    let root = container.appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
+    let parked = container.appendingPathComponent("parked-during-reset", isDirectory: true)
+    _ = try await LocalRecoveryStore(root: root).commit(
+        try recoveryArchive(text: "root removed through its verified descriptor"),
+        generation: PersistenceGeneration(rawValue: 1)
+    )
+    let verified = try #require(LocalRecoveryStore.discoverVerifiedRoots(in: container).first)
+    verified.resetBeforeRootUnlinkForTesting = {
+        try FileManager.default.moveItem(at: root, to: parked)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    }
+
+    await #expect(throws: SessionStoreError.self) {
+        try await LocalRecoveryStore(verifiedRoot: verified).reset()
+    }
+    var isDirectory: ObjCBool = false
+    #expect(FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory))
+    #expect(isDirectory.boolValue)
+    #expect(FileManager.default.fileExists(atPath: parked.path))
+}
+
+@Test func verifiedRecoveryRootFallsBackAndRemovesCorruptNewerGeneration() async throws {
+    let container = recoveryRoot()
+    try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: container) }
+    let root = container.appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
+    let first = try recoveryArchive(text: "verified known good")
+    let second = try recoveryArchive(text: "verified corrupt newest")
+    let writer = LocalRecoveryStore(root: root)
+    _ = try await writer.commit(first, generation: PersistenceGeneration(rawValue: 1))
+    _ = try await writer.commit(second, generation: PersistenceGeneration(rawValue: 2))
+    try Data("{\"broken\":".utf8).write(
+        to: root.appendingPathComponent("generations/00000000000000000002/manifest.json")
+    )
+    let verified = try #require(LocalRecoveryStore.discoverVerifiedRoots(in: container).first)
+
+    #expect(try await LocalRecoveryStore(verifiedRoot: verified).loadLatest()?.archive == first)
+    #expect(!FileManager.default.fileExists(
+        atPath: root.appendingPathComponent("generations/00000000000000000002").path
+    ))
+}
+
 @Test func largeUTF8ArchiveRoundTripsOffMainStoreBoundary() async throws {
     let root = recoveryRoot()
     defer { try? FileManager.default.removeItem(at: root) }

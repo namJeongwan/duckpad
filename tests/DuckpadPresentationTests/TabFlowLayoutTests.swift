@@ -672,6 +672,18 @@ struct AppKitHostedTests {
     #expect(newScratch?.keyEquivalent == "n")
     #expect(newScratch?.keyEquivalentModifierMask == [.command])
 
+    let newWindow = menuItem("New Window", in: menu)
+    #expect(newWindow?.action == #selector(DuckpadWindowController.performNewWindow(_:)))
+    #expect(newWindow?.keyEquivalent == "n")
+    #expect(newWindow?.keyEquivalentModifierMask == [.command, .shift])
+    var newWindowRequests = 0
+    controller.onNewWindowRequested = { newWindowRequests += 1 }
+    controller.performNewWindow()
+    #expect(newWindowRequests == 1)
+
+    #expect(menuItem("Minimize", in: menu)?.keyEquivalentModifierMask == [.command])
+    #expect(menuItem("Enter Full Screen", in: menu)?.keyEquivalentModifierMask == [.command, .control])
+
     let undo = menuItem("Undo", in: menu)
     let redo = menuItem("Redo", in: menu)
     let cut = menuItem("Cut", in: menu)

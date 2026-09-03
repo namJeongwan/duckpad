@@ -84,6 +84,9 @@ private actor RoutingRecoveryStore: RecoveryStore {
     private var stored: StoredRecoveryArchive?
     private var loadError: SessionStoreError?
     private(set) var commitCount = 0
+    private var blockNextReset = false
+    private var resetEntered = false
+    private var releaseReset = false
     func loadLatest() async throws(SessionStoreError) -> StoredRecoveryArchive? {
         if let loadError { throw loadError }
         return stored
@@ -93,10 +96,20 @@ private actor RoutingRecoveryStore: RecoveryStore {
         commitCount += 1
         return .committed
     }
-    func reset() async throws(SessionStoreError) { stored = nil }
+    func reset() async throws(SessionStoreError) {
+        if blockNextReset {
+            blockNextReset = false
+            resetEntered = true
+            while !releaseReset { await Task.yield() }
+        }
+        stored = nil
+    }
     func setLoadError(_ error: SessionStoreError?) { loadError = error }
     func latestTabCount() -> Int? { stored?.archive.session.tabs.count }
     func latestBookmarkedLines() -> [Int]? { stored?.archive.buffers.values.first?.viewState.bookmarkedLines }
+    func armBlockedReset() { blockNextReset = true; resetEntered = false; releaseReset = false }
+    func hasEnteredBlockedReset() -> Bool { resetEntered }
+    func releaseBlockedReset() { releaseReset = true }
 }
 
 @MainActor
@@ -835,6 +848,7 @@ struct FileLifecycleTests {
         blocksDecisions: Bool = false,
         errorPresenter: (any PersistenceErrorPresenting)? = nil,
         recoveryStore: RoutingRecoveryStore? = nil,
+        terminationCoordinator: ApplicationTerminationCoordinator? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil
     ) async -> (DuckpadWindowController, ScratchWorkspaceUseCase, TextViewEditorAdapter, PanelFake, RoutingFileStore) {
         _ = NSApplication.shared
@@ -855,7 +869,7 @@ struct FileLifecycleTests {
         panels.decisions = decisions
         panels.blocksDecisions = blocksDecisions
         panels.saveURL = saveURL
-        let terminationCoordinator = ApplicationTerminationCoordinator()
+        let terminationCoordinator = terminationCoordinator ?? ApplicationTerminationCoordinator()
         let controller = DuckpadWindowController(
             workspace: workspace,
             editorAdapter: editor,
@@ -959,6 +973,237 @@ struct FileLifecycleTests {
         #expect(failurePanels.fileFailureRetries.count == 1)
         #expect(workspaceFailures.failures.isEmpty)
         failureController.close()
+    }
+
+    @Test @MainActor func applicationTerminationReviewsEveryWindowAndReopensAllAfterCancel() async {
+        let coordinator = ApplicationTerminationCoordinator()
+        let (first, _, firstEditor, firstPanels, _) = await makeController(
+            decisions: [.discard],
+            terminationCoordinator: coordinator
+        )
+        let (second, _, secondEditor, secondPanels, _) = await makeController(
+            decisions: [.cancel],
+            terminationCoordinator: coordinator
+        )
+        defer {
+            first.close()
+            second.close()
+        }
+        dirty(firstEditor, with: "first dirty window")
+        dirty(secondEditor, with: "second dirty window")
+        #expect(coordinator.attachedWindowCount == 2)
+
+        let approved = await withCheckedContinuation { continuation in
+            #expect(coordinator.applicationShouldTerminate {
+                continuation.resume(returning: $0)
+            } == .terminateLater)
+        }
+
+        #expect(!approved)
+        #expect(firstPanels.decisionTabs.count == 1)
+        #expect(secondPanels.decisionTabs.count == 1)
+        let newScratch = NSMenuItem(
+            title: "New Scratch",
+            action: #selector(DuckpadWindowController.performNewScratch(_:)),
+            keyEquivalent: ""
+        )
+        #expect(first.validateMenuItem(newScratch))
+        #expect(second.validateMenuItem(newScratch))
+    }
+
+    @Test @MainActor func applicationTerminationFlushesEveryApprovedWindowBeforeReply() async {
+        let coordinator = ApplicationTerminationCoordinator()
+        let firstRecovery = RoutingRecoveryStore()
+        let secondRecovery = RoutingRecoveryStore()
+        let (first, _, firstEditor, firstPanels, _) = await makeController(
+            decisions: [.discard],
+            recoveryStore: firstRecovery,
+            terminationCoordinator: coordinator
+        )
+        let (second, _, secondEditor, secondPanels, _) = await makeController(
+            decisions: [.discard],
+            recoveryStore: secondRecovery,
+            terminationCoordinator: coordinator
+        )
+        defer {
+            first.close()
+            second.close()
+        }
+        dirty(firstEditor, with: "first retained recovery")
+        dirty(secondEditor, with: "second retained recovery")
+
+        let approved = await withCheckedContinuation { continuation in
+            #expect(coordinator.applicationShouldTerminate {
+                continuation.resume(returning: $0)
+            } == .terminateLater)
+        }
+
+        #expect(approved)
+        #expect(firstPanels.decisionTabs.count == 1)
+        #expect(secondPanels.decisionTabs.count == 1)
+        #expect(await firstRecovery.commitCount >= 1)
+        #expect(await secondRecovery.commitCount >= 1)
+        #expect(await firstRecovery.latestTabCount() == 1)
+        #expect(await secondRecovery.latestTabCount() == 1)
+    }
+
+    @Test @MainActor func redCloseReviewsOnlyItsOwningWindow() async {
+        let coordinator = ApplicationTerminationCoordinator()
+        var approvedWindow: NSWindow?
+        let closeSpy: @MainActor (NSWindow) -> Void = { window in
+            approvedWindow = window
+        }
+        let (first, _, firstEditor, firstPanels, _) = await makeController(
+            decisions: [.discard],
+            terminationCoordinator: coordinator,
+            approvedWindowClose: closeSpy
+        )
+        let (second, _, secondEditor, secondPanels, _) = await makeController(
+            decisions: [.cancel],
+            terminationCoordinator: coordinator,
+            approvedWindowClose: closeSpy
+        )
+        defer {
+            first.close()
+            second.close()
+        }
+        dirty(firstEditor, with: "close this window")
+        dirty(secondEditor, with: "leave this window alone")
+
+        #expect(first.windowShouldClose(first.window!) == false)
+        for _ in 0..<200 where approvedWindow == nil {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(approvedWindow === first.window)
+        #expect(firstPanels.decisionTabs.count == 1)
+        #expect(secondPanels.decisionTabs.isEmpty)
+        let newScratch = NSMenuItem(
+            title: "New Scratch",
+            action: #selector(DuckpadWindowController.performNewScratch(_:)),
+            keyEquivalent: ""
+        )
+        #expect(second.validateMenuItem(newScratch))
+    }
+
+    @Test @MainActor func nativeCleanWindowCloseDetachesAndPublishesLifecycleOnce() async {
+        let coordinator = ApplicationTerminationCoordinator()
+        let (controller, _, _, _, _) = await makeController(
+            decisions: [],
+            terminationCoordinator: coordinator
+        )
+        var closeCount = 0
+        controller.onClosed = { closeCount += 1 }
+        #expect(coordinator.attachedWindowCount == 1)
+
+        controller.window?.close()
+
+        #expect(closeCount == 1)
+        #expect(coordinator.attachedWindowCount == 0)
+        #expect(controller.window == nil)
+        controller.close()
+        #expect(closeCount == 1)
+    }
+
+    @Test @MainActor func lateAttachedWindowJoinsApplicationTerminationReview() async {
+        let coordinator = ApplicationTerminationCoordinator()
+        let (first, _, firstEditor, firstPanels, _) = await makeController(
+            decisions: [.discard],
+            blocksDecisions: true,
+            terminationCoordinator: coordinator
+        )
+        dirty(firstEditor, with: "hold application review")
+        var applicationReply: Bool?
+        #expect(coordinator.applicationShouldTerminate { applicationReply = $0 } == .terminateLater)
+        for _ in 0..<500 where firstPanels.decisionTabs.isEmpty { await Task.yield() }
+
+        let secondRecovery = RoutingRecoveryStore()
+        let (second, _, secondEditor, secondPanels, _) = await makeController(
+            decisions: [.discard],
+            recoveryStore: secondRecovery,
+            terminationCoordinator: coordinator
+        )
+        defer {
+            first.close()
+            second.close()
+        }
+        let newScratch = NSMenuItem(
+            title: "New Scratch",
+            action: #selector(DuckpadWindowController.performNewScratch(_:)),
+            keyEquivalent: ""
+        )
+        #expect(!second.validateMenuItem(newScratch))
+        dirty(secondEditor, with: "late restored dirty window")
+        firstPanels.releaseDecisions()
+        for _ in 0..<2_000 where applicationReply == nil { await Task.yield() }
+
+        #expect(applicationReply == true)
+        #expect(secondPanels.decisionTabs.count == 1)
+        #expect(await secondRecovery.commitCount >= 1)
+    }
+
+    @Test @MainActor func applicationTerminationWaitsForClosedWindowRecoveryReset() async {
+        let coordinator = ApplicationTerminationCoordinator()
+        let recoveryStore = RoutingRecoveryStore()
+        await recoveryStore.armBlockedReset()
+        let (controller, _, _, _, _) = await makeController(
+            decisions: [],
+            recoveryStore: recoveryStore,
+            terminationCoordinator: coordinator,
+            approvedWindowClose: { $0.windowController?.close() }
+        )
+
+        #expect(controller.windowShouldClose(controller.window!) == false)
+        for _ in 0..<200 where !(await recoveryStore.hasEnteredBlockedReset()) {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        guard await recoveryStore.hasEnteredBlockedReset() else {
+            Issue.record("window close did not start its tracked recovery reset")
+            controller.close()
+            return
+        }
+        #expect(controller.window == nil)
+        #expect(coordinator.attachedWindowCount == 0)
+        var applicationReply: Bool?
+        #expect(coordinator.applicationShouldTerminate { applicationReply = $0 } == .terminateLater)
+        for _ in 0..<100 { await Task.yield() }
+        #expect(applicationReply == nil)
+
+        let lateRecovery = RoutingRecoveryStore()
+        let (late, _, lateEditor, latePanels, _) = await makeController(
+            decisions: [.discard],
+            recoveryStore: lateRecovery,
+            terminationCoordinator: coordinator
+        )
+        defer { late.close() }
+        dirty(lateEditor, with: "attached while close cleanup was blocked")
+
+        await recoveryStore.releaseBlockedReset()
+        for _ in 0..<2_000 where applicationReply == nil { await Task.yield() }
+        #expect(applicationReply == true)
+        #expect(await recoveryStore.latestTabCount() == nil)
+        #expect(latePanels.decisionTabs.count == 1)
+        #expect(await lateRecovery.commitCount >= 1)
+    }
+
+    @Test @MainActor func failedWindowCleanupDeniesQuitAndRetriesOnNextRequest() async {
+        let coordinator = ApplicationTerminationCoordinator()
+        var attempts = 0
+        coordinator.trackWindowCloseCleanup {
+            attempts += 1
+            return attempts > 1
+        }
+        var firstReply: Bool?
+        #expect(coordinator.applicationShouldTerminate { firstReply = $0 } == .terminateLater)
+        for _ in 0..<2_000 where firstReply == nil { await Task.yield() }
+        #expect(firstReply == false)
+        #expect(attempts >= 1)
+
+        var secondReply: Bool?
+        #expect(coordinator.applicationShouldTerminate { secondReply = $0 } == .terminateLater)
+        for _ in 0..<2_000 where secondReply == nil { await Task.yield() }
+        #expect(secondReply == true)
+        #expect(attempts == 2)
     }
 
     @Test @MainActor func routedCloseSaveFailurePresentsOnceAndRetriesLatestRevision() async {

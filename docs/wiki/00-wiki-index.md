@@ -63,6 +63,8 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 49 | [Phase 19 independent code review](reviews/2026-09-03-phase-19-split-editing-code-review.md) | **Content approved — latest Phase 19 evidence** | 최초 3 Major/1 Minor의 rejected-edit 전환, per-buffer exhaustion, 양 pane language, secondary eviction 결함을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 50 | [Phase 20 saved workspace file browser](23-workspace-file-browser.md) | **Content approved; exact receipt pending** | security-scoped folder roots, native outline browser, navigation restoration, drag/drop, Finder reveal과 `Command-Control-O`/`Command-Shift-E` 명령을 기록한다. |
 | 51 | [Phase 20 independent code review](reviews/2026-09-03-phase-20-workspace-file-browser-code-review.md) | **Content approved — latest Phase 20 evidence** | descriptor-relative file authority, serialized/reconciled root mutation, security-scope lifetime, accepted file-open termination ordering과 corrupt-state preservation을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
+| 52 | [Phase 21 native multiple windows](24-native-multiple-windows.md) | **Implemented; review pending** | `Command-Shift-N` native window, key-window command routing, window별 recovery, 전체-window quit review와 same-file identity conflict 정책을 기록한다. |
+| 53 | [Phase 21 independent code review](reviews/2026-09-03-phase-21-native-multiple-windows-code-review.md) | **Content approved — latest Phase 21 evidence** | 최초 3 Major/1 Minor의 late-window admission, close-reset join, recovery-root TOCTOU 및 test gap을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -118,6 +120,24 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 21 native multiple windows
+
+- **Agent/role:** `/root`, direct investigator and builder; no new implementation agent was added.
+- **Implementation:** `Command-Shift-N` creates an independently retained native window while `Command-N` remains New Scratch. Each window owns its session/editor/recovery/UI use cases; filesystem/workspace/extension infrastructure remains process-shared. The key window retargets the native menu, last-window close does not terminate the app, and Dock reopen restores or creates a window.
+- **Data safety:** red-close reviews only its exact controller. `Command-Q` synchronously admits every current or late-attached window into one serialized coordinator and replies only after all dirty decisions, final recovery flushes, and explicit-close cleanup complete. Any cancellation reopens all admitted interaction surfaces. Failed close cleanup denies quit and is retried on the next request. Same-file buffers across windows rely on identity-checked atomic saves and surface the existing explicit conflict workflow.
+- **Recovery/safety bounds:** the primary archive path is compatible with prior releases; additional UUID recovery directories are restored from a sibling container using bounded descriptor/no-follow enumeration. The accepted root descriptor remains authoritative for manifest/blob reads, writes, cleanup, and reset; symlink/file path replacement cannot redirect operations. Explicit window close unlinks only that archive; app termination preserves open-window archives. Live windows are capped at 32 and discovery at 31 additional roots/1,024 raw entries.
+- **Validation:** focused new tests pass for all-window approval/flush, late attachment during dirty review and close cleanup, cancellation/reopen, exact red-close isolation, blocked/failed close cleanup, descriptor-bound symlink/file swap and pre-unlink replacement rejection, native close teardown, New Window/menu routing, and two-window same-file conflict. A production three-launch smoke creates/restores two windows, closes the restored window with joined cleanup, and verifies only one returns. Exact-current Debug/Release each pass 301/301, parity governance 31/31, and commit governance 8/8; independent re-review remains pending.
+- **Boundary:** macro recording/playback, README, ignored Notepad++, and user-owned doc04/vendor-script changes remain excluded.
+
+### 2026-09-03 — Phase 21 independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 21 구현에는 참여하지 않았다.
+- **Verdict:** **CHANGES REQUIRED — 0 Blocker, 3 Major, 1 Minor.** Cmd-Q 도중 late-restored window가 admission/flush에서 빠지는 경쟁, 명시적 close recovery reset이 종료 join 밖에 남는 내구성 경쟁, descriptor 검증 후 path store로 전환되는 recovery-root TOCTOU를 확인했다. 기존 테스트가 이 두 lifecycle interleave를 다루지 않는 점을 Minor로 기록했다.
+- **Evidence:** exact candidate/tree/diff/message와 9 staged paths, cached diff-check를 확인했다. Independent focused 5/5 PASS와 builder Debug/Release 293/293, parity 31/31, governance 8/8, two-launch smoke를 구분해 기록했다. Receipt는 승인하지 않았다.
+- **Boundary:** review 문서와 index review row/work log만 수정했다. source/tests/work doc, stage/commit/push, doc04, vendor script, README, ignored Notepad++는 건드리지 않았다.
+- **Remediation re-review:** application review가 dirty-decision뿐 아니라 close-cleanup await 뒤에도 late attachment queue를 고정점까지 다시 비우는지 확인했다. 닫힌 창 reset은 detach 전에 등록되고 종료 reply 전에 join되며 실패 시 deny/retry된다. restored recovery는 parent/root FD와 no-follow descriptor 연산을 유지하고, 재귀 reset 후 최종 unlink 직전에도 dev/inode를 재검증한다.
+- **Final verdict/evidence:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** Independent focused 8/8 PASS. Builder exact Debug/Release 301/301, 3-launch production smoke, parity 31/31, governance 8/8 및 diff-check PASS를 supporting evidence로 기록했다. Review/index 반영 후 새 exact candidate와 receipt가 필요하다.
 
 ### 2026-09-03 — Phase 20 saved workspace file browser
 

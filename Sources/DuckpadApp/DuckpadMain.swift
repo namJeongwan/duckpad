@@ -9,42 +9,44 @@ import DuckpadPresentation
 @MainActor
 final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: DuckpadWindowController?
-    private var terminationCoordinator: ApplicationTerminationCoordinator?
+    private var windowControllers: [ObjectIdentifier: DuckpadWindowController] = [:]
+    private var windowRecoveryRoots: [ObjectIdentifier: URL] = [:]
+    private let terminationCoordinator = ApplicationTerminationCoordinator()
+    private var environment: [String: String] = [:]
+    private var recoveryBase: URL!
+    private var fileStore: LocalTextFileStore!
+    private var folderSearchStore: LocalFolderSearchFileStore!
+    private var workspaceRootStore: LocalWorkspaceRootStore!
+    private var extensionLoader: LocalExtensionPackageLoader!
+    private var extensionPolicy: LocalExtensionPreferenceStore!
+    private var extensionTransport: ProcessPluginHostTransport!
+    private var languageRegistry: LanguageRegistry!
+    private var languageConfigurationIssue: String?
+
+    private struct WindowRuntime {
+        let controller: DuckpadWindowController
+        let workspace: ScratchWorkspaceUseCase
+        let editor: ScintillaEditorAdapter
+        let recoveryUseCase: SessionRecoveryUseCase
+        let fileUseCase: FileDocumentUseCase
+        let searchUseCase: SearchWorkspaceUseCase
+        let workspaceBrowserUseCase: WorkspaceBrowserUseCase
+        let languageUseCase: LanguageWorkspaceUseCase
+        let extensionUseCase: ExtensionWorkspaceUseCase
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installDevelopmentAppIcon()
-        let store = InMemorySessionStore()
-        let workspace = ScratchWorkspaceUseCase(store: store)
-        let editor = ScintillaEditorAdapter()
-        let environment = ProcessInfo.processInfo.environment
-        let recoveryRoot = environment["DUCKPAD_RECOVERY_ROOT"].map {
+        environment = ProcessInfo.processInfo.environment
+        recoveryBase = environment["DUCKPAD_RECOVERY_ROOT"].map {
             URL(fileURLWithPath: $0, isDirectory: true)
         } ?? LocalRecoveryStore.defaultRoot()
-        let recoveryStore = LocalRecoveryStore(root: recoveryRoot)
-        let recoveryUseCase = SessionRecoveryUseCase(
-            workspace: workspace,
-            editor: editor,
-            store: recoveryStore
-        )
-        let fileStore = LocalTextFileStore()
-        let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: fileStore)
-        let searchUseCase = SearchWorkspaceUseCase(
-            workspace: workspace,
-            editor: editor,
-            regexEngine: ICURegexEngine()
-        )
-        let folderSearchUseCase = FolderSearchUseCase(
-            store: LocalFolderSearchFileStore(),
-            regexEngine: ICURegexEngine()
-        )
+        fileStore = LocalTextFileStore()
+        folderSearchStore = LocalFolderSearchFileStore()
         let workspaceRootsArchive = environment["DUCKPAD_WORKSPACE_ROOTS_FILE"].map {
             URL(fileURLWithPath: $0, isDirectory: false)
         } ?? LocalWorkspaceRootStore.defaultArchiveURL()
-        let workspaceBrowserUseCase = WorkspaceBrowserUseCase(
-            store: LocalWorkspaceRootStore(archiveURL: workspaceRootsArchive)
-        )
-        let languageRegistry: LanguageRegistry
-        let languageConfigurationIssue: String?
+        workspaceRootStore = LocalWorkspaceRootStore(archiveURL: workspaceRootsArchive)
         do {
             languageRegistry = try LanguageManifestLoader().loadBundled()
             languageConfigurationIssue = nil
@@ -52,59 +54,82 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             languageRegistry = LanguageManifestLoader.fallbackRegistry
             languageConfigurationIssue = "Language registry degraded: \(error)"
         }
-        let languageUseCase = LanguageWorkspaceUseCase(
-            registry: languageRegistry,
-            workspace: workspace,
-            editor: editor,
-            configurationIssue: languageConfigurationIssue
-        )
         let extensionsRoot = environment["DUCKPAD_EXTENSIONS_ROOT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? LocalExtensionPackageLoader.defaultRoot()
         let policyRoot = environment["DUCKPAD_EXTENSION_POLICY_ROOT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? LocalExtensionPreferenceStore.defaultRoot()
-        let extensionLoader = LocalExtensionPackageLoader(root: extensionsRoot)
-        let extensionPolicy = LocalExtensionPreferenceStore(root: policyRoot)
-        let extensionTransport = ProcessPluginHostTransport(executableURL: ProcessPluginHostTransport.siblingOfCurrentExecutable())
-        #if DEBUG
-        let allowsDevelopmentExtensions = environment["DUCKPAD_ALLOW_DEVELOPMENT_EXTENSIONS"] == "1"
-        #else
-        let allowsDevelopmentExtensions = false
-        #endif
-        let extensionUseCase = ExtensionWorkspaceUseCase(
-            loader: extensionLoader, grants: extensionPolicy, transport: extensionTransport,
-            workspace: workspace, editor: editor, allowsUserExtensions: allowsDevelopmentExtensions
-        )
-        let panels = NativeFilePanelAdapter()
-        let terminationCoordinator = ApplicationTerminationCoordinator()
-        let controller = DuckpadWindowController(
-            workspace: workspace,
-            editorAdapter: editor,
-            editorView: editor.view,
-            fileUseCase: fileUseCase,
-            filePanels: panels,
-            fileConflictPresenter: panels,
-            dirtyDecisionPresenter: panels,
-            recoveryUseCase: recoveryUseCase,
-            terminationCoordinator: terminationCoordinator,
-            searchUseCase: searchUseCase,
-            folderSearchUseCase: folderSearchUseCase,
-            workspaceBrowserUseCase: workspaceBrowserUseCase,
-            languageUseCase: languageUseCase,
-            extensionUseCase: extensionUseCase
-        )
+        extensionLoader = LocalExtensionPackageLoader(root: extensionsRoot)
+        extensionPolicy = LocalExtensionPreferenceStore(root: policyRoot)
+        extensionTransport = ProcessPluginHostTransport(executableURL: ProcessPluginHostTransport.siblingOfCurrentExecutable())
+        let runtime = makeWindowRuntime(recoveryRoot: recoveryBase)
+        let controller = runtime.controller
+        let workspace = runtime.workspace
+        let editor = runtime.editor
+        let recoveryUseCase = runtime.recoveryUseCase
+        let fileUseCase = runtime.fileUseCase
+        let searchUseCase = runtime.searchUseCase
+        let workspaceBrowserUseCase = runtime.workspaceBrowserUseCase
+        let languageUseCase = runtime.languageUseCase
+        let extensionUseCase = runtime.extensionUseCase
         windowController = controller
-        self.terminationCoordinator = terminationCoordinator
         terminationCoordinator.installApplicationRetryHandler {
             NSApplication.shared.terminate(nil)
         }
-        installMainMenu(target: controller)
-        controller.onExtensionCommandsChanged = { [weak self, weak controller] in
-            guard let self, let controller else { return }
-            self.installMainMenu(target: controller)
-        }
+        register(runtime, recoveryRoot: recoveryBase)
         controller.showAndFocus()
+        restoreAdditionalWindows()
 
-        if environment["DUCKPAD_EXTENSION_SMOKE"] == "1" {
+        if environment["DUCKPAD_MULTIWINDOW_SMOKE"] == "1" {
+            controller.performNewWindow()
+            Task { @MainActor in
+                for controller in windowControllers.values {
+                    await controller.waitForStartup()
+                    let flushed = await controller.flushRecovery()
+                    precondition(flushed, "window recovery flush failed")
+                }
+                precondition(windowControllers.count == 2, "new-window command did not retain two controllers")
+                precondition(terminationCoordinator.attachedWindowCount == 2, "termination coordinator missed a window")
+                precondition(Set(windowControllers.values.compactMap { $0.window.map(ObjectIdentifier.init) }).count == 2)
+                print("Duckpad multi-window smoke ready: 2 independent native windows with recovery")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
+        } else if let expectedText = environment["DUCKPAD_MULTIWINDOW_CLOSE_RESTORED_SMOKE"],
+                  let expected = Int(expectedText), expected > 1 {
+            Task { @MainActor in
+                for _ in 0..<2_000 where windowControllers.count < expected { await Task.yield() }
+                precondition(windowControllers.count == expected, "additional window was not restored before close")
+                let primaryRoot = recoveryBase.standardizedFileURL
+                guard let pair = windowRecoveryRoots.first(where: { $0.value != primaryRoot }),
+                      let restored = windowControllers[pair.key] else {
+                    preconditionFailure("restored additional window is unavailable")
+                }
+                restored.close()
+                let approved = await withCheckedContinuation { continuation in
+                    let reply = terminationCoordinator.applicationShouldTerminate {
+                        continuation.resume(returning: $0)
+                    }
+                    precondition(reply == .terminateLater, "close cleanup was not joined")
+                }
+                precondition(approved, "close cleanup prevented termination")
+                precondition(!FileManager.default.fileExists(atPath: pair.value.path))
+                print("Duckpad multi-window close cleanup removed the restored window")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
+        } else if let expectedText = environment["DUCKPAD_MULTIWINDOW_RESTORE_SMOKE"],
+                  let expected = Int(expectedText), expected > 0 {
+            Task { @MainActor in
+                for _ in 0..<2_000 where windowControllers.count < expected { await Task.yield() }
+                precondition(windowControllers.count == expected, "additional windows were not restored")
+                for controller in windowControllers.values { await controller.waitForStartup() }
+                precondition(terminationCoordinator.attachedWindowCount == expected)
+                precondition(Set(windowControllers.values.compactMap { $0.window.map(ObjectIdentifier.init) }).count == expected)
+                print("Duckpad multi-window recovery restored \(expected) native windows")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
+        } else if environment["DUCKPAD_EXTENSION_SMOKE"] == "1" {
             Task { @MainActor in
                 await controller.waitForStartup()
                 guard let view = editor.activeScintillaView else { preconditionFailure("extension smoke editor missing") }
@@ -259,19 +284,167 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        terminationCoordinator?.applicationShouldTerminate { approved in
-            sender.reply(toApplicationShouldTerminate: approved)
-        } ?? .terminateNow
+    private func makeWindowRuntime(
+        recoveryRoot: URL,
+        verifiedRecoveryRoot: VerifiedRecoveryRoot? = nil
+    ) -> WindowRuntime {
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        let editor = ScintillaEditorAdapter()
+        let recoveryStore = verifiedRecoveryRoot.map { LocalRecoveryStore(verifiedRoot: $0) }
+            ?? LocalRecoveryStore(root: recoveryRoot)
+        let recoveryUseCase = SessionRecoveryUseCase(
+            workspace: workspace,
+            editor: editor,
+            store: recoveryStore
+        )
+        let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: fileStore)
+        let searchUseCase = SearchWorkspaceUseCase(
+            workspace: workspace,
+            editor: editor,
+            regexEngine: ICURegexEngine()
+        )
+        let folderSearchUseCase = FolderSearchUseCase(
+            store: folderSearchStore,
+            regexEngine: ICURegexEngine()
+        )
+        let workspaceBrowserUseCase = WorkspaceBrowserUseCase(store: workspaceRootStore)
+        let languageUseCase = LanguageWorkspaceUseCase(
+            registry: languageRegistry,
+            workspace: workspace,
+            editor: editor,
+            configurationIssue: languageConfigurationIssue
+        )
+        #if DEBUG
+        let allowsDevelopmentExtensions = environment["DUCKPAD_ALLOW_DEVELOPMENT_EXTENSIONS"] == "1"
+        #else
+        let allowsDevelopmentExtensions = false
+        #endif
+        let extensionUseCase = ExtensionWorkspaceUseCase(
+            loader: extensionLoader,
+            grants: extensionPolicy,
+            transport: extensionTransport,
+            workspace: workspace,
+            editor: editor,
+            allowsUserExtensions: allowsDevelopmentExtensions
+        )
+        let panels = NativeFilePanelAdapter()
+        let controller = DuckpadWindowController(
+            workspace: workspace,
+            editorAdapter: editor,
+            editorView: editor.view,
+            fileUseCase: fileUseCase,
+            filePanels: panels,
+            fileConflictPresenter: panels,
+            dirtyDecisionPresenter: panels,
+            recoveryUseCase: recoveryUseCase,
+            terminationCoordinator: terminationCoordinator,
+            searchUseCase: searchUseCase,
+            folderSearchUseCase: folderSearchUseCase,
+            workspaceBrowserUseCase: workspaceBrowserUseCase,
+            languageUseCase: languageUseCase,
+            extensionUseCase: extensionUseCase
+        )
+        return WindowRuntime(
+            controller: controller,
+            workspace: workspace,
+            editor: editor,
+            recoveryUseCase: recoveryUseCase,
+            fileUseCase: fileUseCase,
+            searchUseCase: searchUseCase,
+            workspaceBrowserUseCase: workspaceBrowserUseCase,
+            languageUseCase: languageUseCase,
+            extensionUseCase: extensionUseCase
+        )
     }
 
-    func applicationWillResignActive(_ notification: Notification) {
-        Task { @MainActor [weak windowController] in
-            _ = await windowController?.flushRecovery()
+    private func register(_ runtime: WindowRuntime, recoveryRoot: URL) {
+        let controller = runtime.controller
+        let identifier = ObjectIdentifier(controller)
+        windowControllers[identifier] = controller
+        windowRecoveryRoots[identifier] = recoveryRoot.standardizedFileURL
+        controller.onNewWindowRequested = { [weak self] in self?.createAdditionalWindow() }
+        controller.onBecameKey = { [weak self, weak controller] in
+            guard let self, let controller else { return }
+            self.installMainMenu(target: controller)
+        }
+        controller.onExtensionCommandsChanged = { [weak self, weak controller] in
+            guard let self, let controller, controller.window?.isKeyWindow == true else { return }
+            self.installMainMenu(target: controller)
+        }
+        controller.onClosed = { [weak self, weak controller] in
+            guard let self, let controller else { return }
+            let identifier = ObjectIdentifier(controller)
+            self.windowRecoveryRoots.removeValue(forKey: identifier)
+            self.windowControllers.removeValue(forKey: identifier)
+            if self.windowController === controller {
+                self.windowController = self.windowControllers.values.first
+            }
+        }
+        installMainMenu(target: controller)
+    }
+
+    private func createAdditionalWindow() {
+        guard windowControllers.count < 32 else {
+            NSSound.beep()
+            return
+        }
+        let recoveryRoot = additionalRecoveryContainer
+            .appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
+        let runtime = makeWindowRuntime(recoveryRoot: recoveryRoot)
+        register(runtime, recoveryRoot: recoveryRoot)
+        runtime.controller.showAndFocus()
+    }
+
+    private var additionalRecoveryContainer: URL {
+        recoveryBase.deletingLastPathComponent().appendingPathComponent(
+            recoveryBase.lastPathComponent + "-Windows",
+            isDirectory: true
+        )
+    }
+
+    private func restoreAdditionalWindows() {
+        guard environment["DUCKPAD_MULTIWINDOW_SMOKE"] != "1" else { return }
+        let container = additionalRecoveryContainer
+        Task { @MainActor [weak self] in
+            let roots = await Task.detached(priority: .utility) {
+                LocalRecoveryStore.discoverVerifiedRoots(in: container)
+            }.value
+            guard let self else { return }
+            let activeRoots = Set(self.windowRecoveryRoots.values.map(\.standardizedFileURL))
+            for root in roots where !activeRoots.contains(root.displayURL.standardizedFileURL) {
+                let runtime = self.makeWindowRuntime(
+                    recoveryRoot: root.displayURL,
+                    verifiedRecoveryRoot: root
+                )
+                self.register(runtime, recoveryRoot: root.displayURL)
+                runtime.controller.showWindow(nil)
+            }
         }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let result = terminationCoordinator.applicationShouldTerminate { approved in
+            sender.reply(toApplicationShouldTerminate: approved)
+        }
+        return result
+    }
+
+    func applicationWillResignActive(_ notification: Notification) {
+        let controllers = Array(windowControllers.values)
+        Task { @MainActor in
+            for controller in controllers { _ = await controller.flushRecovery() }
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            if let controller = windowControllers.values.first { controller.showAndFocus() }
+            else { createAdditionalWindow() }
+        }
+        return true
+    }
 
     private func installMainMenu(target: DuckpadWindowController) {
         NSApplication.shared.mainMenu = DuckpadMainMenuFactory.make(target: target)

@@ -21,6 +21,7 @@ public enum DuckpadMainMenuFactory {
         mainMenu.addItem(fileItem)
         let fileMenu = NSMenu(title: "File")
         add("New Scratch", #selector(DuckpadWindowController.performNewScratch(_:)), "n", target, to: fileMenu)
+        add("New Window", #selector(DuckpadWindowController.performNewWindow(_:)), "n", target, modifiers: [.command, .shift], to: fileMenu)
         add("Open…", #selector(DuckpadWindowController.performOpenFile(_:)), "o", target, to: fileMenu)
         add(
             "Add Folder to Workspace…",
@@ -172,6 +173,37 @@ public enum DuckpadMainMenuFactory {
         add("Move Tab Left", #selector(DuckpadWindowController.performMoveActiveTabLeft(_:)), "[", target, modifiers: [.command, .shift], to: tabMenu)
         add("Move Tab Right", #selector(DuckpadWindowController.performMoveActiveTabRight(_:)), "]", target, modifiers: [.command, .shift], to: tabMenu)
         tabItem.submenu = tabMenu
+
+        let windowItem = NSMenuItem()
+        mainMenu.addItem(windowItem)
+        let windowMenu = NSMenu(title: "Window")
+        let minimize = windowMenu.addItem(
+            withTitle: "Minimize",
+            action: #selector(NSWindow.performMiniaturize(_:)),
+            keyEquivalent: "m"
+        )
+        minimize.keyEquivalentModifierMask = [.command]
+        let zoom = windowMenu.addItem(
+            withTitle: "Zoom",
+            action: #selector(NSWindow.performZoom(_:)),
+            keyEquivalent: ""
+        )
+        zoom.keyEquivalentModifierMask = []
+        let fullScreen = windowMenu.addItem(
+            withTitle: "Enter Full Screen",
+            action: #selector(NSWindow.toggleFullScreen(_:)),
+            keyEquivalent: "f"
+        )
+        fullScreen.keyEquivalentModifierMask = [.command, .control]
+        windowMenu.addItem(.separator())
+        let front = windowMenu.addItem(
+            withTitle: "Bring All to Front",
+            action: #selector(NSApplication.arrangeInFront(_:)),
+            keyEquivalent: ""
+        )
+        front.keyEquivalentModifierMask = []
+        windowItem.submenu = windowMenu
+        NSApplication.shared.windowsMenu = windowMenu
 
         let languageItem = NSMenuItem()
         mainMenu.addItem(languageItem)
