@@ -126,6 +126,24 @@ public protocol EditorViewOptionsPort: EditorPort {
     func setWrapMarkerVisible(_ isVisible: Bool)
 }
 
+/// Platform-neutral edit commands surfaced by the native menu. Application
+/// owns the intent while each editor adapter owns its responder/engine details.
+public enum EditorStandardCommand: Equatable, Sendable {
+    case undo
+    case redo
+    case cut
+    case copy
+    case paste
+    case delete
+    case selectAll
+}
+
+@MainActor
+public protocol EditorStandardCommandPort: EditorPort {
+    func canPerform(_ command: EditorStandardCommand) -> Bool
+    func perform(_ command: EditorStandardCommand)
+}
+
 public enum EditorThemePalette: Equatable, Sendable {
     case light
     case dark

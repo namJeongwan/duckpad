@@ -187,6 +187,11 @@ private func menuItem(_ title: String, in menu: NSMenu) -> NSMenuItem? {
     return nil
 }
 
+@MainActor
+private func flattenedMenuItems(in menu: NSMenu) -> [NSMenuItem] {
+    menu.items + menu.items.compactMap(\.submenu).flatMap(flattenedMenuItems)
+}
+
 @Test func tabsWrapAcrossRowsWhilePreservingOrder() {
     let engine = TabFlowLayoutEngine(
         rowHeight: 30,
@@ -388,6 +393,44 @@ struct AppKitHostedTests {
     await controller.waitForStartup()
     let menu = DuckpadMainMenuFactory.make(target: controller)
 
+    let newScratch = menuItem("New Scratch", in: menu)
+    #expect(newScratch?.action == #selector(DuckpadWindowController.performNewScratch(_:)))
+    #expect(newScratch?.keyEquivalent == "n")
+    #expect(newScratch?.keyEquivalentModifierMask == [.command])
+
+    let undo = menuItem("Undo", in: menu)
+    let redo = menuItem("Redo", in: menu)
+    let cut = menuItem("Cut", in: menu)
+    let copy = menuItem("Copy", in: menu)
+    let paste = menuItem("Paste", in: menu)
+    let delete = menuItem("Delete", in: menu)
+    let selectAll = menuItem("Select All", in: menu)
+    #expect(undo?.action == #selector(DuckpadWindowController.performUndo(_:)))
+    #expect(undo?.keyEquivalent == "z")
+    #expect(undo?.keyEquivalentModifierMask == [.command])
+    #expect(redo?.action == #selector(DuckpadWindowController.performRedo(_:)))
+    #expect(redo?.keyEquivalent == "z")
+    #expect(redo?.keyEquivalentModifierMask == [.command, .shift])
+    #expect(cut?.action == #selector(DuckpadWindowController.performCut(_:)))
+    #expect(cut?.keyEquivalent == "x")
+    #expect(copy?.action == #selector(DuckpadWindowController.performCopy(_:)))
+    #expect(copy?.keyEquivalent == "c")
+    #expect(paste?.action == #selector(DuckpadWindowController.performPaste(_:)))
+    #expect(paste?.keyEquivalent == "v")
+    #expect(delete?.action == #selector(DuckpadWindowController.performDelete(_:)))
+    #expect(delete?.keyEquivalent.isEmpty == true)
+    #expect(selectAll?.action == #selector(DuckpadWindowController.performSelectAll(_:)))
+    #expect(selectAll?.keyEquivalent == "a")
+    for item in [cut, copy, paste, selectAll].compactMap({ $0 }) {
+        #expect(item.keyEquivalentModifierMask == [.command])
+    }
+
+    let shortcuts = flattenedMenuItems(in: menu).compactMap { item -> String? in
+        guard !item.keyEquivalent.isEmpty else { return nil }
+        return "\(item.keyEquivalentModifierMask.rawValue):\(item.keyEquivalent.lowercased())"
+    }
+    #expect(Set(shortcuts).count == shortcuts.count)
+
     let close = menuItem("Close Tab", in: menu)
     #expect(close?.action == #selector(DuckpadWindowController.performCloseActiveTab(_:)))
     #expect(close?.keyEquivalent == "w")
@@ -440,6 +483,26 @@ struct AppKitHostedTests {
         #expect(!controller.validateMenuItem(wrapSymbols))
         #expect(wrapSymbols.state == .off)
     }
+}
+
+@Test @MainActor func newScratchShortcutActionAddsAndActivatesUntitledTab() async {
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    let original = workspace.snapshot().tabs.first(where: \.isActive)?.id
+    #expect(original != nil)
+
+    controller.performNewScratch()
+    for _ in 0..<200 where workspace.snapshot().tabs.count != 2 {
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    await workspace.waitForPendingPersistence()
+    let snapshot = workspace.snapshot()
+    #expect(snapshot.tabs.count == 2)
+    #expect(snapshot.tabs.first(where: \.isActive)?.id != original)
+    #expect(snapshot.tabs.first(where: \.isActive)?.title == "new 2")
 }
 
 @Test @MainActor func layoutCacheIsSinglePassOOneLookupAndInvalidatesForEngineChanges() {
@@ -649,6 +712,67 @@ struct AppKitHostedTests {
     #expect(!restored.isWordWrapEnabled)
     #expect(restored.scrollView.hasHorizontalScroller)
     #expect(!restored.supportsWrapMarker)
+}
+
+@Test @MainActor func textViewFallbackPerformsStandardEditCommandsWithOwnedUndo() throws {
+    let editor = TextViewEditorAdapter()
+    let bufferID = BufferID()
+    editor.display(EditorBufferDescriptor(bufferID: bufferID, revision: 0))
+    editor.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+    editor.textView.insertText("abc", replacementRange: NSRange(location: 0, length: 0))
+    #expect(editor.canPerform(.undo))
+
+    editor.perform(.undo)
+    #expect(editor.textView.string == "")
+    #expect(editor.canPerform(.redo))
+    editor.perform(.redo)
+    #expect(editor.textView.string == "abc")
+
+    editor.perform(.selectAll)
+    #expect(editor.textView.selectedRange() == NSRange(location: 0, length: 3))
+    #expect(editor.canPerform(.cut))
+    #expect(editor.canPerform(.copy))
+    editor.perform(.cut)
+    #expect(editor.textView.string == "")
+    #expect(!editor.canPerform(.delete))
+
+    editor.perform(.undo)
+    editor.textView.setSelectedRange(NSRange(location: 1, length: 0))
+    #expect(editor.canPerform(.delete))
+    editor.perform(.delete)
+    #expect(editor.textView.string == "ac")
+}
+
+@Test @MainActor func textViewFallbackRevisionExhaustionDisablesEveryMutationCommand() {
+    let editor = TextViewEditorAdapter()
+    let bufferID = BufferID()
+    let descriptor = EditorBufferDescriptor(bufferID: bufferID, revision: .max)
+    editor.display(descriptor)
+    editor.install(EditorTextSnapshot(bufferID: bufferID, revision: .max, text: "locked"))
+    editor.setInputEnabled(true)
+    editor.textView.setSelectedRange(NSRange(location: 0, length: 6))
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString("replacement", forType: .string)
+    let originalUndo = editor.textView.undoManager?.canUndo
+    let originalRedo = editor.textView.undoManager?.canRedo
+
+    #expect(!editor.textView.isEditable)
+    #expect(editor.textView.isSelectable)
+    for command in [
+        EditorStandardCommand.undo,
+        .redo,
+        .cut,
+        .paste,
+        .delete,
+    ] {
+        #expect(!editor.canPerform(command))
+        editor.perform(command)
+    }
+
+    #expect(editor.textView.string == "locked")
+    #expect(editor.snapshot(for: bufferID)?.revision == .max)
+    #expect(editor.textView.undoManager?.canUndo == originalUndo)
+    #expect(editor.textView.undoManager?.canRedo == originalRedo)
 }
 
 @Test @MainActor func textViewAdapterRetirementDropsTextAndUndoButPreservesInactiveOpenBuffer() {

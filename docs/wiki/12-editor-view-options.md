@@ -1,6 +1,6 @@
 # Phase 9 — Editor view options
 
-> Status: **Implemented; independent re-review pending**
+> Status: **Approved, committed and audited**
 > Owner/builder: `/root`
 > Last updated: 2026-09-03
 > Parity scope: `C2.F12` editor word wrap and wrap-marker display
@@ -53,8 +53,9 @@ release gate or the remaining display/settings parity.
   and inert until changes are durable and actionable again.
 
 Focused and full validation results are recorded in the Phase 9 entry of the
-wiki index before candidate freeze. Independent review and an exact signed
-receipt remain mandatory before commit.
+wiki index. Independent re-review closed P9-01 with no remaining finding; exact
+candidate `fd83bab4…8026a1` was committed as `268c0e1` and its signed receipt
+passed the nine-commit audit.
 
 Builder validation after P9-01 remediation: the focused startup/termination
 regressions pass 2/2, and the complete debug and release suites pass 189/189

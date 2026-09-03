@@ -168,6 +168,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var languageDetectionTask: Task<Void, Never>?
     private var appliedThemePalette: EditorThemePalette?
     private var terminationReviewInProgress = false
+    private var pendingNewScratchTasks: [UUID: Task<Void, Never>] = [:]
 
     public init(
         workspace: ScratchWorkspaceUseCase,
@@ -255,6 +256,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         startTask?.cancel()
         searchTask?.cancel()
         languageDetectionTask?.cancel()
+        pendingNewScratchTasks.values.forEach { $0.cancel() }
     }
 
     public override func close() {
@@ -394,7 +396,20 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     public func waitForStartup() async { await startTask?.value }
 
     func performAdd() {
-        Task { [weak workspace] in _ = await workspace?.addScratch() }
+        guard workspace.snapshot().startup == .ready, !terminationReviewInProgress else { return }
+        let token = UUID()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.pendingNewScratchTasks.removeValue(forKey: token) }
+            guard !self.terminationReviewInProgress,
+                  self.workspace.snapshot().startup == .ready else { return }
+            _ = await self.workspace.addScratch()
+        }
+        pendingNewScratchTasks[token] = task
+    }
+
+    @objc public func performNewScratch(_ sender: Any? = nil) {
+        performAdd()
     }
 
     func performActivate(_ id: TabID) {
@@ -457,6 +472,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         closeSearchPanel()
     }
 
+    @objc public func performUndo(_ sender: Any? = nil) { performStandardEditorCommand(.undo) }
+    @objc public func performRedo(_ sender: Any? = nil) { performStandardEditorCommand(.redo) }
+    @objc public func performCut(_ sender: Any? = nil) { performStandardEditorCommand(.cut) }
+    @objc public func performCopy(_ sender: Any? = nil) { performStandardEditorCommand(.copy) }
+    @objc public func performPaste(_ sender: Any? = nil) { performStandardEditorCommand(.paste) }
+    @objc public func performDelete(_ sender: Any? = nil) { performStandardEditorCommand(.delete) }
+    @objc public func performSelectAll(_ sender: Any? = nil) { performStandardEditorCommand(.selectAll) }
+
     @objc public func performToggleWordWrap(_ sender: Any? = nil) {
         guard let editor = actionableEditorViewOptions else { return }
         editor.setWordWrapEnabled(!editor.isWordWrapEnabled)
@@ -471,6 +494,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if let command = standardEditorCommand(for: menuItem.action) {
+            return actionableStandardEditorCommands?.canPerform(command) ?? false
+        }
+        if menuItem.action == #selector(performNewScratch(_:)) {
+            return workspace.snapshot().startup == .ready && !terminationReviewInProgress
+        }
         switch menuItem.action {
         case #selector(performToggleWordWrap(_:)):
             guard let editor = actionableEditorViewOptions else {
@@ -492,13 +521,38 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private var actionableEditorViewOptions: (any EditorViewOptionsPort)? {
-        let snapshot = workspace.snapshot()
-        guard snapshot.startup == .ready,
-              snapshot.activeBuffer != nil,
-              !terminationReviewInProgress else {
-            return nil
-        }
+        guard editorCommandsAreActionable else { return nil }
         return activeEditor as? any EditorViewOptionsPort
+    }
+
+    private var actionableStandardEditorCommands: (any EditorStandardCommandPort)? {
+        guard editorCommandsAreActionable else { return nil }
+        return activeEditor as? any EditorStandardCommandPort
+    }
+
+    private var editorCommandsAreActionable: Bool {
+        let snapshot = workspace.snapshot()
+        return snapshot.startup == .ready
+            && snapshot.activeBuffer != nil
+            && !terminationReviewInProgress
+    }
+
+    private func performStandardEditorCommand(_ command: EditorStandardCommand) {
+        guard let editor = actionableStandardEditorCommands, editor.canPerform(command) else { return }
+        editor.perform(command)
+    }
+
+    private func standardEditorCommand(for action: Selector?) -> EditorStandardCommand? {
+        switch action {
+        case #selector(performUndo(_:)): .undo
+        case #selector(performRedo(_:)): .redo
+        case #selector(performCut(_:)): .cut
+        case #selector(performCopy(_:)): .copy
+        case #selector(performPaste(_:)): .paste
+        case #selector(performDelete(_:)): .delete
+        case #selector(performSelectAll(_:)): .selectAll
+        default: nil
+        }
     }
 
     public func routeOpenFile() async {
@@ -571,6 +625,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 activeEditor.setInputEnabled(true)
             }
         }
+        await waitForAcceptedNewScratchTasks()
         await extensionUseCase?.suspendInvocationsAndWait()
         guard dirtyDecisionPresenter != nil || !hasDirtyDocuments else { return false }
         let retrySaveTabID = terminationRetrySaveTabID
@@ -596,6 +651,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         approved = await flushRecovery(final: true)
         return approved
+    }
+
+    private func waitForAcceptedNewScratchTasks() async {
+        while let task = pendingNewScratchTasks.values.first {
+            await task.value
+        }
     }
 
     public func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -694,6 +755,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             registryReady = languageUseCase?.validateRegistry() ?? false
         }
         editorBinding.render(change)
+        if terminationReviewInProgress {
+            activeEditor.setInputEnabled(false)
+        }
         updateWindowTitle(change.snapshot)
         recoveryUseCase?.workspaceDidChange(change)
         if change.snapshot.startup == .ready, case .bufferEdited = change.kind {

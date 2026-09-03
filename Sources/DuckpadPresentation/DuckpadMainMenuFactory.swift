@@ -20,12 +20,27 @@ public enum DuckpadMainMenuFactory {
         let fileItem = NSMenuItem()
         mainMenu.addItem(fileItem)
         let fileMenu = NSMenu(title: "File")
+        add("New Scratch", #selector(DuckpadWindowController.performNewScratch(_:)), "n", target, to: fileMenu)
         add("Open…", #selector(DuckpadWindowController.performOpenFile(_:)), "o", target, to: fileMenu)
         add("Save", #selector(DuckpadWindowController.performSaveFile(_:)), "s", target, to: fileMenu)
         add("Save As…", #selector(DuckpadWindowController.performSaveFileAs(_:)), "s", target, modifiers: [.command, .shift], to: fileMenu)
         fileMenu.addItem(.separator())
         add("Close Tab", #selector(DuckpadWindowController.performCloseActiveTab(_:)), "w", target, to: fileMenu)
         fileItem.submenu = fileMenu
+
+        let editItem = NSMenuItem()
+        mainMenu.addItem(editItem)
+        let editMenu = NSMenu(title: "Edit")
+        add("Undo", #selector(DuckpadWindowController.performUndo(_:)), "z", target, to: editMenu)
+        add("Redo", #selector(DuckpadWindowController.performRedo(_:)), "z", target, modifiers: [.command, .shift], to: editMenu)
+        editMenu.addItem(.separator())
+        add("Cut", #selector(DuckpadWindowController.performCut(_:)), "x", target, to: editMenu)
+        add("Copy", #selector(DuckpadWindowController.performCopy(_:)), "c", target, to: editMenu)
+        add("Paste", #selector(DuckpadWindowController.performPaste(_:)), "v", target, to: editMenu)
+        add("Delete", #selector(DuckpadWindowController.performDelete(_:)), "", target, modifiers: [], to: editMenu)
+        editMenu.addItem(.separator())
+        add("Select All", #selector(DuckpadWindowController.performSelectAll(_:)), "a", target, to: editMenu)
+        editItem.submenu = editMenu
 
         let searchItem = NSMenuItem()
         mainMenu.addItem(searchItem)

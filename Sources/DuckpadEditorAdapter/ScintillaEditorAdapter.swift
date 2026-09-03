@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort, EditorStandardCommandPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -211,6 +211,39 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return }
         editorView.isWrapMarkerVisible = isVisible
         storeViewState(bufferID: bufferID)
+    }
+
+    public func canPerform(_ command: EditorStandardCommand) -> Bool {
+        guard let editorView = activeScintillaView else { return false }
+        switch command {
+        case .undo:
+            return editorView.isInputEnabled && editorView.canUndo
+        case .redo:
+            return editorView.isInputEnabled && editorView.canRedo
+        case .cut:
+            return editorView.canCut
+        case .copy:
+            return editorView.canCopy
+        case .paste:
+            return editorView.canPaste
+        case .delete:
+            return editorView.canDelete
+        case .selectAll:
+            return editorView.canSelectAll
+        }
+    }
+
+    public func perform(_ command: EditorStandardCommand) {
+        guard canPerform(command), let editorView = activeScintillaView else { return }
+        switch command {
+        case .undo: editorView.undo()
+        case .redo: editorView.redo()
+        case .cut: editorView.cutSelection()
+        case .copy: editorView.copySelection()
+        case .paste: editorView.paste()
+        case .delete: editorView.deleteSelectionOrNextCharacter()
+        case .selectAll: editorView.selectAll()
+        }
     }
 
     public var activeLanguageID: LanguageID {

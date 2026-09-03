@@ -56,6 +56,22 @@ NSString *DPScintillaResourcePath(NSString *name) {
 @interface DPScintillaEditorView () <ScintillaNotificationProtocol>
 @end
 
+@interface SCIContentView (DuckpadStandardEditing)
+- (void)selectAll:(id)sender;
+- (void)cut:(id)sender;
+- (void)copy:(id)sender;
+- (void)paste:(id)sender;
+- (void)undo:(id)sender;
+- (void)redo:(id)sender;
+- (BOOL)canUndo;
+- (BOOL)canRedo;
+@end
+
+static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
+    NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"" action:action keyEquivalent:@""];
+    return [content validateUserInterfaceItem:item];
+}
+
 @implementation DPScintillaEditorView {
     ScintillaView *_scintilla;
     uint64_t _revision;
@@ -379,8 +395,21 @@ NSString *DPScintillaResourcePath(NSString *name) {
 - (NSUInteger)anchorUTF8Position { return (NSUInteger)[_scintilla message:SCI_GETANCHOR]; }
 - (NSUInteger)firstVisibleLine { return (NSUInteger)[_scintilla message:SCI_GETFIRSTVISIBLELINE]; }
 - (NSUInteger)horizontalScrollOffset { return (NSUInteger)[_scintilla message:SCI_GETXOFFSET]; }
-- (BOOL)canUndo { return [_scintilla message:SCI_CANUNDO] != 0; }
-- (BOOL)canRedo { return [_scintilla message:SCI_CANREDO] != 0; }
+- (BOOL)canUndo { return [[_scintilla content] canUndo]; }
+- (BOOL)canRedo { return [[_scintilla content] canRedo]; }
+- (BOOL)canCut {
+    return self.isInputEnabled && DPContentCanPerform([_scintilla content], @selector(cut:));
+}
+- (BOOL)canCopy { return DPContentCanPerform([_scintilla content], @selector(copy:)); }
+- (BOOL)canPaste {
+    return self.isInputEnabled && DPContentCanPerform([_scintilla content], @selector(paste:));
+}
+- (BOOL)canDelete {
+    if (!self.isInputEnabled) return NO;
+    return [_scintilla message:SCI_GETSELECTIONEMPTY] == 0
+        || [_scintilla message:SCI_GETCURRENTPOS] < [_scintilla message:SCI_GETLENGTH];
+}
+- (BOOL)canSelectAll { return [_scintilla message:SCI_GETLENGTH] > 0; }
 - (BOOL)cursorResourcesAvailable {
     NSImage *busy = [[NSImage alloc] initWithContentsOfFile:DPScintillaResourcePath(@"mac_cursor_busy.png")];
     NSImage *flipped = [[NSImage alloc] initWithContentsOfFile:DPScintillaResourcePath(@"mac_cursor_flipped.png")];
@@ -426,10 +455,13 @@ NSString *DPScintillaResourcePath(NSString *name) {
 }
 - (void)unmarkText { [[_scintilla content] unmarkText]; }
 - (BOOL)hasMarkedText { return [[_scintilla content] hasMarkedText]; }
-- (void)copySelection { [_scintilla message:SCI_COPY]; }
-- (void)paste { if ([self preflightUserMutation]) [_scintilla message:SCI_PASTE]; }
-- (void)undo { if ([self preflightUserMutation]) [_scintilla message:SCI_UNDO]; }
-- (void)redo { if ([self preflightUserMutation]) [_scintilla message:SCI_REDO]; }
+- (void)copySelection { [[_scintilla content] copy:nil]; }
+- (void)cutSelection { if ([self preflightUserMutation]) [[_scintilla content] cut:nil]; }
+- (void)paste { if ([self preflightUserMutation]) [[_scintilla content] paste:nil]; }
+- (void)deleteSelectionOrNextCharacter { if ([self preflightUserMutation]) [_scintilla message:SCI_CLEAR]; }
+- (void)selectAll { [[_scintilla content] selectAll:nil]; }
+- (void)undo { if ([self preflightUserMutation]) [[_scintilla content] undo:nil]; }
+- (void)redo { if ([self preflightUserMutation]) [[_scintilla content] redo:nil]; }
 - (void)beginGroupedUndo { [_scintilla message:SCI_BEGINUNDOACTION]; }
 - (void)endGroupedUndo { [_scintilla message:SCI_ENDUNDOACTION]; }
 - (void)focusEditor { [self.window makeFirstResponder:[_scintilla content]]; }

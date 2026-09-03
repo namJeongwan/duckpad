@@ -416,6 +416,77 @@ struct ScintillaBridgeTests {
     }
 
     @Test @MainActor
+    func standardEditCommandsPreserveScintillaRevisionAndUndoOwnership() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        adapter.display(EditorBufferDescriptor(bufferID: bufferID, revision: 0))
+        let view = try #require(adapter.activeScintillaView)
+        view.insertCommittedText("abc")
+        let insertedRevision = try #require(adapter.snapshot(for: bufferID)?.revision)
+        #expect(insertedRevision > 0)
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: 1, length: 1))
+        #expect(adapter.canPerform(.cut))
+        #expect(adapter.canPerform(.copy))
+        adapter.perform(.cut)
+        #expect(adapter.snapshot(for: bufferID)?.text == "ac")
+        #expect(adapter.snapshot(for: bufferID)?.revision == insertedRevision + 1)
+
+        #expect(adapter.canPerform(.undo))
+        adapter.perform(.undo)
+        #expect(adapter.snapshot(for: bufferID)?.text == "abc")
+        #expect(adapter.snapshot(for: bufferID)?.revision == insertedRevision + 2)
+        #expect(adapter.canPerform(.redo))
+        adapter.perform(.redo)
+        #expect(adapter.snapshot(for: bufferID)?.text == "ac")
+        #expect(adapter.snapshot(for: bufferID)?.revision == insertedRevision + 3)
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: 1, length: 0))
+        #expect(adapter.canPerform(.delete))
+        adapter.perform(.delete)
+        #expect(adapter.snapshot(for: bufferID)?.text == "a")
+        #expect(adapter.snapshot(for: bufferID)?.revision == insertedRevision + 4)
+        adapter.perform(.selectAll)
+        #expect(Set([view.anchorUTF8Position, view.caretUTF8Position]) == Set([0, 1]))
+
+        adapter.setInputEnabled(false)
+        #expect(!adapter.canPerform(.undo))
+        #expect(!adapter.canPerform(.cut))
+        #expect(!adapter.canPerform(.delete))
+        #expect(adapter.canPerform(.copy))
+    }
+
+    @Test @MainActor
+    func standardUndoAndPasteHonorActiveKoreanComposition() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        adapter.display(EditorBufferDescriptor(bufferID: bufferID, revision: 0))
+        let view = try #require(adapter.activeScintillaView)
+        view.insertCommittedText("base")
+        view.setMarkedText(
+            "ㅎ",
+            selectedRange: NSRange(location: 1, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        #expect(view.hasMarkedText())
+        #expect(!adapter.canPerform(.undo))
+        let markedText = adapter.snapshot(for: bufferID)?.text
+
+        adapter.perform(.undo)
+        #expect(view.hasMarkedText())
+        #expect(adapter.snapshot(for: bufferID)?.text == markedText)
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(" 붙여넣기", forType: .string)
+        #expect(adapter.canPerform(.paste))
+        adapter.perform(.paste)
+        #expect(!view.hasMarkedText())
+        #expect(adapter.snapshot(for: bufferID)?.text.hasSuffix(" 붙여넣기") == true)
+    }
+
+    @Test @MainActor
     func directRecoveryInstallClampsUnsafeViewCoordinatesWithoutTrap() throws {
         let adapter = ScintillaEditorAdapter()
         let bufferID = BufferID()

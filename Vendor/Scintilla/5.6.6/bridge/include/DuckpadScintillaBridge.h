@@ -57,6 +57,11 @@ typedef NS_ENUM(NSInteger, DPScintillaPalette) {
 @property(nonatomic, readonly) NSUInteger horizontalScrollOffset;
 @property(nonatomic, readonly) BOOL canUndo;
 @property(nonatomic, readonly) BOOL canRedo;
+@property(nonatomic, readonly) BOOL canCut;
+@property(nonatomic, readonly) BOOL canCopy;
+@property(nonatomic, readonly) BOOL canPaste;
+@property(nonatomic, readonly) BOOL canDelete;
+@property(nonatomic, readonly) BOOL canSelectAll;
 @property(nonatomic, readonly) BOOL cursorResourcesAvailable;
 @property(nonatomic, readonly) BOOL hasEditorFocus;
 @property(nonatomic, readonly) NSUInteger snapshotReadCount;
@@ -109,7 +114,10 @@ typedef NS_ENUM(NSInteger, DPScintillaPalette) {
 - (void)unmarkText;
 - (BOOL)hasMarkedText;
 - (void)copySelection;
+- (void)cutSelection;
 - (void)paste;
+- (void)deleteSelectionOrNextCharacter;
+- (void)selectAll;
 - (void)undo;
 - (void)redo;
 - (void)beginGroupedUndo;

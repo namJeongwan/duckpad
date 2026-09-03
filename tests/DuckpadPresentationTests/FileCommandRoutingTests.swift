@@ -14,6 +14,45 @@ private actor RoutingSessionStore: SessionStore {
     }
 }
 
+private actor BlockingNewScratchSessionStore: SessionStore {
+    private var stored: StoredSession?
+    private var generation = PersistenceGeneration(rawValue: 0)
+    private var blockNextCommit = false
+    private var blockedCommitEntered = false
+    private var releaseBlockedCommit = false
+
+    func loadSession() async throws(SessionStoreError) -> StoredSession? { stored }
+
+    func commitSession(
+        _ session: ScratchSession,
+        generation: PersistenceGeneration
+    ) async throws(SessionStoreError) -> SessionCommitResult {
+        if blockNextCommit {
+            blockNextCommit = false
+            blockedCommitEntered = true
+            while !releaseBlockedCommit { await Task.yield() }
+        }
+        guard generation > self.generation else {
+            return .superseded(durableGeneration: self.generation)
+        }
+        stored = StoredSession(session: session, generation: generation)
+        self.generation = generation
+        return .committed
+    }
+
+    func armNextCommit() {
+        blockNextCommit = true
+        blockedCommitEntered = false
+        releaseBlockedCommit = false
+    }
+
+    func waitUntilCommitIsBlocked() async {
+        while !blockedCommitEntered { await Task.yield() }
+    }
+
+    func releaseCommit() { releaseBlockedCommit = true }
+}
+
 private actor RoutingRecoveryStore: RecoveryStore {
     private var stored: StoredRecoveryArchive?
     private var loadError: SessionStoreError?
@@ -29,6 +68,7 @@ private actor RoutingRecoveryStore: RecoveryStore {
     }
     func reset() async throws(SessionStoreError) { stored = nil }
     func setLoadError(_ error: SessionStoreError?) { loadError = error }
+    func latestTabCount() -> Int? { stored?.archive.session.tabs.count }
 }
 
 @MainActor
@@ -184,6 +224,46 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
     #expect(approved)
     #expect(await recoveryStore.commitCount == 1)
     controller.close()
+}
+
+@Test @MainActor func terminationWaitsForAcceptedNewScratchBeforeFinalRecoveryFlush() async {
+    _ = NSApplication.shared
+    let sessionStore = BlockingNewScratchSessionStore()
+    let workspace = ScratchWorkspaceUseCase(store: sessionStore)
+    let editor = TextViewEditorAdapter()
+    let recoveryStore = RoutingRecoveryStore()
+    let recovery = SessionRecoveryUseCase(
+        workspace: workspace,
+        editor: editor,
+        store: recoveryStore,
+        debounce: .seconds(60)
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        recoveryUseCase: recovery,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    await sessionStore.armNextCommit()
+
+    controller.performNewScratch()
+    await sessionStore.waitUntilCommitIsBlocked()
+    let review = Task { @MainActor in
+        await controller.reviewDirtyDocumentsForTermination()
+    }
+    for _ in 0..<20 { await Task.yield() }
+
+    #expect(workspace.snapshot().tabs.count == 1)
+    #expect(await recoveryStore.commitCount == 0)
+
+    await sessionStore.releaseCommit()
+    #expect(await review.value)
+    #expect(workspace.snapshot().tabs.count == 2)
+    #expect(await recoveryStore.latestTabCount() == 2)
 }
 
 @Test @MainActor func corruptOnlyRecoveryIsVisibleDisabledAndResetRetryRestoresUsability() async {
@@ -523,11 +603,21 @@ struct FileLifecycleTests {
         #expect(!controller.validateMenuItem(wordWrap))
         controller.performToggleWordWrap(wordWrap)
         #expect(editor.isWordWrapEnabled)
+        editor.textView.setSelectedRange(NSRange(location: 0, length: 0))
+        let delete = NSMenuItem(
+            title: "Delete",
+            action: #selector(DuckpadWindowController.performDelete(_:)),
+            keyEquivalent: ""
+        )
+        #expect(!controller.validateMenuItem(delete))
+        controller.performDelete(delete)
+        #expect(editor.textView.string == "keep this")
 
         panels.releaseDecisions()
         #expect(await review.value == false)
         #expect(controller.validateMenuItem(wordWrap))
         #expect(wordWrap.state == .on)
+        #expect(controller.validateMenuItem(delete))
     }
 
     @Test @MainActor func redCloseThenRepeatedQuitTriggersShareOneCancelledReview() async {

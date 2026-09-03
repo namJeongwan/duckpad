@@ -39,8 +39,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 25 | [Phase 7 language and Lexilla integration](10-language-support.md) | **Implemented; review pending** | official Lexilla 5.5.3 provenance, 78-language registry/detection, exact 20-language keyword-complete tier, persisted overrides, bounded semantic styling, fold/brace/indent/comment UX를 기록한다. |
 | 26 | [Phase 8 secure extension platform](11-extension-platform.md) | **Approved, committed and audited** | official WAMR 2.4.5 interpreter, signed package identity, durable scoped consent, isolated Process-host Developer Preview와 termination-safe grouped edits를 기록한다. commit `1f60bedd`와 exact signed receipt가 audit를 통과했다. |
 | 27 | [Phase 8 independent code review](reviews/2026-09-03-phase-8-extension-platform-code-review.md) | **Approved — latest Phase 8 evidence** | P8-01/P8-02와 Process teardown remediation, WAMR 168/168 재현을 0 Blocker/Major/Minor로 승인했다. receipt SHA-256은 `bd5dfc59a078fc9170ce1112ff9797e8108471d42dd7cf9c1ff02a2112e15e3e`다. |
-| 28 | [Phase 9 editor view options](12-editor-view-options.md) | **Content approved; exact receipt pending** | 탭별 word wrap, Scintilla wrap symbols, recovery 호환성, lifecycle-gated native View menu를 기록한다. |
-| 29 | [Phase 9 independent code review](reviews/2026-09-03-phase-9-editor-view-options-code-review.md) | **Content approved — latest Phase 9 evidence** | view/recovery/Scintilla/menu/close-race와 P9-01 remediation을 0 Blocker, 0 Major, 0 Minor로 승인했다. exact receipt는 pending이다. |
+| 28 | [Phase 9 editor view options](12-editor-view-options.md) | **Approved, committed and audited** | 탭별 word wrap, Scintilla wrap symbols, recovery 호환성, lifecycle-gated native View menu를 기록한다. commit `268c0e1`과 exact signed receipt가 audit를 통과했다. |
+| 29 | [Phase 9 independent code review](reviews/2026-09-03-phase-9-editor-view-options-code-review.md) | **Approved — latest Phase 9 evidence** | view/recovery/Scintilla/menu/close-race와 P9-01 remediation을 0 Blocker, 0 Major, 0 Minor로 승인했다. receipt SHA-256은 `b43abeabd167a748b25bad4d72f6951703188f973275995b920515808a979f8b`다. |
+| 30 | [Phase 10 standard editing commands and shortcuts](13-standard-editing-shortcuts.md) | **Content approved; exact receipt pending** | native Edit menu, Cmd-N/Z/Shift-Z/X/C/V/A, shortcut collision 검사, editor별 undo/clipboard command 계약과 세 review remediation을 기록한다. |
+| 31 | [Phase 10 independent code review](reviews/2026-09-03-phase-10-standard-editing-shortcuts-code-review.md) | **Content approved — latest Phase 10 evidence** | Cmd-N termination join, Scintilla IME responder semantics, fallback revision-exhaustion remediation을 0 Blocker, 0 Major, 0 Minor로 승인했다. candidate freeze/signing이 허가됐고 exact receipt는 pending이다. |
 
 상태 정의:
 
@@ -96,6 +98,37 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 10 P10-01/P10-02/P10-03 independent focused re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; remediation 구현에 참여하지 않았다.
+- **Closure:** tracked Cmd-N termination join과 publication 후 input 재잠금, Scintilla Cocoa marked-text responder semantics, fallback revision-exhaustion read-only를 현재 bytes에서 모두 재검증했다.
+- **Evidence:** independent focused 3/3, physical-input-lock external probe 1/1, debug/release 전체 각 195/195 PASS. builder fresh 195/195, x86_64 macOS 13 link, production 50-tab smoke는 supporting evidence다.
+- **Verdict:** **APPROVED — 0 Blocker, 0 Major, 0 Minor.** Phase 10 candidate freeze와 exact signing을 허가한다.
+- **Boundary:** review 문서와 이 index만 수정했다. source/tests/work docs/stage/sign/commit은 변경하지 않았고 기존 doc04/vendor script를 보존했다.
+
+### 2026-09-03 — Phase 10 P10-01/P10-02/P10-03 remediation
+
+- **Agent/role:** `/root`, direct builder; 추가 구현 agent를 만들지 않았다.
+- **Fix:** accepted Cmd-N task를 동기 등록하고 termination final recovery 전에 join한다. Scintilla Undo/Paste는 Cocoa content responder의 marked-text 규칙을 사용하며, fallback은 revision `UInt64.max`에서 mutation command를 전부 닫는다.
+- **Evidence:** adversarial 3/3, debug/release/fresh 전체 각 195/195, macOS 13 x86_64 release link, production 50-tab wrapped-layout smoke PASS. 첫 parallel release의 기존 viewport-state flake 1건은 isolated retry와 전체 rerun에서 PASS했다.
+- **Boundary:** 기존 reviewer에게 focused re-review만 요청한다. README, ignored Notepad++ checkout, 기존 unstaged doc04/vendor script는 변경하지 않았다.
+
+### 2026-09-03 — Phase 10 independent content review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 10 구현에 참여하지 않았다.
+- **Scope:** 지정된 13개 Phase 10 경로의 Clean Architecture, native shortcuts/collision, validation/action lifecycle, Scintilla/`NSTextView` command semantics, revision/recovery/undo 및 Cmd-N durability를 검토했다.
+- **Evidence:** independent focused 5/5, debug/release 전체 각 192/192 PASS. 외부 scratch adversarial probe에서 Cmd-N termination ordering, active-IME Undo/Paste, fallback revision exhaustion 결함을 각각 재현했다.
+- **Verdict:** **CHANGES REQUIRED — 0 Blocker, 3 Major, 0 Minor.** 자세한 fix는 Phase 10 independent review에 기록했다.
+- **Boundary:** 새 review 문서와 이 index만 수정했다. source/tests/work docs/stage/sign/commit은 변경하지 않았고 기존 doc04/vendor script를 보존했다.
+
+### 2026-09-03 — Phase 10 standard editing commands and shortcuts
+
+- **Agent/role:** `/root`, direct investigator/builder; 추가 구현 agent를 만들지 않았다.
+- **Scope:** Application-owned standard edit-command port, Scintilla/`NSTextView` adapters, native Edit menu와 validation, Cmd-N, exact macOS shortcut/collision acceptance를 구현했다.
+- **Safety:** workspace ready/active-buffer/no-termination predicate를 validation과 직접 selector action에 공통 적용한다. mutating command는 기존 revision/recovery/undo gate를 우회하지 않는다.
+- **Validation:** focused behavior/shortcut/lifecycle 5/5, debug/release/fresh 전체 각 192/192, macOS 13 x86_64 release build/link와 production launch/exit smoke PASS. fresh 경고는 기존 vendored Scintilla Cocoa deprecation뿐이다. 독립 review는 candidate freeze 전에 수행한다.
+- **Boundary:** README와 baseline score를 변경하지 않았다. ignored Notepad++ checkout은 read-only/clean이며 기존 unstaged doc04/vendor script를 보존한다.
 
 ### 2026-09-03 — Phase 9 P9-01 independent focused re-review
 

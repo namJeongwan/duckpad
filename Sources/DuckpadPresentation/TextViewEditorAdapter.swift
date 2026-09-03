@@ -9,7 +9,7 @@ private final class BufferTextView: NSTextView {
 }
 
 @MainActor
-public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOptionsPort, @preconcurrency NSTextStorageDelegate {
+public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOptionsPort, EditorStandardCommandPort, @preconcurrency NSTextStorageDelegate {
     public let scrollView: NSScrollView
     public let textView: NSTextView
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
@@ -19,6 +19,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
     private var undoManagers: [BufferID: UndoManager] = [:]
     private var viewStates: [BufferID: EditorViewState] = [:]
     private var isRendering = false
+    private var requestedInputEnabled = true
 
     public override init() {
         textView = BufferTextView(frame: .zero)
@@ -46,6 +47,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         scrollView.hasHorizontalScroller = false
         scrollView.borderType = .noBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+        applyInputAvailability()
     }
 
     public func display(_ buffer: EditorBufferDescriptor) {
@@ -66,6 +68,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         activeBuffer = buffer
         setTextWithoutEditing(snapshot.text)
         applyWordWrap(viewStates[buffer.bufferID]?.wordWrapEnabled ?? true)
+        applyInputAvailability()
     }
 
     public func install(_ snapshot: EditorTextSnapshot) {
@@ -76,6 +79,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         activeBuffer = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision)
         (textView as? BufferTextView)?.activeUndoManager = undoManagers[snapshot.bufferID]
         setTextWithoutEditing(snapshot.text)
+        applyInputAvailability()
     }
 
     public func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? {
@@ -114,12 +118,12 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         activeBuffer = nil
         (textView as? BufferTextView)?.activeUndoManager = nil
         setTextWithoutEditing("")
+        applyInputAvailability()
     }
 
     public func setInputEnabled(_ isEnabled: Bool) {
-        textView.isEditable = isEnabled
-        textView.isSelectable = isEnabled
-        scrollView.alphaValue = isEnabled ? 1 : 0.65
+        requestedInputEnabled = isEnabled
+        applyInputAvailability()
     }
 
     public func focus() {
@@ -143,6 +147,40 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
     }
 
     public func setWrapMarkerVisible(_ isVisible: Bool) {}
+
+    public func canPerform(_ command: EditorStandardCommand) -> Bool {
+        guard activeBuffer != nil else { return false }
+        let selection = textView.selectedRange()
+        switch command {
+        case .undo:
+            return textView.isEditable && (textView.undoManager?.canUndo ?? false)
+        case .redo:
+            return textView.isEditable && (textView.undoManager?.canRedo ?? false)
+        case .cut:
+            return textView.isEditable && selection.length > 0
+        case .copy:
+            return selection.length > 0
+        case .paste:
+            return textView.isEditable && NSPasteboard.general.string(forType: .string) != nil
+        case .delete:
+            return textView.isEditable && (selection.length > 0 || selection.location < textView.string.utf16.count)
+        case .selectAll:
+            return !textView.string.isEmpty
+        }
+    }
+
+    public func perform(_ command: EditorStandardCommand) {
+        guard canPerform(command) else { return }
+        switch command {
+        case .undo: textView.undoManager?.undo()
+        case .redo: textView.undoManager?.redo()
+        case .cut: textView.cut(nil)
+        case .copy: textView.copy(nil)
+        case .paste: textView.paste(nil)
+        case .delete: textView.deleteForward(nil)
+        case .selectAll: textView.selectAll(nil)
+        }
+    }
 
     public func textStorage(
         _ textStorage: NSTextStorage,
@@ -189,6 +227,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
                 revision: newRevision,
                 text: textStorage.string
             )
+            applyInputAvailability()
         case .rejected:
             restore(bufferID: activeBuffer.bufferID)
         }
@@ -198,6 +237,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         guard let snapshot = snapshots[bufferID] else { return }
         activeBuffer = EditorBufferDescriptor(bufferID: bufferID, revision: snapshot.revision)
         setTextWithoutEditing(snapshot.text)
+        applyInputAvailability()
     }
 
     private func setTextWithoutEditing(_ text: String) {
@@ -226,5 +266,13 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
             height: CGFloat.greatestFiniteMagnitude
         )
         scrollView.hasHorizontalScroller = !isEnabled
+    }
+
+    private func applyInputAvailability() {
+        let hasActiveBuffer = activeBuffer != nil
+        textView.isEditable = requestedInputEnabled
+            && (activeBuffer?.revision ?? .max) < .max
+        textView.isSelectable = requestedInputEnabled && hasActiveBuffer
+        scrollView.alphaValue = requestedInputEnabled ? 1 : 0.65
     }
 }
