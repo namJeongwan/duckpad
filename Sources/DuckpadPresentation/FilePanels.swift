@@ -5,6 +5,11 @@ import DuckpadApplication
 public protocol FilePanelPresenting: AnyObject {
     func chooseOpenURL(attachedTo window: NSWindow?) async -> URL?
     func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL?
+    func chooseFolderURL(attachedTo window: NSWindow?) async -> URL?
+}
+
+public extension FilePanelPresenting {
+    func chooseFolderURL(attachedTo window: NSWindow?) async -> URL? { nil }
 }
 
 @MainActor
@@ -42,6 +47,17 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
     public func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL? {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggestedName
+        return await run(panel, attachedTo: window) == .OK ? panel.url : nil
+    }
+
+    public func chooseFolderURL(attachedTo window: NSWindow?) async -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.prompt = "Search"
+        panel.message = "Choose a folder to search recursively. Hidden files, packages, and symbolic links are skipped."
         return await run(panel, attachedTo: window) == .OK ? panel.url : nil
     }
 

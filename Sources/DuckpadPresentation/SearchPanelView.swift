@@ -12,13 +12,19 @@ private final class SearchResultsTable: NSTableView {
 
 @MainActor
 final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
+    private enum ResultTarget {
+        case openDocument(SearchMatch)
+    }
+
     var onFind: ((SearchQuery) -> Void)?
     var onReplace: ((SearchQuery) -> Void)?
     var onReplaceAll: ((SearchQuery) -> Void)?
     var onFindAll: ((SearchQuery) -> Void)?
+    var onFindInFolder: ((SearchQuery) -> Void)?
     var onIncrementalQuery: ((SearchQuery) -> Void)?
     var onQueryInvalidated: (() -> Void)?
     var onActivateMatch: ((SearchMatch) -> Void)?
+    var onActivateFolderMatch: ((FolderSearchDocumentResult, FolderSearchMatch) -> Void)?
     var onClose: (() -> Void)?
     var onCancel: (() -> Void)?
 
@@ -34,7 +40,9 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     private let status = NSTextField(labelWithString: "")
     private let table = SearchResultsTable()
     private let resultsScroll = NSScrollView()
-    private var rows: [(String, SearchMatch?)] = []
+    private var rows: [(String, ResultTarget?)] = []
+    private var folderResult: FolderSearchResultSet?
+    private var folderRowOffsets: [Int] = []
     private var incrementalTask: Task<Void, Never>?
     private var showingReplace = false
     private lazy var collapsedHeight = heightAnchor.constraint(equalToConstant: 0)
@@ -60,11 +68,13 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         replace.setAccessibilityIdentifier("duckpad.search.replace-current")
         let replaceAll = button("Replace All", #selector(replaceAllPressed))
         let findAll = button("Find All", #selector(findAllPressed))
+        let findInFolder = button("Folder…", #selector(findInFolderPressed))
+        findInFolder.setAccessibilityLabel("Find in Folder")
         let cancel = button("Cancel", #selector(cancelPressed))
         let close = button("×", #selector(closePressed))
         close.setAccessibilityLabel("Close Find and Replace")
 
-        let top = NSStackView(views: [findField, replaceField, findNext, findPrevious, replace, replaceAll, findAll, cancel, close])
+        let top = NSStackView(views: [findField, replaceField, findNext, findPrevious, replace, replaceAll, findAll, findInFolder, cancel, close])
         top.orientation = .horizontal
         top.spacing = 6
         findField.widthAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
@@ -141,9 +151,11 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     }
 
     func present(_ result: SearchResultSet) {
+        folderResult = nil
+        folderRowOffsets = []
         rows = result.documents.flatMap { document in
             [("\(document.title) — \(document.matches.count) match(es)", nil)]
-                + document.matches.map { ("  \($0.line):\($0.column)  \($0.snippet)", Optional($0)) }
+                + document.matches.map { ("  \($0.line):\($0.column)  \($0.snippet)", Optional(.openDocument($0))) }
         }
         table.reloadData()
         resultsScroll.isHidden = rows.isEmpty
@@ -151,6 +163,25 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         status.stringValue = result.isTruncated
             ? "\(result.matchCount)+ matches (truncated)"
             : "\(result.matchCount) matches"
+    }
+
+    func present(_ result: FolderSearchResultSet) {
+        rows = []
+        folderResult = result
+        folderRowOffsets = []
+        folderRowOffsets.reserveCapacity(result.documents.count)
+        var nextOffset = 0
+        for document in result.documents {
+            folderRowOffsets.append(nextOffset)
+            nextOffset += document.matches.count + 1
+        }
+        table.reloadData()
+        resultsScroll.isHidden = nextOffset == 0
+        collapsedHeight.constant = nextOffset == 0 ? 76 : 212
+        let suffix = result.skippedFileCount > 0 ? "; \(result.skippedFileCount) skipped" : ""
+        status.stringValue = result.isTruncated
+            ? "\(result.matchCount)+ matches in \(result.searchedFileCount) files (truncated\(suffix))"
+            : "\(result.matchCount) matches in \(result.searchedFileCount) files\(suffix)"
     }
 
     func presentStatus(_ message: String) { status.stringValue = message }
@@ -162,6 +193,8 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         onQueryInvalidated?()
         if findField.stringValue.isEmpty {
             rows = []
+            folderResult = nil
+            folderRowOffsets = []
             table.reloadData()
             resultsScroll.isHidden = true
             collapsedHeight.constant = 76
@@ -175,11 +208,26 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         }
     }
 
-    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        guard let result = folderResult else { return rows.count }
+        return result.matchCount + result.documents.count
+    }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let field = NSTextField(labelWithString: rows[row].0)
+        let label: String
+        if let (documentIndex, matchIndex) = folderLocation(forRow: row), let result = folderResult {
+            let document = result.documents[documentIndex]
+            if let matchIndex {
+                let match = document.matches[matchIndex]
+                label = "  \(match.line):\(match.column)  \(match.snippet)"
+            } else {
+                label = "\(document.relativePath) — \(document.matches.count) match(es)"
+            }
+        } else {
+            label = rows[row].0
+        }
+        let field = NSTextField(labelWithString: label)
         field.lineBreakMode = .byTruncatingTail
-        field.setAccessibilityLabel(rows[row].0)
+        field.setAccessibilityLabel(label)
         return field
     }
 
@@ -188,12 +236,23 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     @objc private func replacePressed() { onReplace?(currentQuery()) }
     @objc private func replaceAllPressed() { onReplaceAll?(currentQuery()) }
     @objc private func findAllPressed() { onFindAll?(currentQuery()) }
+    @objc private func findInFolderPressed() { onFindInFolder?(currentQuery()) }
     @objc private func cancelPressed() { status.stringValue = "Cancelled"; onCancel?() }
     @objc private func closePressed() { hide(); onClose?() }
     @objc private func resultActivated() {
         let row = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
-        guard row >= 0, let match = rows[row].1 else { return }
-        onActivateMatch?(match)
+        guard row >= 0 else { return }
+        if let (documentIndex, matchIndex) = folderLocation(forRow: row),
+           let matchIndex,
+           let result = folderResult {
+            let document = result.documents[documentIndex]
+            onActivateFolderMatch?(document, document.matches[matchIndex])
+            return
+        }
+        guard row < rows.count, let target = rows[row].1 else { return }
+        switch target {
+        case .openDocument(let match): onActivateMatch?(match)
+        }
     }
 
     func hide() {
@@ -204,6 +263,21 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     }
 
     private func activateSelectedResult() { resultActivated() }
+
+    private func folderLocation(forRow row: Int) -> (document: Int, match: Int?)? {
+        guard folderResult != nil, row >= 0, !folderRowOffsets.isEmpty else { return nil }
+        var lower = 0
+        var upper = folderRowOffsets.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if folderRowOffsets[middle] <= row { lower = middle + 1 }
+            else { upper = middle }
+        }
+        let document = lower - 1
+        guard document >= 0 else { return nil }
+        let offset = row - folderRowOffsets[document]
+        return (document, offset == 0 ? nil : offset - 1)
+    }
 
     private func button(_ title: String, _ action: Selector) -> NSButton {
         let button = NSButton(title: title, target: self, action: action)

@@ -1,6 +1,7 @@
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
+import DuckpadInfrastructure
 @testable import DuckpadPresentation
 import Foundation
 import Testing
@@ -112,8 +113,16 @@ private actor RoutingFileStore: TextFileStore {
     private var values: [String: FileReadResult] = [:]
     private var generation: UInt64 = 0
     private var forcedWriteError: TextFileStoreError?
+    private var blockNextRead = false
+    private var blockedReadEntered = false
+    private var releaseBlockedRead = false
     func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL { url.standardizedFileURL }
     func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult {
+        if blockNextRead {
+            blockNextRead = false
+            blockedReadEntered = true
+            while !releaseBlockedRead { await Task.yield() }
+        }
         guard let value = values[url.path] else { throw .notFound(url.path) }
         return value
     }
@@ -133,15 +142,40 @@ private actor RoutingFileStore: TextFileStore {
         values[url.path] = FileReadResult(data: data, identity: identity)
     }
     func text(at url: URL) -> String? { values[url.path].flatMap { String(data: $0.data, encoding: .utf8) } }
+    func result(at url: URL) -> FileReadResult? { values[url.path] }
     func setWriteError(_ error: TextFileStoreError?) { forcedWriteError = error }
+    func armNextRead() {
+        blockNextRead = true
+        blockedReadEntered = false
+        releaseBlockedRead = false
+    }
+    func waitUntilReadIsBlocked() async {
+        while !blockedReadEntered { await Task.yield() }
+    }
+    func releaseRead() { releaseBlockedRead = true }
+}
+
+private struct RoutingFolderStore: FolderSearchFileStore {
+    let enumeration: FolderSearchEnumeration
+
+    func enumerateTextCandidates(
+        rootPath: String,
+        maximumFiles: Int,
+        maximumDocumentBytes: Int,
+        maximumTotalBytes: Int
+    ) async throws(FolderSearchFailure) -> FolderSearchEnumeration {
+        enumeration
+    }
 }
 
 @MainActor
 private final class PanelFake: FilePanelPresenting, FileConflictPresenting, DirtyDocumentDecisionPresenting {
     var openURL: URL?
     var saveURL: URL?
+    var folderURL: URL?
     private(set) var openRequests = 0
     private(set) var saveRequests = 0
+    private(set) var folderRequests = 0
     private(set) var failures: [FileOperationFailure] = []
     private(set) var fileFailureRetries: [@MainActor () -> Void] = []
     var conflictResolutions: [FileConflictResolution] = []
@@ -152,6 +186,7 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
     private var decisionWaiters: [CheckedContinuation<Void, Never>] = []
     func chooseOpenURL(attachedTo window: NSWindow?) async -> URL? { openRequests += 1; return openURL }
     func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL? { saveRequests += 1; return saveURL }
+    func chooseFolderURL(attachedTo window: NSWindow?) async -> URL? { folderRequests += 1; return folderURL }
     func resolveExternalConflict(attachedTo window: NSWindow?) async -> FileConflictResolution {
         conflictResolutions.isEmpty ? .cancel : conflictResolutions.removeFirst()
     }
@@ -179,6 +214,223 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
         let waiters = decisionWaiters
         decisionWaiters = []
         for waiter in waiters { waiter.resume() }
+    }
+}
+
+@MainActor
+private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier: String) -> T? {
+    if let match = root as? T, match.accessibilityIdentifier() == identifier { return match }
+    for child in root.subviews {
+        if let match = descendant(of: type, in: child, identifier: identifier) { return match }
+    }
+    return nil
+}
+
+@Test @MainActor func routedFolderSearchOpensIdentityCheckedResultAndSelectsUTF8Range() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let root = URL(fileURLWithPath: "/tmp/duckpad-folder-routing", isDirectory: true)
+    let url = root.appendingPathComponent("nested/result.txt")
+    await files.seed("prefix duck suffix", at: url)
+    guard let read = await files.result(at: url) else {
+        Issue.record("file fixture unavailable")
+        return
+    }
+    let enumeration = FolderSearchEnumeration(
+        rootPath: root.path,
+        files: [FolderSearchFile(
+            path: url.path,
+            relativePath: "nested/result.txt",
+            data: read.data,
+            identity: read.identity
+        )],
+        isTruncated: false,
+        skippedFileCount: 0,
+        totalBytes: read.data.count
+    )
+    let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let folderUseCase = FolderSearchUseCase(store: RoutingFolderStore(enumeration: enumeration), regexEngine: ICURegexEngine())
+    let panels = PanelFake()
+    panels.folderURL = root
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: fileUseCase,
+        filePanels: panels,
+        fileConflictPresenter: panels,
+        folderSearchUseCase: folderUseCase,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    controller.performShowFind()
+    guard let content = controller.window?.contentView,
+          let field = descendant(of: NSSearchField.self, in: content, identifier: "duckpad.search.find"),
+          let table = descendant(of: NSTableView.self, in: content, identifier: "duckpad.search.results") else {
+        Issue.record("search controls unavailable")
+        return
+    }
+    field.stringValue = "duck"
+
+    controller.performFindInFolder()
+    for _ in 0..<2_000 where table.numberOfRows < 2 { await Task.yield() }
+    #expect(panels.folderRequests == 1)
+    #expect(table.numberOfRows == 2)
+    table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+    guard let action = table.doubleAction else {
+        Issue.record("result action unavailable")
+        return
+    }
+    _ = NSApp.sendAction(action, to: table.target, from: table)
+    for _ in 0..<2_000 where workspace.activeFileContext()?.binding?.canonicalPath != url.path { await Task.yield() }
+
+    #expect(workspace.activeFileContext()?.binding?.observedIdentity == read.identity)
+    #expect(editor.textView.selectedRange() == NSRange(location: 7, length: 4))
+    #expect(editor.textView.string == "prefix duck suffix")
+}
+
+@Test @MainActor func commandQJoinsCancelledFolderActivationBeforeFinalRecoveryFlush() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let recoveryStore = RoutingRecoveryStore()
+    let recovery = SessionRecoveryUseCase(
+        workspace: workspace, editor: editor, store: recoveryStore, debounce: .seconds(60)
+    )
+    let coordinator = ApplicationTerminationCoordinator()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-blocked-folder-result.txt")
+    await files.seed("duck", at: url)
+    let read = await files.result(at: url)!
+    let match = FolderSearchMatch(
+        range: SearchUTF8Range(location: 0, length: 4), line: 1, column: 1, snippet: "duck"
+    )
+    let document = FolderSearchDocumentResult(
+        path: url.path, relativePath: url.lastPathComponent, identity: read.identity, matches: [match]
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
+        recoveryUseCase: recovery,
+        terminationCoordinator: coordinator,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    await files.armNextRead()
+    controller.routeActivateFolderSearchMatch(document: document, match: match)
+    await files.waitUntilReadIsBlocked()
+
+    var terminationReply: Bool?
+    #expect(coordinator.applicationShouldTerminate { terminationReply = $0 } == .terminateLater)
+    for _ in 0..<20 { await Task.yield() }
+    #expect(terminationReply == nil)
+    #expect(await recoveryStore.commitCount == 0)
+
+    await files.releaseRead()
+    for _ in 0..<2_000 where terminationReply == nil { await Task.yield() }
+    #expect(terminationReply == true)
+    #expect(workspace.snapshot().tabs.count == 1)
+    #expect(await recoveryStore.latestTabCount() == 1)
+}
+
+@Test @MainActor func redCloseAfterUserCancelJoinsFolderActivationBeforeFlush() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let recoveryStore = RoutingRecoveryStore()
+    let recovery = SessionRecoveryUseCase(
+        workspace: workspace, editor: editor, store: recoveryStore, debounce: .seconds(60)
+    )
+    let coordinator = ApplicationTerminationCoordinator()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-cancelled-folder-result.txt")
+    await files.seed("duck", at: url)
+    let read = await files.result(at: url)!
+    let match = FolderSearchMatch(
+        range: SearchUTF8Range(location: 0, length: 4), line: 1, column: 1, snippet: "duck"
+    )
+    let document = FolderSearchDocumentResult(
+        path: url.path, relativePath: url.lastPathComponent, identity: read.identity, matches: [match]
+    )
+    var approvedClose = false
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
+        recoveryUseCase: recovery,
+        terminationCoordinator: coordinator,
+        approvedWindowClose: { _ in approvedClose = true },
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    await files.armNextRead()
+    controller.routeActivateFolderSearchMatch(document: document, match: match)
+    await files.waitUntilReadIsBlocked()
+    controller.performCloseFindPanel()
+
+    #expect(controller.windowShouldClose(controller.window!) == false)
+    for _ in 0..<20 { await Task.yield() }
+    #expect(!approvedClose)
+    #expect(await recoveryStore.commitCount == 0)
+
+    await files.releaseRead()
+    for _ in 0..<2_000 where !approvedClose { await Task.yield() }
+    #expect(approvedClose)
+    #expect(workspace.snapshot().tabs.count == 1)
+    #expect(await recoveryStore.latestTabCount() == 1)
+}
+
+@Test @MainActor func immediateTerminationCannotLivelockQueuedFolderActivation() async {
+    _ = NSApplication.shared
+    for index in 0..<5 {
+        let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+        let editor = TextViewEditorAdapter()
+        let files = RoutingFileStore()
+        let recoveryStore = RoutingRecoveryStore()
+        let recovery = SessionRecoveryUseCase(
+            workspace: workspace, editor: editor, store: recoveryStore, debounce: .seconds(60)
+        )
+        let coordinator = ApplicationTerminationCoordinator()
+        let url = URL(fileURLWithPath: "/tmp/duckpad-fast-folder-result-\(index).txt")
+        await files.seed("duck", at: url)
+        let read = await files.result(at: url)!
+        let match = FolderSearchMatch(
+            range: SearchUTF8Range(location: 0, length: 4), line: 1, column: 1, snippet: "duck"
+        )
+        let document = FolderSearchDocumentResult(
+            path: url.path, relativePath: url.lastPathComponent, identity: read.identity, matches: [match]
+        )
+        let controller = DuckpadWindowController(
+            workspace: workspace,
+            editorAdapter: editor,
+            editorView: editor.scrollView,
+            fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
+            recoveryUseCase: recovery,
+            terminationCoordinator: coordinator,
+            automaticallyStarts: false
+        )
+        controller.start()
+        await controller.waitForStartup()
+
+        controller.routeActivateFolderSearchMatch(document: document, match: match)
+        var terminationReply: Bool?
+        #expect(coordinator.applicationShouldTerminate { terminationReply = $0 } == .terminateLater)
+        for _ in 0..<2_000 where terminationReply == nil { await Task.yield() }
+
+        #expect(terminationReply == true)
+        #expect(await recoveryStore.latestTabCount() == workspace.snapshot().tabs.count)
+        controller.close()
     }
 }
 

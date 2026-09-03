@@ -9,7 +9,7 @@ private final class BufferTextView: NSTextView {
 }
 
 @MainActor
-public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOptionsPort, EditorCommandPort, @preconcurrency NSTextStorageDelegate {
+public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOptionsPort, EditorCommandPort, EditorSelectionPort, @preconcurrency NSTextStorageDelegate {
     public let scrollView: NSScrollView
     public let textView: NSTextView
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
@@ -135,6 +135,26 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
 
     public func focus() {
         textView.window?.makeFirstResponder(textView)
+    }
+
+    public func selectAndReveal(_ range: SearchUTF8Range) {
+        let text = textView.string
+        guard range.location >= 0, range.length >= 0,
+              let lowerUTF8 = text.utf8.index(
+                text.utf8.startIndex,
+                offsetBy: range.location,
+                limitedBy: text.utf8.endIndex
+              ),
+              let upperUTF8 = text.utf8.index(
+                lowerUTF8,
+                offsetBy: range.length,
+                limitedBy: text.utf8.endIndex
+              ),
+              let lower = String.Index(lowerUTF8, within: text),
+              let upper = String.Index(upperUTF8, within: text) else { return }
+        let cocoaRange = NSRange(lower..<upper, in: text)
+        textView.setSelectedRange(cocoaRange)
+        textView.scrollRangeToVisible(cocoaRange)
     }
 
     public var isWordWrapEnabled: Bool {

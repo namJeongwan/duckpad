@@ -75,10 +75,11 @@ private actor FileStoreFake: TextFileStore {
 }
 
 @MainActor
-private final class FileEditorFake: EditorPort {
+private final class FileEditorFake: EditorPort, EditorSelectionPort {
     var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
     private var active: EditorBufferDescriptor?
     private var values: [BufferID: EditorTextSnapshot] = [:]
+    private(set) var revealedRange: SearchUTF8Range?
     func display(_ buffer: EditorBufferDescriptor) {
         active = buffer
         let text = values[buffer.bufferID]?.text ?? ""
@@ -92,6 +93,7 @@ private final class FileEditorFake: EditorPort {
     func retire(bufferID: BufferID) { values.removeValue(forKey: bufferID) }
     func setInputEnabled(_ isEnabled: Bool) {}
     func focus() {}
+    func selectAndReveal(_ range: SearchUTF8Range) { revealedRange = range }
     @discardableResult
     func replaceWith(_ text: String) -> EditorEditOutcome? {
         guard let active, let old = values[active.bufferID] else { return nil }
@@ -122,6 +124,98 @@ private final class FileEditorFake: EditorPort {
     #expect(first == second)
     #expect(workspace.snapshot().tabs.count == 2)
     #expect(await files.readCount == 1)
+}
+
+@Test @MainActor func folderSearchResultOpensExactIdentityAndRevealsUTF8Range() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-folder-result.txt")
+    await files.seed("한글 duck", at: url)
+    guard let read = await files.result(at: url) else { Issue.record("fixture unavailable"); return }
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let match = FolderSearchMatch(
+        range: SearchUTF8Range(location: 7, length: 4),
+        line: 1,
+        column: 8,
+        snippet: "한글 duck"
+    )
+    let document = FolderSearchDocumentResult(
+        path: url.path, relativePath: "duckpad-folder-result.txt",
+        identity: read.identity, matches: [match]
+    )
+
+    guard case .activated(let tabID) = await useCase.activateFolderSearchMatch(document: document, match: match) else {
+        Issue.record("folder result did not activate")
+        return
+    }
+    #expect(workspace.activeFileContext()?.tabID == tabID)
+    #expect(editor.revealedRange == match.range)
+}
+
+@Test @MainActor func folderSearchResultRejectsDirtyOpenDocumentWithoutMovingSelection() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-folder-dirty.txt")
+    await files.seed("duck disk", at: url)
+    guard let read = await files.result(at: url) else { Issue.record("fixture unavailable"); return }
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    _ = await useCase.open(url)
+    editor.replaceWith("local dirty")
+    let match = FolderSearchMatch(
+        range: SearchUTF8Range(location: 0, length: 4),
+        line: 1,
+        column: 1,
+        snippet: "duck disk"
+    )
+    let document = FolderSearchDocumentResult(
+        path: url.path, relativePath: "duckpad-folder-dirty.txt",
+        identity: read.identity, matches: [match]
+    )
+
+    #expect(await useCase.activateFolderSearchMatch(document: document, match: match) == .stale(url.path))
+    #expect(editor.revealedRange == nil)
+    #expect(editor.snapshot(for: workspace.activeFileContext()!.buffer.bufferID)?.text == "local dirty")
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == true)
+}
+
+@Test @MainActor func folderSearchResultRejectsFileChangedAfterSearch() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-folder-stale-disk.txt")
+    await files.seed("duck old", at: url)
+    guard let searched = await files.result(at: url) else { Issue.record("fixture unavailable"); return }
+    await files.externalReplace("new contents", at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let match = FolderSearchMatch(
+        range: SearchUTF8Range(location: 0, length: 4),
+        line: 1,
+        column: 1,
+        snippet: "duck old"
+    )
+    let document = FolderSearchDocumentResult(
+        path: url.path, relativePath: "duckpad-folder-stale-disk.txt",
+        identity: searched.identity, matches: [match]
+    )
+
+    #expect(await useCase.activateFolderSearchMatch(document: document, match: match) == .stale(url.path))
+    #expect(editor.revealedRange == nil)
+    #expect(editor.snapshot(for: workspace.activeFileContext()!.buffer.bufferID)?.text == "new contents")
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == false)
 }
 
 @Test @MainActor func saveAsBindsStableDocumentAndMarksItClean() async {

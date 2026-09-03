@@ -159,6 +159,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let extensionStatus = NSButton(title: "Extensions loading…", target: nil, action: nil)
     private let extensionsPanel = ExtensionsManagerPanel()
     private var searchUseCase: SearchWorkspaceUseCase?
+    private let folderSearchUseCase: FolderSearchUseCase?
     private var languageUseCase: LanguageWorkspaceUseCase?
     private var extensionUseCase: ExtensionWorkspaceUseCase?
     private var extensionState = ExtensionRegistryState(items: [])
@@ -191,6 +192,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var pendingNewScratchTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingCloseTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingRestoreClosedTabTasks: [UUID: Task<Void, Never>] = [:]
+    private var pendingFolderActivationTasks: [UUID: Task<Void, Never>] = [:]
 
     public init(
         workspace: ScratchWorkspaceUseCase,
@@ -205,6 +207,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         recoveryUseCase: SessionRecoveryUseCase? = nil,
         terminationCoordinator: ApplicationTerminationCoordinator? = nil,
         searchUseCase: SearchWorkspaceUseCase? = nil,
+        folderSearchUseCase: FolderSearchUseCase? = nil,
         languageUseCase: LanguageWorkspaceUseCase? = nil,
         extensionUseCase: ExtensionWorkspaceUseCase? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
@@ -226,6 +229,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.pathActionHandler = pathActionHandler ?? NativeTabPathActionHandler()
         self.recoveryUseCase = recoveryUseCase
         self.searchUseCase = searchUseCase
+        self.folderSearchUseCase = folderSearchUseCase
         self.languageUseCase = languageUseCase
         self.extensionUseCase = extensionUseCase
         tabCloseCoordinator = TabCloseCoordinator(workspace: workspace)
@@ -254,9 +258,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         searchPanel.onReplace = { [weak self] query in self?.routeReplace(query) }
         searchPanel.onReplaceAll = { [weak self] query in self?.routeReplaceAll(query) }
         searchPanel.onFindAll = { [weak self] query in self?.routeFindAll(query) }
+        searchPanel.onFindInFolder = { [weak self] query in self?.routeFindInFolder(query) }
         searchPanel.onIncrementalQuery = { [weak self] query in self?.routeFindAll(query, incremental: true) }
         searchPanel.onQueryInvalidated = { [weak self] in self?.cancelSearch() }
         searchPanel.onActivateMatch = { [weak self] match in self?.routeActivateSearchMatch(match) }
+        searchPanel.onActivateFolderMatch = { [weak self] document, match in
+            self?.routeActivateFolderSearchMatch(document: document, match: match)
+        }
         searchPanel.onCancel = { [weak self] in self?.cancelSearch() }
         searchPanel.onClose = { [weak self] in self?.closeSearchPanel() }
         workspace.onChange = { [weak self] change in self?.handle(change) }
@@ -286,6 +294,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         searchTask?.cancel()
         languageDetectionTask?.cancel()
         pendingNewScratchTasks.values.forEach { $0.cancel() }
+        pendingFolderActivationTasks.values.forEach { $0.cancel() }
     }
 
     public override func close() {
@@ -601,6 +610,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         closeSearchPanel()
     }
 
+    @objc public func performFindInFolder(_ sender: Any? = nil) {
+        guard !terminationReviewInProgress else { return }
+        if searchPanel.isHidden { searchPanel.show(replace: false) }
+        let query = searchPanel.currentQuery()
+        guard !query.pattern.isEmpty else {
+            searchPanel.presentStatus("Enter text, then choose Find in Folder again")
+            searchPanel.focusFind()
+            return
+        }
+        routeFindInFolder(query)
+    }
+
     @objc public func performUndo(_ sender: Any? = nil) { performEditorCommand(.undo) }
     @objc public func performRedo(_ sender: Any? = nil) { performEditorCommand(.redo) }
     @objc public func performCut(_ sender: Any? = nil) { performEditorCommand(.cut) }
@@ -665,7 +686,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case #selector(performShowFind(_:)),
              #selector(performShowReplace(_:)),
              #selector(performFindNext(_:)),
-             #selector(performFindPrevious(_:)):
+             #selector(performFindPrevious(_:)),
+             #selector(performFindInFolder(_:)):
             return !terminationReviewInProgress
         case #selector(performToggleWordWrap(_:)):
             guard let editor = actionableEditorViewOptions else {
@@ -888,7 +910,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func waitForAcceptedWorkspaceTasks() async {
         while let task = pendingNewScratchTasks.values.first
             ?? pendingCloseTasks.values.first
-            ?? pendingRestoreClosedTabTasks.values.first {
+            ?? pendingRestoreClosedTabTasks.values.first
+            ?? pendingFolderActivationTasks.values.first {
             await task.value
         }
     }
@@ -1263,6 +1286,31 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    private func routeFindInFolder(_ query: SearchQuery) {
+        guard workspaceInteractionsAreActionable,
+              !query.pattern.isEmpty,
+              let folderSearchUseCase,
+              let filePanels else { return }
+        let operation = beginSearchOperation()
+        searchPanel.presentStatus("Choose a folder…")
+        searchTask = Task { [weak self] in
+            guard let self,
+                  let root = await filePanels.chooseFolderURL(attachedTo: self.window),
+                  self.searchOperationID == operation,
+                  self.workspaceInteractionsAreActionable else { return }
+            self.searchPanel.presentStatus("Searching \(root.lastPathComponent)…")
+            do {
+                let result = try await folderSearchUseCase.search(rootPath: root.path, query: query)
+                guard self.searchOperationID == operation else { return }
+                self.searchPanel.present(result)
+            } catch FolderSearchFailure.search(.cancelled) { }
+            catch {
+                guard self.searchOperationID == operation else { return }
+                self.searchPanel.presentStatus("Folder search failed: \(error)")
+            }
+        }
+    }
+
     private func routeReplace(_ query: SearchQuery) {
         guard workspaceInteractionsAreActionable,
               !query.pattern.isEmpty, let searchUseCase else { return }
@@ -1324,6 +1372,40 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 self?.searchPanel.presentStatus("Result is stale")
             }
         }
+    }
+
+    func routeActivateFolderSearchMatch(
+        document: FolderSearchDocumentResult,
+        match: FolderSearchMatch
+    ) {
+        guard workspaceInteractionsAreActionable,
+              let fileUseCase else { return }
+        let operation = beginSearchOperation()
+        let token = UUID()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.pendingFolderActivationTasks.removeValue(forKey: token) }
+            let outcome = await fileUseCase.activateFolderSearchMatch(document: document, match: match)
+            guard self.searchOperationID == operation,
+                  self.workspaceInteractionsAreActionable else { return }
+            switch outcome {
+            case .activated:
+                self.searchPanel.presentStatus("Opened \(document.relativePath):\(match.line)")
+            case .stale:
+                self.searchPanel.presentStatus("Folder result changed; search again")
+            case .failed(let failure):
+                guard failure != .cancelled else { return }
+                self.fileConflictPresenter?.presentFileFailure(
+                    failure,
+                    attachedTo: self.window,
+                    retry: { [weak self] in
+                        self?.routeActivateFolderSearchMatch(document: document, match: match)
+                    }
+                )
+            }
+        }
+        pendingFolderActivationTasks[token] = task
+        searchTask = task
     }
 
     private func beginSearchOperation() -> UInt64 {

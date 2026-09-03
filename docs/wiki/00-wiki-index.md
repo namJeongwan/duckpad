@@ -55,6 +55,8 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 41 | [Phase 15 independent code review](reviews/2026-09-03-phase-15-advanced-editing-code-review.md) | **Content approved — latest Phase 15 evidence** | 최초 3 Major의 Join 경계, revision exhaustion 원자성, fallback selection/EOL 결함을 focused remediation 재검증으로 모두 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
 | 42 | [Phase 16 external file Compare](19-external-file-compare.md) | **Content approved; exact receipt pending** | 외부 변경 충돌에서 비파괴 local/external 비교, 32 MiB 표시 한도와 Compare 이후 Reload/Overwrite/Cancel 재결정을 기록한다. |
 | 43 | [Phase 16 independent code review](reviews/2026-09-03-phase-16-external-file-compare-code-review.md) | **Content approved — latest Phase 16 evidence** | 최초 2 Major의 comparison-read stale snapshot과 post-panel/reload-read data-loss race를 authoritative revision/binding transaction으로 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
+| 44 | [Phase 17 folder search](20-folder-search.md) | **Content approved; exact receipt pending** | `Command-Shift-F` user-selected recursive search, structured results, bounded/cancellable descriptor-relative scan과 identity-checked result activation을 기록한다. |
+| 45 | [Phase 17 independent code review](reviews/2026-09-03-phase-17-folder-search-code-review.md) | **Content approved — latest Phase 17 evidence** | 최초 5 Major/2 Minor의 TOCTOU, regex validation, result-memory/MainActor, directory-metadata, termination activation race를 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -110,6 +112,23 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 17 folder search
+
+- **Agent/role:** `/root`, direct investigator and builder; independent review verdict is separate.
+- **Implementation:** user-selected recursive folder search reuses Duckpad's Unicode/regex engine and presents grouped relative paths, line/column snippets, and keyboard/double-click activation in the non-modal Find panel.
+- **Safety/performance:** hidden/package/symlink/non-regular entries are excluded, file/input/match/result/pattern/regex caps are explicit, cancellation reaches enumeration and scan tasks, and result activation requires exact file identity plus clean revision-owned editor state.
+- **Validation:** focused Domain/Application/Infrastructure/Presentation coverage passes for Unicode/UTF-16, bounds, cancellation, filesystem exclusions, shortcut uniqueness, routed activation, dirty buffers, and changed disk identity. Exact-current Debug/Release each pass 254/254 and `git diff --check` passes; independent content review approved 0 Blocker/Major/Minor and exact receipt is pending.
+- **Boundary:** no folder Replace All, macro feature, README, ignored Notepad++, or user-owned doc04/vendor-script change is included.
+
+### 2026-09-03 — Phase 17 independent review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 17 구현과 remediation에는 참여하지 않았다.
+- **Initial findings:** **CHANGES_REQUIRED — 0 Blocker, 5 Major, 2 Minor.** Path-based TOCTOU/unbounded growth, empty-folder invalid-regex success, uncharged duplicated result metadata/eager MainActor rows, unbounded uncancellable directory listing, and unjoined late activation을 재현·검토했다. Root-path join과 hidden/package filtering도 Minor로 기록했다.
+- **Closure:** descriptor-relative `openat`/`O_NOFOLLOW`, same-fd bounded read/identity, eager ICU validation, shared document metadata+saturating budget+lazy rows, aggregate listing limits/cancellation, and synchronously registered activation cancellation/join을 현재 bytes에서 재검증했다.
+- **Validation:** independent final focused 22/22, exact-current full Debug 254/254와 `git diff --check` PASS. Builder exact-current Release 254/254, parity 31/31, review-gate 8/8, checker exit 0도 supporting evidence로 구분했다.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** Exact staged-candidate review/receipt는 pending이다.
+- **Boundary:** review 문서와 index Phase 17 row/work log만 수정했다. source/tests/work doc, stage/commit/push, doc04, 기존 vendor script, README, ignored Notepad++는 건드리지 않았다.
 
 ### 2026-09-03 — Phase 16 independent review
 

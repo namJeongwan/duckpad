@@ -89,10 +89,14 @@ public struct SearchReplacementEdit: Equatable, Sendable {
 }
 
 @MainActor
-public protocol SearchEditorPort: EditorPort {
+public protocol EditorSelectionPort: EditorPort {
+    func selectAndReveal(_ range: SearchUTF8Range)
+}
+
+@MainActor
+public protocol SearchEditorPort: EditorSelectionPort {
     func activeSelectionUTF8Range() -> SearchUTF8Range?
     func findActive(_ request: ActiveSearchRequest) throws(SearchFailure) -> SearchUTF8Range?
-    func selectAndReveal(_ range: SearchUTF8Range)
     func replaceActive(
         range: SearchUTF8Range,
         with replacementUTF8: Data,

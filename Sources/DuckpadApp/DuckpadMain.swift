@@ -33,6 +33,10 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             editor: editor,
             regexEngine: ICURegexEngine()
         )
+        let folderSearchUseCase = FolderSearchUseCase(
+            store: LocalFolderSearchFileStore(),
+            regexEngine: ICURegexEngine()
+        )
         let languageRegistry: LanguageRegistry
         let languageConfigurationIssue: String?
         do {
@@ -77,6 +81,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             recoveryUseCase: recoveryUseCase,
             terminationCoordinator: terminationCoordinator,
             searchUseCase: searchUseCase,
+            folderSearchUseCase: folderSearchUseCase,
             languageUseCase: languageUseCase,
             extensionUseCase: extensionUseCase
         )

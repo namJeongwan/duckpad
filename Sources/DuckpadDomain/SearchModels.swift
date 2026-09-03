@@ -136,6 +136,102 @@ public struct SearchResultSet: Equatable, Sendable {
     public var matchCount: Int { documents.reduce(0) { $0 + $1.matches.count } }
 }
 
+public struct FolderSearchMatch: Equatable, Sendable {
+    public let range: SearchUTF8Range
+    public let line: Int
+    public let column: Int
+    public let snippet: String
+
+    public init(
+        range: SearchUTF8Range,
+        line: Int,
+        column: Int,
+        snippet: String
+    ) {
+        self.range = range
+        self.line = line
+        self.column = column
+        self.snippet = snippet
+    }
+}
+
+public struct FolderSearchDocumentResult: Equatable, Sendable {
+    public let path: String
+    public let relativePath: String
+    public let identity: FileIdentity
+    public let matches: [FolderSearchMatch]
+
+    public init(path: String, relativePath: String, identity: FileIdentity, matches: [FolderSearchMatch]) {
+        self.path = path
+        self.relativePath = relativePath
+        self.identity = identity
+        self.matches = matches
+    }
+}
+
+public struct FolderSearchResultSet: Equatable, Sendable {
+    public let rootPath: String
+    public let documents: [FolderSearchDocumentResult]
+    public let isTruncated: Bool
+    public let searchedFileCount: Int
+    public let skippedFileCount: Int
+    public let searchedByteCount: Int
+
+    public init(
+        rootPath: String,
+        documents: [FolderSearchDocumentResult],
+        isTruncated: Bool,
+        searchedFileCount: Int,
+        skippedFileCount: Int,
+        searchedByteCount: Int
+    ) {
+        self.rootPath = rootPath
+        self.documents = documents
+        self.isTruncated = isTruncated
+        self.searchedFileCount = searchedFileCount
+        self.skippedFileCount = skippedFileCount
+        self.searchedByteCount = searchedByteCount
+    }
+
+    public var matchCount: Int { documents.reduce(0) { $0 + $1.matches.count } }
+}
+
+public struct FolderSearchLimits: Equatable, Sendable {
+    public var maximumFiles: Int
+    public var maximumDocumentBytes: Int
+    public var maximumTotalBytes: Int
+    public var maximumMatches: Int
+    public var maximumResultBytes: Int
+    public var maximumPatternBytes: Int
+    public var maximumRegularExpressionBytes: Int
+
+    public init(
+        maximumFiles: Int = 10_000,
+        maximumDocumentBytes: Int = 64 * 1_024 * 1_024,
+        maximumTotalBytes: Int = 256 * 1_024 * 1_024,
+        maximumMatches: Int = 100_000,
+        maximumResultBytes: Int = 32 * 1_024 * 1_024,
+        maximumPatternBytes: Int = 64 * 1_024,
+        maximumRegularExpressionBytes: Int = 8 * 1_024 * 1_024
+    ) {
+        self.maximumFiles = maximumFiles
+        self.maximumDocumentBytes = maximumDocumentBytes
+        self.maximumTotalBytes = maximumTotalBytes
+        self.maximumMatches = maximumMatches
+        self.maximumResultBytes = maximumResultBytes
+        self.maximumPatternBytes = maximumPatternBytes
+        self.maximumRegularExpressionBytes = maximumRegularExpressionBytes
+    }
+}
+
+public enum FolderSearchFailure: Error, Equatable, Sendable {
+    case invalidLimits
+    case invalidRoot(String)
+    case accessDenied(String)
+    case enumerationFailed(String)
+    case search(SearchFailure)
+}
+
 public struct SearchLimits: Equatable, Sendable {
     public var maximumDocumentBytes: Int
     public var maximumMatches: Int

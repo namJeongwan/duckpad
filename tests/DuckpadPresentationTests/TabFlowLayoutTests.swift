@@ -724,6 +724,11 @@ struct AppKitHostedTests {
     }
     #expect(Set(shortcuts).count == shortcuts.count)
 
+    let findInFolder = menuItem("Find in Folder…", in: menu)
+    #expect(findInFolder?.action == #selector(DuckpadWindowController.performFindInFolder(_:)))
+    #expect(findInFolder?.keyEquivalent == "f")
+    #expect(findInFolder?.keyEquivalentModifierMask == [.command, .shift])
+
     let close = menuItem("Close Tab", in: menu)
     #expect(close?.action == #selector(DuckpadWindowController.performCloseActiveTab(_:)))
     #expect(close?.keyEquivalent == "w")

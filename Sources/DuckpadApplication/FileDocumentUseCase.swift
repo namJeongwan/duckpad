@@ -16,6 +16,7 @@ public struct FileWorkspaceContext: Equatable, Sendable {
 }
 
 public enum FileOperationFailure: Error, Equatable, Sendable {
+    case cancelled
     case noActiveDocument
     case editorSnapshotUnavailable(BufferID)
     case editorRevisionMismatch(bufferID: BufferID, expected: UInt64, actual: UInt64)
@@ -78,6 +79,12 @@ public enum FileComparisonOutcome: Equatable, Sendable {
     case failed(FileOperationFailure)
 }
 
+public enum FolderSearchActivationOutcome: Equatable, Sendable {
+    case activated(TabID)
+    case stale(String)
+    case failed(FileOperationFailure)
+}
+
 /// Coordinates file I/O while the editor remains the sole live-text authority.
 /// MainActor isolation serializes open/save decisions and keeps UI publication ordered.
 @MainActor
@@ -117,8 +124,10 @@ public final class FileDocumentUseCase {
     ) async -> FileOpenOutcome {
         await acquireOperation()
         defer { releaseOperation() }
+        guard !Task.isCancelled else { return .failed(.cancelled) }
         do {
             let canonical = try await store.canonicalURL(for: url)
+            guard !Task.isCancelled else { return .failed(.cancelled) }
             if let existing = workspace.tabID(canonicalPath: canonical.path) {
                 switch await workspace.activate(tabID: existing) {
                 case .applied: return .activatedExisting(existing)
@@ -127,6 +136,7 @@ public final class FileDocumentUseCase {
                 }
             }
             let read = try await store.read(from: canonical)
+            guard !Task.isCancelled else { return .failed(.cancelled) }
             let decoded: DecodedTextFile
             do { decoded = try TextFileCodec.decode(read.data, assuming: encodingHint) }
             catch let error { return .failed(.codec(error)) }
@@ -137,6 +147,7 @@ public final class FileDocumentUseCase {
                 lineEnding: decoded.lineEnding,
                 observedIdentity: read.identity
             )
+            guard !Task.isCancelled else { return .failed(.cancelled) }
             switch await workspace.addOpenedFile(binding: binding, title: canonical.lastPathComponent) {
             case .applied:
                 guard let context = workspace.activeFileContext() else { return .failed(.noActiveDocument) }
@@ -152,6 +163,36 @@ public final class FileDocumentUseCase {
         } catch let error {
             return .failed(.store(error))
         }
+    }
+
+    public func activateFolderSearchMatch(
+        document: FolderSearchDocumentResult,
+        match: FolderSearchMatch
+    ) async -> FolderSearchActivationOutcome {
+        guard !Task.isCancelled else { return .failed(.cancelled) }
+        let outcome = await open(URL(fileURLWithPath: document.path))
+        let tabID: TabID
+        switch outcome {
+        case .opened(let opened), .activatedExisting(let opened): tabID = opened
+        case .failed(let failure): return .failed(failure)
+        }
+        guard !Task.isCancelled else { return .failed(.cancelled) }
+        guard let selectionEditor = editor as? any EditorSelectionPort,
+              let context = workspace.fileContext(tabID: tabID),
+              workspace.snapshot().tabs.first(where: { $0.id == tabID })?.isDirty == false,
+              context.binding?.canonicalPath == document.path,
+              context.binding?.observedIdentity == document.identity,
+              let snapshot = selectionEditor.snapshot(for: context.buffer.bufferID),
+              snapshot.revision == context.buffer.revision,
+              match.range.location >= 0,
+              match.range.length >= 0,
+              match.range.location <= snapshot.text.utf8.count,
+              match.range.length <= snapshot.text.utf8.count - match.range.location else {
+            return .stale(document.path)
+        }
+        selectionEditor.selectAndReveal(match.range)
+        selectionEditor.focus()
+        return .activated(tabID)
     }
 
     public func saveActive(conversion: TextFileConversion? = nil) async -> FileSaveOutcome {
