@@ -97,6 +97,17 @@ public enum DuckpadMainMenuFactory {
         add("Toggle Line Comment", #selector(DuckpadWindowController.performToggleLineComment(_:)), "/", target, to: languageMenu)
         add("Language Command Palette…", #selector(DuckpadWindowController.performShowLanguageChooser(_:)), "p", target, modifiers: [.command, .shift], to: languageMenu)
         languageItem.submenu = languageMenu
+
+        let extensionsItem = NSMenuItem(); mainMenu.addItem(extensionsItem)
+        let extensionsMenu = NSMenu(title: "Extensions")
+        add("Manage Extensions…", #selector(DuckpadWindowController.performShowExtensions(_:)), "", target, modifiers: [], to: extensionsMenu)
+        if !target.extensionCommands.isEmpty { extensionsMenu.addItem(.separator()) }
+        for command in target.extensionCommands {
+            let item = extensionsMenu.addItem(withTitle: command.title, action: #selector(DuckpadWindowController.performExtensionCommand(_:)), keyEquivalent: "")
+            item.target = target; item.representedObject = command.id.rawValue
+            item.setAccessibilityLabel("Extension command: \(command.title)")
+        }
+        extensionsItem.submenu = extensionsMenu
         return mainMenu
     }
 

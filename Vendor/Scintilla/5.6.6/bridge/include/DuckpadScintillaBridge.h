@@ -45,6 +45,8 @@ typedef NS_ENUM(NSInteger, DPScintillaPalette) {
 @property(nonatomic, readonly) uint64_t revision;
 @property(nonatomic, readonly, copy) NSData *contentUTF8;
 @property(nonatomic, readonly) NSUInteger documentByteLength;
+- (nullable NSData *)utf8BytesInRange:(NSRange)range
+                                error:(NSError * _Nullable * _Nullable)error;
 @property(nonatomic, getter=isInputEnabled) BOOL inputEnabled;
 @property(nonatomic, getter=isWordWrapEnabled) BOOL wordWrapEnabled;
 @property(nonatomic, readonly) NSUInteger selectionCount;

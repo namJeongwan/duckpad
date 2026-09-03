@@ -159,6 +159,28 @@ NSString *DPScintillaResourcePath(NSString *name) {
     return (NSUInteger)[_scintilla message:SCI_GETLENGTH];
 }
 
+- (NSData *)utf8BytesInRange:(NSRange)range error:(NSError **)error {
+    const NSUInteger length = (NSUInteger)[_scintilla message:SCI_GETLENGTH];
+    if (range.location > length || range.length > length - range.location) {
+        [self fail:DPScintillaErrorInvalidRange description:@"UTF-8 byte range is outside the document" error:error];
+        return nil;
+    }
+    const NSUInteger end = range.location + range.length;
+    if (![self isUTF8Boundary:range.location documentLength:length]
+        || ![self isUTF8Boundary:end documentLength:length]) {
+        [self fail:DPScintillaErrorInvalidUTF8Boundary description:@"Range must use UTF-8 code point boundaries" error:error];
+        return nil;
+    }
+    NSMutableData *bytes = [NSMutableData dataWithLength:range.length + 1];
+    Sci_TextRangeFull textRange = {
+        { static_cast<Sci_Position>(range.location), static_cast<Sci_Position>(end) },
+        static_cast<char *>(bytes.mutableBytes)
+    };
+    [_scintilla message:SCI_GETTEXTRANGEFULL wParam:0 lParam:reinterpret_cast<sptr_t>(&textRange)];
+    bytes.length = range.length;
+    return bytes;
+}
+
 - (BOOL)loadUTF8:(NSData *)content revision:(uint64_t)revision error:(NSError **)error {
     if ([[NSString alloc] initWithData:content encoding:NSUTF8StringEncoding] == nil) {
         return [self fail:DPScintillaErrorInvalidUTF8 description:@"Content is not valid UTF-8" error:error];

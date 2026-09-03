@@ -7,6 +7,8 @@ import DuckpadPresentation
 import DuckpadScintillaBridge
 import Testing
 
+private final class ExtensionEditorAdapterTestBundleSentinel: NSObject {}
+
 private actor DelayedSearchSessionStore: SessionStore {
     private var session: ScratchSession?
     private var generation = PersistenceGeneration(rawValue: 0)
@@ -825,6 +827,66 @@ struct ScintillaBridgeTests {
         }
     }
 
+    @Test @MainActor
+    func signedSampleExtensionUsesOneNativeUndoAndRecoveryTracksUndo() async throws {
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore()); _ = await workspace.start()
+        let adapter = ScintillaEditorAdapter(); let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        let descriptor = try #require(workspace.snapshot().activeBuffer)
+        let original = "앞🙂\nz\na\n뒤🙂"
+        adapter.install(.init(bufferID: descriptor.bufferID, revision: descriptor.revision, text: original)); adapter.display(descriptor)
+        let view = try #require(adapter.activeScintillaView)
+        let prefix = Data("앞🙂\n".utf8).count; view.setPrimarySelectionUTF8Range(.init(location: prefix, length: 4))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("duckpad-extension-adapter-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let helper = try currentPluginHostExecutable()
+        let service = ExtensionWorkspaceUseCase(
+            loader: LocalExtensionPackageLoader(root: root.appendingPathComponent("packages")),
+            grants: LocalExtensionPreferenceStore(root: root.appendingPathComponent("policy")),
+            transport: ProcessPluginHostTransport(executableURL: helper, permitsInjectedDevelopmentHelper: true),
+            workspace: workspace, editor: adapter
+        )
+        await service.refresh()
+        _ = try await service.invoke(.init(rawValue: "com.duckpad.text-tools.sortSelectedLines"))
+        #expect(adapter.snapshot(for: descriptor.bufferID)?.text == "앞🙂\na\nz\n뒤🙂")
+        #expect(workspace.snapshot().activeBuffer?.revision == 1)
+        #expect(view.canUndo)
+
+        view.undo(); await workspace.waitForPendingPersistence()
+        #expect(adapter.snapshot(for: descriptor.bufferID)?.text == original)
+        // Scintilla reports this grouped undo as bounded delete+insert deltas.
+        #expect(workspace.snapshot().activeBuffer?.revision == 3)
+        #expect(String(data: try #require(adapter.recoverySnapshot(for: descriptor.bufferID)).utf8, encoding: .utf8) == original)
+        withExtendedLifetime(binding) {}
+    }
+
+    @Test @MainActor
+    func extensionCaptureReadsTinySelectionWithoutFullSnapshotAndRejectsOversizedDocumentPrecopy() throws {
+        let adapter = ScintillaEditorAdapter()
+        let descriptor = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        let fiftyMiB = String(repeating: "a", count: 50 * 1_024 * 1_024)
+        adapter.install(.init(bufferID: descriptor.bufferID, revision: 0, text: fiftyMiB))
+        adapter.display(descriptor)
+        let view = try #require(adapter.activeScintillaView)
+        let selection = NSRange(location: 25 * 1_024 * 1_024, length: 4)
+        view.setPrimarySelectionUTF8Range(selection)
+        let fullReads = view.snapshotReadCount
+
+        let capture = try adapter.captureExtensionInput(
+            tabID: TabID(), expectedBuffer: descriptor, scope: .selection, maximumBytes: 1_024
+        )
+        #expect(capture.documentByteLength == 50 * 1_024 * 1_024)
+        #expect(capture.selection == .init(location: selection.location, length: selection.length))
+        #expect(capture.scopedUTF8 == Data("aaaa".utf8))
+        #expect(view.snapshotReadCount == fullReads)
+
+        #expect(throws: ExtensionFailure.limitExceeded("command input")) {
+            _ = try adapter.captureExtensionInput(
+                tabID: TabID(), expectedBuffer: descriptor, scope: .document, maximumBytes: 1_024 * 1_024
+            )
+        }
+        #expect(view.snapshotReadCount == fullReads)
+    }
+
     @MainActor
     private func makeHostedView() -> DPScintillaEditorView {
         _ = NSApplication.shared
@@ -834,6 +896,16 @@ struct ScintillaBridgeTests {
         window.contentView = view
         window.orderOut(nil)
         return view
+    }
+
+    private func currentPluginHostExecutable() throws -> URL {
+        let bundleURLs = [Bundle(for: ExtensionEditorAdapterTestBundleSentinel.self).bundleURL]
+            + Bundle.allBundles.map(\.bundleURL) + [Bundle.main.bundleURL]
+        for bundleURL in bundleURLs where bundleURL.pathExtension == "xctest" {
+            let candidate = bundleURL.deletingLastPathComponent().appendingPathComponent("DuckpadPluginHost")
+            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate.resolvingSymlinksInPath() }
+        }
+        throw ExtensionFailure.hostUnavailable("DuckpadPluginHost is absent from the current test build products")
     }
 
     @MainActor

@@ -48,6 +48,22 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             editor: editor,
             configurationIssue: languageConfigurationIssue
         )
+        let extensionsRoot = environment["DUCKPAD_EXTENSIONS_ROOT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? LocalExtensionPackageLoader.defaultRoot()
+        let policyRoot = environment["DUCKPAD_EXTENSION_POLICY_ROOT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? LocalExtensionPreferenceStore.defaultRoot()
+        let extensionLoader = LocalExtensionPackageLoader(root: extensionsRoot)
+        let extensionPolicy = LocalExtensionPreferenceStore(root: policyRoot)
+        let extensionTransport = ProcessPluginHostTransport(executableURL: ProcessPluginHostTransport.siblingOfCurrentExecutable())
+        #if DEBUG
+        let allowsDevelopmentExtensions = environment["DUCKPAD_ALLOW_DEVELOPMENT_EXTENSIONS"] == "1"
+        #else
+        let allowsDevelopmentExtensions = false
+        #endif
+        let extensionUseCase = ExtensionWorkspaceUseCase(
+            loader: extensionLoader, grants: extensionPolicy, transport: extensionTransport,
+            workspace: workspace, editor: editor, allowsUserExtensions: allowsDevelopmentExtensions
+        )
         let panels = NativeFilePanelAdapter()
         let terminationCoordinator = ApplicationTerminationCoordinator()
         let controller = DuckpadWindowController(
@@ -61,7 +77,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             recoveryUseCase: recoveryUseCase,
             terminationCoordinator: terminationCoordinator,
             searchUseCase: searchUseCase,
-            languageUseCase: languageUseCase
+            languageUseCase: languageUseCase,
+            extensionUseCase: extensionUseCase
         )
         windowController = controller
         self.terminationCoordinator = terminationCoordinator
@@ -69,9 +86,38 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             NSApplication.shared.terminate(nil)
         }
         installMainMenu(target: controller)
+        controller.onExtensionCommandsChanged = { [weak self, weak controller] in
+            guard let self, let controller else { return }
+            self.installMainMenu(target: controller)
+        }
         controller.showAndFocus()
 
-        if environment["DUCKPAD_LANGUAGE_SMOKE"] == "1" {
+        if environment["DUCKPAD_EXTENSION_SMOKE"] == "1" {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                guard let view = editor.activeScintillaView else { preconditionFailure("extension smoke editor missing") }
+                let original = "앞🙂\nz\na\n뒤🙂"
+                view.insertCommittedText(original)
+                let prefix = Data("앞🙂\n".utf8).count
+                let selectionLength = Data("z\na\n".utf8).count
+                view.setPrimarySelectionUTF8Range(NSRange(location: prefix, length: selectionLength))
+                await workspace.waitForPendingPersistence()
+                do {
+                    _ = try await extensionUseCase.invoke(ExtensionCommandID(rawValue: "com.duckpad.text-tools.sortSelectedLines"))
+                } catch {
+                    preconditionFailure("extension smoke invocation failed: \(error)")
+                }
+                guard editor.snapshot(for: workspace.snapshot().activeBuffer!.bufferID)?.text == "앞🙂\na\nz\n뒤🙂" else {
+                    preconditionFailure("extension selection command changed bytes outside its grant scope")
+                }
+                view.undo()
+                guard editor.snapshot(for: workspace.snapshot().activeBuffer!.bufferID)?.text == original else {
+                    preconditionFailure("extension command was not one native undo group")
+                }
+                print("Duckpad extension smoke ready: signed package -> isolated WAMR host -> scoped grouped edit")
+                fflush(stdout); Darwin._exit(0)
+            }
+        } else if environment["DUCKPAD_LANGUAGE_SMOKE"] == "1" {
             Task { @MainActor in
                 await controller.waitForStartup()
                 guard let view = editor.activeScintillaView else {

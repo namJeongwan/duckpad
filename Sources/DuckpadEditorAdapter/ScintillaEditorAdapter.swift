@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -253,6 +253,40 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort 
         let lower = min(editorView.anchorUTF8Position, editorView.caretUTF8Position)
         let upper = max(editorView.anchorUTF8Position, editorView.caretUTF8Position)
         return SearchUTF8Range(location: Int(clamping: lower), length: Int(clamping: upper - lower))
+    }
+
+    public func captureExtensionInput(
+        tabID: TabID,
+        expectedBuffer: EditorBufferDescriptor,
+        scope: ExtensionCommandContribution.InputScope,
+        maximumBytes: Int
+    ) throws(ExtensionFailure) -> ExtensionEditorCapture {
+        guard maximumBytes >= 0, activeBuffer == expectedBuffer,
+              let editorView = activeScintillaView,
+              editorView.revision == expectedBuffer.revision else { throw .staleContext }
+        let documentLength = Int(clamping: editorView.documentByteLength)
+        let selection = activeSelectionUTF8Range() ?? SearchUTF8Range(location: 0, length: 0)
+        guard selection.location >= 0, selection.length >= 0,
+              selection.location <= documentLength,
+              selection.length <= documentLength - selection.location else { throw .staleContext }
+        let bytes: Data
+        switch scope {
+        case .selection:
+            guard selection.length > 0 else { throw .invalidResult("command requires a selection") }
+            guard selection.length <= maximumBytes else { throw .limitExceeded("command input") }
+            do {
+                bytes = try editorView.utf8Bytes(in: NSRange(location: selection.location, length: selection.length))
+            } catch let failure as ExtensionFailure {
+                throw failure
+            } catch {
+                throw .invalidResult(String(describing: error))
+            }
+        case .document:
+            guard documentLength <= maximumBytes else { throw .limitExceeded("command input") }
+            bytes = editorView.contentUTF8
+        }
+        guard editorView.revision == expectedBuffer.revision else { throw .staleContext }
+        return ExtensionEditorCapture(tabID: tabID, buffer: expectedBuffer, documentByteLength: documentLength, selection: selection, scopedUTF8: bytes)
     }
 
     public func findActive(_ request: ActiveSearchRequest) throws(SearchFailure) -> SearchUTF8Range? {

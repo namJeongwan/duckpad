@@ -37,6 +37,8 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 23 | [Phase 6 remediation re-review](reviews/2026-09-03-phase-6-search-replace-rereview.md) | **Rejected — superseded review evidence** | P6-01/P6-02 closure와 당시 selection nil/invalidation이 전체 문서 치환으로 확장되던 P6-03 잔여 Major를 기록한다. |
 | 24 | [Phase 6 final remediation re-review](reviews/2026-09-03-phase-6-search-replace-final-rereview.md) | **Content approved — latest Phase 6 evidence** | 공통 typed selection preflight, 무변경/undo/recovery 보존, P6-01~P6-03 closure와 132-test evidence를 기록한다. |
 | 25 | [Phase 7 language and Lexilla integration](10-language-support.md) | **Implemented; review pending** | official Lexilla 5.5.3 provenance, 78-language registry/detection, exact 20-language keyword-complete tier, persisted overrides, bounded semantic styling, fold/brace/indent/comment UX를 기록한다. |
+| 26 | [Phase 8 secure extension platform](11-extension-platform.md) | **Changes required; remediation awaiting re-review** | official WAMR 2.4.5 interpreter, signed package identity, durable scoped consent, isolated Process-host Developer Preview, grouped UTF-8 edits와 P8-01/P8-02 remediation을 기록한다. |
+| 27 | [Phase 8 independent code review](reviews/2026-09-03-phase-8-extension-platform-code-review.md) | **Rejected — latest Phase 8 review evidence** | P8-01 durability restart latch와 P8-02 termination cancel/join 결함을 판정했다. 후속 직접 수정은 새 독립 re-review 전까지 승인 근거가 아니다. |
 
 상태 정의:
 
@@ -92,6 +94,23 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 8 P8-01/P8-02 direct remediation
+
+- **Agent/role:** `/root`, direct builder. 사용자의 지시에 따라 추가 구현 agent 없이 직접 수정했고, 독립 reviewer verdict는 변경하지 않았다.
+- **P8-01:** rename 뒤 directory fsync 실패에도 published generation을 소비하고, 해당 프로세스에서는 user authority를 restart-required 상태로 영구 잠근다. refresh/즉시 재시도/consent/grant/revoke/reset/user invocation이 latch를 우회하지 못한다.
+- **P8-02:** Cmd-Q와 red close가 use-case invocation admission과 editor input을 잠근 뒤 exact request cancel, transport teardown, invocation completion을 모두 기다리고 나서 dirty review/final recovery flush를 수행한다. 종료가 거절될 때만 두 gate를 다시 열어 queued-task 우회를 막는다.
+- **Evidence:** restart-only recovery, same-generation retry 거절, queued admission 차단, denial resume, held-reservation idle join, termination approval ordering 회귀 테스트를 추가했다. debug/release/fresh가 각각 Domain 13 + Application 62 + Infrastructure 40 + Presentation 38 + EditorAdapter 31 = 184/184를 통과했고, Infrastructure 40/40 병렬 stress 3회, macOS 13 x86_64 release build, sample signature 검증, 실제 extension smoke도 통과했다.
+- **Additional direct hardening:** full-target stress에서 child exit 뒤 중복 `Process.waitUntilExit` 경로가 Swift task를 남기는 경합을 재현했다. `/root`가 pre-launch shared multi-waiter exit signal로 read/timeout/cancel/catch teardown을 단일화하고 PID-readiness 기반 test로 고정했다.
+- **Safety:** README/ignored Notepad++ reference/stage/commit을 건드리지 않았고, 기존 unstaged doc04/old Scintilla vendor script는 Phase 8 범위 밖으로 보존했다.
+
+### 2026-09-03 — Phase 8 secure extension platform
+
+- **Agent/role:** `/root/philosophy_parity`, product builder; stage/commit 또는 독립 review를 수행하지 않는다.
+- **Implementation:** official WAMR 2.4.5 interpreter-only runtime, descriptor-bound signed package loader, durable identity/scope grants, request-scoped framed helper transport, bundled Text Tools Wasm sample, revision-reserved grouped edits, native Extensions manager/menu를 [Phase 8 문서](11-extension-platform.md)에 구현·기록했다.
+- **Hardening and verification:** `/root` 및 `/root/clean_architecture` guard에 따라 50 MiB 실제/500 MiB 가상 bounded capture, selection 결과 containment, reservation 대기 중 cancel/disable/revoke/grant-removal 재검증, stable publisher fingerprint verification-only 계약, current SwiftPM configuration helper resolution, WAMR absent-target byte-identical regeneration을 추가했다. Phase 8 focused 26개, 전체 debug/release/fresh 각각 178개, x86_64 release build 및 실제 extension smoke가 통과했다.
+- **Security collaboration:** `/root`의 construction guard를 반영해 no-import Wasm policy, memory/table/ABI caps, hidden exact inventory, immutable bundled attestation, consent/revoke tokens, selection-only payload, terminal first-wins cancel/timeout/reap, policy uncertainty fail-closed, dynamic authorized command UI와 adversarial tests를 추가했다.
+- **Boundary:** SwiftPM Process helper는 Developer Preview이며 signed embedded XPC/helper identity gate 전에는 release user extension execution을 비활성화한다. README/NPP/stage/commit 없음; 기존 unstaged doc04/old Scintilla vendor script 보존.
 
 ### 2026-09-03 — Phase 7 language and Lexilla integration
 
@@ -363,3 +382,27 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - **Regression/content:** P7-01의 네 source/test SHA는 직전 approval과 동일하고 post-policy focused 20/20 PASS다. full current Phase 7 content approval을 유지한다.
 - **Manifest/verdict:** 189-file product/acceptance path digest `c1dd9781d9212530d35290250def28264272308985538bf558830e52ea84f840`, path+byte digest `f17f16b381359b6c73e8d5a9395d2ddfd372da1e82d43a404b2d5fd45fa234be`; **APPROVED — 0 Blocker, 0 Major, 0 Minor.** 상세 evidence는 [Phase 7 re-review](reviews/2026-09-03-phase-7-language-lexilla-rereview.md)에 추가했다.
 - **Safety:** review evidence/index만 수정했고 source/test/stage/commit은 변경하지 않았다.
+
+### 2026-09-03 — Phase 8 extension-platform independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent Phase 8 content reviewer; builder와 분리된 verdict만 판정한다.
+- **Scope:** current unstaged Phase 8 extension platform의 WAMR provenance/interpreter policy, descriptor-bound signed packages/trust, durable policy authority, Process framing/teardown, release user gate, bounded Scintilla capture/result transaction, lifecycle races, sample/UI/composition/tests를 검토했다. 기존 unrelated 문서 04/vendor-Scintilla script는 제외·보존했다.
+- **Verdict:** **CHANGES_REQUIRED — 0 Blocker, 2 Major, 0 Minor.** P8-01은 post-rename durability uncertainty 뒤 restart latch가 없어 동일 generation으로 권한을 다시 활성화할 수 있고, P8-02는 termination final flush가 active extension request를 cancel/join하지 않아 flush 이후 late edit가 적용될 수 있다.
+- **Validation:** official WAMR 2.4.5 tar SHA 및 isolated 168-file byte reproduction PASS; focused debug/release 26/26, 추가 debug Domain 13/13 + Application 59/59, build와 real signed-loader → Process → WAMR → grouped-edit/undo smoke PASS. 196-path product/acceptance path+byte manifest digest는 `4bb70fda4f73795df5bbe74e54182998e977e66b0b0ce160a117ad370f5ffbba`다.
+- **Record:** 상세 evidence/fix는 [Phase 8 review](reviews/2026-09-03-phase-8-extension-platform-code-review.md). 이 review 문서와 index entry만 수정했고 reviewed source/test를 수정·stage·commit하지 않았다.
+
+### 2026-09-03 — Phase 8 focused remediation independent re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent focused re-reviewer; P8-01/P8-02 및 그 stress 과정에서 드러난 Process teardown hang만 재검증했다.
+- **Closure:** rename 직후 generation 소비와 process-lifetime user-authority latch가 refresh/retry/consent/grant/revoke/reset/invoke 우회를 막는다. 종료는 editor/invocation admission을 먼저 잠그고 exact request transport teardown 및 invocation completion을 join한 뒤 dirty review/final recovery flush를 수행한다. pre-entry UI task와 held workspace reservation도 late mutation 없이 종료된다. pre-launch shared multi-waiter exit signal이 timeout/cancel cleanup의 중복 `waitUntilExit` hang을 제거한다.
+- **Validation:** independent current focused debug 32/32, closure tests 20/20, held-reservation 10/10, Process teardown 3/3, release remediation 17/17, real signed extension smoke PASS. Frozen-candidate supporting evidence는 debug/release/fresh 184/184, Infrastructure 40/40 x3, x86_64 macOS 13 build, signature 및 hygiene PASS다.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** final 196-path product/acceptance path digest는 `2bdb07824db766fc8da73c77d9893d437e4408ad0bb49bd0a24a20663bc6b02b`, path+byte digest는 `24942d5e3a05013c598c7721982ef040eeb23747efcda88453ca62a8cb484088`다. exact staged candidate receipt는 아직 발급하지 않았다. 상세 기록은 [Phase 8 review](reviews/2026-09-03-phase-8-extension-platform-code-review.md)의 focused re-review section에 있다.
+- **Safety:** review doc/index만 수정했다. product/source/tests, README/reference, unrelated 문서 04/vendor-Scintilla script, stage/commit은 변경하지 않았다.
+
+### 2026-09-03 — Phase 8 WAMR whitespace normalization independent re-approval
+
+- **Agent/role:** `/root/phase1_code_review`, independent focused reviewer; upstream normalization과 재현 계약만 검토했다.
+- **Scope:** WAMR 2.4.5 vendored blob 14개의 trailing horizontal whitespace/extra EOF blank-line 정규화와 `scripts/vendor_wamr_2_4_5.sh`, `PROVENANCE.md` 갱신이다.
+- **Validation:** official archive SHA 재검증; raw upstream과 비교해 차이가 선언된 14개에만 존재하고 전부 정확한 정규화 결과임을 확인했다. staged script의 fresh reproduction은 168/168 byte-identical, `sh -n` 및 `git diff --cached --check` PASS다.
+- **Manifest/verdict:** product/acceptance 196-path path digest `2bdb07824db766fc8da73c77d9893d437e4408ad0bb49bd0a24a20663bc6b02b`, staged path+byte digest `498e8b7acf348011532fb394f433187045033dd2600239742a6def06632b6dfc`; **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** Receipt/sign은 아직 수행하지 않았다.
+- **Safety:** review doc/index만 수정했다. product/source/tests/stage/commit은 변경하지 않았다. 상세 evidence는 [Phase 8 review](reviews/2026-09-03-phase-8-extension-platform-code-review.md)에 있다.

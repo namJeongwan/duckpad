@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "com.duckpad.text-tools",
+  "name": "Duckpad Text Tools",
+  "version": { "major": 1, "minor": 0, "patch": 0 },
+  "api": {
+    "minimum": { "major": 1, "minor": 0, "patch": 0 },
+    "maximumExclusive": { "major": 2, "minor": 0, "patch": 0 }
+  },
+  "publisher": { "id": "com.duckpad", "keyID": "release-sample-1" },
+  "runtime": { "kind": "wasm-core", "module": "module.wasm", "abi": "duckpad-wasm-1" },
+  "capabilities": [
+    { "id": "documents.read", "scope": "selection" },
+    { "id": "documents.read", "scope": "active" },
+    { "id": "documents.write", "scope": "selection" },
+    { "id": "documents.write", "scope": "active" }
+  ],
+  "contributes": {
+    "commands": [
+      { "id": "com.duckpad.text-tools.sortSelectedLines", "title": "Sort Selected Lines", "operation": 1, "inputScope": "selection" },
+      { "id": "com.duckpad.text-tools.trimTrailingWhitespace", "title": "Trim Trailing Whitespace", "operation": 2, "inputScope": "document" }
+    ],
+    "keybindings": [
+      { "command": "com.duckpad.text-tools.sortSelectedLines", "key": "cmd+option+s" }
+    ],
+    "snippets": [
+      { "language": "plain-text", "prefix": "duck", "body": "🦆 Duckpad" }
+    ],
+    "themes": [],
+    "languages": []
+  }
+}
