@@ -9,7 +9,7 @@ private final class BufferTextView: NSTextView {
 }
 
 @MainActor
-public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOptionsPort, EditorCommandPort, EditorSelectionPort, @preconcurrency NSTextStorageDelegate {
+public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOptionsPort, EditorCommandPort, EditorSelectionPort, BookmarkEditorPort, @preconcurrency NSTextStorageDelegate, @preconcurrency NSLayoutManagerDelegate {
     public let scrollView: NSScrollView
     public let textView: NSTextView
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
@@ -19,13 +19,17 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
     private var undoManagers: [BufferID: UndoManager] = [:]
     private var viewStates: [BufferID: EditorViewState] = [:]
     private var isRendering = false
+    private var isProcessingTextStorageEdit = false
+    private var bookmarkRenderScheduled = false
     private var requestedInputEnabled = true
+    private static let bookmarkTemporaryAttribute = NSAttributedString.Key("app.duckpad.bookmark")
 
     public override init() {
         textView = BufferTextView(frame: .zero)
         scrollView = NSScrollView(frame: .zero)
         super.init()
         textView.textStorage?.delegate = self
+        textView.layoutManager?.delegate = self
         textView.isRichText = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
@@ -75,6 +79,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         activeBuffer = buffer
         setTextWithoutEditing(snapshot.text)
         applyWordWrap(viewStates[buffer.bufferID]?.wordWrapEnabled ?? true)
+        renderBookmarks()
         applyInputAvailability()
     }
 
@@ -86,6 +91,8 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         activeBuffer = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision)
         (textView as? BufferTextView)?.activeUndoManager = undoManagers[snapshot.bufferID]
         setTextWithoutEditing(snapshot.text)
+        sanitizeBookmarks(bufferID: snapshot.bufferID, text: snapshot.text)
+        renderBookmarks()
         applyInputAvailability()
     }
 
@@ -114,6 +121,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text))
         if activeBuffer?.bufferID == snapshot.bufferID {
             applyWordWrap(snapshot.viewState.wordWrapEnabled)
+            renderBookmarks()
         }
     }
 
@@ -174,6 +182,48 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
     }
 
     public func setWrapMarkerVisible(_ isVisible: Bool) {}
+
+    public var hasBookmarks: Bool {
+        guard let bufferID = activeBuffer?.bufferID else { return false }
+        return !(viewStates[bufferID]?.bookmarkedLines.isEmpty ?? true)
+    }
+
+    public func toggleBookmarkAtCaret() {
+        guard let bufferID = activeBuffer?.bufferID else { return }
+        let line = lineNumber(atUTF16: textView.selectedRange().location, in: textView.string)
+        var state = viewStates[bufferID] ?? EditorViewState()
+        if let index = state.bookmarkedLines.firstIndex(of: line) {
+            state.bookmarkedLines.remove(at: index)
+        } else if state.bookmarkedLines.count < EditorViewState.maximumBookmarkCount {
+            state.bookmarkedLines.append(line)
+            state.bookmarkedLines.sort()
+        }
+        viewStates[bufferID] = state
+        renderBookmarks()
+    }
+
+    @discardableResult
+    public func navigateToBookmark(forward: Bool) -> Bool {
+        guard let bufferID = activeBuffer?.bufferID,
+              let lines = viewStates[bufferID]?.bookmarkedLines,
+              !lines.isEmpty else { return false }
+        let current = lineNumber(atUTF16: textView.selectedRange().location, in: textView.string)
+        let target = forward
+            ? (lines.first(where: { $0 > current }) ?? lines[0])
+            : (lines.last(where: { $0 < current }) ?? lines[lines.count - 1])
+        let location = lineStartUTF16(line: target, in: textView.string)
+        textView.setSelectedRange(NSRange(location: location, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: location, length: 0))
+        return true
+    }
+
+    public func clearBookmarks() {
+        guard let bufferID = activeBuffer?.bufferID else { return }
+        var state = viewStates[bufferID] ?? EditorViewState()
+        state.bookmarkedLines = []
+        viewStates[bufferID] = state
+        renderBookmarks()
+    }
 
     public func canPerform(_ command: EditorCommand) -> Bool {
         guard activeBuffer != nil else { return false }
@@ -424,6 +474,8 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         range editedRange: NSRange,
         changeInLength delta: Int
     ) {
+        isProcessingTextStorageEdit = true
+        defer { isProcessingTextStorageEdit = false }
         guard !isRendering, editedMask.contains(.editedCharacters),
               let activeBuffer else {
             return
@@ -454,6 +506,13 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         )
         switch onEdit?(edit) ?? .rejected(currentRevision: activeBuffer.revision) {
         case .accepted(let newRevision):
+            updateBookmarks(
+                bufferID: activeBuffer.bufferID,
+                previousText: previous.text,
+                replacedRange: previousRange,
+                replacement: replacement,
+                resultingText: textStorage.string
+            )
             self.activeBuffer = EditorBufferDescriptor(
                 bufferID: activeBuffer.bufferID,
                 revision: newRevision
@@ -463,6 +522,8 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
                 revision: newRevision,
                 text: textStorage.string
             )
+            sanitizeBookmarks(bufferID: activeBuffer.bufferID, text: textStorage.string)
+            renderBookmarks()
             applyInputAvailability()
         case .rejected:
             restore(bufferID: activeBuffer.bufferID)
@@ -473,6 +534,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         guard let snapshot = snapshots[bufferID] else { return }
         activeBuffer = EditorBufferDescriptor(bufferID: bufferID, revision: snapshot.revision)
         setTextWithoutEditing(snapshot.text)
+        renderBookmarks()
         applyInputAvailability()
     }
 
@@ -502,6 +564,149 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
             height: CGFloat.greatestFiniteMagnitude
         )
         scrollView.hasHorizontalScroller = !isEnabled
+    }
+
+    private func updateBookmarks(
+        bufferID: BufferID,
+        previousText: String,
+        replacedRange: NSRange,
+        replacement: String,
+        resultingText: String
+    ) {
+        var state = viewStates[bufferID] ?? EditorViewState()
+        guard !state.bookmarkedLines.isEmpty else { return }
+        let previousStarts = lineStartOffsets(in: previousText)
+        let resultingStarts = lineStartOffsets(in: resultingText)
+        let replacedEnd = NSMaxRange(replacedRange)
+        let offsetDelta = (replacement as NSString).length - replacedRange.length
+        state.bookmarkedLines = Array(Set(state.bookmarkedLines.compactMap { line -> Int? in
+            guard previousStarts.indices.contains(line) else { return nil }
+            let oldStart = previousStarts[line]
+            let mappedStart: Int
+            if oldStart < replacedRange.location {
+                mappedStart = oldStart
+            } else if oldStart >= replacedEnd {
+                mappedStart = max(0, oldStart + offsetDelta)
+            } else {
+                mappedStart = replacedRange.location
+            }
+            return lineIndex(containingUTF16: mappedStart, starts: resultingStarts)
+        })).sorted()
+        viewStates[bufferID] = state
+    }
+
+    private func sanitizeBookmarks(bufferID: BufferID, text: String) {
+        var state = viewStates[bufferID] ?? EditorViewState()
+        let lastLine = lineBreakCount(in: text)
+        state.bookmarkedLines = state.bookmarkedLines.filter { $0 <= lastLine }
+        viewStates[bufferID] = state
+    }
+
+    private func renderBookmarks() {
+        if isProcessingTextStorageEdit {
+            scheduleBookmarkRender()
+            return
+        }
+        guard let layoutManager = textView.layoutManager else { return }
+        let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
+        layoutManager.removeTemporaryAttribute(Self.bookmarkTemporaryAttribute, forCharacterRange: fullRange)
+        guard let bufferID = activeBuffer?.bufferID else { return }
+        let color = NSColor.controlAccentColor.withAlphaComponent(0.13)
+        let source = textView.string as NSString
+        let starts = lineStartOffsets(in: textView.string)
+        for line in viewStates[bufferID]?.bookmarkedLines ?? [] {
+            guard starts.indices.contains(line) else { continue }
+            let start = starts[line]
+            guard start < source.length else { continue }
+            let range = source.lineRange(for: NSRange(location: start, length: 0))
+            layoutManager.addTemporaryAttribute(Self.bookmarkTemporaryAttribute, value: color, forCharacterRange: range)
+        }
+    }
+
+    public func layoutManager(
+        _ layoutManager: NSLayoutManager,
+        shouldUseTemporaryAttributes attrs: [NSAttributedString.Key: Any],
+        forDrawingToScreen toScreen: Bool,
+        atCharacterIndex charIndex: Int,
+        effectiveRange: NSRangePointer?
+    ) -> [NSAttributedString.Key: Any]? {
+        guard toScreen else { return nil }
+        var rendered = attrs
+        if let color = rendered.removeValue(forKey: Self.bookmarkTemporaryAttribute) as? NSColor,
+           rendered[.backgroundColor] == nil {
+            rendered[.backgroundColor] = color
+        }
+        return rendered
+    }
+
+    private func scheduleBookmarkRender() {
+        guard !bookmarkRenderScheduled else { return }
+        bookmarkRenderScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.bookmarkRenderScheduled = false
+            self.renderBookmarks()
+        }
+    }
+
+    private func lineNumber(atUTF16 location: Int, in text: String) -> Int {
+        let source = text as NSString
+        return lineBreakCount(in: source.substring(to: min(max(0, location), source.length)))
+    }
+
+    private func lineStartUTF16(line: Int, in text: String) -> Int {
+        let starts = lineStartOffsets(in: text)
+        return starts[min(max(0, line), starts.count - 1)]
+    }
+
+    private func lineStartOffsets(in text: String) -> [Int] {
+        let source = text as NSString
+        var starts = [0]
+        var index = 0
+        while index < source.length {
+            let character = source.character(at: index)
+            if character == 0x0D {
+                if index + 1 < source.length, source.character(at: index + 1) == 0x0A {
+                    index += 1
+                }
+                starts.append(index + 1)
+            } else if character == 0x0A {
+                starts.append(index + 1)
+            }
+            index += 1
+        }
+        return starts
+    }
+
+    private func lineIndex(containingUTF16 location: Int, starts: [Int]) -> Int {
+        var lower = 0
+        var upper = starts.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if starts[middle] <= location {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+        return max(0, lower - 1)
+    }
+
+    private func lineBreakCount(in text: String) -> Int {
+        let source = text as NSString
+        var count = 0
+        var index = 0
+        while index < source.length {
+            let value = source.character(at: index)
+            if value == 0x0D {
+                count += 1
+                if index + 1 < source.length, source.character(at: index + 1) == 0x0A { index += 1 }
+            } else if value == 0x0A {
+                count += 1
+            }
+            index += 1
+        }
+        return count
     }
 
     private func applyInputAvailability() {

@@ -77,6 +77,12 @@ public enum DuckpadMainMenuFactory {
         add("Replace…", #selector(DuckpadWindowController.performShowReplace(_:)), "h", target, to: searchMenu)
         add("Find in Folder…", #selector(DuckpadWindowController.performFindInFolder(_:)), "f", target, modifiers: [.command, .shift], to: searchMenu)
         add("Close Find Panel", #selector(DuckpadWindowController.performCloseFindPanel(_:)), "\u{1b}", target, modifiers: [], to: searchMenu)
+        searchMenu.addItem(.separator())
+        let f2 = String(UnicodeScalar(NSF2FunctionKey)!)
+        add("Toggle Bookmark", #selector(DuckpadWindowController.performToggleBookmark(_:)), f2, target, modifiers: [.command], to: searchMenu)
+        add("Next Bookmark", #selector(DuckpadWindowController.performNextBookmark(_:)), f2, target, modifiers: [], to: searchMenu)
+        add("Previous Bookmark", #selector(DuckpadWindowController.performPreviousBookmark(_:)), f2, target, modifiers: [.shift], to: searchMenu)
+        add("Clear All Bookmarks", #selector(DuckpadWindowController.performClearBookmarks(_:)), f2, target, modifiers: [.command, .shift], to: searchMenu)
         searchItem.submenu = searchMenu
 
         let viewItem = NSMenuItem()

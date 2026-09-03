@@ -68,6 +68,7 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, readonly) NSUInteger anchorUTF8Position;
 @property(nonatomic, readonly) NSUInteger firstVisibleLine;
 @property(nonatomic, readonly) NSUInteger horizontalScrollOffset;
+@property(nonatomic, readonly, copy) NSArray<NSNumber *> *bookmarkedLines;
 @property(nonatomic, readonly) BOOL canUndo;
 @property(nonatomic, readonly) BOOL canRedo;
 @property(nonatomic, readonly) BOOL canCut;
@@ -119,6 +120,10 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
                 firstVisibleLine:(NSUInteger)firstVisibleLine
           horizontalScrollOffset:(NSUInteger)horizontalScrollOffset
                  wordWrapEnabled:(BOOL)wordWrapEnabled;
+- (void)restoreBookmarkedLines:(NSArray<NSNumber *> *)lines;
+- (void)toggleBookmarkAtCaret;
+- (BOOL)navigateToBookmarkForward:(BOOL)forward;
+- (void)clearBookmarks;
 - (BOOL)addSelectionUTF8Range:(NSRange)range;
 - (void)insertCommittedText:(NSString *)text;
 - (void)setMarkedText:(NSString *)text

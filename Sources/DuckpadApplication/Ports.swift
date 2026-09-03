@@ -126,6 +126,16 @@ public protocol EditorViewOptionsPort: EditorPort {
     func setWrapMarkerVisible(_ isVisible: Bool)
 }
 
+/// Line bookmarks are view metadata: they move with editor lines, survive
+/// recovery, and never mutate document bytes, revision, dirty state, or undo.
+@MainActor
+public protocol BookmarkEditorPort: EditorPort {
+    var hasBookmarks: Bool { get }
+    func toggleBookmarkAtCaret()
+    @discardableResult func navigateToBookmark(forward: Bool) -> Bool
+    func clearBookmarks()
+}
+
 /// Platform-neutral edit commands surfaced by the native menu. Application
 /// owns the intent while each editor adapter owns its responder/engine details.
 public enum EditorCommand: Equatable, Sendable {

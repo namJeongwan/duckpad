@@ -729,6 +729,30 @@ struct AppKitHostedTests {
     #expect(findInFolder?.keyEquivalent == "f")
     #expect(findInFolder?.keyEquivalentModifierMask == [.command, .shift])
 
+    let f2 = String(UnicodeScalar(NSF2FunctionKey)!)
+    let toggleBookmark = menuItem("Toggle Bookmark", in: menu)
+    let nextBookmark = menuItem("Next Bookmark", in: menu)
+    let previousBookmark = menuItem("Previous Bookmark", in: menu)
+    let clearBookmarks = menuItem("Clear All Bookmarks", in: menu)
+    #expect(toggleBookmark?.action == #selector(DuckpadWindowController.performToggleBookmark(_:)))
+    #expect(toggleBookmark?.keyEquivalent == f2)
+    #expect(toggleBookmark?.keyEquivalentModifierMask == [.command])
+    #expect(nextBookmark?.action == #selector(DuckpadWindowController.performNextBookmark(_:)))
+    #expect(nextBookmark?.keyEquivalentModifierMask == [])
+    #expect(previousBookmark?.action == #selector(DuckpadWindowController.performPreviousBookmark(_:)))
+    #expect(previousBookmark?.keyEquivalentModifierMask == [.shift])
+    #expect(clearBookmarks?.action == #selector(DuckpadWindowController.performClearBookmarks(_:)))
+    #expect(clearBookmarks?.keyEquivalentModifierMask == [.command, .shift])
+    if let toggleBookmark, let nextBookmark, let clearBookmarks {
+        #expect(controller.validateMenuItem(toggleBookmark))
+        #expect(!controller.validateMenuItem(nextBookmark))
+        controller.performToggleBookmark(toggleBookmark)
+        #expect(controller.validateMenuItem(nextBookmark))
+        #expect(controller.validateMenuItem(clearBookmarks))
+        controller.performClearBookmarks(clearBookmarks)
+        #expect(!controller.validateMenuItem(nextBookmark))
+    }
+
     let close = menuItem("Close Tab", in: menu)
     #expect(close?.action == #selector(DuckpadWindowController.performCloseActiveTab(_:)))
     #expect(close?.keyEquivalent == "w")
@@ -1183,6 +1207,64 @@ struct AppKitHostedTests {
     #expect(!restored.isWordWrapEnabled)
     #expect(restored.scrollView.hasHorizontalScroller)
     #expect(!restored.supportsWrapMarker)
+}
+
+@Test @MainActor func textViewFallbackBookmarksTrackEditsNavigateAndRecover() throws {
+    let editor = TextViewEditorAdapter()
+    let descriptor = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+    let text = "zero\none\ntwo\nthree"
+    editor.install(.init(bufferID: descriptor.bufferID, revision: 0, text: text))
+    editor.display(descriptor)
+    editor.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+
+    editor.textView.setSelectedRange(NSRange(location: 5, length: 0))
+    editor.toggleBookmarkAtCaret()
+    editor.textView.setSelectedRange(NSRange(location: 13, length: 0))
+    editor.toggleBookmarkAtCaret()
+    #expect(editor.recoveryCapture(for: descriptor.bufferID)?.viewState.bookmarkedLines == [1, 3])
+    #expect(editor.snapshot(for: descriptor.bufferID)?.revision == 0)
+    #expect(editor.navigateToBookmark(forward: true))
+    #expect(editor.textView.selectedRange().location == 5)
+    #expect(editor.navigateToBookmark(forward: false))
+    #expect(editor.textView.selectedRange().location == 13)
+
+    editor.textView.insertText("new\n", replacementRange: NSRange(location: 0, length: 0))
+    #expect(editor.recoveryCapture(for: descriptor.bufferID)?.viewState.bookmarkedLines == [2, 4])
+    let recovery = try #require(editor.recoverySnapshot(for: descriptor.bufferID))
+    let restored = TextViewEditorAdapter()
+    restored.installRecovery(recovery)
+    restored.display(.init(bufferID: descriptor.bufferID, revision: recovery.revision))
+    #expect(restored.recoveryCapture(for: descriptor.bufferID)?.viewState.bookmarkedLines == [2, 4])
+    restored.clearBookmarks()
+    #expect(!restored.hasBookmarks)
+    #expect(restored.textView.string == "new\n" + text)
+}
+
+@Test @MainActor func textViewFallbackBookmarksPreserveOtherDecorationsAndCRLFLineIdentity() throws {
+    let editor = TextViewEditorAdapter()
+    let descriptor = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+    editor.install(.init(bufferID: descriptor.bufferID, revision: 0, text: "zero\r\none\r\ntwo"))
+    editor.display(descriptor)
+    editor.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+
+    let decoration = NSColor.systemRed
+    editor.textView.layoutManager?.addTemporaryAttribute(
+        .backgroundColor,
+        value: decoration,
+        forCharacterRange: NSRange(location: 0, length: 1)
+    )
+    editor.textView.setSelectedRange(NSRange(location: 11, length: 0))
+    editor.toggleBookmarkAtCaret()
+    let retained = editor.textView.layoutManager?.temporaryAttribute(
+        .backgroundColor,
+        atCharacterIndex: 0,
+        effectiveRange: nil
+    ) as? NSColor
+    #expect(retained == decoration)
+
+    editor.textView.insertText("", replacementRange: NSRange(location: 4, length: 1))
+    #expect(editor.textView.string == "zero\none\r\ntwo")
+    #expect(editor.recoveryCapture(for: descriptor.bufferID)?.viewState.bookmarkedLines == [2])
 }
 
 @Test @MainActor func textViewFallbackPerformsStandardEditCommandsWithOwnedUndo() throws {

@@ -13,6 +13,8 @@
 
 NSErrorDomain const DPScintillaErrorDomain = @"app.duckpad.scintilla";
 static NSURL *DPScintillaResourceDirectory;
+static constexpr int DPBookmarkMarker = 20;
+static constexpr int DPBookmarkMask = 1 << DPBookmarkMarker;
 
 void DPScintillaConfigureResourceDirectory(NSURL *directoryURL) {
     DPScintillaResourceDirectory = [directoryURL copy];
@@ -125,6 +127,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_SETMARGINMASKN wParam:1 lParam:SC_MASK_FOLDERS];
         [_scintilla message:SCI_SETMARGINSENSITIVEN wParam:1 lParam:1];
         [_scintilla message:SCI_SETMARGINWIDTHN wParam:1 lParam:12];
+        [_scintilla message:SCI_SETMARGINTYPEN wParam:2 lParam:SC_MARGIN_SYMBOL];
+        [_scintilla message:SCI_SETMARGINMASKN wParam:2 lParam:DPBookmarkMask];
+        [_scintilla message:SCI_SETMARGINWIDTHN wParam:2 lParam:12];
+        [_scintilla message:SCI_MARKERDEFINE wParam:DPBookmarkMarker lParam:SC_MARK_BOOKMARK];
         [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEROPEN lParam:SC_MARK_BOXMINUS];
         [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDER lParam:SC_MARK_BOXPLUS];
         [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERSUB lParam:SC_MARK_VLINE];
@@ -395,6 +401,65 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (NSUInteger)anchorUTF8Position { return (NSUInteger)[_scintilla message:SCI_GETANCHOR]; }
 - (NSUInteger)firstVisibleLine { return (NSUInteger)[_scintilla message:SCI_GETFIRSTVISIBLELINE]; }
 - (NSUInteger)horizontalScrollOffset { return (NSUInteger)[_scintilla message:SCI_GETXOFFSET]; }
+- (NSArray<NSNumber *> *)bookmarkedLines {
+    NSMutableArray<NSNumber *> *result = [NSMutableArray array];
+    NSInteger line = [_scintilla message:SCI_MARKERNEXT wParam:0 lParam:DPBookmarkMask];
+    while (line >= 0) {
+        [result addObject:@(line)];
+        line = [_scintilla message:SCI_MARKERNEXT wParam:(uptr_t)line + 1 lParam:DPBookmarkMask];
+    }
+    return result;
+}
+
+- (void)restoreBookmarkedLines:(NSArray<NSNumber *> *)lines {
+    [_scintilla message:SCI_MARKERDELETEALL wParam:DPBookmarkMarker];
+    const NSInteger lineCount = [_scintilla message:SCI_GETLINECOUNT];
+    for (NSNumber *value in lines) {
+        const NSInteger line = value.integerValue;
+        if (line >= 0 && line < lineCount) {
+            [_scintilla message:SCI_MARKERADD wParam:(uptr_t)line lParam:DPBookmarkMarker];
+        }
+    }
+}
+
+- (void)toggleBookmarkAtCaret {
+    const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:self.caretUTF8Position];
+    const NSInteger markers = [_scintilla message:SCI_MARKERGET wParam:(uptr_t)line];
+    if ((markers & DPBookmarkMask) != 0) {
+        [_scintilla message:SCI_MARKERDELETE wParam:(uptr_t)line lParam:DPBookmarkMarker];
+    } else {
+        [_scintilla message:SCI_MARKERADD wParam:(uptr_t)line lParam:DPBookmarkMarker];
+    }
+}
+
+- (BOOL)navigateToBookmarkForward:(BOOL)forward {
+    const NSInteger lineCount = [_scintilla message:SCI_GETLINECOUNT];
+    if (lineCount <= 0) return NO;
+    const NSInteger current = [_scintilla message:SCI_LINEFROMPOSITION wParam:self.caretUTF8Position];
+    NSInteger target = -1;
+    if (forward) {
+        target = [_scintilla message:SCI_MARKERNEXT
+                              wParam:(uptr_t)MIN(current + 1, lineCount)
+                              lParam:DPBookmarkMask];
+    } else if (current > 0) {
+        target = [_scintilla message:SCI_MARKERPREVIOUS
+                              wParam:(uptr_t)current - 1
+                              lParam:DPBookmarkMask];
+    }
+    if (target < 0) {
+        target = forward
+            ? [_scintilla message:SCI_MARKERNEXT wParam:0 lParam:DPBookmarkMask]
+            : [_scintilla message:SCI_MARKERPREVIOUS wParam:(uptr_t)lineCount - 1 lParam:DPBookmarkMask];
+    }
+    if (target < 0) return NO;
+    [_scintilla message:SCI_GOTOLINE wParam:(uptr_t)target];
+    [_scintilla message:SCI_SCROLLCARET];
+    return YES;
+}
+
+- (void)clearBookmarks {
+    [_scintilla message:SCI_MARKERDELETEALL wParam:DPBookmarkMarker];
+}
 - (BOOL)canUndo { return [[_scintilla content] canUndo]; }
 - (BOOL)canRedo { return [[_scintilla content] canRedo]; }
 - (BOOL)canCut {
@@ -673,6 +738,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_STYLESETSIZE wParam:STYLE_LINENUMBER lParam:11];
     [_scintilla message:SCI_SETMARGINBACKN wParam:0 lParam:gutterBackground];
     [_scintilla message:SCI_SETMARGINBACKN wParam:1 lParam:gutterBackground];
+    [_scintilla message:SCI_SETMARGINBACKN wParam:2 lParam:gutterBackground];
     [_scintilla message:SCI_SETFOLDMARGINCOLOUR wParam:1 lParam:gutterBackground];
     [_scintilla message:SCI_SETFOLDMARGINHICOLOUR wParam:1 lParam:gutterBackground];
     [_scintilla message:SCI_SETMARGINLEFT wParam:0 lParam:8];
@@ -689,6 +755,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_MARKERSETFORE wParam:marker lParam:dark ? 0xE8E8E8 : 0x303030];
         [_scintilla message:SCI_MARKERSETBACK wParam:marker lParam:dark ? 0x505050 : 0xD8D8D8];
     }
+    [_scintilla message:SCI_MARKERSETFORE wParam:DPBookmarkMarker lParam:dark ? 0x263238 : 0xFFFFFF];
+    [_scintilla message:SCI_MARKERSETBACK wParam:DPBookmarkMarker lParam:dark ? 0x4AA3FF : 0x006EDC];
     for (const auto &[style, role] : _semanticStyleRoles) {
         if (style >= STYLE_DEFAULT && style <= STYLE_LASTPREDEFINED) continue;
         int colour = foreground;

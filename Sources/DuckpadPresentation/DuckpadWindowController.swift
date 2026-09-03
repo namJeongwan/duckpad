@@ -653,6 +653,30 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         recoveryUseCase?.editorViewStateDidChange()
     }
 
+    @objc public func performToggleBookmark(_ sender: Any? = nil) {
+        guard let editor = actionableBookmarkEditor else { return }
+        editor.toggleBookmarkAtCaret()
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    @objc public func performNextBookmark(_ sender: Any? = nil) {
+        guard let editor = actionableBookmarkEditor,
+              editor.navigateToBookmark(forward: true) else { return }
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    @objc public func performPreviousBookmark(_ sender: Any? = nil) {
+        guard let editor = actionableBookmarkEditor,
+              editor.navigateToBookmark(forward: false) else { return }
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    @objc public func performClearBookmarks(_ sender: Any? = nil) {
+        guard let editor = actionableBookmarkEditor, editor.hasBookmarks else { return }
+        editor.clearBookmarks()
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if let command = editorCommand(for: menuItem.action) {
             return actionableEditorCommands?.canPerform(command) ?? false
@@ -689,6 +713,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performFindPrevious(_:)),
              #selector(performFindInFolder(_:)):
             return !terminationReviewInProgress
+        case #selector(performToggleBookmark(_:)):
+            return actionableBookmarkEditor != nil
+        case #selector(performNextBookmark(_:)),
+             #selector(performPreviousBookmark(_:)),
+             #selector(performClearBookmarks(_:)):
+            return actionableBookmarkEditor?.hasBookmarks == true
         case #selector(performToggleWordWrap(_:)):
             guard let editor = actionableEditorViewOptions else {
                 menuItem.state = .off
@@ -711,6 +741,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var actionableEditorViewOptions: (any EditorViewOptionsPort)? {
         guard editorCommandsAreActionable else { return nil }
         return activeEditor as? any EditorViewOptionsPort
+    }
+
+    private var actionableBookmarkEditor: (any BookmarkEditorPort)? {
+        guard editorCommandsAreActionable else { return nil }
+        return activeEditor as? any BookmarkEditorPort
     }
 
     private func closeScope(for action: Selector?) -> TabCloseScope? {

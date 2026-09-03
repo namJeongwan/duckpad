@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort, EditorCommandPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort, EditorCommandPort, BookmarkEditorPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -100,6 +100,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     public func install(_ snapshot: EditorTextSnapshot) {
+        if activeBuffer?.bufferID == snapshot.bufferID { storeViewState(bufferID: snapshot.bufferID) }
         snapshots[snapshot.bufferID] = snapshot
         let bytes = Data(snapshot.text.utf8)
         recoveryBuffers[snapshot.bufferID] = RecoveryBuffer(
@@ -109,12 +110,16 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             deltas: [],
             byteCount: bytes.count
         )
-        viewStates[snapshot.bufferID] = viewStates[snapshot.bufferID] ?? EditorViewState()
+        viewStates[snapshot.bufferID] = sanitized(
+            viewStates[snapshot.bufferID] ?? EditorViewState(),
+            for: bytes
+        )
         acceptedEdits[snapshot.bufferID] = []
         guard let editorView = bufferViews[snapshot.bufferID] else { return }
         load(snapshot, into: editorView)
         if activeBuffer?.bufferID == snapshot.bufferID {
             activeBuffer = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision)
+            restoreViewState(for: snapshot.bufferID, in: editorView)
         }
     }
 
@@ -210,6 +215,34 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     public func setWrapMarkerVisible(_ isVisible: Bool) {
         guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return }
         editorView.isWrapMarkerVisible = isVisible
+        storeViewState(bufferID: bufferID)
+    }
+
+    public var hasBookmarks: Bool {
+        !(activeScintillaView?.bookmarkedLines.isEmpty ?? true)
+    }
+
+    public func toggleBookmarkAtCaret() {
+        guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return }
+        editorView.toggleBookmarkAtCaret()
+        if editorView.bookmarkedLines.count > EditorViewState.maximumBookmarkCount {
+            editorView.toggleBookmarkAtCaret()
+        }
+        storeViewState(bufferID: bufferID)
+    }
+
+    @discardableResult
+    public func navigateToBookmark(forward: Bool) -> Bool {
+        guard let bufferID = activeBuffer?.bufferID,
+              let editorView = activeScintillaView,
+              editorView.navigate(toBookmarkForward: forward) else { return false }
+        storeViewState(bufferID: bufferID)
+        return true
+    }
+
+    public func clearBookmarks() {
+        guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return }
+        editorView.clearBookmarks()
         storeViewState(bufferID: bufferID)
     }
 
@@ -625,7 +658,8 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             firstVisibleLine: Int(clamping: editorView.firstVisibleLine),
             horizontalScrollOffset: Int(clamping: editorView.horizontalScrollOffset),
             wordWrapEnabled: editorView.isWordWrapEnabled,
-            wrapMarkerVisible: editorView.isWrapMarkerVisible
+            wrapMarkerVisible: editorView.isWrapMarkerVisible,
+            bookmarkedLines: editorView.bookmarkedLines.map(\.intValue)
         )
     }
 
@@ -639,6 +673,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             wordWrapEnabled: state.wordWrapEnabled
         )
         editorView.isWrapMarkerVisible = state.wrapMarkerVisible
+        editorView.restoreBookmarkedLines(state.bookmarkedLines.map { NSNumber(value: $0) })
     }
 
     private func sanitized(_ state: EditorViewState, for utf8: Data) -> EditorViewState {
@@ -649,14 +684,31 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             }
             return offset
         }
+        let maximumLine = lineCount(in: utf8)
         return EditorViewState(
             anchorUTF8: boundary(state.anchorUTF8),
             caretUTF8: boundary(state.caretUTF8),
             firstVisibleLine: max(0, state.firstVisibleLine),
             horizontalScrollOffset: max(0, state.horizontalScrollOffset),
             wordWrapEnabled: state.wordWrapEnabled,
-            wrapMarkerVisible: state.wrapMarkerVisible
+            wrapMarkerVisible: state.wrapMarkerVisible,
+            bookmarkedLines: state.bookmarkedLines.filter { $0 < maximumLine }
         )
+    }
+
+    private func lineCount(in utf8: Data) -> Int {
+        var count = 1
+        var index = 0
+        while index < utf8.count {
+            if utf8[index] == 0x0D {
+                count += 1
+                if index + 1 < utf8.count, utf8[index + 1] == 0x0A { index += 1 }
+            } else if utf8[index] == 0x0A {
+                count += 1
+            }
+            index += 1
+        }
+        return count
     }
 
     /// Replays only accepted bounded deltas if a later edit must be rejected.

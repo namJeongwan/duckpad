@@ -57,6 +57,8 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 43 | [Phase 16 independent code review](reviews/2026-09-03-phase-16-external-file-compare-code-review.md) | **Content approved — latest Phase 16 evidence** | 최초 2 Major의 comparison-read stale snapshot과 post-panel/reload-read data-loss race를 authoritative revision/binding transaction으로 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
 | 44 | [Phase 17 folder search](20-folder-search.md) | **Content approved; exact receipt pending** | `Command-Shift-F` user-selected recursive search, structured results, bounded/cancellable descriptor-relative scan과 identity-checked result activation을 기록한다. |
 | 45 | [Phase 17 independent code review](reviews/2026-09-03-phase-17-folder-search-code-review.md) | **Content approved — latest Phase 17 evidence** | 최초 5 Major/2 Minor의 TOCTOU, regex validation, result-memory/MainActor, directory-metadata, termination activation race를 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
+| 46 | [Phase 18 persistent bookmarks](21-persistent-bookmarks.md) | **Implemented; review pending** | 문서별 line bookmark, 편집/undo 추적, 복구 검증, 순환 탐색과 `Command/F2` 단축키를 기록한다. |
+| 47 | [Phase 18 independent code review](reviews/2026-09-03-phase-18-persistent-bookmarks-code-review.md) | **Content approved — latest Phase 18 evidence** | 최초 4 Major의 first-line backward wrap, fallback temporary-attribute ownership, CRLF mapping, maximum-marker MainActor budget을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -112,6 +114,24 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 18 persistent bookmarks
+
+- **Agent/role:** `/root`, direct builder; independent review verdict is separate.
+- **Implementation:** per-buffer bookmark state is owned by Scintilla marker 20 or the AppKit fallback, follows accepted edits, survives tab switching/recovery, and supports wrapping next/previous navigation plus clear-all.
+- **Invariants:** bookmark commands never mutate text, revision, dirty state, or undo ownership. Recovery is legacy-compatible and rejects negative, over-10,000, or out-of-document lines; fallback highlighting uses namespaced temporary layout attributes outside active text-storage processing.
+- **Shortcuts:** `Command-F2` toggle, `F2` next, `Shift-F2` previous, and `Command-Shift-F2` clear all; lifecycle and availability validation use the existing termination admission boundary.
+- **Validation:** focused bookmark/menu/recovery coverage passes, including per-buffer isolation, CRLF/decoration ownership, first-line wrapping, bounded maximum-count capture, and Scintilla edit/undo/redo marker movement. Exact-current full Debug and Release suites each pass 261/261.
+- **Boundary:** macro recording/playback, README, ignored Notepad++, and user-owned doc04/vendor-script changes are excluded.
+
+### 2026-09-03 — Phase 18 independent review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 18 구현/remediation에는 참여하지 않았다.
+- **Initial findings:** **CHANGES_REQUIRED — 0 Blocker, 4 Major, 0 Minor.** Scintilla first-line Previous가 current marker에 머무는 문제, fallback이 다른 temporary background를 제거하는 문제, split-CRLF line mapping 오류, 100,000-marker MainActor/per-bookmark scan 예산 부재를 재현·검토했다.
+- **Closure:** strict backward wrap, namespaced TextKit temporary key/draw translation, one-pass CR/LF/CRLF offset rebase+binary lookup, 10,000 cap과 maximum native timing budget을 현재 bytes에서 재검증했다.
+- **Validation:** independent focused 9/9와 external AppKit/Scintilla 전후 probe PASS; builder exact-current focused 8/8, Debug/Release 261/261 supporting evidence와 `git diff --check` PASS를 확인했다.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** Exact staged-candidate review/receipt는 pending이다.
+- **Boundary:** review 문서와 index Phase 18 review row/work log만 수정했다. source/tests/work doc, stage/commit/push, doc04, 기존 vendor script, README, ignored Notepad++는 건드리지 않았다.
 
 ### 2026-09-03 — Phase 17 folder search
 

@@ -96,6 +96,41 @@ private actor RoutingRecoveryStore: RecoveryStore {
     func reset() async throws(SessionStoreError) { stored = nil }
     func setLoadError(_ error: SessionStoreError?) { loadError = error }
     func latestTabCount() -> Int? { stored?.archive.session.tabs.count }
+    func latestBookmarkedLines() -> [Int]? { stored?.archive.buffers.values.first?.viewState.bookmarkedLines }
+}
+
+@Test @MainActor func controllerBookmarkCommandsPersistViewStateWithoutDirtyingDocument() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let recoveryStore = RoutingRecoveryStore()
+    let recovery = SessionRecoveryUseCase(
+        workspace: workspace, editor: editor, store: recoveryStore, debounce: .seconds(60)
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        recoveryUseCase: recovery,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    let descriptor = workspace.snapshot().activeBuffer!
+    editor.install(.init(bufferID: descriptor.bufferID, revision: descriptor.revision, text: "zero\none"))
+    editor.textView.setSelectedRange(NSRange(location: 5, length: 0))
+
+    controller.performToggleBookmark()
+    #expect(await controller.flushRecovery())
+    #expect(await recoveryStore.latestBookmarkedLines() == [1])
+    #expect(workspace.snapshot().activeBuffer?.revision == 0)
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == false)
+    #expect(editor.textView.undoManager?.canUndo == false)
+
+    controller.performClearBookmarks()
+    #expect(await controller.flushRecovery())
+    #expect(await recoveryStore.latestBookmarkedLines() == [])
 }
 
 @MainActor

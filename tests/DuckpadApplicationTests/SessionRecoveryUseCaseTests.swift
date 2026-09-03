@@ -137,12 +137,23 @@ private func recoveredFileBinding() -> FileBinding {
     #expect(decoded.anchorUTF8 == 1)
     #expect(!decoded.wordWrapEnabled)
     #expect(!decoded.wrapMarkerVisible)
+    #expect(decoded.bookmarkedLines.isEmpty)
 
     let roundTrip = try JSONDecoder().decode(
         EditorViewState.self,
-        from: JSONEncoder().encode(EditorViewState(wrapMarkerVisible: true))
+        from: JSONEncoder().encode(EditorViewState(wrapMarkerVisible: true, bookmarkedLines: [4, 1, 4]))
     )
     #expect(roundTrip.wrapMarkerVisible)
+    #expect(roundTrip.bookmarkedLines == [1, 4])
+
+    let bounded = EditorViewState(bookmarkedLines: Array(0...EditorViewState.maximumBookmarkCount))
+    #expect(bounded.bookmarkedLines.count == EditorViewState.maximumBookmarkCount)
+    #expect(bounded.bookmarkedLines.last == EditorViewState.maximumBookmarkCount - 1)
+
+    let negative = Data(#"{"anchorUTF8":0,"caretUTF8":0,"firstVisibleLine":0,"horizontalScrollOffset":0,"wordWrapEnabled":true,"bookmarkedLines":[-1]}"#.utf8)
+    #expect(throws: DecodingError.self) {
+        try JSONDecoder().decode(EditorViewState.self, from: negative)
+    }
 }
 
 @Test @MainActor func startupRestoresTabOrderActiveDirtyFileTextAndViewStateBeforeEditing() async throws {

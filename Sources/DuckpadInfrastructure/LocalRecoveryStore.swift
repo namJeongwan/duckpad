@@ -335,7 +335,20 @@ public actor LocalRecoveryStore: RecoveryStore {
               state.firstVisibleLine >= 0,
               state.horizontalScrollOffset >= 0,
               state.anchorUTF8 <= utf8.count,
-              state.caretUTF8 <= utf8.count else { return false }
+              state.caretUTF8 <= utf8.count,
+              state.bookmarkedLines.count <= EditorViewState.maximumBookmarkCount else { return false }
+        var maximumLine = 0
+        var index = 0
+        while index < utf8.count {
+            if utf8[index] == 0x0D {
+                maximumLine += 1
+                if index + 1 < utf8.count, utf8[index + 1] == 0x0A { index += 1 }
+            } else if utf8[index] == 0x0A {
+                maximumLine += 1
+            }
+            index += 1
+        }
+        guard state.bookmarkedLines.allSatisfy({ $0 >= 0 && $0 <= maximumLine }) else { return false }
         return isUTF8Boundary(state.anchorUTF8, in: utf8)
             && isUTF8Boundary(state.caretUTF8, in: utf8)
     }

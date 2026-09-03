@@ -2,12 +2,14 @@ import DuckpadDomain
 import Foundation
 
 public struct EditorViewState: Codable, Equatable, Sendable {
+    public static let maximumBookmarkCount = 10_000
     public var anchorUTF8: Int
     public var caretUTF8: Int
     public var firstVisibleLine: Int
     public var horizontalScrollOffset: Int
     public var wordWrapEnabled: Bool
     public var wrapMarkerVisible: Bool
+    public var bookmarkedLines: [Int]
 
     public init(
         anchorUTF8: Int = 0,
@@ -15,7 +17,8 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         firstVisibleLine: Int = 0,
         horizontalScrollOffset: Int = 0,
         wordWrapEnabled: Bool = true,
-        wrapMarkerVisible: Bool = false
+        wrapMarkerVisible: Bool = false,
+        bookmarkedLines: [Int] = []
     ) {
         self.anchorUTF8 = anchorUTF8
         self.caretUTF8 = caretUTF8
@@ -23,6 +26,9 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         self.horizontalScrollOffset = horizontalScrollOffset
         self.wordWrapEnabled = wordWrapEnabled
         self.wrapMarkerVisible = wrapMarkerVisible
+        self.bookmarkedLines = Array(
+            Array(Set(bookmarkedLines.filter { $0 >= 0 })).sorted().prefix(Self.maximumBookmarkCount)
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -32,6 +38,7 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         case horizontalScrollOffset
         case wordWrapEnabled
         case wrapMarkerVisible
+        case bookmarkedLines
     }
 
     public init(from decoder: any Decoder) throws {
@@ -42,6 +49,16 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         horizontalScrollOffset = try values.decode(Int.self, forKey: .horizontalScrollOffset)
         wordWrapEnabled = try values.decode(Bool.self, forKey: .wordWrapEnabled)
         wrapMarkerVisible = try values.decodeIfPresent(Bool.self, forKey: .wrapMarkerVisible) ?? false
+        let decodedBookmarks = try values.decodeIfPresent([Int].self, forKey: .bookmarkedLines) ?? []
+        guard decodedBookmarks.count <= Self.maximumBookmarkCount,
+              decodedBookmarks.allSatisfy({ $0 >= 0 }) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .bookmarkedLines,
+                in: values,
+                debugDescription: "Bookmarks must be nonnegative and bounded"
+            )
+        }
+        bookmarkedLines = Array(Set(decodedBookmarks)).sorted()
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -52,6 +69,7 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         try values.encode(horizontalScrollOffset, forKey: .horizontalScrollOffset)
         try values.encode(wordWrapEnabled, forKey: .wordWrapEnabled)
         try values.encode(wrapMarkerVisible, forKey: .wrapMarkerVisible)
+        try values.encode(bookmarkedLines, forKey: .bookmarkedLines)
     }
 }
 

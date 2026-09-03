@@ -416,6 +416,96 @@ struct ScintillaBridgeTests {
     }
 
     @Test @MainActor
+    func bookmarksTrackLinesNavigateWrapAndRoundTripRecoveryWithoutEditing() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        let text = "zero\none\ntwo\nthree"
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: text))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        let view = try #require(adapter.activeScintillaView)
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: 5, length: 0))
+        adapter.toggleBookmarkAtCaret()
+        view.setPrimarySelectionUTF8Range(NSRange(location: 13, length: 0))
+        adapter.toggleBookmarkAtCaret()
+        #expect(adapter.hasBookmarks)
+        #expect(adapter.recoveryCapture(for: bufferID)?.viewState.bookmarkedLines == [1, 3])
+        #expect(adapter.snapshot(for: bufferID)?.revision == 0)
+        #expect(!view.canUndo)
+
+        let otherBufferID = BufferID()
+        adapter.display(.init(bufferID: otherBufferID, revision: 0))
+        #expect(!adapter.hasBookmarks)
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        #expect(adapter.recoveryCapture(for: bufferID)?.viewState.bookmarkedLines == [1, 3])
+
+        #expect(adapter.navigateToBookmark(forward: true))
+        #expect(view.caretUTF8Position == 5)
+        #expect(adapter.navigateToBookmark(forward: false))
+        #expect(view.caretUTF8Position == 13)
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+        view.insertCommittedText("new\n")
+        #expect(adapter.recoveryCapture(for: bufferID)?.viewState.bookmarkedLines == [2, 4])
+        view.undo()
+        #expect(adapter.recoveryCapture(for: bufferID)?.viewState.bookmarkedLines == [1, 3])
+        view.redo()
+        #expect(adapter.recoveryCapture(for: bufferID)?.viewState.bookmarkedLines == [2, 4])
+
+        let recovery = try #require(adapter.recoverySnapshot(for: bufferID))
+        let restored = ScintillaEditorAdapter()
+        restored.installRecovery(recovery)
+        restored.display(.init(bufferID: bufferID, revision: recovery.revision))
+        #expect(restored.recoveryCapture(for: bufferID)?.viewState.bookmarkedLines == [2, 4])
+        restored.clearBookmarks()
+        #expect(!restored.hasBookmarks)
+        #expect(restored.snapshot(for: bufferID)?.text == "new\n" + text)
+    }
+
+    @Test @MainActor
+    func previousBookmarkFromBookmarkedFirstLineWrapsToLastBookmark() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: "first\nsecond\nthird"))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        let view = try #require(adapter.activeScintillaView)
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+        adapter.toggleBookmarkAtCaret()
+        view.setPrimarySelectionUTF8Range(NSRange(location: 13, length: 0))
+        adapter.toggleBookmarkAtCaret()
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+
+        #expect(adapter.navigateToBookmark(forward: false))
+        #expect(view.caretUTF8Position == 13)
+    }
+
+    @Test @MainActor
+    func maximumBookmarkRecoveryAndCaptureStayWithinMainActorBudget() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        let text = Array(repeating: "x", count: EditorViewState.maximumBookmarkCount + 1)
+            .joined(separator: "\n")
+        let bookmarks = Array(0..<EditorViewState.maximumBookmarkCount)
+        let recovery = EditorRecoverySnapshot(
+            bufferID: bufferID,
+            revision: 0,
+            utf8: Data(text.utf8),
+            viewState: EditorViewState(bookmarkedLines: bookmarks)
+        )
+        let clock = ContinuousClock()
+        let start = clock.now
+
+        adapter.installRecovery(recovery)
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        let captured = try #require(adapter.recoveryCapture(for: bufferID))
+
+        #expect(captured.viewState.bookmarkedLines == bookmarks)
+        #expect(start.duration(to: clock.now) < .seconds(2))
+    }
+
+    @Test @MainActor
     func standardEditCommandsPreserveScintillaRevisionAndUndoOwnership() throws {
         let adapter = ScintillaEditorAdapter()
         let bufferID = BufferID()

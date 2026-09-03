@@ -192,6 +192,27 @@ func incompleteGenerationNeverReplacesPrevious(_ fault: RecoveryStoreFault) asyn
     }
 }
 
+@Test func outOfRangeRecoveredBookmarkRejectsNewestAndFallsBack() async throws {
+    let root = recoveryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let previous = try recoveryArchive(text: "previous")
+    let newest = try recoveryArchive(text: "one\ntwo")
+    let store = LocalRecoveryStore(root: root)
+    _ = try await store.commit(previous, generation: PersistenceGeneration(rawValue: 1))
+    _ = try await store.commit(newest, generation: PersistenceGeneration(rawValue: 2))
+    try mutateManifest(root: root, generation: 2) { manifest in
+        var buffers = manifest["buffers"] as! [[String: Any]]
+        var viewState = buffers[0]["viewState"] as! [String: Any]
+        viewState["bookmarkedLines"] = [99]
+        buffers[0]["viewState"] = viewState
+        manifest["buffers"] = buffers
+    }
+
+    let loaded = try #require(try await store.loadLatest())
+    #expect(loaded.generation.rawValue == 1)
+    #expect(loaded.archive == previous)
+}
+
 @Test func manifestWithTwoTabsOwningOneDocumentIsRejectedAtLoad() async throws {
     let root = recoveryRoot()
     defer { try? FileManager.default.removeItem(at: root) }
