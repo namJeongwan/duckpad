@@ -558,10 +558,12 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     }
 
     private func installMainMenu(target: DuckpadWindowController) {
-        NSApplication.shared.mainMenu = DuckpadMainMenuFactory.make(
+        let menu = DuckpadMainMenuFactory.make(
             target: target,
             applicationTarget: self
         )
+        NSApplication.shared.mainMenu = menu
+        target.applicationMainMenuDidChange(menu)
     }
 
     @objc func performShowSettings(_ sender: Any? = nil) {

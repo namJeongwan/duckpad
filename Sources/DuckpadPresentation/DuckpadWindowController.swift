@@ -210,6 +210,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let fileFormatStatus = NSButton(title: "UTF-8 · No EOL", target: nil, action: nil)
     private let extensionStatus = NSButton(title: "Extensions loading…", target: nil, action: nil)
     private let extensionsPanel = ExtensionsManagerPanel()
+    let commandPalettePanel = CommandPalettePanel()
     let symbolOutlinePanel = SymbolOutlinePanel()
     private let workspaceSidebar = WorkspaceSidebarView(frame: .zero)
     private let workspaceContentSplit = NSSplitView(frame: .zero)
@@ -376,6 +377,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
             self.activeEditor.focus()
         }
+        commandPalettePanel.onExecute = { [weak self] item, target in
+            guard let self, self.workspaceInteractionsAreActionable,
+                  let action = item.action else { return }
+            NSApplication.shared.sendAction(action, to: target, from: item)
+        }
         extensionUseCase?.onStateChange = { [weak self] state in self?.renderExtensionState(state) }
         extensionsPanel.onSetEnabled = { [weak self] id, enabled in
             Task { @MainActor [weak self] in
@@ -425,6 +431,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         documentIntelligenceTask?.cancel()
         documentIntelligenceTask = nil
         documentIntelligenceUseCase?.cancel()
+        commandPalettePanel.dismiss()
         symbolOutlinePanel.dismiss()
         if let terminationCoordinator, let recoveryUseCase {
             terminationCoordinator.trackWindowCloseCleanup {
@@ -442,6 +449,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         activeEditor.onEdit = nil
         languageUseCase?.onStateChange = nil
         documentIntelligenceUseCase?.cancel()
+        commandPalettePanel.dismiss()
         symbolOutlinePanel.dismiss()
         extensionUseCase?.onStateChange = nil
         workspaceBrowserUseCase?.onStateChange = nil
@@ -742,6 +750,23 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performShowDocumentSwitcher(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable else { return }
         tabStrip.documentSwitcher.showDocumentSwitcher()
+    }
+
+    @objc public func performShowCommandPalette(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable,
+              let menu = NSApplication.shared.mainMenu else { return }
+        commandPalettePanel.present(
+            menu: menu,
+            excludingAction: #selector(performShowCommandPalette(_:)),
+            relativeTo: tabStrip.documentSwitcher
+        )
+    }
+
+    public func applicationMainMenuDidChange(_ menu: NSMenu) {
+        commandPalettePanel.refreshIfPresented(
+            menu: menu,
+            excludingAction: #selector(performShowCommandPalette(_:))
+        )
     }
 
     @objc public func performCompleteCurrentDocumentWord(_ sender: Any? = nil) {
@@ -1073,6 +1098,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performPreviousTab(_:)),
              #selector(performLastUsedTab(_:)),
              #selector(performShowDocumentSwitcher(_:)),
+             #selector(performShowCommandPalette(_:)),
              #selector(performMoveActiveTabLeft(_:)),
              #selector(performMoveActiveTabRight(_:)),
              #selector(performOpenFile(_:)),
@@ -1595,6 +1621,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         documentIntelligenceTask?.cancel()
         documentIntelligenceTask = nil
         documentIntelligenceUseCase?.cancel()
+        commandPalettePanel.dismiss()
         symbolOutlinePanel.dismiss()
         currentDocumentOutline = nil
         workspaceBrowserUseCase?.suspendCommands()

@@ -132,6 +132,15 @@ public enum DuckpadMainMenuFactory {
         mainMenu.addItem(viewItem)
         let viewMenu = NSMenu(title: "View")
         add(
+            "Command Palette…",
+            #selector(DuckpadWindowController.performShowCommandPalette(_:)),
+            "p",
+            target,
+            modifiers: [.command, .shift],
+            to: viewMenu
+        )
+        viewMenu.addItem(.separator())
+        add(
             "Document Symbols…",
             #selector(DuckpadWindowController.performShowDocumentSymbols(_:)),
             "o",
@@ -270,7 +279,7 @@ public enum DuckpadMainMenuFactory {
         }
         languageMenu.addItem(.separator())
         add("Toggle Line Comment", #selector(DuckpadWindowController.performToggleLineComment(_:)), "/", target, to: languageMenu)
-        add("Language Command Palette…", #selector(DuckpadWindowController.performShowLanguageChooser(_:)), "p", target, modifiers: [.command, .shift], to: languageMenu)
+        add("Choose Language…", #selector(DuckpadWindowController.performShowLanguageChooser(_:)), "", target, modifiers: [], to: languageMenu)
         languageItem.submenu = languageMenu
 
         let extensionsItem = NSMenuItem(); mainMenu.addItem(extensionsItem)

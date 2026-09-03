@@ -1,6 +1,6 @@
 # Phase 24 — Settings, themes, and accessibility
 
-Status: **Implemented; independent review pending**
+Status: **Approved, committed and pushed** (`3721fcf`)
 
 ## User contract
 
@@ -36,7 +36,7 @@ Stable identifiers are:
 - The complete native-menu test verifies `Command-,` and checks the whole shortcut surface for collisions.
 - The initial independent review found three Majors: unacknowledged UserDefaults persistence/corruption, missing live Increase Contrast notification, and document-window ownership of the application Settings command. A first remediation closed the appearance and command-ownership defects but retained a path-read/publish uncertainty flaw and did not join accepted settings work during termination.
 - Final remediation binds bounded reads to a no-follow file descriptor, validates the same descriptor snapshot, privately writes and fully syncs a replacement before descriptor-relative rename, syncs the directory, and distinguishes a pre-publish failure from post-publish durability uncertainty. Uncertain publication keeps the runtime on the visible new value with an explicit warning instead of rolling back to a value that restart would not load. The application termination coordinator synchronously owns every accepted settings task and joins it before its true reply; new updates are rejected once review begins.
-- Final-remediation focused tests pass 14/14, including before/after-rename faults, symlink and oversized reads, uncertainty alignment, and cancellation-ignoring blocked settings save success/failure followed immediately by termination. The production composition smoke persists preferences to an isolated real archive, closes the last document window, opens Settings with no document target, creates a new window, and observes its authoritative wrap defaults. Exact-current Debug and Release each pass 333/333 tests. Independent re-review, exact receipt, commit, and push remain pending.
+- Final-remediation focused tests pass 14/14, including before/after-rename faults, symlink and oversized reads, uncertainty alignment, and cancellation-ignoring blocked settings save success/failure followed immediately by termination. The production composition smoke persists preferences to an isolated real archive, closes the last document window, opens Settings with no document target, creates a new window, and observes its authoritative wrap defaults. Exact-current Debug and Release each pass 333/333 tests. Independent review approved the final content with 0 findings; exact receipt verification, local audit, and push produced commit `3721fcf` on `origin/main`.
 
 ## Deliberate boundary
 

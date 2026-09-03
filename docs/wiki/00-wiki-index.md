@@ -69,8 +69,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 55 | [Phase 22 independent code review](reviews/2026-09-03-phase-22-document-intelligence-code-review.md) | **Content approved — latest Phase 22 evidence** | 최초 2 Major/1 Minor의 analyzer CPU/memory, split-pane stale routing, CR-only outline 결함을 bounded streaming/raw prefilter/cancellation, exact-pane identity, mixed-EOL scanner로 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
 | 56 | [Phase 23 encoding and line endings](26-encoding-and-line-endings.md) | **Approved, committed and pushed** | Format menu/status control, explicit BOM-less UTF-16 open, UTF-8/BOM/UTF-16 및 LF/CRLF/CR durable conversion과 exact binding/lifecycle authority를 기록한다. commit `703b89c`가 exact receipt/audit 후 `origin/main`에 push됐다. |
 | 57 | [Phase 23 independent code review](reviews/2026-09-03-phase-23-encoding-eol-code-review.md) | **Content approved — latest Phase 23 evidence** | 최초 2 Major의 conflict/post-write binding authority와 accepted format-task termination join 결함을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
-| 58 | [Phase 24 settings, themes, and accessibility](27-settings-themes-accessibility.md) | **Content approved; exact receipt pending** | 표준 `Command-,` 설정 창, versioned preference 저장, 시스템/라이트/다크 appearance, 실행 중 테마 재적용, 새 탭 wrap 기본값과 접근성 계약을 기록한다. |
+| 58 | [Phase 24 settings, themes, and accessibility](27-settings-themes-accessibility.md) | **Approved, committed and pushed** | 표준 `Command-,` 설정 창, versioned preference 저장, 시스템/라이트/다크 appearance, 실행 중 테마 재적용, 새 탭 wrap 기본값과 접근성을 commit `3721fcf`로 `origin/main`에 반영했다. |
 | 59 | [Phase 24 independent code review](reviews/2026-09-03-phase-24-settings-code-review.md) | **Approved — 0 findings** | Descriptor-bound durable settings authority, live accessibility, zero-window Settings ownership, accepted-update termination join을 독립 재검증했다. |
+| 60 | [Phase 25A command palette and unified registry](28-command-palette.md) | **Content approved; exact receipt pending** | `Shift-Command-P` 검색 팔레트에 core/native/extension menu command를 하나의 validation/dispatch authority로 통합하고 매크로 제외 경계를 기록한다. |
+| 61 | [Phase 25A independent code review](reviews/2026-09-03-phase-25a-command-palette-code-review.md) | **Approved — 0 findings** | Exact-target dispatch/current validation, live extension refresh와 hosted popover lifecycle을 remediation 후 독립 재검증했다. |
 
 상태 정의:
 
@@ -134,6 +136,41 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - **Failure/accessibility:** corrupt or unsupported settings degrade without rewriting unknown storage; failed writes preserve authoritative live state and roll controls back. Native controls and status expose stable accessibility identifiers and labels; increased contrast remains macOS-owned.
 - **Validation:** focused settings/menu/editor tests, including live effective-appearance propagation, pass. Latest full-matrix evidence is recorded by the remediation logs below; independent approval, exact receipt, commit, and push remain pending.
 - **Boundary:** macros, localization catalogs, final distribution signing/notarization, README, ignored Notepad++, and user-owned doc04/vendor script are excluded.
+
+### 2026-09-03 — Phase 25A command palette
+
+- **Agent/role:** `/root`, direct implementation builder; independent review is pending.
+- **Scope:** native main-menu leaf commands are projected into one searchable registry while retaining their original target, selector, represented object, validation, menu path, and shortcut. `Shift-Command-P` now owns the global palette; language selection remains available without a conflicting shortcut.
+- **Safety/accessibility:** disabled commands remain visible but cannot execute, the palette self-command is excluded, execution rechecks interaction admission, host close/termination dismiss it, Reduce Motion controls animation, and search/results expose stable accessibility metadata.
+- **Validation:** focused registry/search/disabled-execution tests 3/3, complete native-menu shortcut test 1/1, and clean scratch-path Debug/Release each 336/336 PASS. Independent review remains pending.
+- **Boundary:** macro recording/playback remains deliberately unimplemented and `C9.F02` stays Missing rather than Reviewed-N/A. README, ignored Notepad++, and user-owned doc04/vendor script remain untouched.
+
+### 2026-09-03 — Phase 25A independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent content reviewer; Phase 25A 구현에는 참여하지 않았다.
+- **Scope:** exact eight-path candidate의 original menu-item target/represented-object authority, validation/dispatch, current main-menu/extension refresh, popover/termination/teardown lifecycle, shortcuts, accessibility/Reduce Motion, search rank/scaling을 검토했다.
+- **Findings:** P25A-01 Major는 presentation-time enabled snapshot을 activation이 그대로 신뢰해 current validation을 우회한다. P25A-02 Minor는 열린 palette가 extension menu rebuild 뒤 stale하다. P25A-03 Minor는 hosted popover lifecycle/nil-target/Reduce Motion regression 부재다.
+- **Validation:** exact candidate/tree/diff/message와 exclusions/cached check PASS; independent focused 4/4 PASS, 5,000-command benchmark 약 15 ms/query. 비대화형 nil-target probe는 key window를 얻지 못해 dispatch 증거로 쓰지 않았고 test gap으로 명시했다.
+- **Verdict:** **CHANGES REQUIRED — 0 Blocker, 1 Major, 2 Minor.** Content refreeze/receipt는 authorize하지 않는다. Review/index evidence edit로 candidate `51183bad…`도 invalidated됐다.
+- **Safety:** 새 review doc과 index review row/work log만 수정했다. Product/source/tests/work doc/stage/commit/sign/push는 변경하지 않았고 user-owned doc04/vendor script를 보존했다.
+
+### 2026-09-03 — Phase 25A review remediation
+
+- **Agent/role:** `/root`, direct remediation builder; independent reviewer verdict document remains untouched.
+- **P25A-01:** nil-target commands resolve and weakly pin their effective responder before popover presentation. Activation re-runs the exact captured target's current `NSMenuItemValidation`; a stale enabled snapshot can no longer dispatch.
+- **P25A-02:** every app main-menu install notifies its owning controller, and a visible palette replaces its registry from the rebuilt extension menu while retaining the current query.
+- **P25A-03:** hosted tests cover live-menu refresh, host close, termination dismissal, nil-target routing, and Reduce Motion animation policy; the dynamic-disable race now has a direct regression.
+- **Validation:** remediation-focused command execution/lifecycle 7/7, native shortcut 1/1, extension-menu rebuild 1/1, and exact-current Debug/Release each 340/340 PASS. Independent re-review remains pending.
+- **Boundary:** README, ignored Notepad++, user-owned doc04/vendor script, and the reviewer verdict document remain untouched.
+
+### 2026-09-03 — Phase 25A remediation independent re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent focused re-reviewer; remediation 구현에는 참여하지 않았다.
+- **Closure:** P25A-01 exact weak target/current validation/fail-closed dispatch, P25A-02 visible current-menu refresh/query preservation, P25A-03 hosted nil-target/host-close/termination/Reduce Motion evidence를 현재 bytes에서 닫았다. 새 finding은 없다.
+- **Validation:** candidate/tree/diff/message, exact 10-path stage, exclusions와 cached check PASS; independent palette/lifecycle 7/7, shortcut 1/1, extension rebuild 1/1, hosted deallocation 1/1 PASS. Builder Debug/Release 340/340 등은 supporting evidence로 확인했다.
+- **Manifest:** exact eight-path product/test/work-doc path digest `766df675bf84978f67ca250e62c1c854a34e59582eb4bd66d3a6935f8de874fa`, byte digest `257ab07e9b60272e7b937c56ac3296c798f159daa2ac09dd46ff6ba113b9292b`.
+- **Verdict:** **APPROVED — 0 Blocker, 0 Major, 0 Minor.** Content refreeze/exact receipt review를 authorize한다. Review/index edits로 `7f652642…`는 invalidated되어 새 candidate가 필요하다.
+- **Safety:** review doc/index만 수정했다. Product/source/tests/work doc/stage/commit/sign/push는 변경하지 않았고 user-owned doc04/vendor script를 보존했다.
 
 ### 2026-09-03 — Phase 24 independent code review
 
