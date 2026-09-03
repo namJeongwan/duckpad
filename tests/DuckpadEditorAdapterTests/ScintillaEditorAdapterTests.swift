@@ -1391,6 +1391,29 @@ struct ScintillaBridgeTests {
         #expect(view.snapshotReadCount == fullReads)
     }
 
+    @Test @MainActor
+    func editorDefaultsAffectOnlyBuffersCreatedAfterPreferenceChange() {
+        _ = NSApplication.shared
+        let adapter = ScintillaEditorAdapter(defaultViewState: EditorViewState(
+            wordWrapEnabled: false,
+            wrapMarkerVisible: true
+        ))
+        let first = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        adapter.display(first)
+        #expect(!adapter.isWordWrapEnabled)
+        #expect(adapter.isWrapMarkerVisible)
+
+        adapter.setDefaultViewOptions(wordWrapEnabled: true, wrapMarkerVisible: false)
+        let second = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        adapter.display(second)
+        #expect(adapter.isWordWrapEnabled)
+        #expect(!adapter.isWrapMarkerVisible)
+
+        adapter.display(first)
+        #expect(!adapter.isWordWrapEnabled)
+        #expect(adapter.isWrapMarkerVisible)
+    }
+
     @MainActor
     private func makeHostedView() -> DPScintillaEditorView {
         _ = NSApplication.shared

@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -49,6 +49,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private var pendingRecoveryBuffers: Set<BufferID> = []
     private var revisionExhaustedBuffers: Set<BufferID> = []
     private var themePalette: EditorThemePalette = .light
+    private var defaultViewState: EditorViewState
     private var isRecovering = false
     private var inputEnabled = true
 
@@ -63,7 +64,8 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         DPScintillaConfigureResourceDirectory(directory)
     }
 
-    public init() {
+    public init(defaultViewState: EditorViewState = EditorViewState()) {
+        self.defaultViewState = defaultViewState
         Self.prepareResources()
         splitView.dividerStyle = .thin
         splitView.isVertical = true
@@ -103,7 +105,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
                 byteCount: bytes.count
             )
         }
-        viewStates[buffer.bufferID] = viewStates[buffer.bufferID] ?? EditorViewState()
+        viewStates[buffer.bufferID] = viewStates[buffer.bufferID] ?? defaultViewState
         activeBuffer = buffer
         let editorView: DPScintillaEditorView
         if let existing = bufferViews[buffer.bufferID] {
@@ -139,7 +141,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             byteCount: bytes.count
         )
         viewStates[snapshot.bufferID] = sanitized(
-            viewStates[snapshot.bufferID] ?? EditorViewState(),
+            viewStates[snapshot.bufferID] ?? defaultViewState,
             for: bytes
         )
         acceptedEdits[snapshot.bufferID] = []
@@ -174,7 +176,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             revision: recovery.revision,
             baseUTF8: recovery.baseUTF8,
             deltas: recovery.deltas,
-            viewState: viewStates[bufferID] ?? EditorViewState()
+            viewState: viewStates[bufferID] ?? defaultViewState
         )
     }
 
@@ -298,6 +300,11 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return }
         editorView.isWrapMarkerVisible = isVisible
         storeViewState(bufferID: bufferID)
+    }
+
+    public func setDefaultViewOptions(wordWrapEnabled: Bool, wrapMarkerVisible: Bool) {
+        defaultViewState.wordWrapEnabled = wordWrapEnabled
+        defaultViewState.wrapMarkerVisible = wrapMarkerVisible
     }
 
     public var hasBookmarks: Bool {

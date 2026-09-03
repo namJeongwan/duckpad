@@ -67,8 +67,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 53 | [Phase 21 independent code review](reviews/2026-09-03-phase-21-native-multiple-windows-code-review.md) | **Content approved — latest Phase 21 evidence** | 최초 3 Major/1 Minor의 late-window admission, close-reset join, recovery-root TOCTOU 및 test gap을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 54 | [Phase 22 current-document completion and symbols](25-document-intelligence.md) | **Approved, committed and pushed** | `Control-Space` bounded local completion, `Command-Option-O` searchable symbol outline, streamed 4 MiB analysis와 exact split-pane authority를 기록한다. commit `83dcb74`가 exact receipt/audit 후 `origin/main`에 push됐다. |
 | 55 | [Phase 22 independent code review](reviews/2026-09-03-phase-22-document-intelligence-code-review.md) | **Content approved — latest Phase 22 evidence** | 최초 2 Major/1 Minor의 analyzer CPU/memory, split-pane stale routing, CR-only outline 결함을 bounded streaming/raw prefilter/cancellation, exact-pane identity, mixed-EOL scanner로 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
-| 56 | [Phase 23 encoding and line endings](26-encoding-and-line-endings.md) | **Content approved; exact receipt pending** | Format menu/status control, explicit BOM-less UTF-16 open, UTF-8/BOM/UTF-16 및 LF/CRLF/CR durable conversion과 exact binding/lifecycle authority를 기록한다. |
+| 56 | [Phase 23 encoding and line endings](26-encoding-and-line-endings.md) | **Approved, committed and pushed** | Format menu/status control, explicit BOM-less UTF-16 open, UTF-8/BOM/UTF-16 및 LF/CRLF/CR durable conversion과 exact binding/lifecycle authority를 기록한다. commit `703b89c`가 exact receipt/audit 후 `origin/main`에 push됐다. |
 | 57 | [Phase 23 independent code review](reviews/2026-09-03-phase-23-encoding-eol-code-review.md) | **Content approved — latest Phase 23 evidence** | 최초 2 Major의 conflict/post-write binding authority와 accepted format-task termination join 결함을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
+| 58 | [Phase 24 settings, themes, and accessibility](27-settings-themes-accessibility.md) | **Content approved; exact receipt pending** | 표준 `Command-,` 설정 창, versioned preference 저장, 시스템/라이트/다크 appearance, 실행 중 테마 재적용, 새 탭 wrap 기본값과 접근성 계약을 기록한다. |
+| 59 | [Phase 24 independent code review](reviews/2026-09-03-phase-24-settings-code-review.md) | **Approved — 0 findings** | Descriptor-bound durable settings authority, live accessibility, zero-window Settings ownership, accepted-update termination join을 독립 재검증했다. |
 
 상태 정의:
 
@@ -124,6 +126,57 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 24 settings, themes, and accessibility
+
+- **Agent/role:** `/root`, direct investigator and builder; no new implementation agent was added.
+- **Implementation:** native reusable Settings window and standard `Command-,`; versioned Domain settings, async Application load/update state, descriptor-bound atomic Application Support store; system/light/dark appearance shared across every native window; live effective-appearance refresh; new-tab-only word-wrap/wrap-symbol defaults with recovered/existing per-buffer state preservation.
+- **Failure/accessibility:** corrupt or unsupported settings degrade without rewriting unknown storage; failed writes preserve authoritative live state and roll controls back. Native controls and status expose stable accessibility identifiers and labels; increased contrast remains macOS-owned.
+- **Validation:** focused settings/menu/editor tests, including live effective-appearance propagation, pass. Latest full-matrix evidence is recorded by the remediation logs below; independent approval, exact receipt, commit, and push remain pending.
+- **Boundary:** macros, localization catalogs, final distribution signing/notarization, README, ignored Notepad++, and user-owned doc04/vendor script are excluded.
+
+### 2026-09-03 — Phase 24 independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent content reviewer; Phase 24 구현에는 참여하지 않았다.
+- **Scope:** exact 18-path candidate의 settings schema/store, multi-window/new-window propagation, native Settings/lifecycle/menu/accessibility, effective theme와 per-buffer default/recovery invariants를 검토했다.
+- **Validation:** exact candidate/tree/diff/message/exclusions/cached check PASS; independent focused 8/8와 fresh Swift 6 build PASS. Wrong-type UserDefaults와 weak menu-target external probes, installed SDK contracts로 세 결함을 재현했다.
+- **Verdict:** **CHANGES REQUIRED — 0 Blocker, 3 Major, 0 Minor.** P24-01은 corruption/write durability 계약, P24-02는 live High Contrast 갱신, P24-03은 last document close 후 Settings 접근을 깨뜨린다. 상세 evidence는 [Phase 24 review](reviews/2026-09-03-phase-24-settings-code-review.md)에 있다.
+- **Safety:** review 문서와 index review row/work log만 수정했다. product/source/tests/work doc/stage/commit/sign은 변경하지 않았고 user-owned doc04/vendor script를 보존했다. Evidence edit로 frozen candidate는 invalidated됐다.
+
+### 2026-09-03 — Phase 24 remediation independent re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent focused re-reviewer; remediation 구현에는 참여하지 않았다.
+- **Closure:** P24-02의 teardown-safe accessibility notification과 P24-03의 app-lifetime Settings target/zero-window→new-window defaults는 닫혔다.
+- **Residual/new finding:** P24-01 Local settings는 path lstat 뒤 unbounded/path read와 post-rename chmod ordinary failure가 남는다. P24-04는 accepted async settings update가 application termination barrier에 등록/join되지 않는다.
+- **Validation:** exact candidate/tree/diff/message/exclusions/cached check PASS; independent focused 10/10 PASS. Injected post-write probe는 `.writeFailed` 뒤 새 JSON이 visible한 상태를 exit 24로 재현했다. Exact 18-path product/test/work-doc path+byte digest는 `341653569744167d5b44d9dfe312b1f7a674f7d43f79b606f96536f124041630`이다.
+- **Verdict:** **CHANGES REQUIRED — 0 Blocker, 2 Major, 0 Minor.** Receipt는 authorize하지 않으며 review/index evidence 반영으로 candidate `57fb25d…`는 invalidated됐다.
+- **Safety:** review doc/index만 수정했다. product/source/tests/work doc/stage/commit/sign/push는 변경하지 않았고 user-owned doc04/vendor script를 보존했다.
+
+### 2026-09-03 — Phase 24 P24-01/P24-02/P24-03 remediation
+
+- **Agent/role:** `/root`, direct remediation builder; independent reviewer evidence는 수정하지 않았다.
+- **P24-01:** best-effort `UserDefaults`를 제거하고 1 MiB 제한, regular-file 검사, canonical JSON, private permission과 acknowledged atomic write를 갖는 async Application Support store로 교체했다. Application은 성공한 write 뒤에만 state를 publish하며 실제 non-regular/read/write failure regressions가 rollback을 검증한다.
+- **P24-02:** 각 document window가 `NSWorkspace.accessibilityDisplayOptionsDidChangeNotification`을 teardown-safe token으로 관찰해 system contrast 변경 시 effective palette를 즉시 다시 적용한다.
+- **P24-03:** Settings menu는 document controller가 아니라 app-lifetime target을 사용한다. 마지막 document close 뒤에도 target이 유지되고, application termination review 동안은 app-owned validation이 명령을 막는다.
+- **Validation:** remediation-focused settings/store/theme/menu 10/10, real-archive production composition smoke, exact-current Debug/Release each 329/329 PASS; independent re-review는 pending이다.
+- **Boundary:** README, ignored Notepad++, user-owned doc04/vendor script와 reviewer verdict 문서는 보존했다.
+
+### 2026-09-03 — Phase 24 P24-01/P24-04 final remediation
+
+- **Agent/role:** `/root`, direct remediation builder; reviewer verdict 문서는 수정하지 않았다.
+- **P24-01:** settings load는 directory-relative `O_NOFOLLOW` descriptor에서 최대 1 MiB+1만 stream하고 동일 fd의 dev/inode/size/mtime/ctime snapshot을 재검증한다. Save는 mode 0600 temp에 write, fsync/F_FULLFSYNC, chmod, close를 모두 완료한 뒤 `renameat`하고 directory를 sync한다. pre-rename failure는 기존 archive를 유지하며, post-rename uncertainty는 runtime도 visible 새 값으로 유지하고 warning outcome을 낸다.
+- **P24-04:** Settings action이 생성한 Task를 같은 MainActor turn에서 application-lifetime coordinator에 등록한다. Cmd-Q는 accepted task를 join한 뒤 reply하고 review 시작 뒤 새 settings mutation을 거절한다.
+- **Validation:** descriptor/symlink/oversize/before+after rename/uncertainty/blocked-save success·failure termination을 포함한 focused 14/14, production smoke, exact-current Debug/Release each 333/333 PASS; independent re-review는 pending이다.
+- **Boundary:** README, ignored Notepad++, user-owned doc04/vendor script와 reviewer evidence를 보존했다.
+
+### 2026-09-03 — Phase 24 final remediation independent re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent focused re-reviewer; remediation 구현에는 참여하지 않았다.
+- **Closure:** P24-01의 no-follow 1 MiB+1 same-fd read, private fully-synced temp, pre/post-rename typed authority와 P24-04의 synchronous accepted-task registration/termination join을 현재 bytes에서 닫았다. P24-02/P24-03 closure도 유지된다.
+- **Validation:** candidate/tree/diff/message, exact 20-path stage, exclusions, cached check PASS; independent Debug/Release focused 14/14, termination interleave 5회 반복 10/10 PASS. Builder Debug/Release 333/333과 production smoke/parity/governance/checker는 supporting evidence로 확인했다.
+- **Manifest:** exact 18-path product/test/work-doc path digest `d07b499054472caebaa2986ba83042312df0823911961f3ba7e5d5d81a5322c8`, byte digest `50a5ced36952165005b32942f4a5ecb1cabff813a8c7f2c8194265127bb629a4`.
+- **Verdict:** **APPROVED — 0 Blocker, 0 Major, 0 Minor.** Content is authorized for refreeze/exact receipt review; review/index evidence edits invalidate `56e800dc…`, so this turn did not sign.
+- **Safety:** review doc/index만 수정했다. Product/source/tests/work doc/stage/commit/sign/push는 변경하지 않았고 user-owned doc04/vendor script를 보존했다.
 
 ### 2026-09-03 — Phase 23 P23-01/P23-02 remediation
 

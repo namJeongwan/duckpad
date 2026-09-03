@@ -7,10 +7,12 @@ import DuckpadInfrastructure
 import DuckpadPresentation
 
 @MainActor
-final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
+final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var windowController: DuckpadWindowController?
     private var windowControllers: [ObjectIdentifier: DuckpadWindowController] = [:]
+    private var windowEditors: [ObjectIdentifier: ScintillaEditorAdapter] = [:]
     private var windowRecoveryRoots: [ObjectIdentifier: URL] = [:]
+    private var settingsWindowController: DuckpadSettingsWindowController?
     private let terminationCoordinator = ApplicationTerminationCoordinator()
     private var environment: [String: String] = [:]
     private var recoveryBase: URL!
@@ -22,6 +24,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
     private var extensionTransport: ProcessPluginHostTransport!
     private var languageRegistry: LanguageRegistry!
     private var languageConfigurationIssue: String?
+    private var settingsUseCase: AppSettingsUseCase!
 
     private struct WindowRuntime {
         let controller: DuckpadWindowController
@@ -39,6 +42,19 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         installDevelopmentAppIcon()
         environment = ProcessInfo.processInfo.environment
+        let settingsArchive = environment["DUCKPAD_SETTINGS_FILE"].map {
+            URL(fileURLWithPath: $0, isDirectory: false)
+        } ?? LocalAppSettingsStore.defaultArchiveURL()
+        settingsUseCase = AppSettingsUseCase(store: LocalAppSettingsStore(archiveURL: settingsArchive))
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let initialSettings = await settingsUseCase.start().settings
+            apply(initialSettings)
+            finishLaunching()
+        }
+    }
+
+    private func finishLaunching() {
         recoveryBase = environment["DUCKPAD_RECOVERY_ROOT"].map {
             URL(fileURLWithPath: $0, isDirectory: true)
         } ?? LocalRecoveryStore.defaultRoot()
@@ -81,7 +97,35 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         controller.showAndFocus()
         restoreAdditionalWindows()
 
-        if environment["DUCKPAD_MULTIWINDOW_SMOKE"] == "1" {
+        if environment["DUCKPAD_SETTINGS_SMOKE"] == "1" {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                let requested = AppSettings(
+                    appearanceMode: .dark,
+                    defaultWordWrapEnabled: false,
+                    defaultWrapMarkerVisible: true
+                )
+                guard case .saved(let saved) = await settingsUseCase.update(requested) else {
+                    preconditionFailure("settings smoke could not persist preferences")
+                }
+                apply(saved)
+                controller.close()
+                precondition(windowControllers.isEmpty, "last document window remained retained")
+                performShowSettings()
+                precondition(settingsWindowController?.window?.isVisible == true, "Settings unavailable without documents")
+                createAdditionalWindow()
+                guard let reopened = windowControllers.values.first,
+                      let reopenedEditor = windowEditors[ObjectIdentifier(reopened)] else {
+                    preconditionFailure("settings smoke could not reopen a document window")
+                }
+                await reopened.waitForStartup()
+                precondition(!reopenedEditor.isWordWrapEnabled, "reopened window missed word-wrap default")
+                precondition(reopenedEditor.isWrapMarkerVisible, "reopened window missed wrap-marker default")
+                print("Duckpad settings smoke ready: durable defaults + zero-window Settings + reopened window")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
+        } else if environment["DUCKPAD_MULTIWINDOW_SMOKE"] == "1" {
             controller.performNewWindow()
             Task { @MainActor in
                 for controller in windowControllers.values {
@@ -346,7 +390,11 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         verifiedRecoveryRoot: VerifiedRecoveryRoot? = nil
     ) -> WindowRuntime {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
-        let editor = ScintillaEditorAdapter()
+        let settings = settingsUseCase.state.settings
+        let editor = ScintillaEditorAdapter(defaultViewState: EditorViewState(
+            wordWrapEnabled: settings.defaultWordWrapEnabled,
+            wrapMarkerVisible: settings.defaultWrapMarkerVisible
+        ))
         let recoveryStore = verifiedRecoveryRoot.map { LocalRecoveryStore(verifiedRoot: $0) }
             ?? LocalRecoveryStore(root: recoveryRoot)
         let recoveryUseCase = SessionRecoveryUseCase(
@@ -421,8 +469,10 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         let controller = runtime.controller
         let identifier = ObjectIdentifier(controller)
         windowControllers[identifier] = controller
+        windowEditors[identifier] = runtime.editor
         windowRecoveryRoots[identifier] = recoveryRoot.standardizedFileURL
         controller.onNewWindowRequested = { [weak self] in self?.createAdditionalWindow() }
+        controller.onSettingsRequested = { [weak self] in self?.showSettings() }
         controller.onBecameKey = { [weak self, weak controller] in
             guard let self, let controller else { return }
             self.installMainMenu(target: controller)
@@ -435,6 +485,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             guard let self, let controller else { return }
             let identifier = ObjectIdentifier(controller)
             self.windowRecoveryRoots.removeValue(forKey: identifier)
+            self.windowEditors.removeValue(forKey: identifier)
             self.windowControllers.removeValue(forKey: identifier)
             if self.windowController === controller {
                 self.windowController = self.windowControllers.values.first
@@ -507,7 +558,57 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func installMainMenu(target: DuckpadWindowController) {
-        NSApplication.shared.mainMenu = DuckpadMainMenuFactory.make(target: target)
+        NSApplication.shared.mainMenu = DuckpadMainMenuFactory.make(
+            target: target,
+            applicationTarget: self
+        )
+    }
+
+    @objc func performShowSettings(_ sender: Any? = nil) {
+        guard terminationCoordinator.permitsApplicationCommands else { return }
+        showSettings()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(performShowSettings(_:)) {
+            return terminationCoordinator.permitsApplicationCommands
+        }
+        return true
+    }
+
+    private func showSettings() {
+        let settingsWindow = settingsWindowController ?? DuckpadSettingsWindowController()
+        settingsWindowController = settingsWindow
+        settingsWindow.acceptsUpdates = { [weak self] in
+            self?.terminationCoordinator.permitsApplicationCommands == true
+        }
+        settingsWindow.onUpdateTaskStarted = { [weak self] task in
+            self?.terminationCoordinator.trackApplicationTask(task)
+        }
+        settingsWindow.present(settings: settingsUseCase.state.settings) { [weak self] settings in
+            guard let self else { return .failed(.writeFailed("application unavailable")) }
+            let outcome = await self.settingsUseCase.update(settings)
+            switch outcome {
+            case .saved(let saved), .savedWithWarning(let saved, _): self.apply(saved)
+            case .failed: break
+            }
+            return outcome
+        }
+    }
+
+    private func apply(_ settings: AppSettings) {
+        switch settings.appearanceMode {
+        case .system: NSApplication.shared.appearance = nil
+        case .light: NSApplication.shared.appearance = NSAppearance(named: .aqua)
+        case .dark: NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        }
+        for editor in windowEditors.values {
+            editor.setDefaultViewOptions(
+                wordWrapEnabled: settings.defaultWordWrapEnabled,
+                wrapMarkerVisible: settings.defaultWrapMarkerVisible
+            )
+        }
+        for controller in windowControllers.values { controller.refreshAppearance() }
     }
 
     private func installDevelopmentAppIcon() {

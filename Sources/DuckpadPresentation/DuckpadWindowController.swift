@@ -2,6 +2,24 @@ import AppKit
 import DuckpadApplication
 import DuckpadDomain
 
+private final class WorkspaceNotificationObservation: @unchecked Sendable {
+    private let center: NotificationCenter
+    private let token: NSObjectProtocol
+
+    init(center: NotificationCenter, token: NSObjectProtocol) {
+        self.center = center
+        self.token = token
+    }
+
+    func invalidate() {
+        center.removeObserver(token)
+    }
+
+    deinit {
+        invalidate()
+    }
+}
+
 public struct TabWorkspaceSmokeState: Equatable, Sendable {
     public let tabCount: Int
     public let rowCount: Int
@@ -60,6 +78,7 @@ private enum CloseRetryContext {
 private final class FileDropView: NSView {
     var onFiles: (([URL]) -> Void)?
     var onFolders: (([URL]) -> Void)?
+    var onEffectiveAppearanceChange: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -68,6 +87,11 @@ private final class FileDropView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onEffectiveAppearanceChange?()
+    }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         fileURLs(from: sender).isEmpty ? [] : .copy
@@ -199,6 +223,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var hasTornDownWindow = false
     public var onExtensionCommandsChanged: (() -> Void)?
     public var onNewWindowRequested: (() -> Void)?
+    public var onSettingsRequested: (() -> Void)?
     public var onBecameKey: (() -> Void)?
     public var onClosed: (() -> Void)?
     private let editorHostView: NSView
@@ -237,6 +262,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var pendingWorkspaceFileOpenTasks: [UUID: Task<Void, Never>] = [:]
     private var workspaceRestoreTask: Task<Void, Never>?
     private var workspaceNavigationRevisions: [WorkspaceRootID: UInt64] = [:]
+    private var accessibilityDisplayObserver: WorkspaceNotificationObservation?
 
     public init(
         workspace: ScratchWorkspaceUseCase,
@@ -295,6 +321,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         super.init(window: window)
         window.delegate = self
         self.errorPresenter = configureContent(injectedPresenter: errorPresenter)
+        let workspaceNotifications = NSWorkspace.shared.notificationCenter
+        let accessibilityToken = workspaceNotifications.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshAppearance() }
+        }
+        accessibilityDisplayObserver = WorkspaceNotificationObservation(
+            center: workspaceNotifications,
+            token: accessibilityToken
+        )
         editorBinding = EditorBindingUseCase(workspace: workspace, editor: activeEditor)
         tabStrip.onAdd = { [weak self] in self?.performAdd() }
         tabStrip.onActivate = { [weak self] id in self?.performActivate(id) }
@@ -382,6 +420,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func tearDownWindow() {
         guard !hasTornDownWindow else { return }
         hasTornDownWindow = true
+        accessibilityDisplayObserver?.invalidate()
+        accessibilityDisplayObserver = nil
         documentIntelligenceTask?.cancel()
         documentIntelligenceTask = nil
         documentIntelligenceUseCase?.cancel()
@@ -608,6 +648,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performNewWindow(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
         onNewWindowRequested?()
+    }
+
+    @objc public func performShowSettings(_ sender: Any? = nil) {
+        guard !terminationReviewInProgress else { return }
+        onSettingsRequested?()
     }
 
     func performActivate(_ id: TabID) {
@@ -1010,6 +1055,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         if menuItem.action == #selector(performNewWindow(_:)) {
             return !terminationReviewInProgress
+        }
+        if menuItem.action == #selector(performShowSettings(_:)) {
+            return !terminationReviewInProgress && onSettingsRequested != nil
         }
         if menuItem.action == #selector(performRestoreLastClosedTab(_:)) {
             return workspaceInteractionsAreActionable && workspace.canRestoreRecentlyClosedTab
@@ -1650,6 +1698,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         onBecameKey?()
     }
 
+    public func refreshAppearance() {
+        appliedThemePalette = nil
+        updateLanguageTheme()
+    }
+
     public func windowWillClose(_ notification: Notification) {
         tearDownWindow()
     }
@@ -1759,6 +1812,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         dropView.onFolders = { [weak self] urls in
             guard let self else { return }
             for url in urls { self.routeAddWorkspaceRoot(url) }
+        }
+        dropView.onEffectiveAppearanceChange = { [weak self] in
+            self?.refreshAppearance()
         }
         root.view = dropView
         root.view.addSubview(persistenceBanner)

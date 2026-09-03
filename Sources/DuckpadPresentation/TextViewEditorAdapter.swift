@@ -9,7 +9,7 @@ private final class BufferTextView: NSTextView {
 }
 
 @MainActor
-public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOptionsPort, EditorCommandPort, EditorSelectionPort, BookmarkEditorPort, @preconcurrency NSTextStorageDelegate, @preconcurrency NSLayoutManagerDelegate {
+public final class TextViewEditorAdapter: NSObject, EditorPort, EditorDefaultViewOptionsPort, EditorCommandPort, EditorSelectionPort, BookmarkEditorPort, @preconcurrency NSTextStorageDelegate, @preconcurrency NSLayoutManagerDelegate {
     public let scrollView: NSScrollView
     public let textView: NSTextView
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
@@ -22,6 +22,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
     private var isProcessingTextStorageEdit = false
     private var bookmarkRenderScheduled = false
     private var requestedInputEnabled = true
+    private var defaultViewState = EditorViewState()
     private static let bookmarkTemporaryAttribute = NSAttributedString.Key("app.duckpad.bookmark")
 
     public override init() {
@@ -78,14 +79,16 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         (textView as? BufferTextView)?.activeUndoManager = undoManager
         activeBuffer = buffer
         setTextWithoutEditing(snapshot.text)
-        applyWordWrap(viewStates[buffer.bufferID]?.wordWrapEnabled ?? true)
+        let viewState = viewStates[buffer.bufferID] ?? defaultViewState
+        viewStates[buffer.bufferID] = viewState
+        applyWordWrap(viewState.wordWrapEnabled)
         renderBookmarks()
         applyInputAvailability()
     }
 
     public func install(_ snapshot: EditorTextSnapshot) {
         snapshots[snapshot.bufferID] = snapshot
-        viewStates[snapshot.bufferID] = viewStates[snapshot.bufferID] ?? EditorViewState()
+        viewStates[snapshot.bufferID] = viewStates[snapshot.bufferID] ?? defaultViewState
         undoManagers[snapshot.bufferID] = UndoManager()
         guard activeBuffer?.bufferID == snapshot.bufferID else { return }
         activeBuffer = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision)
@@ -111,7 +114,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
             baseRevision: snapshot.revision,
             revision: snapshot.revision,
             baseUTF8: Data(snapshot.text.utf8),
-            viewState: viewStates[bufferID] ?? EditorViewState()
+            viewState: viewStates[bufferID] ?? defaultViewState
         )
     }
 
@@ -169,8 +172,10 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
     }
 
     public var isWordWrapEnabled: Bool {
-        guard let bufferID = activeBuffer?.bufferID else { return true }
-        return viewStates[bufferID]?.wordWrapEnabled ?? true
+        guard let bufferID = activeBuffer?.bufferID else {
+            return defaultViewState.wordWrapEnabled
+        }
+        return viewStates[bufferID]?.wordWrapEnabled ?? defaultViewState.wordWrapEnabled
     }
 
     public var isWrapMarkerVisible: Bool { false }
@@ -185,6 +190,11 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
     }
 
     public func setWrapMarkerVisible(_ isVisible: Bool) {}
+
+    public func setDefaultViewOptions(wordWrapEnabled: Bool, wrapMarkerVisible: Bool) {
+        defaultViewState.wordWrapEnabled = wordWrapEnabled
+        defaultViewState.wrapMarkerVisible = false
+    }
 
     public var hasBookmarks: Bool {
         guard let bufferID = activeBuffer?.bufferID else { return false }

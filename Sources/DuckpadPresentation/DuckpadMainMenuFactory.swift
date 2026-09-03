@@ -5,11 +5,23 @@ import DuckpadDomain
 /// tested without launching the executable target.
 @MainActor
 public enum DuckpadMainMenuFactory {
-    public static func make(target: DuckpadWindowController) -> NSMenu {
+    public static func make(
+        target: DuckpadWindowController,
+        applicationTarget: AnyObject? = nil
+    ) -> NSMenu {
         let mainMenu = NSMenu()
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
+        let settingsTarget: AnyObject = applicationTarget ?? target
+        add(
+            "Settings…",
+            #selector(DuckpadWindowController.performShowSettings(_:)),
+            ",",
+            settingsTarget,
+            to: appMenu
+        )
+        appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: "Quit Duckpad",
             action: #selector(NSApplication.terminate(_:)),
@@ -312,7 +324,7 @@ public enum DuckpadMainMenuFactory {
         _ title: String,
         _ action: Selector,
         _ keyEquivalent: String,
-        _ target: DuckpadWindowController,
+        _ target: AnyObject,
         modifiers: NSEvent.ModifierFlags = [.command],
         to menu: NSMenu
     ) {

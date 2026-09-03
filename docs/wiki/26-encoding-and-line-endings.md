@@ -1,6 +1,6 @@
 # Phase 23 — Encoding and line-ending controls
 
-Status: **Remediated; independent re-review pending**
+Status: **Approved, committed, and pushed**
 
 ## User contract
 
@@ -30,7 +30,7 @@ Native Open, Save, Save As, and format-conversion actions synchronously register
 - Application and presentation race tests prove that a Save panel or serialized file operation cannot carry a captured conversion across an active-tab identity/revision/binding change or create the rejected destination.
 - The production smoke uses the real local file store to open BOM-less UTF-16 LE and atomically convert it to UTF-8 BOM plus CRLF.
 - The initial independent review found two Majors: stale conflict/post-write binding authority and missing accepted format-task termination joining. Exact pre-write and post-write authority checks plus synchronous file-task lifecycle registration remediate both, with regressions for rebind-before-overwrite, rebind-during-write, and immediate termination during a cancellation-ignoring blocked conversion.
-- Exact-current Debug and Release each pass 320/320 tests. The production smoke verifies the exact `EF BB BF` prefix and UTF-8 Korean/emoji CRLF payload; parity passes 31/31, commit governance passes 8/8, the default checker exits successfully, and `git diff --check` passes. Independent remediation re-review, signed receipt, commit, and push are pending.
+- Exact-current Debug and Release each pass 320/320 tests. The production smoke verifies the exact `EF BB BF` prefix and UTF-8 Korean/emoji CRLF payload; parity passes 31/31, commit governance passes 8/8, the default checker exits successfully, and `git diff --check` passes. Independent remediation re-review approved the exact candidate with 0 Blocker/Major/Minor; commit `703b89c` passed the signed receipt audit and was pushed to `origin/main`.
 
 ## Deliberate boundary
 

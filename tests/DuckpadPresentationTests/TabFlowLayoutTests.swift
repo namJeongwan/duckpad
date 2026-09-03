@@ -100,11 +100,21 @@ private final class WeakBox<Value: AnyObject> {
 }
 
 @MainActor
+private final class ApplicationMenuTargetSpy: NSObject {
+    private(set) var settingsRequests = 0
+
+    @objc func performShowSettings(_ sender: Any?) {
+        settingsRequests += 1
+    }
+}
+
+@MainActor
 private final class HostedLanguageEditorFake: LanguageEditorPort, DocumentIntelligenceEditorPort {
     var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
     var supportedLexers: Set<String> = []
     var prefix = Data()
     var configurations: [EditorLanguageConfiguration] = []
+    private(set) var themes: [EditorThemePalette] = []
     private(set) var mutationCount = 0
     private var activeBuffer: EditorBufferDescriptor?
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
@@ -142,7 +152,7 @@ private final class HostedLanguageEditorFake: LanguageEditorPort, DocumentIntell
         configurations.append(configuration)
         return true
     }
-    func applyTheme(_ palette: EditorThemePalette) {}
+    func applyTheme(_ palette: EditorThemePalette) { themes.append(palette) }
     func toggleLineComment(prefix: String) -> EditorEditOutcome {
         mutationCount += 1
         return .rejected(currentRevision: activeBuffer?.revision ?? 0)
@@ -644,6 +654,83 @@ struct AppKitHostedTests {
     #expect(editor.mutationCount == 0)
 }
 
+@Test @MainActor func effectiveAppearanceChangesRefreshTheEditorPalette() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = ["null"]
+    let registry = try LanguageRegistry(definitions: [
+        LanguageDefinition(
+            id: .plainText,
+            displayName: "Plain Text",
+            group: "Text",
+            lexerName: "null",
+            supportTier: .plain
+        ),
+    ])
+    let service = LanguageWorkspaceUseCase(
+        registry: registry,
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(frame: .zero),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+
+    controller.window?.appearance = NSAppearance(named: .darkAqua)
+    await Task.yield()
+    let darkPalette: EditorThemePalette = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        ? .highContrastDark
+        : .dark
+    #expect(editor.themes.last == darkPalette)
+
+    controller.window?.appearance = NSAppearance(named: .aqua)
+    await Task.yield()
+    let lightPalette: EditorThemePalette = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        ? .highContrastLight
+        : .light
+    #expect(editor.themes.last == lightPalette)
+
+    let beforeAccessibilityNotification = editor.themes.count
+    NSWorkspace.shared.notificationCenter.post(
+        name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+        object: nil
+    )
+    await Task.yield()
+    #expect(editor.themes.count == beforeAccessibilityNotification + 1)
+}
+
+@Test @MainActor func applicationSettingsUsesAnAppLifetimeTargetAfterDocumentClose() throws {
+    _ = NSApplication.shared
+    let applicationTarget = ApplicationMenuTargetSpy()
+    let controller = DuckpadWindowController(
+        workspace: ScratchWorkspaceUseCase(store: PresentationStore()),
+        automaticallyStarts: false
+    )
+    let menu = DuckpadMainMenuFactory.make(
+        target: controller,
+        applicationTarget: applicationTarget
+    )
+    controller.close()
+    let settings = try #require(menuItem("Settings…", in: menu))
+    #expect(settings.target === applicationTarget)
+
+    #expect(settings.target === applicationTarget)
+    #expect(NSApplication.shared.sendAction(
+        try #require(settings.action),
+        to: settings.target,
+        from: settings
+    ))
+    #expect(applicationTarget.settingsRequests == 1)
+}
+
 @Test @MainActor func failedActivationRestoresAuthoritativeSelectionWithoutRecursion() async {
     let store = PresentationStore()
     let workspace = ScratchWorkspaceUseCase(store: store)
@@ -700,6 +787,16 @@ struct AppKitHostedTests {
     controller.start()
     await controller.waitForStartup()
     let menu = DuckpadMainMenuFactory.make(target: controller)
+
+    let settings = menuItem("Settings…", in: menu)
+    #expect(settings?.action == #selector(DuckpadWindowController.performShowSettings(_:)))
+    #expect(settings?.keyEquivalent == ",")
+    #expect(settings?.keyEquivalentModifierMask == [.command])
+    var settingsRequests = 0
+    controller.onSettingsRequested = { settingsRequests += 1 }
+    controller.performShowSettings()
+    #expect(settingsRequests == 1)
+    if let settings { #expect(controller.validateMenuItem(settings)) }
 
     let newScratch = menuItem("New Scratch", in: menu)
     #expect(newScratch?.action == #selector(DuckpadWindowController.performNewScratch(_:)))

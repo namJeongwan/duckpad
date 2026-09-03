@@ -126,6 +126,13 @@ public protocol EditorViewOptionsPort: EditorPort {
     func setWrapMarkerVisible(_ isVisible: Bool)
 }
 
+/// Process preferences affect only buffers created after the change. Existing
+/// and recovered buffers keep their per-buffer view state.
+@MainActor
+public protocol EditorDefaultViewOptionsPort: EditorViewOptionsPort {
+    func setDefaultViewOptions(wordWrapEnabled: Bool, wrapMarkerVisible: Bool)
+}
+
 /// Line bookmarks are view metadata: they move with editor lines, survive
 /// recovery, and never mutate document bytes, revision, dirty state, or undo.
 @MainActor

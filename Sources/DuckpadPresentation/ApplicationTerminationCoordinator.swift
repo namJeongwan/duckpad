@@ -27,6 +27,15 @@ public final class ApplicationTerminationCoordinator {
         }
     }
 
+    @MainActor
+    private final class ApplicationTaskRecord {
+        let task: Task<Void, Never>
+
+        init(task: Task<Void, Never>) {
+            self.task = task
+        }
+    }
+
     private var controllers: [ObjectIdentifier: WeakController] = [:]
     private var attachmentOrder: [ObjectIdentifier] = []
     private var inFlightReview: Task<Void, Never>?
@@ -40,6 +49,7 @@ public final class ApplicationTerminationCoordinator {
     private var applicationReviewInFlight = false
     private var applicationTerminationApproved = false
     private var cleanupRecords: [UUID: CleanupRecord] = [:]
+    private var applicationTaskRecords: [UUID: ApplicationTaskRecord] = [:]
 
     public init() {}
 
@@ -74,6 +84,23 @@ public final class ApplicationTerminationCoordinator {
     public var attachedWindowCount: Int {
         compactControllers()
         return controllers.count
+    }
+
+    public var permitsApplicationCommands: Bool {
+        !applicationReviewInFlight && !applicationTerminationApproved
+    }
+
+    public func trackApplicationTask(_ task: Task<Void, Never>) {
+        guard !applicationTerminationApproved else { return }
+        let id = UUID()
+        let record = ApplicationTaskRecord(task: task)
+        applicationTaskRecords[id] = record
+        Task { @MainActor [weak self, weak record] in
+            await task.value
+            guard let self, let record,
+                  self.applicationTaskRecords[id] === record else { return }
+            self.applicationTaskRecords.removeValue(forKey: id)
+        }
     }
 
     public func trackWindowCloseCleanup(
@@ -137,7 +164,8 @@ public final class ApplicationTerminationCoordinator {
     ) -> NSApplication.TerminateReply {
         applicationReviewInFlight = true
         let requiringReview = liveControllers().filter { $0.requiresTerminationReview }
-        if inFlightReview == nil, requiringReview.isEmpty, cleanupRecords.isEmpty {
+        if inFlightReview == nil, requiringReview.isEmpty,
+           cleanupRecords.isEmpty, applicationTaskRecords.isEmpty {
             applicationReviewInFlight = false
             applicationTerminationApproved = true
             return .terminateNow
@@ -179,6 +207,7 @@ public final class ApplicationTerminationCoordinator {
                     return
                 }
             }
+            await finishTrackedApplicationTasks()
             guard await finishTrackedCleanups() else {
                 finishReview(approved: false)
                 return
@@ -189,6 +218,13 @@ public final class ApplicationTerminationCoordinator {
             guard !reviewQueue.isEmpty else { break }
         }
         finishReview(approved: true)
+    }
+
+    private func finishTrackedApplicationTasks() async {
+        while let (id, record) = applicationTaskRecords.first {
+            await record.task.value
+            applicationTaskRecords.removeValue(forKey: id)
+        }
     }
 
     private func finishTrackedCleanups() async -> Bool {
