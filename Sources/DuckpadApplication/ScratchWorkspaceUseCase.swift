@@ -112,6 +112,7 @@ public enum TabCloseScope: Equatable, Sendable {
     case others
     case left
     case right
+    case unchanged
     case unpinned
 }
 
@@ -195,7 +196,7 @@ public final class ScratchWorkspaceUseCase {
         let automaticReplacement: ClosedTabState?
     }
 
-    private static let recentlyClosedLimit = 20
+    private static let recentlyClosedLimit = 100
     private let store: any SessionStore
     private let writer: OrderedSessionWriter
     private var session: ScratchSession
@@ -442,13 +443,20 @@ public final class ScratchWorkspaceUseCase {
         case .current:
             return [anchor]
         case .all:
-            return session.tabs.filter { !$0.isPinned || $0.id == anchor }.map(\.id)
+            return session.tabs.filter { !$0.isPinned }.map(\.id)
         case .others:
             return session.tabs.filter { $0.id != anchor && !$0.isPinned }.map(\.id)
         case .left:
             return session.tabs[..<anchorIndex].filter { !$0.isPinned }.map(\.id)
         case .right:
             return session.tabs[(anchorIndex + 1)...].filter { !$0.isPinned }.map(\.id)
+        case .unchanged:
+            return session.tabs.compactMap { tab in
+                guard !tab.isPinned,
+                      let buffer = try? session.buffer(for: tab.id),
+                      !buffer.isDirty else { return nil }
+                return tab.id
+            }
         case .unpinned:
             return session.tabs.filter { !$0.isPinned }.map(\.id)
         }

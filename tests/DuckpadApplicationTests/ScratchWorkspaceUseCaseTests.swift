@@ -434,7 +434,7 @@ private final class EditorFake: EditorPort {
     #expect(useCase.recentlyClosedTabCount == 1)
 }
 
-@Test @MainActor func recentlyClosedStackIsLIFOAndEvictsBeyondTwentyEntries() async {
+@Test @MainActor func recentlyClosedStackIsLIFOAndEvictsBeyondOneHundredEntries() async {
     let store = StoreSpy()
     let useCase = ScratchWorkspaceUseCase(store: store)
     _ = await useCase.start()
@@ -442,17 +442,43 @@ private final class EditorFake: EditorPort {
     let binding = EditorBindingUseCase(workspace: useCase, editor: editor)
     binding.render(useCase.snapshot())
     useCase.onChange = { binding.render($0) }
-    for _ in 0..<21 { _ = await useCase.addScratch() }
+    for _ in 0..<101 { _ = await useCase.addScratch() }
     let closedIDs = Array(useCase.snapshot().tabs.dropLast().map(\.id))
     for id in closedIDs { _ = await useCase.close(tabID: id) }
-    #expect(useCase.recentlyClosedTabCount == 20)
+    #expect(useCase.recentlyClosedTabCount == 100)
 
-    for _ in 0..<20 {
+    for (offset, expectedActive) in closedIDs.dropFirst().reversed().enumerated() {
         #expect(await useCase.restoreLastClosedTab() == .applied(.saved))
+        #expect(useCase.snapshot().tabs.first(where: \.isActive)?.id == expectedActive)
+        #expect(useCase.recentlyClosedTabCount == 99 - offset)
     }
     #expect(!useCase.snapshot().tabs.contains(where: { $0.id == closedIDs[0] }))
     #expect(Set(useCase.snapshot().tabs.map(\.id)).isSuperset(of: Set(closedIDs.dropFirst())))
     #expect(useCase.recentlyClosedTabCount == 0)
+}
+
+@Test @MainActor func bulkCloseScopesProtectPinnedTabsAndSelectExactStableTargets() async throws {
+    var session = ScratchSession()
+    let pinned = session.addUntitled()
+    let left = session.addUntitled()
+    let anchor = session.addUntitled()
+    let right = session.addUntitled()
+    _ = try session.setPinned(tabID: pinned, isPinned: true)
+    _ = try session.recordEdit(in: anchor, expectedRevision: 0)
+    try session.activate(tabID: anchor)
+
+    let useCase = ScratchWorkspaceUseCase(store: StoreSpy(session: session))
+    _ = await useCase.start()
+
+    #expect(useCase.tabIDs(for: .current, relativeTo: anchor) == [anchor])
+    #expect(useCase.tabIDs(for: .all, relativeTo: anchor) == [left, anchor, right])
+    #expect(useCase.tabIDs(for: .others, relativeTo: anchor) == [left, right])
+    #expect(useCase.tabIDs(for: .left, relativeTo: anchor) == [left])
+    #expect(useCase.tabIDs(for: .right, relativeTo: anchor) == [right])
+    #expect(useCase.tabIDs(for: .unchanged, relativeTo: anchor) == [left, right])
+    #expect(useCase.tabIDs(for: .unpinned, relativeTo: anchor) == [left, anchor, right])
+    #expect(useCase.tabIDs(for: .current, relativeTo: pinned) == [pinned])
+    #expect(useCase.tabIDs(for: .all, relativeTo: pinned) == [left, anchor, right])
 }
 
 @Test @MainActor func undoCloseWithReopenedFileCreatesDirtyUnboundRecoveryCopy() async {

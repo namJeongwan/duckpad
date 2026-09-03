@@ -83,6 +83,17 @@ private final class ErrorPresenterSpy: PersistenceErrorPresenting {
     }
 }
 
+@MainActor
+private final class FixedDirtyDecisionPresenter: DirtyDocumentDecisionPresenting {
+    let result: CloseDecision
+    init(_ result: CloseDecision) { self.result = result }
+    func decision(
+        for tab: TabSnapshot,
+        saveAvailable: Bool,
+        attachedTo window: NSWindow?
+    ) async -> CloseDecision { result }
+}
+
 private final class WeakBox<Value: AnyObject> {
     weak var value: Value?
     init(_ value: Value?) { self.value = value }
@@ -723,6 +734,27 @@ struct AppKitHostedTests {
     #expect(openDocument?.keyEquivalentModifierMask == [.command, .shift])
     if let openDocument { #expect(controller.validateMenuItem(openDocument)) }
 
+    let bulkCloseItems: [(String, Selector)] = [
+        ("Close All Tabs", #selector(DuckpadWindowController.performCloseAllTabs(_:))),
+        ("Close Other Tabs", #selector(DuckpadWindowController.performCloseOtherTabs(_:))),
+        ("Close Tabs to Left", #selector(DuckpadWindowController.performCloseTabsToLeft(_:))),
+        ("Close Tabs to Right", #selector(DuckpadWindowController.performCloseTabsToRight(_:))),
+        ("Close Unchanged Tabs", #selector(DuckpadWindowController.performCloseUnchangedTabs(_:))),
+        ("Close Unpinned Tabs", #selector(DuckpadWindowController.performCloseUnpinnedTabs(_:))),
+    ]
+    for (title, selector) in bulkCloseItems {
+        let item = menuItem(title, in: menu)
+        #expect(item?.action == selector)
+        #expect(item?.keyEquivalent.isEmpty == true)
+    }
+    if let closeOthers = menuItem("Close Other Tabs", in: menu),
+       let closeLeft = menuItem("Close Tabs to Left", in: menu),
+       let closeRight = menuItem("Close Tabs to Right", in: menu) {
+        #expect(!controller.validateMenuItem(closeOthers))
+        #expect(!controller.validateMenuItem(closeLeft))
+        #expect(!controller.validateMenuItem(closeRight))
+    }
+
     let mru = menuItem("Last Used Tab", in: menu)
     let reverseMRU = menuItem("Previous in Tab History", in: menu)
     #expect(mru?.action == #selector(DuckpadWindowController.performLastUsedTab(_:)))
@@ -770,6 +802,106 @@ struct AppKitHostedTests {
         #expect(!controller.validateMenuItem(wrapSymbols))
         #expect(wrapSymbols.state == .off)
     }
+}
+
+@Test @MainActor func terminationWaitsForAcceptedBulkClosePersistence() async {
+    var restored = ScratchSession()
+    let first = restored.addUntitled()
+    _ = restored.addUntitled()
+    let store = PresentationStore(session: restored)
+    let workspace = ScratchWorkspaceUseCase(store: store)
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+
+    await store.armBlockingCommit()
+    let closeTask = controller.performClose(first)
+    await store.waitUntilCommitEntered()
+    #expect(controller.beginTerminationReviewAdmission())
+
+    var terminationFinished = false
+    let termination = Task { @MainActor in
+        let approved = await controller.continuePreparedTerminationReview()
+        terminationFinished = true
+        return approved
+    }
+    for _ in 0..<50 { await Task.yield() }
+    #expect(!terminationFinished)
+
+    await store.releaseCommit()
+    await closeTask.value
+    #expect(await termination.value)
+    #expect(terminationFinished)
+    #expect(!workspace.snapshot().tabs.contains(where: { $0.id == first }))
+}
+
+@Test @MainActor func closeAdmittedImmediatelyBeforeTerminationStillCommitsBeforeApproval() async {
+    var restored = ScratchSession()
+    let admittedClose = restored.addUntitled()
+    _ = restored.addUntitled()
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore(session: restored))
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+
+    let closeTask = controller.performClose(admittedClose)
+    #expect(controller.beginTerminationReviewAdmission())
+    #expect(await controller.continuePreparedTerminationReview())
+    await closeTask.value
+
+    #expect(!workspace.snapshot().tabs.contains(where: { $0.id == admittedClose }))
+}
+
+@Test @MainActor func terminationCancellationKeepsAlreadyAdmittedCloseAndReopensInteraction() async throws {
+    var restored = ScratchSession()
+    let admittedClose = restored.addUntitled()
+    let dirty = restored.addUntitled()
+    _ = try restored.recordEdit(in: dirty, expectedRevision: 0)
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore(session: restored))
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        dirtyDecisionPresenter: FixedDirtyDecisionPresenter(.cancel),
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+
+    let closeTask = controller.performClose(admittedClose)
+    #expect(controller.beginTerminationReviewAdmission())
+    #expect(!(await controller.continuePreparedTerminationReview()))
+    await closeTask.value
+
+    #expect(!workspace.snapshot().tabs.contains(where: { $0.id == admittedClose }))
+    #expect(workspace.snapshot().tabs.contains(where: { $0.id == dirty }))
+    let newScratch = NSMenuItem(
+        title: "New Scratch",
+        action: #selector(DuckpadWindowController.performNewScratch(_:)),
+        keyEquivalent: "n"
+    )
+    #expect(controller.validateMenuItem(newScratch))
+}
+
+@Test @MainActor func mainMenuBulkCloseRoutesStableScopeThroughSharedCoordinator() async {
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    _ = await workspace.addScratch()
+    _ = await workspace.addScratch()
+    let active = try! #require(workspace.snapshot().tabs.first(where: \.isActive)?.id)
+
+    let item = try! #require(menuItem("Close Other Tabs", in: DuckpadMainMenuFactory.make(target: controller)))
+    #expect(controller.validateMenuItem(item))
+    controller.performCloseOtherTabs(item)
+    for _ in 0..<1_000 where workspace.snapshot().tabs.count != 1 { await Task.yield() }
+
+    #expect(workspace.snapshot().tabs.map(\.id) == [active])
+    #expect(workspace.recentlyClosedTabCount == 2)
+    #expect(!controller.validateMenuItem(item))
 }
 
 @Test @MainActor func newScratchShortcutActionAddsAndActivatesUntitledTab() async {
@@ -844,6 +976,34 @@ struct AppKitHostedTests {
     #expect(closed == tabs[4].id)
     #expect(move?.0 == tabs[1].id)
     #expect(move?.1 == 9)
+}
+
+@Test @MainActor func tabContextMenuPublishesEveryBulkCloseScope() throws {
+    _ = NSApplication.shared
+    let tabs = makeTabs(count: 4, activeIndex: 1)
+    let (window, _, strip) = hostStrip(width: 700, height: 220, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    var actions: [TabContextAction] = []
+    strip.onContextAction = { _, action in actions.append(action) }
+    let menu = try #require(strip.contextMenu(for: tabs[1].id))
+    let expected: [(String, TabCloseScope)] = [
+        ("Close", .current),
+        ("Close Others", .others),
+        ("Close to Left", .left),
+        ("Close to Right", .right),
+        ("Close All", .all),
+        ("Close Unchanged", .unchanged),
+        ("Close Unpinned", .unpinned),
+    ]
+    for (title, scope) in expected {
+        let index = try #require(menu.items.firstIndex(where: { $0.title == title }))
+        menu.performActionForItem(at: index)
+        #expect(actions.last == .close(scope))
+    }
 }
 
 @Test @MainActor func headlessCollectionPasteboardAcceptsCrossRowDropAtEnd() {

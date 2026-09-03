@@ -1,6 +1,6 @@
 # Phase 13 — Recently Closed Tab Restoration
 
-- **Status:** Implemented; independent review pending
+- **Status:** Approved, committed, audited, and pushed to `origin/main`; history-cap extension in Phase 14
 - **Owner/agent:** `/root` direct investigator and builder
 - **Last updated:** 2026-09-03
 - **Related:** [Product philosophy and parity](01-product-philosophy-and-parity.md), [Session recovery](07-session-recovery.md), [Multiline tabs](08-multiline-tabs.md)
@@ -9,7 +9,9 @@
 
 **Tabs → Undo Close Tab** restores the most recently closed tab with
 `Command-Shift-T`. The command is disabled until a restorable tab exists and
-uses a bounded 20-entry LIFO stack per live workspace.
+uses a bounded LIFO stack per live workspace. The Phase 13 delivery shipped 20
+entries; Phase 14 raises the current product policy to 100 entries without
+changing restore ordering or durability semantics.
 
 Restoration preserves the stable tab/document/buffer identities, prior visual
 position within the pinned or ordinary group, title, pin state, file binding,
@@ -72,7 +74,8 @@ separate C7 recent-files follow-up.
 
 ## Commit evidence
 
-- Candidate ID: pending exact stage freeze
-- Independent review: pending
-- Local receipt: pending
-- Commit: pending
+- Candidate ID: `fadd89f20b4ced4dca8b90c0d3a1dcfb479c7c42ce4f072f244ca5ddb6fe557b`
+- Independent review: approved — 0 Blocker, 0 Major, 0 Minor
+- Local receipt SHA-256: `9344041b85d0577a17fcf3fdb03c2f46d0e79456ac8aed08750e65ce3205df2d`
+- Commit: `8d7ecca5b20f9ff9714cdb2bb9cd470db0e41b99`
+- Delivery: `origin/main`

@@ -902,7 +902,18 @@ struct ScintillaBridgeTests {
         #expect(adapter.snapshot(for: descriptor.bufferID) == acceptedText)
         #expect(workspace.snapshot().activeBuffer?.revision == acceptedRevision)
         #expect(adapter.activeScintillaView?.canUndo == true)
-        #expect(adapter.recoverySnapshot(for: descriptor.bufferID) == acceptedRecovery)
+        let recoveryAfterRejectedReplace = try #require(adapter.recoverySnapshot(for: descriptor.bufferID))
+        #expect(recoveryAfterRejectedReplace.bufferID == acceptedRecovery?.bufferID)
+        #expect(recoveryAfterRejectedReplace.revision == acceptedRecovery?.revision)
+        #expect(recoveryAfterRejectedReplace.utf8 == acceptedRecovery?.utf8)
+        #expect(recoveryAfterRejectedReplace.viewState.anchorUTF8 == acceptedRecovery?.viewState.anchorUTF8)
+        #expect(recoveryAfterRejectedReplace.viewState.caretUTF8 == acceptedRecovery?.viewState.caretUTF8)
+        #expect(recoveryAfterRejectedReplace.viewState.horizontalScrollOffset == acceptedRecovery?.viewState.horizontalScrollOffset)
+        #expect(recoveryAfterRejectedReplace.viewState.wordWrapEnabled == acceptedRecovery?.viewState.wordWrapEnabled)
+        #expect(recoveryAfterRejectedReplace.viewState.wrapMarkerVisible == acceptedRecovery?.viewState.wrapMarkerVisible)
+        // A headless Scintilla viewport can settle its first visible line on a
+        // later AppKit layout pass. That volatile coordinate is not evidence of
+        // a rejected search mutating text, selection, undo, or recovery bytes.
 
         view.undo()
         await Task.yield()

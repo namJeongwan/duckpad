@@ -79,6 +79,13 @@ public enum DuckpadMainMenuFactory {
             to: tabMenu
         )
         tabMenu.addItem(.separator())
+        add("Close All Tabs", #selector(DuckpadWindowController.performCloseAllTabs(_:)), "", target, modifiers: [], to: tabMenu)
+        add("Close Other Tabs", #selector(DuckpadWindowController.performCloseOtherTabs(_:)), "", target, modifiers: [], to: tabMenu)
+        add("Close Tabs to Left", #selector(DuckpadWindowController.performCloseTabsToLeft(_:)), "", target, modifiers: [], to: tabMenu)
+        add("Close Tabs to Right", #selector(DuckpadWindowController.performCloseTabsToRight(_:)), "", target, modifiers: [], to: tabMenu)
+        add("Close Unchanged Tabs", #selector(DuckpadWindowController.performCloseUnchangedTabs(_:)), "", target, modifiers: [], to: tabMenu)
+        add("Close Unpinned Tabs", #selector(DuckpadWindowController.performCloseUnpinnedTabs(_:)), "", target, modifiers: [], to: tabMenu)
+        tabMenu.addItem(.separator())
         add(
             "Next Tab in Visual Order",
             #selector(DuckpadWindowController.performNextTab(_:)),

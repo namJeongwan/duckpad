@@ -47,8 +47,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 33 | [Phase 11 independent code review](reviews/2026-09-03-phase-11-workspace-chrome-code-review.md) | **Approved — latest Phase 11 evidence** | dropdown O(1) 증분 갱신, synchronous termination chrome admission, 네 모서리·전체 ICNS round-trip을 0 Blocker/Major/Minor로 독립 재검증했다. |
 | 34 | [Phase 12 searchable document switcher](15-searchable-document-switcher.md) | **Approved, committed and pushed** | title/path ranked filtering, stable-ID keyboard activation, adaptive native popover, `Command-Shift-O`, 5,000-tab budget와 termination admission을 기록한다. commit `5f816e0`가 exact receipt/audit 후 `origin/main`에 push됐다. |
 | 35 | [Phase 12 independent code review](reviews/2026-09-03-phase-12-searchable-document-switcher-code-review.md) | **Content approved — latest Phase 12 evidence** | 최초 2 Major/1 Minor, 두 remediation round와 exact-tier/popover lifecycle closure를 기록하며 최종 0 Blocker/Major/Minor로 승인한다. |
-| 36 | [Phase 13 recently closed tab restoration](16-recently-closed-tabs.md) | **Content approved; exact receipt pending** | 최근 20개 탭의 stable metadata와 UTF-8/view snapshot 복구, `Command-Shift-T`, durable restore, 종료 경쟁 및 자동 빈 탭 치환을 기록한다. |
+| 36 | [Phase 13 recently closed tab restoration](16-recently-closed-tabs.md) | **Approved, committed and pushed** | 최근 닫은 탭 기록을 최대 100개까지 보관하며 stable metadata와 UTF-8/view snapshot 복구, `Command-Shift-T`, durable restore, 종료 경쟁 및 자동 빈 탭 치환을 기록한다. Phase 13은 commit `8d7ecca`로 전달됐고 100-entry 정책은 후속 탭 lifecycle slice에서 확장한다. |
 | 37 | [Phase 13 independent code review](reviews/2026-09-03-phase-13-recently-closed-tabs-code-review.md) | **Content approved — latest Phase 13 evidence** | 최초 2 Major와 automatic-replacement/stable-retry remediation, off-main capture materialization 및 duplicate-path safety를 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
+| 38 | [Phase 14 tab lifecycle commands](17-tab-lifecycle-commands.md) | **Content approved; exact receipt pending** | 최근 닫은 탭 기록 100개, Close All/Others/Left/Right/Unchanged/Unpinned의 native 메뉴·우클릭 경로, pinned 보호, dirty review 및 종료 경쟁 처리를 기록한다. |
+| 39 | [Phase 14 independent code review](reviews/2026-09-03-phase-14-tab-lifecycle-code-review.md) | **Content approved — latest Phase 14 evidence** | 초기 accepted-close termination race Major와 LIFO test Minor를 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -104,6 +106,25 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 14 tab lifecycle independent review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 14 구현과 remediation에는 참여하지 않았다.
+- **Initial findings:** registered close Task가 later termination gate를 다시 검사해 same-actor Close-All → termination에서 accepted close를 100/100 누락하는 Major를 external public-API probe로 재현했다. 100-entry fixture가 최종 membership만 확인해 FIFO도 통과하는 test-strength Minor도 기록했다.
+- **Closure:** close admission을 Task 등록 전에 동기 획득하고 admitted task는 termination이 join하도록 수정했다. approval/cancel-reopen 양쪽 테스트와 external probe 100/100을 확인했다. LIFO fixture도 매 pop의 reversed active TabID와 99...0 count를 검증한다.
+- **Scintilla triage:** headless AppKit의 비동기 `firstVisibleLine` settle만 exact equality에서 제외했다. text/revision/selection/horizontal/wrap/recovery bytes/undo는 유지되고 별도 recovery test가 vertical viewport capture/restore를 계속 검증하므로 제품 회귀 은폐가 아니다.
+- **Evidence:** independent initial focused 6/6, exact-final focused 8/8, external probe 100/100, `git diff --check` PASS. builder exact-final Debug/Release 221/221는 supporting evidence로 기록한다.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** exact staged-candidate receipt는 pending이다.
+- **Boundary:** review 문서와 index row/work log만 수정했다. source/tests/work docs/stage/sign/commit/push는 건드리지 않았고 doc04/vendor script/README/ignored Notepad++를 제외·보존했다.
+
+### 2026-09-03 — Phase 14 tab lifecycle commands
+
+- **Agent/role:** `/root`, direct investigator and builder; independent review verdict는 별도다.
+- **User policy:** `Command-Shift-T` recent-close history는 열린 탭 제한이 아니며, process-local LIFO 보관 한도를 20에서 100으로 확장했다.
+- **Implementation:** Application의 stable target scope에 `unchanged`를 추가하고 Tabs menu와 tab context menu에 All/Others/Left/Right/Unchanged/Unpinned close를 연결했다. shortcut이 없는 bulk 명령은 macOS 기본 chord와 충돌하지 않는다.
+- **Safety:** pinned tab은 bulk target에서 보호되고 dirty tab은 기존 shared save/discard/cancel review를 그대로 통과한다. Presentation은 접수된 close task를 termination gate가 join한 뒤 dirty review와 final recovery flush를 진행한다.
+- **Validation:** focused remediation 8/8와 Debug/Release full 221/221 PASS. headless Scintilla viewport의 비동기 first-visible-line settle을 문서 변이로 오인하던 기존 flaky assertion은 text/revision/selection/wrap/recovery byte 계약을 유지한 채 volatile layout 좌표만 제외했다. independent exact-byte review는 pending이다.
+- **Boundary:** 기존 사용자 변경 `docs/wiki/04-implementation-foundation.md`, `scripts/vendor_scintilla_5_6_6.sh`, README와 ignored Notepad++ reference는 제외·보존한다.
 
 ### 2026-09-03 — Phase 13 recently closed tabs independent review
 

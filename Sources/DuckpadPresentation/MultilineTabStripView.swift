@@ -181,7 +181,12 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         let menu = NSMenu(title: tab.title)
         add("Close", action: #selector(closeCurrent), to: menu)
         add("Close Others", action: #selector(closeOthers), to: menu)
+        add("Close to Left", action: #selector(closeLeft), to: menu)
         add("Close to Right", action: #selector(closeRight), to: menu)
+        menu.addItem(.separator())
+        add("Close All", action: #selector(closeAll), to: menu)
+        add("Close Unchanged", action: #selector(closeUnchanged), to: menu)
+        add("Close Unpinned", action: #selector(closeUnpinned), to: menu)
         menu.addItem(.separator())
         add(tab.isPinned ? "Unpin Tab" : "Pin Tab", action: #selector(togglePinned), to: menu)
         if tab.fullPath != nil {
@@ -202,7 +207,11 @@ private final class DuckpadTabItem: NSCollectionViewItem {
 
     @objc private func closeCurrent() { onContextAction?(.close(.current)) }
     @objc private func closeOthers() { onContextAction?(.close(.others)) }
+    @objc private func closeLeft() { onContextAction?(.close(.left)) }
     @objc private func closeRight() { onContextAction?(.close(.right)) }
+    @objc private func closeAll() { onContextAction?(.close(.all)) }
+    @objc private func closeUnchanged() { onContextAction?(.close(.unchanged)) }
+    @objc private func closeUnpinned() { onContextAction?(.close(.unpinned)) }
     @objc private func togglePinned() {
         guard let tab = configuredTab else { return }
         onContextAction?(.setPinned(!tab.isPinned))

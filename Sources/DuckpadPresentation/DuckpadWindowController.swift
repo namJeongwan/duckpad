@@ -189,6 +189,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var extensionStatusIsWarning = false
     private var terminationReviewInProgress = false
     private var pendingNewScratchTasks: [UUID: Task<Void, Never>] = [:]
+    private var pendingCloseTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingRestoreClosedTabTasks: [UUID: Task<Void, Never>] = [:]
 
     public init(
@@ -479,15 +480,51 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @discardableResult
     func performClose(_ id: TabID, decision: CloseDecision? = nil) -> Task<Void, Never> {
-        Task { @MainActor [weak self] in
-            guard let self, self.workspaceInteractionsAreActionable else { return }
-            await self.requestClose(tabID: id, decision: decision)
+        guard workspaceInteractionsAreActionable else { return Task {} }
+        return performClose(tabIDs: [id], decision: decision)
+    }
+
+    @discardableResult
+    private func performClose(
+        tabIDs: [TabID],
+        decision: CloseDecision? = nil
+    ) -> Task<Void, Never> {
+        let token = UUID()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.pendingCloseTasks.removeValue(forKey: token) }
+            await self.requestClose(
+                tabIDs: tabIDs,
+                retryingSaveTabID: nil,
+                forcedDecision: decision
+            )
         }
+        pendingCloseTasks[token] = task
+        return task
+    }
+
+    private func performClose(scope: TabCloseScope, relativeTo tabID: TabID) {
+        guard workspaceInteractionsAreActionable else { return }
+        let targets = workspace.tabIDs(for: scope, relativeTo: tabID)
+        guard !targets.isEmpty else { return }
+        performClose(tabIDs: targets)
     }
 
     @objc public func performCloseActiveTab(_ sender: Any? = nil) {
         guard let id = workspace.snapshot().tabs.first(where: \.isActive)?.id else { return }
         performClose(id)
+    }
+
+    @objc public func performCloseAllTabs(_ sender: Any? = nil) { performActiveCloseScope(.all) }
+    @objc public func performCloseOtherTabs(_ sender: Any? = nil) { performActiveCloseScope(.others) }
+    @objc public func performCloseTabsToLeft(_ sender: Any? = nil) { performActiveCloseScope(.left) }
+    @objc public func performCloseTabsToRight(_ sender: Any? = nil) { performActiveCloseScope(.right) }
+    @objc public func performCloseUnchangedTabs(_ sender: Any? = nil) { performActiveCloseScope(.unchanged) }
+    @objc public func performCloseUnpinnedTabs(_ sender: Any? = nil) { performActiveCloseScope(.unpinned) }
+
+    private func performActiveCloseScope(_ scope: TabCloseScope) {
+        guard let id = workspace.snapshot().tabs.first(where: \.isActive)?.id else { return }
+        performClose(scope: scope, relativeTo: id)
     }
 
     @objc public func performRestoreLastClosedTab(_ sender: Any? = nil) {
@@ -595,6 +632,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         if menuItem.action == #selector(performRestoreLastClosedTab(_:)) {
             return workspaceInteractionsAreActionable && workspace.canRestoreRecentlyClosedTab
         }
+        if let scope = closeScope(for: menuItem.action) {
+            guard workspaceInteractionsAreActionable,
+                  let active = workspace.snapshot().tabs.first(where: \.isActive)?.id else { return false }
+            return !workspace.tabIDs(for: scope, relativeTo: active).isEmpty
+        }
         switch menuItem.action {
         case #selector(performCloseActiveTab(_:)),
              #selector(performNextTab(_:)),
@@ -637,6 +679,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var actionableEditorViewOptions: (any EditorViewOptionsPort)? {
         guard editorCommandsAreActionable else { return nil }
         return activeEditor as? any EditorViewOptionsPort
+    }
+
+    private func closeScope(for action: Selector?) -> TabCloseScope? {
+        switch action {
+        case #selector(performCloseAllTabs(_:)): .all
+        case #selector(performCloseOtherTabs(_:)): .others
+        case #selector(performCloseTabsToLeft(_:)): .left
+        case #selector(performCloseTabsToRight(_:)): .right
+        case #selector(performCloseUnchangedTabs(_:)): .unchanged
+        case #selector(performCloseUnpinnedTabs(_:)): .unpinned
+        default: nil
+        }
     }
 
     private var actionableStandardEditorCommands: (any EditorStandardCommandPort)? {
@@ -813,6 +867,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func waitForAcceptedWorkspaceTasks() async {
         while let task = pendingNewScratchTasks.values.first
+            ?? pendingCloseTasks.values.first
             ?? pendingRestoreClosedTabTasks.values.first {
             await task.value
         }
@@ -1059,14 +1114,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    private func requestClose(tabID: TabID, decision forcedDecision: CloseDecision?) async {
-        await requestClose(
-            tabIDs: [tabID],
-            retryingSaveTabID: nil,
-            forcedDecision: forcedDecision
-        )
-    }
-
     private func requestClose(
         tabIDs: [TabID],
         retryingSaveTabID: TabID?,
@@ -1090,14 +1137,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
         )
         if case .failed(let failure) = outcome { presentCloseFailure(failure) }
-    }
-
-    private func requestClose(scope: TabCloseScope, relativeTo tabID: TabID) async {
-        let targets = workspace.tabIDs(for: scope, relativeTo: tabID)
-        await requestClose(
-            tabIDs: targets,
-            retryingSaveTabID: nil
-        )
     }
 
     private func closeDecision(for tab: TabSnapshot, saveAvailable: Bool) async -> CloseDecision {
@@ -1137,7 +1176,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard workspaceInteractionsAreActionable else { return }
         switch action {
         case .close(let scope):
-            Task { [weak self] in await self?.requestClose(scope: scope, relativeTo: tabID) }
+            performClose(scope: scope, relativeTo: tabID)
         case .setPinned(let pinned):
             Task { @MainActor [weak self] in
                 guard let self, self.workspaceInteractionsAreActionable else { return }
