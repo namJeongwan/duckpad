@@ -501,6 +501,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         navigateTabs(.lastUsed)
     }
 
+    @objc public func performShowDocumentSwitcher(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable else { return }
+        tabStrip.documentSwitcher.showDocumentSwitcher()
+    }
+
     @objc public func performMoveActiveTabLeft(_ sender: Any? = nil) {
         moveActiveTab(by: -1)
     }
@@ -576,6 +581,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performNextTab(_:)),
              #selector(performPreviousTab(_:)),
              #selector(performLastUsedTab(_:)),
+             #selector(performShowDocumentSwitcher(_:)),
              #selector(performMoveActiveTabLeft(_:)),
              #selector(performMoveActiveTabRight(_:)),
              #selector(performOpenFile(_:)),

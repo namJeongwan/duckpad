@@ -43,8 +43,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 29 | [Phase 9 independent code review](reviews/2026-09-03-phase-9-editor-view-options-code-review.md) | **Approved — latest Phase 9 evidence** | view/recovery/Scintilla/menu/close-race와 P9-01 remediation을 0 Blocker, 0 Major, 0 Minor로 승인했다. receipt SHA-256은 `b43abeabd167a748b25bad4d72f6951703188f973275995b920515808a979f8b`다. |
 | 30 | [Phase 10 standard editing commands and shortcuts](13-standard-editing-shortcuts.md) | **Content approved; exact receipt pending** | native Edit menu, Cmd-N/Z/Shift-Z/X/C/V/A, shortcut collision 검사, editor별 undo/clipboard command 계약과 세 review remediation을 기록한다. |
 | 31 | [Phase 10 independent code review](reviews/2026-09-03-phase-10-standard-editing-shortcuts-code-review.md) | **Content approved — latest Phase 10 evidence** | Cmd-N termination join, Scintilla IME responder semantics, fallback revision-exhaustion remediation을 0 Blocker, 0 Major, 0 Minor로 승인했다. candidate freeze/signing이 허가됐고 exact receipt는 pending이다. |
-| 32 | [Phase 11 workspace chrome and document dropdown](14-workspace-chrome-and-document-dropdown.md) | **Content approved; exact receipt pending** | 상단 blank-space 제거, compact multiline tabs, stable-ID document dropdown, 실제 status bar, language dropdown, Scintilla gutter/palette polish와 84% footprint 교체 앱 아이콘을 기록한다. P11-01…P11-03 독립 재검토가 0 Blocker/Major/Minor로 승인됐다. |
-| 33 | [Phase 11 independent code review](reviews/2026-09-03-phase-11-workspace-chrome-code-review.md) | **Content approved — latest Phase 11 evidence** | dropdown O(1) 증분 갱신, synchronous termination chrome admission, 네 모서리·전체 ICNS round-trip을 독립 재검증했다. exact staged receipt는 아직 발급하지 않았다. |
+| 32 | [Phase 11 workspace chrome and document dropdown](14-workspace-chrome-and-document-dropdown.md) | **Approved, committed and pushed** | 상단 blank-space 제거, compact multiline tabs, stable-ID document dropdown, 실제 status bar, language dropdown, Scintilla gutter/palette polish와 84% footprint 교체 앱 아이콘을 기록한다. commit `fff6c1c`가 exact receipt/audit 후 `origin/main`에 push됐다. |
+| 33 | [Phase 11 independent code review](reviews/2026-09-03-phase-11-workspace-chrome-code-review.md) | **Approved — latest Phase 11 evidence** | dropdown O(1) 증분 갱신, synchronous termination chrome admission, 네 모서리·전체 ICNS round-trip을 0 Blocker/Major/Minor로 독립 재검증했다. |
+| 34 | [Phase 12 searchable document switcher](15-searchable-document-switcher.md) | **Content approved; exact receipt pending** | title/path ranked filtering, stable-ID keyboard activation, adaptive native popover, `Command-Shift-O`, 5,000-tab budget와 termination admission을 기록한다. |
+| 35 | [Phase 12 independent code review](reviews/2026-09-03-phase-12-searchable-document-switcher-code-review.md) | **Content approved — latest Phase 12 evidence** | 최초 2 Major/1 Minor, 두 remediation round와 exact-tier/popover lifecycle closure를 기록하며 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -100,6 +102,15 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 12 searchable document switcher independent review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 12 구현과 remediation에는 참여하지 않았다.
+- **Initial findings:** exact multi-word title보다 path-only 결과가 앞서는 ranking, host window close 뒤 남는 popover를 Major로, 제거된 flat-menu 설명을 Minor로 판정했다. 실제 compiled probes로 두 Major를 재현했다.
+- **Remediation:** host-window/teardown dismissal과 historical documentation은 첫 re-review에서 닫혔다. scalar tier/offset 합산의 tier inversion을 추가 재현한 뒤, final tuple `tier → visual index` 정렬과 exact adversarial test로 P12-01까지 닫았다.
+- **Evidence:** independent initial focused 9/9 + Debug 204/204, first re-review focused 11/11, final focused 8/8와 `git diff --check` PASS. builder Debug/Release 205/205는 supporting evidence로만 기록한다.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** exact staged-candidate receipt는 pending이다.
+- **Boundary:** 이 review 문서와 index row/work log만 수정했다. source/tests/other docs/stage/sign/commit/push는 건드리지 않았고 doc04/vendor script/README/ignored Notepad++를 제외·보존했다.
 
 ### 2026-09-03 — Phase 11 P11-01…P11-03 independent focused re-review
 

@@ -51,7 +51,7 @@ final class DocumentSwitcherButton: NSButton {
     var onActivate: ((TabID) -> Void)?
     private(set) var updateMetrics = UpdateMetrics()
     private(set) var tabs: [TabSnapshot] = []
-    private let documentsMenu = NSMenu(title: "Open Documents")
+    let documentPanel = DocumentSwitcherPanel()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -68,6 +68,10 @@ final class DocumentSwitcherButton: NSButton {
         setAccessibilityIdentifier("duckpad.tab.documents")
         setAccessibilityLabel("Open Documents")
         translatesAutoresizingMaskIntoConstraints = false
+        documentPanel.onActivate = { [weak self] id in
+            guard self?.isEnabled == true else { return }
+            self?.onActivate?(id)
+        }
         updateButtonLabel()
     }
 
@@ -76,26 +80,23 @@ final class DocumentSwitcherButton: NSButton {
 
     func apply(tabs: [TabSnapshot]) {
         self.tabs = tabs
-        rebuildMenu()
+        if documentPanel.isPresented { documentPanel.apply(tabs: tabs) }
+        updateButtonLabel()
+        setInteractionsEnabled(isEnabled)
         updateMetrics.fullRebuilds += 1
     }
 
     func apply(change: WorkspaceChange) {
         switch change.kind {
         case .persistence:
-            guard tabs.count == change.snapshot.tabs.count else {
-                apply(tabs: change.snapshot.tabs)
-                return
-            }
-            tabs = change.snapshot.tabs
+            guard tabs.count == change.snapshot.tabs.count else { return apply(tabs: change.snapshot.tabs) }
         case .tabUpdated(let index), .bufferEdited(let index):
             guard tabs.count == change.snapshot.tabs.count,
-                  tabs.indices.contains(index), documentsMenu.items.indices.contains(index) else {
+                  tabs.indices.contains(index) else {
                 apply(tabs: change.snapshot.tabs)
                 return
             }
             tabs[index] = change.snapshot.tabs[index]
-            configure(documentsMenu.items[index], tab: tabs[index], index: index)
             updateMetrics.itemUpdates += 1
             updateMetrics.incrementalItemInspections += 1
         case .activeTabChanged(let previousIndex, let currentIndex):
@@ -103,82 +104,38 @@ final class DocumentSwitcherButton: NSButton {
                 .compactMap { $0 }
                 .reduce(into: [Int]()) { indices, index in
                     if !indices.contains(index) { indices.append(index) }
-                }
+            }
             guard tabs.count == change.snapshot.tabs.count,
                   !affected.isEmpty,
-                  affected.allSatisfy({ tabs.indices.contains($0) && documentsMenu.items.indices.contains($0) }) else {
+                  affected.allSatisfy({ tabs.indices.contains($0) }) else {
                 apply(tabs: change.snapshot.tabs)
                 return
             }
-            tabs = change.snapshot.tabs
             for index in affected {
-                configure(documentsMenu.items[index], tab: tabs[index], index: index)
+                tabs[index] = change.snapshot.tabs[index]
             }
             updateMetrics.itemUpdates += affected.count
             updateMetrics.incrementalItemInspections += affected.count
         default:
-            apply(tabs: change.snapshot.tabs)
+            return apply(tabs: change.snapshot.tabs)
         }
+        if documentPanel.isPresented { documentPanel.apply(tabs: tabs) }
         updateButtonLabel()
     }
 
     func setInteractionsEnabled(_ enabled: Bool) {
         isEnabled = enabled && !tabs.isEmpty
+        if !enabled { documentPanel.dismiss() }
     }
-
-    func menuItem(for tabID: TabID) -> NSMenuItem? {
-        documentsMenu.items.first { ($0.representedObject as? String) == tabID.rawValue.uuidString }
-    }
-
-    var menuItems: [NSMenuItem] { documentsMenu.items }
 
     @objc private func showDocuments() {
-        guard isEnabled, !documentsMenu.items.isEmpty else { return }
-        let active = tabs.firstIndex(where: \.isActive).flatMap {
-            documentsMenu.items.indices.contains($0) ? documentsMenu.items[$0] : nil
-        }
-        documentsMenu.popUp(
-            positioning: active,
-            at: NSPoint(x: bounds.minX, y: bounds.minY - 4),
-            in: self
-        )
+        showDocumentSwitcher()
     }
 
-    @objc private func activateDocument(_ sender: NSMenuItem) {
-        guard isEnabled,
-              let raw = sender.representedObject as? String,
-              let uuid = UUID(uuidString: raw) else { return }
-        onActivate?(TabID(rawValue: uuid))
-    }
-
-    private func rebuildMenu() {
-        documentsMenu.removeAllItems()
-        for (index, tab) in tabs.enumerated() {
-            let item = NSMenuItem(title: "", action: #selector(activateDocument(_:)), keyEquivalent: "")
-            item.target = self
-            documentsMenu.addItem(item)
-            configure(item, tab: tab, index: index)
-        }
-        updateButtonLabel()
-        setInteractionsEnabled(isEnabled)
-    }
-
-    private func configure(_ item: NSMenuItem, tab: TabSnapshot, index: Int) {
-        let dirtySuffix = tab.isDirty ? " — Edited" : ""
-        item.title = "\(index + 1). \(tab.title)\(dirtySuffix)"
-        item.representedObject = tab.id.rawValue.uuidString
-        item.state = tab.isActive ? .on : .off
-        item.image = NSImage(
-            systemSymbolName: tab.isPinned ? "pin.fill" : (tab.fullPath == nil ? "note.text" : "doc.text"),
-            accessibilityDescription: nil
-        )
-        item.toolTip = tab.fullPath ?? "Unsaved scratch document"
-        item.setAccessibilityLabel(
-            "Document \(index + 1), \(tab.title), "
-                + (tab.isActive ? "selected" : "not selected")
-                + (tab.isDirty ? ", modified" : "")
-                + (tab.isPinned ? ", pinned" : "")
-        )
+    func showDocumentSwitcher() {
+        guard isEnabled, !tabs.isEmpty else { return }
+        documentPanel.apply(tabs: tabs)
+        documentPanel.present(relativeTo: self)
     }
 
     private func updateButtonLabel() {

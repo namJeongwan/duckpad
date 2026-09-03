@@ -389,6 +389,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     func tearDownHostedViews() {
+        documentSwitcher.documentPanel.dismiss()
         flowLayout.onContentHeightChange = nil
         hostedCollectionView.dataSource = nil
         hostedCollectionView.delegate = nil

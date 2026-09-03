@@ -19,10 +19,11 @@
 
 ## 2. 변경 불가 개발 규칙
 
-### 2.1 Local Git only
+### 2.1 Reviewed local commits and controlled GitHub delivery
 
-- Duckpad 작업 이력은 Duckpad 저장소의 **로컬 Git**에만 기록한다.
-- 원격 저장소 추가, push, pull, 원격 PR 생성은 별도 정책이 명시적으로 확정되기 전까지 금지한다.
+- Duckpad 변경은 먼저 로컬 Git에서 review receipt, verified commit과 post-commit audit를 완료한다.
+- 2026-09-03 사용자 승인에 따라 canonical remote는 `https://github.com/namJeongwan/duckpad.git`, delivery branch는 `main`이다. 검증이 끝난 로컬 commit만 `origin/main`에 push한다.
+- force-push, history rewrite, 다른 remote/branch publication과 원격 PR 생성은 별도 명시적 승인 전까지 금지한다.
 - `notepad-plus-plus/`처럼 참고용으로 가져온 저장소의 내부 Git 이력과 Duckpad 제품 이력을 혼합하지 않는다.
 - 커밋 전 `git status --short`, `git diff --check`, staged diff와 포함 파일을 확인한다.
 - 사용자 변경과 다른 에이전트 변경을 임의로 되돌리거나 함께 커밋하지 않는다.
@@ -33,7 +34,7 @@
 - Duckpad 제품 루트가 단 하나의 명확한 Git 경계다.
 - 참고 소스의 보관 방식과 라이선스 출처가 문서화되어 있다.
 - ignore 규칙이 Xcode 사용자 상태, DerivedData, 세션 테스트 산출물과 비밀 파일을 제외한다.
-- 원격은 구성하지 않는다. 확인 명령 `git remote -v`의 결과가 비어 있어야 한다.
+- `origin` fetch/push URL은 canonical Duckpad remote와 정확히 일치해야 한다. Notepad++ reference repository의 remote나 객체를 Duckpad delivery에 혼합하지 않는다.
 
 ### 2.2 English-only commit messages
 
@@ -304,7 +305,7 @@ Gate:
 
 - clean clone에 해당하는 새 로컬 checkout에서 명령 한 번으로 Debug build와 unit test가 성공한다.
 - Domain/Application target이 AppKit, SwiftUI, Scintilla를 의존하지 않는지 검증한다.
-- `git remote -v`가 비어 있고 참고 소스 출처 및 라이선스가 기록되어 있다.
+- `git remote get-url origin`이 canonical Duckpad URL과 일치하고 참고 소스 출처 및 라이선스가 기록되어 있다.
 - review verifier, local commit wrapper, repository-managed raw-commit rejection hook이 설치되어 있다.
 - governance end-to-end fixture가 root/후속 commit 성공과 mutation/identity/receipt 실패 시나리오를 모두 통과한다.
 - 예제 변경 하나가 investigator → builder → independent reviewer → two-artifact receipt → verified local commit → post-commit audit 흐름을 통과한다.

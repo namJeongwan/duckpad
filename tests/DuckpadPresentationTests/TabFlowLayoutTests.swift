@@ -266,7 +266,147 @@ private func flattenedMenuItems(in menu: NSMenu) -> [NSMenuItem] {
 
 @Suite(.serialized)
 struct AppKitHostedTests {
-@Test @MainActor func documentDropdownMirrorsOpenTabsAndRoutesExactStableIdentity() {
+@Test @MainActor func documentSwitcherSearchMatchesTitlePathAndDiacriticsDeterministically() {
+    let tabs = [
+        TabSnapshot(
+            id: TabID(), title: "Résumé.md", isActive: false, isDirty: false, isPinned: false,
+            buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0),
+            fullPath: "/Users/duck/Notes/Résumé.md"
+        ),
+        TabSnapshot(
+            id: TabID(), title: "server.swift", isActive: true, isDirty: true, isPinned: false,
+            buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 1),
+            fullPath: "/Users/duck/Sources/API/server.swift"
+        ),
+        TabSnapshot(
+            id: TabID(), title: "scratch SQL", isActive: false, isDirty: false, isPinned: true,
+            buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        ),
+    ]
+
+    #expect(DocumentSwitcherSearch.matchingIndices(in: tabs, query: "resume") == [0])
+    #expect(DocumentSwitcherSearch.matchingIndices(in: tabs, query: "api swift") == [1])
+    #expect(DocumentSwitcherSearch.matchingIndices(in: tabs, query: "SCRATCH sql") == [2])
+    #expect(DocumentSwitcherSearch.matchingIndices(in: tabs, query: "missing").isEmpty)
+    #expect(DocumentSwitcherSearch.matchingIndices(in: tabs, query: "   ") == [0, 1, 2])
+
+    let exactTitle = TabSnapshot(
+        id: TabID(), title: "server swift", isActive: false, isDirty: false, isPinned: false,
+        buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0),
+        fullPath: "/Later/server-swift.txt"
+    )
+    let pathMixed = TabSnapshot(
+        id: TabID(), title: "server", isActive: false, isDirty: false, isPinned: false,
+        buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0),
+        fullPath: "/Earlier/swift/server.txt"
+    )
+    #expect(
+        DocumentSwitcherSearch.matchingIndices(in: [pathMixed, exactTitle], query: "server swift")
+            == [1, 0]
+    )
+
+    let manyTerms = "a b c d e f g h i j"
+    let phraseContained = TabSnapshot(
+        id: TabID(), title: String(repeating: "x", count: 1_200) + manyTerms,
+        isActive: false, isDirty: false, isPinned: false,
+        buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+    )
+    let allTermsOnly = TabSnapshot(
+        id: TabID(), title: "abcdefghij", isActive: false, isDirty: false, isPinned: false,
+        buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+    )
+    #expect(
+        DocumentSwitcherSearch.matchingIndices(
+            in: [allTermsOnly, phraseContained], query: manyTerms
+        ) == [1, 0]
+    )
+}
+
+@Test @MainActor func documentSwitcherPanelRoutesFilteredSelectionByStableTabIdentity() {
+    _ = NSApplication.shared
+    let tabs = makeTabs(count: 4, activeIndex: 1, dirtyIndex: 3)
+    let panel = DocumentSwitcherPanel()
+    var activated: TabID?
+    panel.onActivate = { activated = $0 }
+    panel.apply(tabs: tabs)
+    #expect(panel.selectedTabID == tabs[1].id)
+
+    #expect(panel.control(
+        NSSearchField(), textView: NSTextView(),
+        doCommandBy: #selector(NSResponder.moveDown(_:))
+    ))
+    #expect(panel.selectedTabID == tabs[2].id)
+
+    panel.setQuery("new 4")
+    #expect(panel.filteredTabs.map(\.id) == [tabs[3].id])
+    panel.activateSelectedResult()
+    #expect(activated == tabs[3].id)
+
+    activated = nil
+    panel.setQuery("does-not-exist")
+    panel.activateSelectedResult()
+    #expect(activated == nil)
+}
+
+@Test @MainActor func documentSwitcherSearchHandlesFiveThousandTabsWithinInteractionBudget() {
+    let tabs = makeTabs(count: 5_000, activeIndex: 2_500)
+    let clock = ContinuousClock()
+    var result: [Int] = []
+    let elapsed = clock.measure {
+        result = DocumentSwitcherSearch.matchingIndices(in: tabs, query: "new 4999")
+    }
+    #expect(result == [4_998])
+    #expect(elapsed < .milliseconds(250))
+}
+
+@Test @MainActor func documentSwitcherPopoverOpensFromChromeAndClosesWhenInteractionsLock() {
+    let tabs = makeTabs(count: 8, activeIndex: 3)
+    let (window, _, strip) = hostStrip(width: 560, height: 360, tabs: tabs)
+    defer {
+        strip.documentSwitcher.documentPanel.dismiss()
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+    strip.setInteractionsEnabled(true)
+
+    strip.documentSwitcher.showDocumentSwitcher()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    #expect(strip.documentSwitcher.documentPanel.isPresented)
+    #expect(strip.documentSwitcher.documentPanel.selectedTabID == tabs[3].id)
+
+    let expanded = tabs + [
+        TabSnapshot(
+            id: TabID(), title: "late document", isActive: false, isDirty: false, isPinned: false,
+            buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        ),
+    ]
+    strip.apply(tabs: expanded)
+    #expect(strip.documentSwitcher.documentPanel.tabs.count == expanded.count)
+
+    strip.setInteractionsEnabled(false)
+    RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+    #expect(!strip.documentSwitcher.documentPanel.isPresented)
+}
+
+@Test @MainActor func documentSwitcherPopoverClosesWithItsHostWindow() {
+    let tabs = makeTabs(count: 3, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 500, height: 300, tabs: tabs)
+    window.makeKeyAndOrderFront(nil)
+    strip.setInteractionsEnabled(true)
+    strip.documentSwitcher.showDocumentSwitcher()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    #expect(strip.documentSwitcher.documentPanel.isPresented)
+
+    window.close()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    #expect(!strip.documentSwitcher.documentPanel.isPresented)
+    strip.tearDownHostedViews()
+    window.contentView = nil
+}
+
+@Test @MainActor func documentSwitcherChromeMirrorsOpenTabsAndUpdatesIncrementally() {
     _ = NSApplication.shared
     let tabs = makeTabs(count: 3, activeIndex: 1, dirtyIndex: 2)
     let (window, _, strip) = hostStrip(width: 420, height: 280, tabs: tabs)
@@ -278,15 +418,8 @@ struct AppKitHostedTests {
 
     #expect(strip.documentSwitcher.tabs.count == 3)
     #expect(strip.documentSwitcher.title == "3")
-    #expect(strip.documentSwitcher.menuItems.map(\.state) == [.off, .on, .off])
-    #expect(strip.documentSwitcher.menuItems[2].title == "3. new 3 — Edited")
-    #expect(strip.documentSwitcher.menuItems[2].toolTip == "Unsaved scratch document")
-
-    var activated: TabID?
-    strip.onActivate = { activated = $0 }
-    let first = strip.documentSwitcher.menuItems[0]
-    #expect(NSApplication.shared.sendAction(first.action!, to: first.target, from: first))
-    #expect(activated == tabs[0].id)
+    #expect(strip.documentSwitcher.tabs.map(\.isActive) == [false, true, false])
+    #expect(strip.documentSwitcher.tabs[2].isDirty)
 
     let before = strip.documentSwitcher.updateMetrics
     var updated = tabs
@@ -314,7 +447,7 @@ struct AppKitHostedTests {
         strip.documentSwitcher.updateMetrics.incrementalItemInspections
             == before.incrementalItemInspections + 1
     )
-    #expect(strip.documentSwitcher.menuItems[2].title == "3. new 3")
+    #expect(!strip.documentSwitcher.tabs[2].isDirty)
 
     let activeBefore = strip.documentSwitcher.updateMetrics
     updated[1] = TabSnapshot(
@@ -334,7 +467,7 @@ struct AppKitHostedTests {
         ),
         kind: .activeTabChanged(previousIndex: 1, currentIndex: 0)
     ))
-    #expect(strip.documentSwitcher.menuItems.map(\.state) == [.on, .off, .off])
+    #expect(strip.documentSwitcher.tabs.map(\.isActive) == [true, false, false])
     #expect(strip.documentSwitcher.updateMetrics.itemUpdates == activeBefore.itemUpdates + 2)
     #expect(
         strip.documentSwitcher.updateMetrics.incrementalItemInspections
@@ -342,7 +475,7 @@ struct AppKitHostedTests {
     )
 }
 
-@Test @MainActor func documentDropdownIncrementalWorkStaysConstantAtScale() {
+@Test @MainActor func documentSwitcherIncrementalWorkStaysConstantAtScale() {
     _ = NSApplication.shared
     for count in [500, 5_000] {
         let button = DocumentSwitcherButton(frame: .zero)
@@ -548,6 +681,12 @@ struct AppKitHostedTests {
     #expect(close?.action == #selector(DuckpadWindowController.performCloseActiveTab(_:)))
     #expect(close?.keyEquivalent == "w")
     #expect(close?.keyEquivalentModifierMask == [.command])
+
+    let openDocument = menuItem("Open Document…", in: menu)
+    #expect(openDocument?.action == #selector(DuckpadWindowController.performShowDocumentSwitcher(_:)))
+    #expect(openDocument?.keyEquivalent == "o")
+    #expect(openDocument?.keyEquivalentModifierMask == [.command, .shift])
+    if let openDocument { #expect(controller.validateMenuItem(openDocument)) }
 
     let mru = menuItem("Last Used Tab", in: menu)
     let reverseMRU = menuItem("Previous in Tab History", in: menu)

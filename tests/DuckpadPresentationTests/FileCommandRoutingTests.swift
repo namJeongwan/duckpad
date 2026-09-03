@@ -680,9 +680,10 @@ struct FileLifecycleTests {
         controller.performNewScratch()
         controller.performActivate(firstID)
         controller.tabStrip.performMiddleClick(tabID: activeID)
-        if let item = controller.tabStrip.documentSwitcher.menuItem(for: firstID) {
-            #expect(NSApplication.shared.sendAction(item.action!, to: item.target, from: item))
-        }
+        let documentPanel = controller.tabStrip.documentSwitcher.documentPanel
+        documentPanel.apply(tabs: workspace.snapshot().tabs)
+        documentPanel.setQuery(workspace.snapshot().tabs[0].title)
+        documentPanel.activateSelectedResult()
         for _ in 0..<20 { await Task.yield() }
         #expect(workspace.snapshot().tabs.count == originalCount)
         #expect(workspace.snapshot().tabs.first(where: \.isActive)?.id == activeID)

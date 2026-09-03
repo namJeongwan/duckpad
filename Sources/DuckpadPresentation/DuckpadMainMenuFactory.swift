@@ -63,6 +63,15 @@ public enum DuckpadMainMenuFactory {
         mainMenu.addItem(tabItem)
         let tabMenu = NSMenu(title: "Tabs")
         add(
+            "Open Document…",
+            #selector(DuckpadWindowController.performShowDocumentSwitcher(_:)),
+            "o",
+            target,
+            modifiers: [.command, .shift],
+            to: tabMenu
+        )
+        tabMenu.addItem(.separator())
+        add(
             "Next Tab in Visual Order",
             #selector(DuckpadWindowController.performNextTab(_:)),
             String(UnicodeScalar(NSRightArrowFunctionKey)!),

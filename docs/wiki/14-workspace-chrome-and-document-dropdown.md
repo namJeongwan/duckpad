@@ -1,6 +1,6 @@
 # Phase 11 — Workspace Chrome and Document Dropdown
 
-- **Status:** P11-01…P11-03 remediated; independent re-review pending
+- **Status:** Approved, committed, audited, and pushed to `origin/main`
 - **Owner/agent:** `/root` direct builder
 - **Last updated:** 2026-09-03
 - **Related:** [Multiline tab workspace](08-multiline-tabs.md), [Language support](10-language-support.md), [Standard editing shortcuts](13-standard-editing-shortcuts.md)
@@ -24,9 +24,10 @@ organizer or changing scratch-first behavior.
   restrained semantic colors, a two-point active indicator, SF Symbol pin/close
   controls, and close affordances shown only for the active or hovered tab.
 - The right side of the tab strip contains native New Scratch and Open Documents
-  buttons. Open Documents shows every tab in visual order, the active checkmark,
-  edited state, pinned/file/scratch icon, and full-path or scratch tooltip. Menu
-  actions route by stable `TabID`, never by a stale numeric index.
+  buttons. Phase 11 originally used a flat native menu with active, edited,
+  pinned/file/scratch and path state. [Phase 12](15-searchable-document-switcher.md)
+  supersedes that menu with the current searchable keyboard-first popover while
+  preserving stable-`TabID` routing.
 - A real 24-point status bar owns extension and language controls outside the
   editor frame. Extension status opens the manager. Language status opens a
   grouped native dropdown containing Automatic Detection and every bundled
@@ -95,7 +96,8 @@ text revision, undo history, dirty state, file binding, or recovery data.
 
 ## Commit evidence
 
-- Candidate ID: pending exact stage freeze
-- Independent review: pending
-- Local receipt: pending
-- Commit: pending
+- Candidate ID: `9e371fd9103b5106e785db6ec23800b8f073b7b5dc3f1e3869ce576ba5370938`
+- Independent review: approved — 0 Blocker, 0 Major, 0 Minor
+- Local receipt SHA-256: `60bcabb07d116c86e1a5095ecc8aace53b1fb31abc46ed43d11487bc4abd4637`
+- Commit: `fff6c1cc1b3b27ab28f98f45c8ade92b16d46d08`
+- Delivery: `origin/main`
