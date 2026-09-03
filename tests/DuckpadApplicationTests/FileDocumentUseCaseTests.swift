@@ -10,6 +10,9 @@ private actor FileStoreFake: TextFileStore {
     private var blockNextWrite = false
     private var blockedWriteEntered = false
     private var releaseBlockedWrite = false
+    private var blockNextRead = false
+    private var blockedReadEntered = false
+    private var releaseBlockedRead = false
     private var forcedWriteError: TextFileStoreError?
 
     func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL {
@@ -18,6 +21,11 @@ private actor FileStoreFake: TextFileStore {
 
     func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult {
         readCount += 1
+        if blockNextRead {
+            blockNextRead = false
+            blockedReadEntered = true
+            while !releaseBlockedRead { await Task.yield() }
+        }
         guard let file = files[url.standardizedFileURL.path] else { throw .notFound(url.path) }
         return file
     }
@@ -52,10 +60,14 @@ private actor FileStoreFake: TextFileStore {
     func externalReplace(_ text: String, at url: URL) { seed(text, at: url) }
     func text(at url: URL) -> String? { files[url.standardizedFileURL.path].flatMap { String(data: $0.data, encoding: .utf8) } }
     func data(at url: URL) -> Data? { files[url.standardizedFileURL.path]?.data }
+    func result(at url: URL) -> FileReadResult? { files[url.standardizedFileURL.path] }
     func setWriteError(_ error: TextFileStoreError?) { forcedWriteError = error }
     func armBlockedWrite() { blockNextWrite = true; blockedWriteEntered = false; releaseBlockedWrite = false }
     func waitForBlockedWrite() async { while !blockedWriteEntered { await Task.yield() } }
     func releaseWrite() { releaseBlockedWrite = true }
+    func armBlockedRead() { blockNextRead = true; blockedReadEntered = false; releaseBlockedRead = false }
+    func waitForBlockedRead() async { while !blockedReadEntered { await Task.yield() } }
+    func releaseRead() { releaseBlockedRead = true }
 
     private func makeIdentity(path: String, data: Data, serial: UInt64) -> FileIdentity {
         FileIdentity(canonicalPath: path, device: 1, inode: 1, byteCount: UInt64(data.count), modifiedNanoseconds: Int64(serial), contentToken: "token-\(serial)-\(data.count)")
@@ -147,12 +159,272 @@ private final class FileEditorFake: EditorPort {
     await files.externalReplace("external", at: url)
     guard case .conflict = await useCase.saveActive() else { Issue.record("expected conflict"); return }
     #expect(await files.text(at: url) == "external")
+    guard case .ready(let comparison) = await useCase.pendingExternalComparison() else {
+        Issue.record("comparison snapshot unavailable")
+        return
+    }
+    #expect(comparison.tabID == workspace.activeFileContext()?.tabID)
+    #expect(comparison.path == url.path)
+    #expect(comparison.localText == "mine")
+    #expect(comparison.externalText == "external")
+    #expect(comparison.localRevision == workspace.activeFileContext()?.buffer.revision)
+    #expect(await useCase.resolveConflict(.compare) == .conflict(
+        tabID: comparison.tabID,
+        current: comparison.externalIdentity
+    ))
+    #expect(editor.snapshot(for: workspace.activeFileContext()!.buffer.bufferID)?.text == "mine")
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == true)
+    #expect(await files.text(at: url) == "external")
     #expect(await useCase.resolveConflict(.cancel) == .cancelled(workspace.activeFileContext()!.tabID))
     #expect(await files.text(at: url) == "external")
     guard case .conflict = await useCase.saveActive() else { Issue.record("expected second conflict"); return }
     #expect(editor.snapshot(for: workspace.activeFileContext()!.buffer.bufferID)?.text == "mine")
     #expect(await useCase.resolveConflict(.overwrite) == .saved(workspace.activeFileContext()!.tabID))
     #expect(await files.text(at: url) == "mine")
+}
+
+@Test @MainActor func oversizedExternalComparisonPreservesPendingConflict() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-large-conflict.txt")
+    await files.seed("base", at: url)
+    let useCase = FileDocumentUseCase(
+        workspace: workspace,
+        editor: editor,
+        store: files,
+        maximumComparisonBytes: 4
+    )
+    _ = await useCase.open(url)
+    editor.replaceWith("mine")
+    await files.externalReplace("external", at: url)
+
+    guard case .conflict(let tabID, let current) = await useCase.saveActive() else {
+        Issue.record("expected conflict")
+        return
+    }
+    #expect(await useCase.pendingExternalComparison() == .failed(
+        .comparisonTooLarge(actual: 8, limit: 4)
+    ))
+    #expect(await files.text(at: url) == "external")
+    #expect(await useCase.resolveConflict(.cancel) == .cancelled(tabID))
+    #expect(current != nil)
+}
+
+@Test @MainActor func editDuringExternalComparisonReadInvalidatesSnapshotWithoutConsumingConflict() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-comparison-edit-race.txt")
+    await files.seed("base", at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    _ = await useCase.open(url)
+    editor.replaceWith("mine-before-read")
+    await files.externalReplace("external", at: url)
+    guard case .conflict(let tabID, _) = await useCase.saveActive() else {
+        Issue.record("expected conflict")
+        return
+    }
+    await files.armBlockedRead()
+
+    let comparison = Task { await useCase.pendingExternalComparison() }
+    await files.waitForBlockedRead()
+    #expect(editor.replaceWith("mine-after-read") == .accepted(newRevision: 2))
+    await files.releaseRead()
+
+    #expect(await comparison.value == .failed(.comparisonInvalidated))
+    #expect(editor.snapshot(for: workspace.activeFileContext()!.buffer.bufferID)?.text == "mine-after-read")
+    #expect(await files.text(at: url) == "external")
+    #expect(await useCase.resolveConflict(.cancel) == .cancelled(tabID))
+}
+
+@Test @MainActor func closeDuringExternalComparisonReadInvalidatesSnapshot() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-comparison-close-race.txt")
+    await files.seed("base", at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    _ = await useCase.open(url)
+    editor.replaceWith("mine")
+    await files.externalReplace("external", at: url)
+    guard case .conflict(let tabID, _) = await useCase.saveActive() else {
+        Issue.record("expected conflict")
+        return
+    }
+    let revision = workspace.fileContext(tabID: tabID)!.buffer.revision
+    await files.armBlockedRead()
+
+    let comparison = Task { await useCase.pendingExternalComparison() }
+    await files.waitForBlockedRead()
+    guard case .closed = await workspace.close(tabID: tabID, decision: .discard, expectedRevision: revision) else {
+        Issue.record("close failed")
+        await files.releaseRead()
+        return
+    }
+    await files.releaseRead()
+
+    #expect(await comparison.value == .failed(.comparisonInvalidated))
+    #expect(await files.text(at: url) == "external")
+}
+
+@Test @MainActor func editAfterPresentedComparisonPreventsReloadDataLoss() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-comparison-presented-edit.txt")
+    await files.seed("base", at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    _ = await useCase.open(url)
+    editor.replaceWith("mine-before-compare")
+    _ = await workspace.flushPersistence()
+    await files.externalReplace("external", at: url)
+    guard case .conflict(let tabID, _) = await useCase.saveActive(),
+          case .ready = await useCase.pendingExternalComparison() else {
+        Issue.record("comparison unavailable")
+        return
+    }
+
+    #expect(editor.replaceWith("mine-after-compare") == .accepted(newRevision: 2))
+    guard case .failed(.editorRevisionMismatch(_, let expected, let actual)) =
+        await useCase.resolveConflict(.reload) else {
+        Issue.record("reload did not reject the newer edit")
+        return
+    }
+    #expect(expected == 1)
+    #expect(actual == 2)
+    #expect(editor.snapshot(for: workspace.fileContext(tabID: tabID)!.buffer.bufferID)?.text == "mine-after-compare")
+    #expect(await files.text(at: url) == "external")
+    #expect(await useCase.resolveConflict(.cancel) == .cancelled(tabID))
+}
+
+@Test @MainActor func editDuringReloadReadPreventsReloadDataLoss() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-reload-edit-race.txt")
+    await files.seed("base", at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    _ = await useCase.open(url)
+    editor.replaceWith("mine-before-reload")
+    _ = await workspace.flushPersistence()
+    await files.externalReplace("external", at: url)
+    guard case .conflict(let tabID, _) = await useCase.saveActive() else {
+        Issue.record("expected conflict")
+        return
+    }
+    await files.armBlockedRead()
+
+    let reload = Task { await useCase.resolveConflict(.reload) }
+    await files.waitForBlockedRead()
+    #expect(editor.replaceWith("mine-during-reload") == .accepted(newRevision: 2))
+    await files.releaseRead()
+
+    #expect(await reload.value == .failed(.editorRevisionMismatch(
+        bufferID: workspace.fileContext(tabID: tabID)!.buffer.bufferID,
+        expected: 1,
+        actual: 2
+    )))
+    #expect(editor.snapshot(for: workspace.fileContext(tabID: tabID)!.buffer.bufferID)?.text == "mine-during-reload")
+    #expect(await files.text(at: url) == "external")
+    #expect(await useCase.resolveConflict(.cancel) == .cancelled(tabID))
+}
+
+@Test @MainActor func closeAfterPresentedComparisonInvalidatesReload() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-comparison-presented-close.txt")
+    await files.seed("base", at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    _ = await useCase.open(url)
+    editor.replaceWith("mine")
+    await files.externalReplace("external", at: url)
+    guard case .conflict(let tabID, _) = await useCase.saveActive(),
+          case .ready = await useCase.pendingExternalComparison() else {
+        Issue.record("comparison unavailable")
+        return
+    }
+    let revision = workspace.fileContext(tabID: tabID)!.buffer.revision
+    guard case .closed = await workspace.close(tabID: tabID, decision: .discard, expectedRevision: revision) else {
+        Issue.record("close failed")
+        return
+    }
+
+    #expect(await useCase.resolveConflict(.reload) == .failed(.comparisonInvalidated))
+    #expect(await files.text(at: url) == "external")
+}
+
+@Test @MainActor func rebindAfterPresentedComparisonInvalidatesReloadAtSameRevision() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let originalURL = URL(fileURLWithPath: "/tmp/duckpad-comparison-original.txt")
+    let reboundURL = URL(fileURLWithPath: "/tmp/duckpad-comparison-rebound.txt")
+    await files.seed("base", at: originalURL)
+    await files.seed("rebound", at: reboundURL)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    _ = await useCase.open(originalURL)
+    editor.replaceWith("mine")
+    await files.externalReplace("external", at: originalURL)
+    guard case .conflict(let tabID, _) = await useCase.saveActive(),
+          case .ready = await useCase.pendingExternalComparison(),
+          let reboundRead = await files.result(at: reboundURL),
+          let context = workspace.fileContext(tabID: tabID) else {
+        Issue.record("comparison fixture unavailable")
+        return
+    }
+    let reboundBinding = FileBinding(
+        canonicalPath: reboundRead.identity.canonicalPath,
+        encoding: .utf8,
+        byteOrderMark: .absent,
+        lineEnding: .none,
+        observedIdentity: reboundRead.identity
+    )
+    guard case .applied = await workspace.bindSavedFile(
+        tabID: tabID,
+        binding: reboundBinding,
+        title: reboundURL.lastPathComponent,
+        savedRevision: context.buffer.revision
+    ) else {
+        Issue.record("rebind failed")
+        return
+    }
+
+    #expect(workspace.fileContext(tabID: tabID)?.buffer.revision == context.buffer.revision)
+    #expect(await useCase.resolveConflict(.reload) == .failed(.comparisonInvalidated))
+    #expect(workspace.fileContext(tabID: tabID)?.binding == reboundBinding)
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "mine")
+    #expect(await files.text(at: originalURL) == "external")
+    #expect(await useCase.resolveConflict(.cancel) == .cancelled(tabID))
 }
 
 @Test @MainActor func editAcceptedDuringSaveRemainsDirtyAfterOlderSnapshotBecomesDurable() async {

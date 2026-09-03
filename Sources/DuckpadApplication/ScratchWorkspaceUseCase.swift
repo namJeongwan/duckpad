@@ -842,12 +842,24 @@ public final class ScratchWorkspaceUseCase {
     }
 
     @discardableResult
-    public func replaceFileContents(tabID: TabID, binding: FileBinding, title: String) async -> WorkspaceActionOutcome {
+    public func replaceFileContents(
+        tabID: TabID,
+        binding: FileBinding,
+        title: String,
+        expectedRevision: UInt64,
+        expectedBinding: FileBinding?
+    ) async -> WorkspaceActionOutcome {
         await acquireTransaction()
         defer { releaseTransaction() }
         var candidate = session
         do {
-            _ = try candidate.replaceFileContents(tabID: tabID, binding: binding, title: title)
+            _ = try candidate.replaceFileContents(
+                tabID: tabID,
+                binding: binding,
+                title: title,
+                expectedRevision: expectedRevision,
+                expectedBinding: expectedBinding
+            )
             guard let index = candidate.tabs.firstIndex(where: { $0.id == tabID }) else { return .rejected(.unknownTab(tabID)) }
             return await persistMutation(candidate, kind: .tabUpdated(index: index), retry: .saveCurrent)
         } catch let error as SessionError { return .rejected(error) }

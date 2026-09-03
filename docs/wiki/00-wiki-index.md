@@ -53,6 +53,8 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 39 | [Phase 14 independent code review](reviews/2026-09-03-phase-14-tab-lifecycle-code-review.md) | **Content approved — latest Phase 14 evidence** | 초기 accepted-close termination race Major와 LIFO test Minor를 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 40 | [Phase 15 advanced editing commands](18-advanced-editing-commands.md) | **Content approved; exact receipt pending** | 줄 복제/이동/삭제/합치기, 들여쓰기, 대소문자 변환, 후행 공백 제거와 충돌 없는 native shortcut surface를 기록한다. |
 | 41 | [Phase 15 independent code review](reviews/2026-09-03-phase-15-advanced-editing-code-review.md) | **Content approved — latest Phase 15 evidence** | 최초 3 Major의 Join 경계, revision exhaustion 원자성, fallback selection/EOL 결함을 focused remediation 재검증으로 모두 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
+| 42 | [Phase 16 external file Compare](19-external-file-compare.md) | **Content approved; exact receipt pending** | 외부 변경 충돌에서 비파괴 local/external 비교, 32 MiB 표시 한도와 Compare 이후 Reload/Overwrite/Cancel 재결정을 기록한다. |
+| 43 | [Phase 16 independent code review](reviews/2026-09-03-phase-16-external-file-compare-code-review.md) | **Content approved — latest Phase 16 evidence** | 최초 2 Major의 comparison-read stale snapshot과 post-panel/reload-read data-loss race를 authoritative revision/binding transaction으로 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -108,6 +110,23 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 16 independent review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 16 구현/remediation에는 참여하지 않았다.
+- **Initial findings:** 0 Blocker, 2 Major, 0 Minor. comparison disk-read 중 stale local snapshot 반환과 panel 표시 뒤/Reload read 중 edit 유실을 외부 blocking-store probe로 재현했다.
+- **Closure:** post-read exact context/revision validation과 Domain transaction 내부 expected revision/binding 검증을 재검토했다. 같은 probe에서 read race는 `comparisonInvalidated`, post-panel Reload는 `editorRevisionMismatch`로 닫히며 local dirty bytes를 보존했다.
+- **Validation:** independent focused adversarial 9/9, builder Debug/Release 232/232, `git diff --check` PASS.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** exact staged review/receipt는 pending이다.
+- **Boundary:** review doc/index만 수정했고 doc04, 기존 vendor script, README, ignored Notepad++, product/tests, stage/commit/push는 건드리지 않았다.
+
+### 2026-09-03 — Phase 16 external file Compare
+
+- **Agent/role:** `/root`, direct builder; independent review verdict is separate.
+- **Implementation:** save-conflict UI now offers Compare and presents immutable local/external snapshots in a read-only native side-by-side panel before returning to the same unresolved decision.
+- **Safety:** Compare performs no document or disk mutation, preserves the pending conflict, uses typed failures and a 32 MiB per-side guard, and routes subsequent Reload/Overwrite through existing file/workspace authority.
+- **Validation:** focused use-case and presentation tests cover exact snapshot capture, non-mutating repeated decision flow, Reload completion, oversize rejection, and edit/close/rebind races. Final remediated Debug/Release suites each pass 232/232 and `git diff --check` passes; independent content review is approved 0/0/0 and exact receipt remains pending.
+- **Boundary:** README, ignored Notepad++, and the existing user changes in doc04/vendor script are untouched.
 
 ### 2026-09-03 — Phase 15 independent review
 

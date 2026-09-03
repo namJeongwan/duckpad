@@ -101,6 +101,7 @@ public enum SessionError: Error, Equatable, Sendable {
     case dirtyBufferRequiresDecision(BufferID)
     case revisionConflict(bufferID: BufferID, expected: UInt64, actual: UInt64)
     case revisionExhausted(bufferID: BufferID)
+    case fileBindingConflict(documentID: DocumentID)
     case duplicateBufferID(BufferID)
     case duplicateFileBinding(String)
     case invalidTabDestination(Int)
@@ -508,12 +509,28 @@ public struct ScratchSession: Codable, Equatable, Sendable {
     }
 
     @discardableResult
-    public mutating func replaceFileContents(tabID: TabID, binding: FileBinding, title: String) throws -> UInt64 {
-        try bindFile(tabID: tabID, binding: binding, title: title)
+    public mutating func replaceFileContents(
+        tabID: TabID,
+        binding: FileBinding,
+        title: String,
+        expectedRevision: UInt64,
+        expectedBinding: FileBinding?
+    ) throws -> UInt64 {
         let document = try document(for: tabID)
         guard var buffer = buffers[document.bufferID] else {
             throw SessionError.brokenBufferReference(document.bufferID)
         }
+        guard buffer.revision == expectedRevision else {
+            throw SessionError.revisionConflict(
+                bufferID: buffer.id,
+                expected: expectedRevision,
+                actual: buffer.revision
+            )
+        }
+        guard fileBindings[document.id] == expectedBinding else {
+            throw SessionError.fileBindingConflict(documentID: document.id)
+        }
+        try bindFile(tabID: tabID, binding: binding, title: title)
         let revision = try buffer.replaceContents()
         buffers[buffer.id] = buffer
         return revision

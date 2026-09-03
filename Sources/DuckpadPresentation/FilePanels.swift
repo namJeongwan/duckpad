@@ -10,11 +10,16 @@ public protocol FilePanelPresenting: AnyObject {
 @MainActor
 public protocol FileConflictPresenting: AnyObject {
     func resolveExternalConflict(attachedTo window: NSWindow?) async -> FileConflictResolution
+    func presentExternalComparison(_ comparison: ExternalFileComparison, attachedTo window: NSWindow?) async
     func presentFileFailure(
         _ failure: FileOperationFailure,
         attachedTo window: NSWindow?,
         retry: @escaping @MainActor () -> Void
     )
+}
+
+public extension FileConflictPresenting {
+    func presentExternalComparison(_ comparison: ExternalFileComparison, attachedTo window: NSWindow?) async {}
 }
 
 @MainActor
@@ -44,15 +49,103 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "The file changed outside Duckpad."
-        alert.informativeText = "Overwrite the external version, reload it, or cancel and keep your edits."
+        alert.informativeText = "Compare both versions, overwrite the external version, reload it, or cancel and keep your edits."
         alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Compare")
         alert.addButton(withTitle: "Reload")
         alert.addButton(withTitle: "Overwrite")
         switch await run(alert, attachedTo: window) {
-        case .alertSecondButtonReturn: return .reload
-        case .alertThirdButtonReturn: return .overwrite
+        case .alertSecondButtonReturn: return .compare
+        case .alertThirdButtonReturn: return .reload
+        case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1): return .overwrite
         default: return .cancel
         }
+    }
+
+    public func presentExternalComparison(
+        _ comparison: ExternalFileComparison,
+        attachedTo window: NSWindow?
+    ) async {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Compare External Changes"
+        alert.informativeText = comparison.path
+        alert.addButton(withTitle: "Done")
+
+        let local = comparisonTextView(
+            title: "Duckpad — revision \(comparison.localRevision)",
+            text: comparison.localText,
+            otherText: comparison.externalText
+        )
+        let external = comparisonTextView(
+            title: "On Disk",
+            text: comparison.externalText,
+            otherText: comparison.localText
+        )
+        let panes = NSStackView(views: [local, external])
+        panes.orientation = .horizontal
+        panes.distribution = .fillEqually
+        panes.spacing = 10
+        panes.frame = NSRect(x: 0, y: 0, width: 820, height: 440)
+        alert.accessoryView = panes
+        _ = await run(alert, attachedTo: window)
+    }
+
+    private func comparisonTextView(title: String, text: String, otherText: String) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 12, weight: .semibold)
+        let textView = NSTextView(frame: .zero)
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.textStorage?.setAttributedString(comparisonText(text, otherText: otherText))
+        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.setAccessibilityLabel("\(title), read-only comparison")
+        textView.setAccessibilityHelp("Changed lines are marked with a dot and a highlighted background.")
+        let scroll = NSScrollView(frame: .zero)
+        scroll.documentView = textView
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        let stack = NSStackView(views: [label, scroll])
+        stack.orientation = .vertical
+        stack.spacing = 4
+        scroll.heightAnchor.constraint(equalToConstant: 410).isActive = true
+        return stack
+    }
+
+    private func comparisonText(_ text: String, otherText: String) -> NSAttributedString {
+        let lines = comparisonLines(text)
+        let otherLines = comparisonLines(otherText)
+        let result = NSMutableAttributedString()
+        let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        for (index, line) in lines.enumerated() {
+            let changed = index >= otherLines.count || line != otherLines[index]
+            let marker = changed ? "●" : " "
+            let rendered = String(format: "%@ %5d  %@%@", marker, index + 1, line, index + 1 < lines.count ? "\n" : "")
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.textColor,
+            ]
+            if changed { attributes[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.18) }
+            result.append(NSAttributedString(string: rendered, attributes: attributes))
+        }
+        return result
+    }
+
+    private func comparisonLines(_ text: String) -> [String] {
+        var lines: [String] = []
+        var lineStart = text.startIndex
+        var index = text.startIndex
+        while index < text.endIndex {
+            let next = text.index(after: index)
+            if text[index].isNewline {
+                lines.append(String(text[lineStart..<index]))
+                lineStart = next
+            }
+            index = next
+        }
+        lines.append(String(text[lineStart...]))
+        return lines
     }
 
     public func presentFileFailure(

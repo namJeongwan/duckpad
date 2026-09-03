@@ -1359,19 +1359,32 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         fileOutcome: FileSaveOutcome,
         retry: @escaping @MainActor () -> Void
     ) async -> FileSaveOutcome {
-        switch fileOutcome {
-        case .conflict:
-            guard let fileUseCase, let presenter = fileConflictPresenter else { return fileOutcome }
-            let resolution = await presenter.resolveExternalConflict(attachedTo: window)
-            return await resolve(fileOutcome: await fileUseCase.resolveConflict(resolution), retry: retry)
-        case .failed(.workspace):
-            break
-        case .failed(let failure):
-            fileConflictPresenter?.presentFileFailure(failure, attachedTo: window, retry: retry)
-        case .saved, .requiresDestination, .cancelled:
-            break
+        var current = fileOutcome
+        while true {
+            switch current {
+            case .conflict:
+                guard let fileUseCase, let presenter = fileConflictPresenter else { return current }
+                let resolution = await presenter.resolveExternalConflict(attachedTo: window)
+                if resolution == .compare {
+                    switch await fileUseCase.pendingExternalComparison() {
+                    case .ready(let comparison):
+                        await presenter.presentExternalComparison(comparison, attachedTo: window)
+                        continue
+                    case .failed(let failure):
+                        presenter.presentFileFailure(failure, attachedTo: window, retry: retry)
+                        return .failed(failure)
+                    }
+                }
+                current = await fileUseCase.resolveConflict(resolution)
+            case .failed(.workspace):
+                return current
+            case .failed(let failure):
+                fileConflictPresenter?.presentFileFailure(failure, attachedTo: window, retry: retry)
+                return current
+            case .saved, .requiresDestination, .cancelled:
+                return current
+            }
         }
-        return fileOutcome
     }
 
     private func saveBeforeClosing(

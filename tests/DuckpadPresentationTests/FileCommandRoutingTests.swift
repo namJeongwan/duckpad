@@ -144,13 +144,20 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
     private(set) var saveRequests = 0
     private(set) var failures: [FileOperationFailure] = []
     private(set) var fileFailureRetries: [@MainActor () -> Void] = []
+    var conflictResolutions: [FileConflictResolution] = []
+    private(set) var comparisons: [ExternalFileComparison] = []
     var decisions: [CloseDecision] = []
     var blocksDecisions = false
     private(set) var decisionTabs: [String] = []
     private var decisionWaiters: [CheckedContinuation<Void, Never>] = []
     func chooseOpenURL(attachedTo window: NSWindow?) async -> URL? { openRequests += 1; return openURL }
     func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL? { saveRequests += 1; return saveURL }
-    func resolveExternalConflict(attachedTo window: NSWindow?) async -> FileConflictResolution { .cancel }
+    func resolveExternalConflict(attachedTo window: NSWindow?) async -> FileConflictResolution {
+        conflictResolutions.isEmpty ? .cancel : conflictResolutions.removeFirst()
+    }
+    func presentExternalComparison(_ comparison: ExternalFileComparison, attachedTo window: NSWindow?) async {
+        comparisons.append(comparison)
+    }
     func presentFileFailure(
         _ failure: FileOperationFailure,
         attachedTo window: NSWindow?,
@@ -173,6 +180,44 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
         decisionWaiters = []
         for waiter in waiters { waiter.resume() }
     }
+}
+
+@Test @MainActor func routedConflictCompareIsReadOnlyThenReloadsAfterSecondDecision() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-routing-compare.txt")
+    await files.seed("base", at: url)
+    let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let panels = PanelFake()
+    panels.openURL = url
+    panels.conflictResolutions = [.compare, .reload]
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: fileUseCase,
+        filePanels: panels,
+        fileConflictPresenter: panels,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    await controller.routeOpenFile()
+    editor.textView.selectAll(nil)
+    editor.textView.insertText("mine", replacementRange: editor.textView.selectedRange())
+    await files.seed("external", at: url)
+
+    await controller.routeSaveFile()
+
+    #expect(panels.comparisons.count == 1)
+    #expect(panels.comparisons.first?.localText == "mine")
+    #expect(panels.comparisons.first?.externalText == "external")
+    #expect(editor.textView.string == "external")
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == false)
+    #expect(await files.text(at: url) == "external")
 }
 
 @Test @MainActor func controllerRoutesOpenSaveAndSaveAsThroughPanelPorts() async {

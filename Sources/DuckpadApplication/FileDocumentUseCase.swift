@@ -23,6 +23,8 @@ public enum FileOperationFailure: Error, Equatable, Sendable {
     case store(TextFileStoreError)
     case workspace(PersistenceFailure)
     case session(SessionError)
+    case comparisonTooLarge(actual: Int, limit: Int)
+    case comparisonInvalidated
 }
 
 public enum FileOpenOutcome: Equatable, Sendable {
@@ -42,30 +44,71 @@ public enum FileSaveOutcome: Equatable, Sendable {
 public enum FileConflictResolution: Equatable, Sendable {
     case overwrite
     case reload
+    case compare
     case cancel
+}
+
+public struct ExternalFileComparison: Equatable, Sendable {
+    public let tabID: TabID
+    public let path: String
+    public let localText: String
+    public let externalText: String
+    public let localRevision: UInt64
+    public let externalIdentity: FileIdentity
+
+    public init(
+        tabID: TabID,
+        path: String,
+        localText: String,
+        externalText: String,
+        localRevision: UInt64,
+        externalIdentity: FileIdentity
+    ) {
+        self.tabID = tabID
+        self.path = path
+        self.localText = localText
+        self.externalText = externalText
+        self.localRevision = localRevision
+        self.externalIdentity = externalIdentity
+    }
+}
+
+public enum FileComparisonOutcome: Equatable, Sendable {
+    case ready(ExternalFileComparison)
+    case failed(FileOperationFailure)
 }
 
 /// Coordinates file I/O while the editor remains the sole live-text authority.
 /// MainActor isolation serializes open/save decisions and keeps UI publication ordered.
 @MainActor
 public final class FileDocumentUseCase {
+    public static let defaultMaximumComparisonBytes = 32 * 1_024 * 1_024
     private struct PendingConflict {
         let context: FileWorkspaceContext
         let url: URL
         let conversion: TextFileConversion?
+        let currentIdentity: FileIdentity?
     }
 
     private let workspace: ScratchWorkspaceUseCase
     private let editor: any EditorPort
     private let store: any TextFileStore
+    private let maximumComparisonBytes: Int
     private var pendingConflict: PendingConflict?
     private var operationBusy = false
     private var operationWaiters: [CheckedContinuation<Void, Never>] = []
 
-    public init(workspace: ScratchWorkspaceUseCase, editor: any EditorPort, store: any TextFileStore) {
+    public init(
+        workspace: ScratchWorkspaceUseCase,
+        editor: any EditorPort,
+        store: any TextFileStore,
+        maximumComparisonBytes: Int = FileDocumentUseCase.defaultMaximumComparisonBytes
+    ) {
+        precondition(maximumComparisonBytes > 0)
         self.workspace = workspace
         self.editor = editor
         self.store = store
+        self.maximumComparisonBytes = maximumComparisonBytes
     }
 
     public func open(
@@ -149,6 +192,8 @@ public final class FileDocumentUseCase {
                 conversion: pendingConflict.conversion,
                 overwrite: true
             )
+        case .compare:
+            return .conflict(tabID: context.tabID, current: pendingConflict.currentIdentity)
         case .reload:
             do {
                 let read = try await store.read(from: pendingConflict.url)
@@ -162,17 +207,91 @@ public final class FileDocumentUseCase {
                     lineEnding: decoded.lineEnding,
                     observedIdentity: read.identity
                 )
-                switch await workspace.replaceFileContents(tabID: context.tabID, binding: updated, title: URL(fileURLWithPath: updated.canonicalPath).lastPathComponent) {
+                switch await workspace.replaceFileContents(
+                    tabID: context.tabID,
+                    binding: updated,
+                    title: URL(fileURLWithPath: updated.canonicalPath).lastPathComponent,
+                    expectedRevision: context.buffer.revision,
+                    expectedBinding: context.binding
+                ) {
                 case .applied:
                     guard let refreshed = workspace.fileContext(tabID: context.tabID) else { return .failed(.noActiveDocument) }
                     editor.install(EditorTextSnapshot(bufferID: refreshed.buffer.bufferID, revision: refreshed.buffer.revision, text: decoded.text))
+                    self.pendingConflict = nil
                     return .saved(context.tabID)
                 case .persistenceFailed(let failure): return .failed(.workspace(failure))
+                case .rejected(.revisionConflict(let bufferID, let expected, let actual)):
+                    return .failed(.editorRevisionMismatch(
+                        bufferID: bufferID,
+                        expected: expected,
+                        actual: actual
+                    ))
+                case .rejected(.unknownTab), .rejected(.fileBindingConflict):
+                    return .failed(.comparisonInvalidated)
                 case .rejected(let error): return .failed(.session(error))
                 }
             } catch let error {
                 return .failed(.store(error))
             }
+        }
+    }
+
+    public func pendingExternalComparison() async -> FileComparisonOutcome {
+        await acquireOperation()
+        defer { releaseOperation() }
+        guard let pendingConflict,
+              let context = workspace.fileContext(tabID: pendingConflict.context.tabID) else {
+            return .failed(.noActiveDocument)
+        }
+        guard let snapshot = editor.snapshot(for: context.buffer.bufferID) else {
+            return .failed(.editorSnapshotUnavailable(context.buffer.bufferID))
+        }
+        guard snapshot.revision == context.buffer.revision else {
+            return .failed(.editorRevisionMismatch(
+                bufferID: context.buffer.bufferID,
+                expected: context.buffer.revision,
+                actual: snapshot.revision
+            ))
+        }
+        guard snapshot.text.utf8.count <= maximumComparisonBytes else {
+            return .failed(.comparisonTooLarge(
+                actual: snapshot.text.utf8.count,
+                limit: maximumComparisonBytes
+            ))
+        }
+        do {
+            let read = try await store.read(from: pendingConflict.url)
+            guard let refreshed = workspace.fileContext(tabID: context.tabID),
+                  refreshed == context,
+                  let refreshedSnapshot = editor.snapshot(for: refreshed.buffer.bufferID),
+                  refreshedSnapshot.revision == snapshot.revision else {
+                return .failed(.comparisonInvalidated)
+            }
+            guard read.data.count <= maximumComparisonBytes else {
+                return .failed(.comparisonTooLarge(
+                    actual: read.data.count,
+                    limit: maximumComparisonBytes
+                ))
+            }
+            let decoded: DecodedTextFile
+            do {
+                decoded = try TextFileCodec.decode(
+                    read.data,
+                    assuming: context.binding?.encoding
+                )
+            } catch let error {
+                return .failed(.codec(error))
+            }
+            return .ready(ExternalFileComparison(
+                tabID: context.tabID,
+                path: read.identity.canonicalPath,
+                localText: snapshot.text,
+                externalText: decoded.text,
+                localRevision: snapshot.revision,
+                externalIdentity: read.identity
+            ))
+        } catch let error {
+            return .failed(.store(error))
         }
     }
 
@@ -226,7 +345,12 @@ public final class FileDocumentUseCase {
             case .rejected(let error): return .failed(.session(error))
             }
         } catch .conflict(let current) {
-            pendingConflict = PendingConflict(context: context, url: url, conversion: conversion)
+            pendingConflict = PendingConflict(
+                context: context,
+                url: url,
+                conversion: conversion,
+                currentIdentity: current
+            )
             return .conflict(tabID: context.tabID, current: current)
         } catch let error {
             return .failed(.store(error))
