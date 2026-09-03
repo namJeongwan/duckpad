@@ -37,6 +37,12 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             store: LocalFolderSearchFileStore(),
             regexEngine: ICURegexEngine()
         )
+        let workspaceRootsArchive = environment["DUCKPAD_WORKSPACE_ROOTS_FILE"].map {
+            URL(fileURLWithPath: $0, isDirectory: false)
+        } ?? LocalWorkspaceRootStore.defaultArchiveURL()
+        let workspaceBrowserUseCase = WorkspaceBrowserUseCase(
+            store: LocalWorkspaceRootStore(archiveURL: workspaceRootsArchive)
+        )
         let languageRegistry: LanguageRegistry
         let languageConfigurationIssue: String?
         do {
@@ -82,6 +88,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             terminationCoordinator: terminationCoordinator,
             searchUseCase: searchUseCase,
             folderSearchUseCase: folderSearchUseCase,
+            workspaceBrowserUseCase: workspaceBrowserUseCase,
             languageUseCase: languageUseCase,
             extensionUseCase: extensionUseCase
         )
@@ -167,6 +174,26 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
                     preconditionFailure("search smoke replace failed")
                 }
                 print("Duckpad search smoke ready: ICU regex + 2 grouped replacements")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
+        } else if let workspaceRootPath = environment["DUCKPAD_WORKSPACE_SMOKE_ROOT"] {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                _ = await workspaceBrowserUseCase.start()
+                let state = await workspaceBrowserUseCase.addRoot(
+                    URL(fileURLWithPath: workspaceRootPath, isDirectory: true)
+                )
+                guard case .ready(let roots) = state,
+                      let root = roots.first(where: { $0.canonicalPath == workspaceRootPath }),
+                      try await workspaceBrowserUseCase.children(
+                        rootID: root.id,
+                        relativeDirectory: ""
+                      ).contains(where: { $0.name == "smoke.txt" }),
+                      controller.workspaceSidebarSmokeState().rootCount == 1 else {
+                    preconditionFailure("workspace browser smoke failed")
+                }
+                print("Duckpad workspace smoke ready: persisted root + lazy native outline")
                 fflush(stdout)
                 Darwin._exit(0)
             }

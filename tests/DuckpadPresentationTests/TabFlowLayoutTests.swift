@@ -835,6 +835,25 @@ struct AppKitHostedTests {
 
     let wordWrap = menuItem("Word Wrap", in: menu)
     let wrapSymbols = menuItem("Show Wrap Symbols", in: menu)
+    let workspaceSidebar = menuItem("Workspace Sidebar", in: menu)
+    let addWorkspaceFolder = menuItem("Add Folder to Workspace…", in: menu)
+    #expect(workspaceSidebar?.action == #selector(DuckpadWindowController.performToggleWorkspaceSidebar(_:)))
+    #expect(workspaceSidebar?.keyEquivalent == "e")
+    #expect(workspaceSidebar?.keyEquivalentModifierMask == [.command, .shift])
+    #expect(addWorkspaceFolder?.action == #selector(DuckpadWindowController.performAddWorkspaceFolder(_:)))
+    #expect(addWorkspaceFolder?.keyEquivalent == "o")
+    #expect(addWorkspaceFolder?.keyEquivalentModifierMask == [.command, .control])
+    if let workspaceSidebar {
+        #expect(controller.validateMenuItem(workspaceSidebar))
+        #expect(workspaceSidebar.state == .on)
+        #expect(controller.workspaceSidebarSmokeState().arrangedPaneCount == 2)
+        controller.performToggleWorkspaceSidebar(workspaceSidebar)
+        #expect(controller.validateMenuItem(workspaceSidebar))
+        #expect(workspaceSidebar.state == .off)
+        #expect(controller.workspaceSidebarSmokeState().arrangedPaneCount == 1)
+        controller.performToggleWorkspaceSidebar(workspaceSidebar)
+        #expect(controller.workspaceSidebarSmokeState().arrangedPaneCount == 2)
+    }
     #expect(wordWrap?.action == #selector(DuckpadWindowController.performToggleWordWrap(_:)))
     #expect(wrapSymbols?.action == #selector(DuckpadWindowController.performToggleWrapMarker(_:)))
     if let wordWrap {

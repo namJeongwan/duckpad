@@ -258,6 +258,28 @@ private actor RoutingFileStore: TextFileStore {
     func releaseRead() { releaseBlockedRead = true }
 }
 
+private struct PreparedWorkspaceRootStore: WorkspaceRootStore {
+    let root: WorkspaceRoot
+    let entry: WorkspaceBrowserEntry
+    let read: WorkspaceFileRead
+
+    func loadRoots() async throws(WorkspaceBrowserFailure) -> [WorkspaceRoot] { [root] }
+    func addRoot(_ url: URL) async throws(WorkspaceBrowserFailure) -> WorkspaceRoot {
+        throw .duplicateRoot(root.canonicalPath)
+    }
+    func removeRoot(_ id: WorkspaceRootID) async throws(WorkspaceBrowserFailure) {}
+    func children(
+        rootID: WorkspaceRootID,
+        relativeDirectory: String
+    ) async throws(WorkspaceBrowserFailure) -> [WorkspaceBrowserEntry] { [entry] }
+    func readFile(_ entry: WorkspaceBrowserEntry) async throws(WorkspaceBrowserFailure) -> WorkspaceFileRead { read }
+    func updateNavigation(
+        rootID: WorkspaceRootID,
+        expandedRelativePaths: [String],
+        selectedRelativePath: String?
+    ) async throws(WorkspaceBrowserFailure) -> WorkspaceRoot { root }
+}
+
 private struct RoutingFolderStore: FolderSearchFileStore {
     let enumeration: FolderSearchEnumeration
 
@@ -690,6 +712,77 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     #expect(await review.value)
     #expect(workspace.snapshot().tabs.count == 2)
     #expect(await recoveryStore.latestTabCount() == 2)
+}
+
+@Test @MainActor func terminationWaitsForAcceptedWorkspaceFileOpenBeforeFinalRecoveryFlush() async {
+    _ = NSApplication.shared
+    let sessionStore = BlockingNewScratchSessionStore()
+    let workspace = ScratchWorkspaceUseCase(store: sessionStore)
+    let editor = TextViewEditorAdapter()
+    let recoveryStore = RoutingRecoveryStore()
+    let recovery = SessionRecoveryUseCase(
+        workspace: workspace,
+        editor: editor,
+        store: recoveryStore,
+        debounce: .seconds(60)
+    )
+    let rootID = WorkspaceRootID()
+    let root = WorkspaceRoot(id: rootID, canonicalPath: "/tmp/workspace", displayName: "workspace")
+    let entry = WorkspaceBrowserEntry(
+        rootID: rootID,
+        relativePath: "opened.txt",
+        name: "opened.txt",
+        kind: .file
+    )
+    let url = URL(fileURLWithPath: "/tmp/workspace/opened.txt")
+    let data = Data("accepted before termination".utf8)
+    let identity = FileIdentity(
+        canonicalPath: url.path,
+        device: 1,
+        inode: 2,
+        byteCount: UInt64(data.count),
+        modifiedNanoseconds: 3,
+        contentToken: "workspace-open"
+    )
+    let browser = WorkspaceBrowserUseCase(store: PreparedWorkspaceRootStore(
+        root: root,
+        entry: entry,
+        read: WorkspaceFileRead(url: url, result: FileReadResult(data: data, identity: identity))
+    ))
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: RoutingFileStore())
+    let coordinator = ApplicationTerminationCoordinator()
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: files,
+        recoveryUseCase: recovery,
+        terminationCoordinator: coordinator,
+        workspaceBrowserUseCase: browser,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    for _ in 0..<1_000 where !browser.acceptsCommands { await Task.yield() }
+    await sessionStore.armNextCommit()
+
+    controller.routeOpenWorkspaceEntry(entry)
+    await sessionStore.waitUntilCommitIsBlocked()
+    var terminationReply: Bool?
+    #expect(coordinator.applicationShouldTerminate { terminationReply = $0 } == .terminateLater)
+    for _ in 0..<20 { await Task.yield() }
+
+    #expect(workspace.snapshot().tabs.count == 1)
+    #expect(await recoveryStore.commitCount == 0)
+    #expect(terminationReply == nil)
+
+    await sessionStore.releaseCommit()
+    for _ in 0..<1_000 where terminationReply == nil { await Task.yield() }
+    #expect(terminationReply == true)
+    #expect(workspace.snapshot().tabs.count == 2)
+    #expect(await recoveryStore.latestTabCount() == 2)
+    #expect(editor.snapshot(for: workspace.snapshot().activeBuffer!.bufferID)?.text == "accepted before termination")
 }
 
 @Test @MainActor func corruptOnlyRecoveryIsVisibleDisabledAndResetRetryRestoresUsability() async {

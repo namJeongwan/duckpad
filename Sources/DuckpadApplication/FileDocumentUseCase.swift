@@ -128,40 +128,73 @@ public final class FileDocumentUseCase {
         do {
             let canonical = try await store.canonicalURL(for: url)
             guard !Task.isCancelled else { return .failed(.cancelled) }
-            if let existing = workspace.tabID(canonicalPath: canonical.path) {
-                switch await workspace.activate(tabID: existing) {
-                case .applied: return .activatedExisting(existing)
-                case .persistenceFailed(let failure): return .failed(.workspace(failure))
-                case .rejected(let error): return .failed(.session(error))
-                }
-            }
-            let read = try await store.read(from: canonical)
-            guard !Task.isCancelled else { return .failed(.cancelled) }
-            let decoded: DecodedTextFile
-            do { decoded = try TextFileCodec.decode(read.data, assuming: encodingHint) }
-            catch let error { return .failed(.codec(error)) }
-            let binding = FileBinding(
-                canonicalPath: read.identity.canonicalPath,
-                encoding: decoded.encoding,
-                byteOrderMark: decoded.byteOrderMark,
-                lineEnding: decoded.lineEnding,
-                observedIdentity: read.identity
+            return try await openCanonical(canonical, prepared: nil, encodingHint: encodingHint)
+        } catch let error {
+            return .failed(.store(error))
+        }
+    }
+
+    public func open(
+        _ workspaceRead: WorkspaceFileRead,
+        assuming encodingHint: TextFileEncoding? = nil
+    ) async -> FileOpenOutcome {
+        await acquireOperation()
+        defer { releaseOperation() }
+        guard !Task.isCancelled else { return .failed(.cancelled) }
+        let canonical = workspaceRead.url.standardizedFileURL
+        guard canonical.isFileURL,
+              workspaceRead.result.identity.canonicalPath == canonical.path else {
+            return .failed(.store(.invalidPath(workspaceRead.url.path)))
+        }
+        do {
+            return try await openCanonical(
+                canonical,
+                prepared: workspaceRead.result,
+                encodingHint: encodingHint
             )
-            guard !Task.isCancelled else { return .failed(.cancelled) }
-            switch await workspace.addOpenedFile(binding: binding, title: canonical.lastPathComponent) {
-            case .applied:
-                guard let context = workspace.activeFileContext() else { return .failed(.noActiveDocument) }
-                editor.install(EditorTextSnapshot(
-                    bufferID: context.buffer.bufferID,
-                    revision: context.buffer.revision,
-                    text: decoded.text
-                ))
-                return .opened(context.tabID)
+        } catch let error {
+            return .failed(.store(error))
+        }
+    }
+
+    private func openCanonical(
+        _ canonical: URL,
+        prepared: FileReadResult?,
+        encodingHint: TextFileEncoding?
+    ) async throws(TextFileStoreError) -> FileOpenOutcome {
+        if let existing = workspace.tabID(canonicalPath: canonical.path) {
+            switch await workspace.activate(tabID: existing) {
+            case .applied: return .activatedExisting(existing)
             case .persistenceFailed(let failure): return .failed(.workspace(failure))
             case .rejected(let error): return .failed(.session(error))
             }
-        } catch let error {
-            return .failed(.store(error))
+        }
+        let read: FileReadResult
+        if let prepared { read = prepared }
+        else { read = try await store.read(from: canonical) }
+        guard !Task.isCancelled else { return .failed(.cancelled) }
+        let decoded: DecodedTextFile
+        do { decoded = try TextFileCodec.decode(read.data, assuming: encodingHint) }
+        catch let error { return .failed(.codec(error)) }
+        let binding = FileBinding(
+            canonicalPath: read.identity.canonicalPath,
+            encoding: decoded.encoding,
+            byteOrderMark: decoded.byteOrderMark,
+            lineEnding: decoded.lineEnding,
+            observedIdentity: read.identity
+        )
+        guard !Task.isCancelled else { return .failed(.cancelled) }
+        switch await workspace.addOpenedFile(binding: binding, title: canonical.lastPathComponent) {
+        case .applied:
+            guard let context = workspace.activeFileContext() else { return .failed(.noActiveDocument) }
+            editor.install(EditorTextSnapshot(
+                bufferID: context.buffer.bufferID,
+                revision: context.buffer.revision,
+                text: decoded.text
+            ))
+            return .opened(context.tabID)
+        case .persistenceFailed(let failure): return .failed(.workspace(failure))
+        case .rejected(let error): return .failed(.session(error))
         }
     }
 

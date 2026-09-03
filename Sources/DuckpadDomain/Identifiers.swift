@@ -28,3 +28,8 @@ public struct SessionID: DuckpadIdentifier {
     public let rawValue: UUID
     public init(rawValue: UUID) { self.rawValue = rawValue }
 }
+
+public struct WorkspaceRootID: DuckpadIdentifier {
+    public let rawValue: UUID
+    public init(rawValue: UUID) { self.rawValue = rawValue }
+}

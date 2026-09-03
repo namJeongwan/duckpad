@@ -22,6 +22,23 @@ public enum DuckpadMainMenuFactory {
         let fileMenu = NSMenu(title: "File")
         add("New Scratch", #selector(DuckpadWindowController.performNewScratch(_:)), "n", target, to: fileMenu)
         add("Open…", #selector(DuckpadWindowController.performOpenFile(_:)), "o", target, to: fileMenu)
+        add(
+            "Add Folder to Workspace…",
+            #selector(DuckpadWindowController.performAddWorkspaceFolder(_:)),
+            "o",
+            target,
+            modifiers: [.command, .control],
+            to: fileMenu
+        )
+        add(
+            "Remove Folder from Workspace",
+            #selector(DuckpadWindowController.performRemoveWorkspaceFolder(_:)),
+            "",
+            target,
+            modifiers: [],
+            to: fileMenu
+        )
+        fileMenu.addItem(.separator())
         add("Save", #selector(DuckpadWindowController.performSaveFile(_:)), "s", target, to: fileMenu)
         add("Save As…", #selector(DuckpadWindowController.performSaveFileAs(_:)), "s", target, modifiers: [.command, .shift], to: fileMenu)
         fileMenu.addItem(.separator())
@@ -88,6 +105,15 @@ public enum DuckpadMainMenuFactory {
         let viewItem = NSMenuItem()
         mainMenu.addItem(viewItem)
         let viewMenu = NSMenu(title: "View")
+        add(
+            "Workspace Sidebar",
+            #selector(DuckpadWindowController.performToggleWorkspaceSidebar(_:)),
+            "e",
+            target,
+            modifiers: [.command, .shift],
+            to: viewMenu
+        )
+        viewMenu.addItem(.separator())
         add("Word Wrap", #selector(DuckpadWindowController.performToggleWordWrap(_:)), "", target, modifiers: [], to: viewMenu)
         add("Show Wrap Symbols", #selector(DuckpadWindowController.performToggleWrapMarker(_:)), "", target, modifiers: [], to: viewMenu)
         viewMenu.addItem(.separator())

@@ -35,6 +35,12 @@ public struct WorkspaceChromeSmokeState: Equatable, Sendable {
     public let extensionStatusEnabled: Bool
 }
 
+public struct WorkspaceSidebarSmokeState: Equatable, Sendable {
+    public let isVisible: Bool
+    public let rootCount: Int
+    public let arrangedPaneCount: Int
+}
+
 private enum CloseRetryContext {
     /// Stable IDs capture the exact single/bulk command target set without
     /// retaining a stale tab snapshot or AppKit object.
@@ -45,6 +51,7 @@ private enum CloseRetryContext {
 @MainActor
 private final class FileDropView: NSView {
     var onFiles: (([URL]) -> Void)?
+    var onFolders: (([URL]) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -61,7 +68,18 @@ private final class FileDropView: NSView {
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         let urls = fileURLs(from: sender)
         guard !urls.isEmpty else { return false }
-        onFiles?(urls)
+        var files: [URL] = []
+        var folders: [URL] = []
+        for url in urls {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
+                folders.append(url)
+            } else {
+                files.append(url)
+            }
+        }
+        if !files.isEmpty { onFiles?(files) }
+        if !folders.isEmpty { onFolders?(folders) }
         return true
     }
 
@@ -158,10 +176,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let languageStatus = NSButton(title: "Plain Text", target: nil, action: nil)
     private let extensionStatus = NSButton(title: "Extensions loading…", target: nil, action: nil)
     private let extensionsPanel = ExtensionsManagerPanel()
+    private let workspaceSidebar = WorkspaceSidebarView(frame: .zero)
+    private let workspaceContentSplit = NSSplitView(frame: .zero)
     private var searchUseCase: SearchWorkspaceUseCase?
     private let folderSearchUseCase: FolderSearchUseCase?
     private var languageUseCase: LanguageWorkspaceUseCase?
     private var extensionUseCase: ExtensionWorkspaceUseCase?
+    private var workspaceBrowserUseCase: WorkspaceBrowserUseCase?
     private var extensionState = ExtensionRegistryState(items: [])
     public var onExtensionCommandsChanged: (() -> Void)?
     private let editorHostView: NSView
@@ -193,6 +214,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var pendingCloseTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingRestoreClosedTabTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingFolderActivationTasks: [UUID: Task<Void, Never>] = [:]
+    private var pendingWorkspaceBrowserTasks: [UUID: Task<Void, Never>] = [:]
+    private var pendingWorkspaceFileOpenTasks: [UUID: Task<Void, Never>] = [:]
+    private var workspaceRestoreTask: Task<Void, Never>?
+    private var workspaceNavigationRevisions: [WorkspaceRootID: UInt64] = [:]
 
     public init(
         workspace: ScratchWorkspaceUseCase,
@@ -208,6 +233,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         terminationCoordinator: ApplicationTerminationCoordinator? = nil,
         searchUseCase: SearchWorkspaceUseCase? = nil,
         folderSearchUseCase: FolderSearchUseCase? = nil,
+        workspaceBrowserUseCase: WorkspaceBrowserUseCase? = nil,
         languageUseCase: LanguageWorkspaceUseCase? = nil,
         extensionUseCase: ExtensionWorkspaceUseCase? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
@@ -230,6 +256,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.recoveryUseCase = recoveryUseCase
         self.searchUseCase = searchUseCase
         self.folderSearchUseCase = folderSearchUseCase
+        self.workspaceBrowserUseCase = workspaceBrowserUseCase
         self.languageUseCase = languageUseCase
         self.extensionUseCase = extensionUseCase
         tabCloseCoordinator = TabCloseCoordinator(workspace: workspace)
@@ -267,7 +294,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         searchPanel.onCancel = { [weak self] in self?.cancelSearch() }
         searchPanel.onClose = { [weak self] in self?.closeSearchPanel() }
+        workspaceSidebar.onAddRoot = { [weak self] in self?.performAddWorkspaceFolder(nil) }
+        workspaceSidebar.onRemoveRoot = { [weak self] id in self?.routeRemoveWorkspaceRoot(id) }
+        workspaceSidebar.onOpenFile = { [weak self] entry in self?.routeOpenWorkspaceEntry(entry) }
+        workspaceSidebar.onLoadChildren = { [weak self] rootID, path in
+            self?.routeLoadWorkspaceChildren(rootID: rootID, relativeDirectory: path)
+        }
+        workspaceSidebar.onNavigationChange = { [weak self] rootID, expanded, selected in
+            self?.routePersistWorkspaceNavigation(rootID: rootID, expanded: expanded, selected: selected)
+        }
+        workspaceSidebar.onDropFolder = { [weak self] url in self?.routeAddWorkspaceRoot(url) }
+        workspaceSidebar.onRevealPath = { [weak self] path in
+            self?.pathActionHandler.openContainingFolder(for: path)
+        }
         workspace.onChange = { [weak self] change in self?.handle(change) }
+        workspaceBrowserUseCase?.onStateChange = { [weak self] state in self?.renderWorkspaceBrowser(state) }
         languageUseCase?.onStateChange = { [weak self] state in self?.renderLanguageState(state) }
         extensionUseCase?.onStateChange = { [weak self] state in self?.renderExtensionState(state) }
         extensionsPanel.onSetEnabled = { [weak self] id, enabled in
@@ -293,16 +334,24 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         startTask?.cancel()
         searchTask?.cancel()
         languageDetectionTask?.cancel()
+        workspaceRestoreTask?.cancel()
         pendingNewScratchTasks.values.forEach { $0.cancel() }
         pendingFolderActivationTasks.values.forEach { $0.cancel() }
+        pendingWorkspaceBrowserTasks.values.forEach { $0.cancel() }
+        pendingWorkspaceFileOpenTasks.values.forEach { $0.cancel() }
     }
 
     public override func close() {
+        workspaceBrowserUseCase?.suspendCommands()
+        workspaceRestoreTask?.cancel()
+        workspaceRestoreTask = nil
+        cancelWorkspaceBrowserTasks()
         window?.delegate = nil
         workspace.onChange = nil
         activeEditor.onEdit = nil
         languageUseCase?.onStateChange = nil
         extensionUseCase?.onStateChange = nil
+        workspaceBrowserUseCase?.onStateChange = nil
         editorBinding = nil
         errorPresenter = nil
         tabStrip.tearDownHostedViews()
@@ -356,7 +405,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public func workspaceChromeSmokeState() -> WorkspaceChromeSmokeState {
         window?.contentView?.layoutSubtreeIfNeeded()
-        let overlap = editorHostView.frame.intersection(statusBar.frame)
+        let editorFrame = editorHostView.convert(editorHostView.bounds, to: window?.contentView)
+        let statusFrame = statusBar.convert(statusBar.bounds, to: window?.contentView)
+        let overlap = editorFrame.intersection(statusFrame)
         return WorkspaceChromeSmokeState(
             documentCount: tabStrip.documentSwitcher.tabs.count,
             bannerHeight: persistenceBanner.frame.height,
@@ -366,6 +417,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             interactionsEnabled: tabStrip.interactionsEnabled,
             languageStatusEnabled: languageStatus.isEnabled,
             extensionStatusEnabled: extensionStatus.isEnabled
+        )
+    }
+
+    public func workspaceSidebarSmokeState() -> WorkspaceSidebarSmokeState {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        return WorkspaceSidebarSmokeState(
+            isVisible: workspaceSidebar.superview != nil,
+            rootCount: workspaceBrowserUseCase?.roots.count ?? 0,
+            arrangedPaneCount: workspaceContentSplit.arrangedSubviews.count
         )
     }
 
@@ -456,6 +516,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             } else {
                 _ = await workspace.start()
             }
+            _ = await workspaceBrowserUseCase?.start()
             await extensionUseCase?.refresh()
         }
     }
@@ -578,6 +639,35 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performOpenFile(_ sender: Any? = nil) {
         Task { [weak self] in await self?.routeOpenFile() }
+    }
+
+    @objc public func performAddWorkspaceFolder(_ sender: Any? = nil) {
+        guard workspaceBrowserCommandsAreActionable,
+              let panels = filePanels,
+              let workspaceBrowserUseCase else { return }
+        let windowReference = WeakWindowReference(window)
+        beginWorkspaceBrowserTask { [weak self] in
+            let url = await panels.chooseWorkspaceFolderURL(attachedTo: windowReference)
+            guard let self, let url, self.workspaceBrowserCommandsAreActionable,
+                  !Task.isCancelled else { return }
+            _ = await workspaceBrowserUseCase.addRoot(url)
+        }
+    }
+
+    @objc public func performRemoveWorkspaceFolder(_ sender: Any? = nil) {
+        guard let rootID = workspaceSidebar.selectedRootID else { return }
+        routeRemoveWorkspaceRoot(rootID)
+    }
+
+    @objc public func performToggleWorkspaceSidebar(_ sender: Any? = nil) {
+        guard !terminationReviewInProgress else { return }
+        if workspaceSidebar.superview != nil {
+            workspaceContentSplit.removeArrangedSubview(workspaceSidebar)
+            workspaceSidebar.removeFromSuperview()
+        } else {
+            workspaceContentSplit.insertArrangedSubview(workspaceSidebar, at: 0)
+            workspaceContentSplit.setPosition(220, ofDividerAt: 0)
+        }
     }
 
     @objc public func performSaveFile(_ sender: Any? = nil) {
@@ -729,6 +819,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performShowLanguageChooser(_:)),
              #selector(performShowExtensions(_:)):
             return workspaceInteractionsAreActionable
+        case #selector(performAddWorkspaceFolder(_:)):
+            guard let workspaceBrowserUseCase else { return false }
+            return workspaceBrowserCommandsAreActionable
+                && workspaceBrowserUseCase.roots.count < WorkspaceRoot.maximumRootCount
+        case #selector(performRemoveWorkspaceFolder(_:)):
+            return workspaceBrowserCommandsAreActionable && workspaceSidebar.selectedRootID != nil
+        case #selector(performToggleWorkspaceSidebar(_:)):
+            menuItem.state = workspaceSidebar.superview == nil ? .off : .on
+            return !terminationReviewInProgress
         case #selector(performShowFind(_:)),
              #selector(performShowReplace(_:)),
              #selector(performFindNext(_:)),
@@ -814,6 +913,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspace.snapshot().startup == .ready && !terminationReviewInProgress
     }
 
+    private var workspaceBrowserCommandsAreActionable: Bool {
+        workspaceInteractionsAreActionable && workspaceBrowserUseCase?.acceptsCommands == true
+    }
+
     private func navigateTabs(_ command: TabNavigationCommand) {
         guard workspaceInteractionsAreActionable else { return }
         Task { @MainActor [weak self] in
@@ -868,6 +971,126 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    private func routeAddWorkspaceRoot(_ url: URL) {
+        guard workspaceBrowserCommandsAreActionable, let workspaceBrowserUseCase else { return }
+        beginWorkspaceBrowserTask {
+            guard !Task.isCancelled else { return }
+            _ = await workspaceBrowserUseCase.addRoot(url)
+        }
+    }
+
+    private func routeRemoveWorkspaceRoot(_ rootID: WorkspaceRootID) {
+        guard workspaceBrowserCommandsAreActionable, let workspaceBrowserUseCase else { return }
+        beginWorkspaceBrowserTask {
+            guard !Task.isCancelled else { return }
+            _ = await workspaceBrowserUseCase.removeRoot(rootID)
+        }
+    }
+
+    private func routeLoadWorkspaceChildren(rootID: WorkspaceRootID, relativeDirectory: String) {
+        guard workspaceBrowserCommandsAreActionable, let workspaceBrowserUseCase else { return }
+        beginWorkspaceBrowserTask { [weak self] in
+            do {
+                let children = try await workspaceBrowserUseCase.children(
+                    rootID: rootID,
+                    relativeDirectory: relativeDirectory
+                )
+                guard let self, !Task.isCancelled else { return }
+                self.workspaceSidebar.applyChildren(
+                    rootID: rootID,
+                    relativeDirectory: relativeDirectory,
+                    entries: children
+                )
+            } catch let failure as WorkspaceBrowserFailure {
+                guard let self, !Task.isCancelled else { return }
+                self.workspaceSidebar.applyChildrenFailure(
+                    rootID: rootID,
+                    relativeDirectory: relativeDirectory,
+                    failure: failure
+                )
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                self.workspaceSidebar.applyChildrenFailure(
+                    rootID: rootID,
+                    relativeDirectory: relativeDirectory,
+                    failure: .io(error.localizedDescription)
+                )
+            }
+        }
+    }
+
+    func routeOpenWorkspaceEntry(_ entry: WorkspaceBrowserEntry) {
+        guard workspaceBrowserCommandsAreActionable,
+              let workspaceBrowserUseCase,
+              let fileUseCase else { return }
+        beginWorkspaceBrowserTask { [weak self] in
+            do {
+                let read = try await workspaceBrowserUseCase.readFile(entry)
+                guard let self, self.workspaceInteractionsAreActionable, !Task.isCancelled else { return }
+                self.beginAcceptedWorkspaceFileOpen(read, fileUseCase: fileUseCase)
+            } catch let failure as WorkspaceBrowserFailure {
+                guard let self, !Task.isCancelled else { return }
+                self.workspaceSidebar.presentFailure(failure)
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                self.workspaceSidebar.presentFailure(.io(error.localizedDescription))
+            }
+        }
+    }
+
+    private func beginAcceptedWorkspaceFileOpen(
+        _ read: WorkspaceFileRead,
+        fileUseCase: FileDocumentUseCase
+    ) {
+        let token = UUID()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.pendingWorkspaceFileOpenTasks.removeValue(forKey: token) }
+            let outcome = await fileUseCase.open(read)
+            guard !self.terminationReviewInProgress else { return }
+            await self.handle(fileOutcome: outcome) {}
+        }
+        pendingWorkspaceFileOpenTasks[token] = task
+    }
+
+    private func routePersistWorkspaceNavigation(
+        rootID: WorkspaceRootID,
+        expanded: [String],
+        selected: String?
+    ) {
+        guard workspaceBrowserCommandsAreActionable, let workspaceBrowserUseCase else { return }
+        let revision = (workspaceNavigationRevisions[rootID] ?? 0) &+ 1
+        workspaceNavigationRevisions[rootID] = revision
+        beginWorkspaceBrowserTask { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard let self, !Task.isCancelled,
+                  revision == self.workspaceNavigationRevisions[rootID] else { return }
+            await workspaceBrowserUseCase.updateNavigation(
+                rootID: rootID,
+                expandedRelativePaths: expanded,
+                selectedRelativePath: selected
+            )
+        }
+    }
+
+    private func beginWorkspaceBrowserTask(
+        _ operation: @escaping @MainActor () async -> Void
+    ) {
+        let token = UUID()
+        let task = Task { @MainActor [weak self] in
+            await operation()
+            self?.pendingWorkspaceBrowserTasks.removeValue(forKey: token)
+        }
+        pendingWorkspaceBrowserTasks[token] = task
+    }
+
+    private func cancelWorkspaceBrowserTasks() {
+        filePanels?.cancelOutstandingPanels()
+        let tasks = Array(pendingWorkspaceBrowserTasks.values)
+        pendingWorkspaceBrowserTasks.removeAll()
+        for task in tasks { task.cancel() }
+    }
+
     public func routeSaveFile() async {
         guard workspaceInteractionsAreActionable, let fileUseCase else { return }
         let outcome = await fileUseCase.saveActive()
@@ -897,6 +1120,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public var requiresTerminationReview: Bool {
         hasDirtyDocuments || recoveryUseCase != nil || extensionUseCase != nil
+            || !pendingWorkspaceBrowserTasks.isEmpty || !pendingWorkspaceFileOpenTasks.isEmpty
     }
 
     @discardableResult
@@ -930,6 +1154,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     func beginTerminationReviewAdmission() -> Bool {
         guard !terminationReviewInProgress else { return false }
         terminationReviewInProgress = true
+        workspaceBrowserUseCase?.suspendCommands()
+        workspaceRestoreTask?.cancel()
+        workspaceRestoreTask = nil
+        cancelWorkspaceBrowserTasks()
         updateWorkspaceInteractionAdmission(workspace.snapshot())
         cancelSearch()
         activeEditor.setInputEnabled(false)
@@ -947,6 +1175,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             if !approved {
                 terminationReviewInProgress = false
                 extensionUseCase?.resumeInvocations()
+                Task { @MainActor [weak workspaceBrowserUseCase] in
+                    await workspaceBrowserUseCase?.resumeCommandsAndReconcile()
+                }
                 let snapshot = workspace.snapshot()
                 updateWorkspaceInteractionAdmission(snapshot)
                 editorBinding.render(snapshot)
@@ -984,7 +1215,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         while let task = pendingNewScratchTasks.values.first
             ?? pendingCloseTasks.values.first
             ?? pendingRestoreClosedTabTasks.values.first
-            ?? pendingFolderActivationTasks.values.first {
+            ?? pendingFolderActivationTasks.values.first
+            ?? pendingWorkspaceFileOpenTasks.values.first
+            ?? pendingWorkspaceBrowserTasks.values.first {
             await task.value
         }
     }
@@ -1107,11 +1340,25 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 }
             }
         }
+        dropView.onFolders = { [weak self] urls in
+            guard let self else { return }
+            for url in urls { self.routeAddWorkspaceRoot(url) }
+        }
         root.view = dropView
         root.view.addSubview(persistenceBanner)
         root.view.addSubview(tabStrip)
         root.view.addSubview(searchPanel)
-        root.view.addSubview(editorHostView)
+        workspaceContentSplit.isVertical = true
+        workspaceContentSplit.dividerStyle = .thin
+        workspaceContentSplit.translatesAutoresizingMaskIntoConstraints = false
+        workspaceContentSplit.addArrangedSubview(workspaceSidebar)
+        workspaceContentSplit.addArrangedSubview(editorHostView)
+        workspaceSidebar.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+        let preferredSidebarWidth = workspaceSidebar.widthAnchor.constraint(equalToConstant: 220)
+        preferredSidebarWidth.priority = .defaultHigh
+        preferredSidebarWidth.isActive = true
+        workspaceSidebar.widthAnchor.constraint(lessThanOrEqualToConstant: 380).isActive = true
+        root.view.addSubview(workspaceContentSplit)
         root.view.addSubview(statusBar)
         statusBar.setAccessibilityIdentifier("duckpad.status.bar")
         configureStatusButton(
@@ -1138,10 +1385,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             searchPanel.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             searchPanel.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             searchPanel.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
-            editorHostView.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
-            editorHostView.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            editorHostView.topAnchor.constraint(equalTo: searchPanel.bottomAnchor),
-            editorHostView.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            workspaceContentSplit.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            workspaceContentSplit.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            workspaceContentSplit.topAnchor.constraint(equalTo: searchPanel.bottomAnchor),
+            workspaceContentSplit.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             statusBar.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             statusBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             statusBar.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
@@ -1163,6 +1410,59 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         updateWorkspaceInteractionAdmission(snapshot)
         editorBinding.render(snapshot)
         updateWindowTitle(snapshot)
+    }
+
+    private func renderWorkspaceBrowser(_ state: WorkspaceBrowserState) {
+        switch state {
+        case .idle, .loading:
+            workspaceSidebar.setInteractionsEnabled(false)
+        case .failed(let failure):
+            let remainsUsable = workspaceBrowserUseCase?.acceptsCommands == true
+            workspaceSidebar.setInteractionsEnabled(remainsUsable && workspaceInteractionsAreActionable)
+            if remainsUsable { _ = workspaceSidebar.apply(roots: workspaceBrowserUseCase?.roots ?? []) }
+            workspaceSidebar.presentFailure(failure)
+        case .ready(let roots):
+            workspaceSidebar.setInteractionsEnabled(workspaceInteractionsAreActionable)
+            guard workspaceSidebar.apply(roots: roots) else { return }
+            workspaceRestoreTask?.cancel()
+            workspaceRestoreTask = Task { @MainActor [weak self] in
+                guard let self, let useCase = self.workspaceBrowserUseCase else { return }
+                for root in roots where root.isAvailable {
+                    for path in root.expandedRelativePaths.sorted(by: { lhs, rhs in
+                        let left = lhs.split(separator: "/").count
+                        let right = rhs.split(separator: "/").count
+                        return left == right ? lhs < rhs : left < right
+                    }) {
+                        guard !Task.isCancelled else { return }
+                        do {
+                            let children = try await useCase.children(rootID: root.id, relativeDirectory: path)
+                            guard !Task.isCancelled else { return }
+                            self.workspaceSidebar.applyChildren(
+                                rootID: root.id,
+                                relativeDirectory: path,
+                                entries: children
+                            )
+                            self.workspaceSidebar.restoreNavigation(for: root)
+                        } catch let failure as WorkspaceBrowserFailure {
+                            self.workspaceSidebar.applyChildrenFailure(
+                                rootID: root.id,
+                                relativeDirectory: path,
+                                failure: failure
+                            )
+                            break
+                        } catch {
+                            self.workspaceSidebar.applyChildrenFailure(
+                                rootID: root.id,
+                                relativeDirectory: path,
+                                failure: .io(error.localizedDescription)
+                            )
+                            break
+                        }
+                    }
+                    self.workspaceSidebar.restoreNavigation(for: root)
+                }
+            }
+        }
     }
 
     private func handle(_ change: WorkspaceChange) {
@@ -1203,6 +1503,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func updateWorkspaceInteractionAdmission(_ snapshot: WorkspaceSnapshot) {
         let enabled = snapshot.startup == .ready && !terminationReviewInProgress
         tabStrip.setInteractionsEnabled(enabled)
+        workspaceSidebar.setInteractionsEnabled(enabled && workspaceBrowserUseCase?.acceptsCommands == true)
         languageStatus.isEnabled = enabled
         extensionStatus.isEnabled = enabled
     }

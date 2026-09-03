@@ -61,6 +61,8 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 47 | [Phase 18 independent code review](reviews/2026-09-03-phase-18-persistent-bookmarks-code-review.md) | **Content approved — latest Phase 18 evidence** | 최초 4 Major의 first-line backward wrap, fallback temporary-attribute ownership, CRLF mapping, maximum-marker MainActor budget을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 48 | [Phase 19 shared-document split editing](22-split-editing.md) | **Implemented; review pending** | 같은 Scintilla document/undo를 공유하면서 cursor·selection·scroll은 독립적인 좌우/상하 pane, 복구와 native 단축키를 기록한다. |
 | 49 | [Phase 19 independent code review](reviews/2026-09-03-phase-19-split-editing-code-review.md) | **Content approved — latest Phase 19 evidence** | 최초 3 Major/1 Minor의 rejected-edit 전환, per-buffer exhaustion, 양 pane language, secondary eviction 결함을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
+| 50 | [Phase 20 saved workspace file browser](23-workspace-file-browser.md) | **Content approved; exact receipt pending** | security-scoped folder roots, native outline browser, navigation restoration, drag/drop, Finder reveal과 `Command-Control-O`/`Command-Shift-E` 명령을 기록한다. |
+| 51 | [Phase 20 independent code review](reviews/2026-09-03-phase-20-workspace-file-browser-code-review.md) | **Content approved — latest Phase 20 evidence** | descriptor-relative file authority, serialized/reconciled root mutation, security-scope lifetime, accepted file-open termination ordering과 corrupt-state preservation을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -116,6 +118,22 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 20 saved workspace file browser
+
+- **Agent/role:** `/root`, direct investigator and builder; no new implementation agent was added.
+- **Implementation:** user-selected folders persist as security-scoped bookmarks in a native `NSOutlineView` sidebar. Root/directory expansion is lazy and sorted folder-first; file activation reuses the existing loss-safe file-open use case. Folder drag/drop, removal, Finder reveal, unavailable-root state, and root-specific selection/expansion restoration are included.
+- **Bounds and safety:** 32 roots, 1 MiB descriptor-bounded archive, 1,000 expanded paths per root, 10,000 raw immediate entries, 1 GiB open-file bytes, and 16 KiB relative paths are hard limits. Descriptor-relative `openat`/`fstatat` plus `O_NOFOLLOW` keeps validation and reading on the same filesystem objects. Hidden entries, packages, symbolic links, non-regular files, traversal, forged entry kinds, root replacement, duplicate IDs/paths, and corrupt archive retry are rejected or skipped. The archive uses atomic writes with `0700` directory and `0600` file permissions.
+- **Shortcuts:** Add Folder uses `Command-Control-O`; Workspace Sidebar uses `Command-Shift-E`. Complete-menu collision coverage and sidebar visibility/routing coverage are included.
+- **Validation:** focused Application/Infrastructure/AppKit tests pass, including concurrent Add serialization, cancellation-ignoring mutation suppression/reconciliation, corrupt-start failure preservation after termination denial, security-scope access-before-inspection and exact stop balancing, descriptor/file-swap rejection, pre-materialization raw-entry limit and cancellation, prepared open without a second path read, immediate termination during a blocked accepted workspace-file commit, delayed-root-load command admission, cancellation-ignoring panel teardown, persistent navigation, context actions, and exact shortcut routing. Production composition smoke opens a persisted root and lazily sees `smoke.txt`. Exact-current full Debug and Release suites each pass 288/288; independent content review is approved with exact receipt pending.
+- **Boundary:** multiple windows, symbols/completion, settings UI, packaging/notarization, README, ignored Notepad++, and user-owned doc04/vendor-script changes are excluded from this slice.
+
+### 2026-09-03 — Phase 20 independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 20 구현/remediation에는 참여하지 않았다.
+- **Findings/closure:** review 전 과정에서 0 Blocker, 8 Major, 1 Minor를 재현했다. descriptor TOCTOU, concurrent stale publication, unbounded enumeration, panel/UI lifetime, security-scope ordering, restore admission, late durable root publication, accepted file-open final-flush race, corrupt resume fabrication을 descriptor authority, FIFO/epoch reconciliation, explicit admission 및 accepted-open join으로 모두 닫았다.
+- **Verdict/validation:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** Independent exact-current focused 17/17과 external adversarial probe가 PASS다. Builder Debug/Release 288/288, production smoke, parity 31/31, governance 8/8, checker와 `git diff --check` PASS를 supporting evidence로 기록했다. Exact receipt는 pending이다.
+- **Boundary:** review 문서와 index Phase 20 review row/work log만 수정했다. source/tests/work doc, stage/commit/push, doc04, 기존 vendor script, README, ignored Notepad++는 건드리지 않았다.
 
 ### 2026-09-03 — Phase 19 review remediation
 

@@ -2,14 +2,24 @@ import AppKit
 import DuckpadApplication
 
 @MainActor
+public final class WeakWindowReference: @unchecked Sendable {
+    public weak var window: NSWindow?
+    public init(_ window: NSWindow?) { self.window = window }
+}
+
+@MainActor
 public protocol FilePanelPresenting: AnyObject {
     func chooseOpenURL(attachedTo window: NSWindow?) async -> URL?
     func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL?
     func chooseFolderURL(attachedTo window: NSWindow?) async -> URL?
+    func chooseWorkspaceFolderURL(attachedTo window: WeakWindowReference) async -> URL?
+    func cancelOutstandingPanels()
 }
 
 public extension FilePanelPresenting {
     func chooseFolderURL(attachedTo window: NSWindow?) async -> URL? { nil }
+    func chooseWorkspaceFolderURL(attachedTo window: WeakWindowReference) async -> URL? { nil }
+    func cancelOutstandingPanels() {}
 }
 
 @MainActor
@@ -34,6 +44,8 @@ public protocol DirtyDocumentDecisionPresenting: AnyObject {
 
 @MainActor
 public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPresenting, DirtyDocumentDecisionPresenting {
+    private var activePanels: [ObjectIdentifier: NSSavePanel] = [:]
+
     public init() {}
 
     public func chooseOpenURL(attachedTo window: NSWindow?) async -> URL? {
@@ -59,6 +71,22 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
         panel.prompt = "Search"
         panel.message = "Choose a folder to search recursively. Hidden files, packages, and symbolic links are skipped."
         return await run(panel, attachedTo: window) == .OK ? panel.url : nil
+    }
+
+    public func chooseWorkspaceFolderURL(attachedTo window: WeakWindowReference) async -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.prompt = "Add"
+        panel.message = "Choose a folder to keep in the Duckpad workspace sidebar."
+        return await run(panel, attachedTo: window.window) == .OK ? panel.url : nil
+    }
+
+    public func cancelOutstandingPanels() {
+        let panels = Array(activePanels.values)
+        for panel in panels { panel.cancel(nil) }
     }
 
     public func resolveExternalConflict(attachedTo window: NSWindow?) async -> FileConflictResolution {
@@ -203,9 +231,23 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
     }
 
     private func run(_ panel: NSSavePanel, attachedTo window: NSWindow?) async -> NSApplication.ModalResponse {
+        guard !Task.isCancelled else { return .cancel }
         guard let window else { return panel.runModal() }
-        return await withCheckedContinuation { continuation in
-            panel.beginSheetModal(for: window) { continuation.resume(returning: $0) }
+        let identifier = ObjectIdentifier(panel)
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: .cancel)
+                    return
+                }
+                activePanels[identifier] = panel
+                panel.beginSheetModal(for: window) { [weak self] response in
+                    self?.activePanels.removeValue(forKey: identifier)
+                    continuation.resume(returning: response)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak panel] in panel?.cancel(nil) }
         }
     }
 

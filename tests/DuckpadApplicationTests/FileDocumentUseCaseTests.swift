@@ -126,6 +126,40 @@ private final class FileEditorFake: EditorPort, EditorSelectionPort {
     #expect(await files.readCount == 1)
 }
 
+@Test @MainActor func workspaceDescriptorReadOpensWithoutASecondPathRead() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-workspace-prepared.txt")
+    let data = Data("descriptor-safe 한글🙂".utf8)
+    let identity = FileIdentity(
+        canonicalPath: url.path,
+        device: 7,
+        inode: 9,
+        byteCount: UInt64(data.count),
+        modifiedNanoseconds: 11,
+        contentToken: "prepared"
+    )
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+
+    let outcome = await useCase.open(WorkspaceFileRead(
+        url: url,
+        result: FileReadResult(data: data, identity: identity)
+    ))
+    guard case .opened = outcome else {
+        Issue.record("prepared workspace read did not open: \(outcome)")
+        return
+    }
+    #expect(await files.readCount == 0)
+    #expect(workspace.activeFileContext()?.binding?.observedIdentity == identity)
+    let bufferID = try #require(workspace.snapshot().activeBuffer?.bufferID)
+    #expect(editor.snapshot(for: bufferID)?.text == "descriptor-safe 한글🙂")
+}
+
 @Test @MainActor func folderSearchResultOpensExactIdentityAndRevealsUTF8Range() async {
     let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
     let editor = FileEditorFake()
