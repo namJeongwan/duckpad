@@ -10,6 +10,9 @@ private actor PresentationStore: SessionStore {
     private var failure: SessionStoreError?
     private var failLoad = false
     private var commitAttempts = 0
+    private var blockNextCommit = false
+    private var blockedCommitEntered = false
+    private var releaseBlockedCommit = false
     init(session: ScratchSession? = nil) { self.session = session }
     func loadSession() async throws(SessionStoreError) -> StoredSession? {
         if failLoad, let failure { throw failure }
@@ -17,6 +20,11 @@ private actor PresentationStore: SessionStore {
     }
     func commitSession(_ session: ScratchSession, generation: PersistenceGeneration) async throws(SessionStoreError) -> SessionCommitResult {
         commitAttempts += 1
+        if blockNextCommit {
+            blockNextCommit = false
+            blockedCommitEntered = true
+            while !releaseBlockedCommit { await Task.yield() }
+        }
         if let failure { throw failure }
         guard generation > self.generation else { return .superseded(durableGeneration: self.generation) }
         self.session = session
@@ -28,6 +36,15 @@ private actor PresentationStore: SessionStore {
         failLoad = forLoad
     }
     func attempts() -> Int { commitAttempts }
+    func armBlockingCommit() {
+        blockNextCommit = true
+        blockedCommitEntered = false
+        releaseBlockedCommit = false
+    }
+    func waitUntilCommitEntered() async {
+        while !blockedCommitEntered { await Task.yield() }
+    }
+    func releaseCommit() { releaseBlockedCommit = true }
 }
 
 private actor DelayedPresentationStore: SessionStore {
@@ -682,6 +699,24 @@ struct AppKitHostedTests {
     #expect(close?.keyEquivalent == "w")
     #expect(close?.keyEquivalentModifierMask == [.command])
 
+    let undoClose = menuItem("Undo Close Tab", in: menu)
+    #expect(undoClose?.action == #selector(DuckpadWindowController.performRestoreLastClosedTab(_:)))
+    #expect(undoClose?.keyEquivalent == "t")
+    #expect(undoClose?.keyEquivalentModifierMask == [.command, .shift])
+    if let undoClose { #expect(!controller.validateMenuItem(undoClose)) }
+
+    let closedID = workspace.snapshot().tabs[0].id
+    await controller.performClose(closedID).value
+    if let undoClose {
+        #expect(controller.validateMenuItem(undoClose))
+        controller.performRestoreLastClosedTab(undoClose)
+        for _ in 0..<200 where !workspace.snapshot().tabs.contains(where: { $0.id == closedID }) {
+            await Task.yield()
+        }
+        #expect(workspace.snapshot().tabs.contains(where: { $0.id == closedID }))
+        #expect(!controller.validateMenuItem(undoClose))
+    }
+
     let openDocument = menuItem("Open Document…", in: menu)
     #expect(openDocument?.action == #selector(DuckpadWindowController.performShowDocumentSwitcher(_:)))
     #expect(openDocument?.keyEquivalent == "o")
@@ -1277,6 +1312,31 @@ struct AppKitHostedTests {
     #expect(controller.tabStrip.updateMetrics.fullReloads == before.fullReloads)
     #expect(controller.tabStrip.updateMetrics.itemReloads == before.itemReloads + 1)
     controller.close()
+}
+
+@Test @MainActor func terminationJoinsAcceptedUndoCloseBeforeApproval() async {
+    let store = PresentationStore()
+    let workspace = ScratchWorkspaceUseCase(store: store)
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    _ = await workspace.addScratch()
+    let closedID = workspace.snapshot().tabs[0].id
+    await controller.performClose(closedID).value
+    #expect(workspace.canRestoreRecentlyClosedTab)
+
+    await store.armBlockingCommit()
+    controller.performRestoreLastClosedTab(nil)
+    await store.waitUntilCommitEntered()
+    #expect(controller.beginTerminationReviewAdmission())
+    let approval = Task { @MainActor in await controller.continuePreparedTerminationReview() }
+    await Task.yield()
+    #expect(!workspace.snapshot().tabs.contains(where: { $0.id == closedID }))
+
+    await store.releaseCommit()
+    #expect(await approval.value)
+    #expect(workspace.snapshot().tabs.contains(where: { $0.id == closedID }))
 }
 
 @Test @MainActor func controllerWindowAndHostedViewsDeallocateWithoutGlobalLeak() {

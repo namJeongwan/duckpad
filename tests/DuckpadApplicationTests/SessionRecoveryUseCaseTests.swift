@@ -266,6 +266,33 @@ private func recoveredFileBinding() -> FileBinding {
     #expect(latest.archive.buffers[original.buffer.bufferID] == nil)
 }
 
+@Test @MainActor func undoClosePublishesOnlyAfterRecoveredBytesAreDurable() async throws {
+    let store = RecoveryStoreFake()
+    let (workspace, editor, _, recovery) = recoveryHarness(store: store)
+    _ = await recovery.start()
+    #expect(editor.insert("durable recently closed 🦆") == .accepted(newRevision: 1))
+    _ = await recovery.flush()
+    let original = workspace.snapshot().tabs[0]
+    _ = await workspace.addScratch()
+
+    guard case .closed = await workspace.close(
+        tabID: original.id,
+        decision: .discard,
+        expectedRevision: 1
+    ) else {
+        Issue.record("dirty close should commit")
+        return
+    }
+    #expect((await store.latest())?.archive.buffers[original.buffer.bufferID] == nil)
+
+    #expect(await workspace.restoreLastClosedTab() == .applied(.saved))
+    let latest = try #require(await store.latest())
+    #expect(latest.archive.session.tabs.contains(where: { $0.id == original.id }))
+    #expect(latest.archive.buffers[original.buffer.bufferID]?.revision == 1)
+    #expect(latest.archive.buffers[original.buffer.bufferID]?.utf8 == Data("durable recently closed 🦆".utf8))
+    #expect(workspace.snapshot().tabs.first(where: { $0.id == original.id })?.isActive == true)
+}
+
 @Test @MainActor func rapidRecoveryEditsCoalesceToOneAdditionalArchiveCommit() async {
     let store = RecoveryStoreFake()
     let (_, editor, _, recovery) = recoveryHarness(store: store)

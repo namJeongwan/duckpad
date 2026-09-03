@@ -189,6 +189,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var extensionStatusIsWarning = false
     private var terminationReviewInProgress = false
     private var pendingNewScratchTasks: [UUID: Task<Void, Never>] = [:]
+    private var pendingRestoreClosedTabTasks: [UUID: Task<Void, Never>] = [:]
 
     public init(
         workspace: ScratchWorkspaceUseCase,
@@ -489,6 +490,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         performClose(id)
     }
 
+    @objc public func performRestoreLastClosedTab(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable,
+              workspace.canRestoreRecentlyClosedTab else { return }
+        let token = UUID()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.pendingRestoreClosedTabTasks.removeValue(forKey: token) }
+            guard !self.terminationReviewInProgress,
+                  self.workspace.snapshot().startup == .ready,
+                  self.workspace.canRestoreRecentlyClosedTab else { return }
+            _ = await self.workspace.restoreLastClosedTab()
+        }
+        pendingRestoreClosedTabTasks[token] = task
+    }
+
     @objc public func performNextTab(_ sender: Any? = nil) {
         navigateTabs(.next)
     }
@@ -575,6 +591,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         if menuItem.action == #selector(performNewScratch(_:)) {
             return workspace.snapshot().startup == .ready && !terminationReviewInProgress
+        }
+        if menuItem.action == #selector(performRestoreLastClosedTab(_:)) {
+            return workspaceInteractionsAreActionable && workspace.canRestoreRecentlyClosedTab
         }
         switch menuItem.action {
         case #selector(performCloseActiveTab(_:)),
@@ -764,7 +783,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 editorBinding.render(snapshot)
             }
         }
-        await waitForAcceptedNewScratchTasks()
+        await waitForAcceptedWorkspaceTasks()
         await extensionUseCase?.suspendInvocationsAndWait()
         guard dirtyDecisionPresenter != nil || !hasDirtyDocuments else { return false }
         let retrySaveTabID = terminationRetrySaveTabID
@@ -792,8 +811,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         return approved
     }
 
-    private func waitForAcceptedNewScratchTasks() async {
-        while let task = pendingNewScratchTasks.values.first {
+    private func waitForAcceptedWorkspaceTasks() async {
+        while let task = pendingNewScratchTasks.values.first
+            ?? pendingRestoreClosedTabTasks.values.first {
             await task.value
         }
     }

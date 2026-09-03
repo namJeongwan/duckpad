@@ -1,6 +1,6 @@
 # Phase 12 — Searchable Open Document Switcher
 
-- **Status:** Implemented; independent review pending
+- **Status:** Approved, committed, audited, and pushed to `origin/main`
 - **Owner/agent:** `/root` direct investigator and builder
 - **Last updated:** 2026-09-03
 - **Related:** [Multiline tab workspace](08-multiline-tabs.md), [Workspace chrome](14-workspace-chrome-and-document-dropdown.md), [Standard shortcuts](13-standard-editing-shortcuts.md)
@@ -67,7 +67,15 @@ scope.
 
 ## Commit evidence
 
-- Candidate ID: pending exact stage freeze
-- Independent review: pending
-- Local receipt: pending
-- Commit: pending
+- Candidate ID: `6abff1057e9ba839321934c1c8340d7bef73ac2b373bbaba0262c7f50140c3f9`
+- Independent review: approved — 0 Blocker, 0 Major, 0 Minor
+- Local receipt SHA-256: `8e2d42817b6ea8c3e573da448f8730f5978024f6a8f63f7a99d2c0fdf992d22a`
+- Commit: `5f816e0249951e65598551c428ef4f9fccd2aa72`
+- Delivery: `origin/main`
+
+## Follow-up TODO
+
+- [ ] Rebalance multiline-tab chrome width and internal padding so short titles
+  do not truncate prematurely. Hidden pin/dirty/close affordances must collapse
+  their reserved space, the active tab must retain a readable title, and the
+  50/200-tab wrap and viewport-performance contracts must remain intact.

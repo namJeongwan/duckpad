@@ -63,6 +63,14 @@ public enum DuckpadMainMenuFactory {
         mainMenu.addItem(tabItem)
         let tabMenu = NSMenu(title: "Tabs")
         add(
+            "Undo Close Tab",
+            #selector(DuckpadWindowController.performRestoreLastClosedTab(_:)),
+            "t",
+            target,
+            modifiers: [.command, .shift],
+            to: tabMenu
+        )
+        add(
             "Open Document…",
             #selector(DuckpadWindowController.performShowDocumentSwitcher(_:)),
             "o",

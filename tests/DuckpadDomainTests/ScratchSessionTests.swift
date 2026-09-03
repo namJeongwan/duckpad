@@ -104,6 +104,46 @@ import Testing
     #expect(try session.close(tabID: tab, discardingDirty: true) == nil)
 }
 
+@Test func closedTabStateRestoresStableMetadataOrderAndDirtyRevision() throws {
+    var session = ScratchSession()
+    let first = session.addUntitled()
+    let restoredID = session.addUntitled()
+    let third = session.addUntitled()
+    _ = try session.setPinned(tabID: first, isPinned: true)
+    _ = try session.setPinned(tabID: restoredID, isPinned: true)
+    let fileBinding = FileBinding(
+        canonicalPath: "/tmp/restored.swift",
+        encoding: .utf8,
+        byteOrderMark: .absent,
+        lineEnding: .lf,
+        observedIdentity: FileIdentity(
+            canonicalPath: "/tmp/restored.swift",
+            device: 1,
+            inode: 2,
+            byteCount: 3,
+            modifiedNanoseconds: 4,
+            contentToken: "restored"
+        )
+    )
+    try session.bindFile(tabID: restoredID, binding: fileBinding, title: "restored.swift")
+    try session.setLanguageOverride(.manual(LanguageID(rawValue: "swift")), for: restoredID)
+    _ = try session.recordEdit(in: restoredID, expectedRevision: 0)
+    let state = try session.closedTabState(for: restoredID)
+
+    _ = try session.close(tabID: restoredID, discardingDirty: true)
+    #expect(session.tabs.map(\.id) == [first, third])
+
+    let index = try session.restoreClosedTab(state)
+    #expect(index == 1)
+    #expect(session.tabs.map(\.id) == [first, restoredID, third])
+    #expect(session.activeTabID == restoredID)
+    #expect(session.tabs[index].isPinned)
+    #expect(try session.buffer(for: restoredID).isDirty)
+    #expect(try session.buffer(for: restoredID).revision == 1)
+    #expect(try session.fileBinding(for: restoredID) == fileBinding)
+    #expect(try session.languageOverride(for: restoredID) == .manual(LanguageID(rawValue: "swift")))
+}
+
 @Test func closingActiveTabSelectsStableNeighbor() throws {
     var session = ScratchSession()
     let first = session.addUntitled()

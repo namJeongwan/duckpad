@@ -1,5 +1,6 @@
 import DuckpadApplication
 import DuckpadDomain
+import Foundation
 import Testing
 
 private actor StoreSpy: SessionStore {
@@ -114,6 +115,7 @@ private final class EditorFake: EditorPort {
     private(set) var inputEnabled = true
     private(set) var retired: [BufferID] = []
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
+    private var viewStates: [BufferID: EditorViewState] = [:]
 
     func display(_ buffer: EditorBufferDescriptor) {
         displayed = buffer
@@ -125,6 +127,7 @@ private final class EditorFake: EditorPort {
     }
     func install(_ snapshot: EditorTextSnapshot) {
         snapshots[snapshot.bufferID] = snapshot
+        viewStates[snapshot.bufferID] = viewStates[snapshot.bufferID] ?? EditorViewState()
         if displayed?.bufferID == snapshot.bufferID {
             displayed = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision)
         }
@@ -132,13 +135,33 @@ private final class EditorFake: EditorPort {
     func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? {
         snapshots[bufferID]
     }
+    func recoveryCapture(for bufferID: BufferID) -> EditorRecoveryCapture? {
+        guard let snapshot = snapshots[bufferID] else { return nil }
+        return EditorRecoveryCapture(
+            bufferID: bufferID,
+            baseRevision: snapshot.revision,
+            revision: snapshot.revision,
+            baseUTF8: Data(snapshot.text.utf8),
+            viewState: viewStates[bufferID] ?? EditorViewState()
+        )
+    }
+    func installRecovery(_ snapshot: EditorRecoverySnapshot) {
+        viewStates[snapshot.bufferID] = snapshot.viewState
+        guard let text = String(data: snapshot.utf8, encoding: .utf8) else { return }
+        install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text))
+    }
     func focus() {}
     func retire(bufferID: BufferID) {
         retired.append(bufferID)
         snapshots.removeValue(forKey: bufferID)
+        viewStates.removeValue(forKey: bufferID)
         if displayed?.bufferID == bufferID { displayed = nil }
     }
     func setInputEnabled(_ isEnabled: Bool) { inputEnabled = isEnabled }
+
+    func setViewState(_ state: EditorViewState, for bufferID: BufferID) {
+        viewStates[bufferID] = state
+    }
 
     func insert(_ replacement: String) -> EditorEditOutcome? {
         guard inputEnabled, let displayed, let current = snapshots[displayed.bufferID] else { return nil }
@@ -227,6 +250,250 @@ private final class EditorFake: EditorPort {
     }
     #expect(active != tab.id)
     #expect(useCase.snapshot().tabs.map(\.id) == [active])
+}
+
+@Test @MainActor func undoCloseRestoresDirtyEditorBytesAndStableTabIdentity() async {
+    let store = StoreSpy()
+    let useCase = ScratchWorkspaceUseCase(store: store)
+    _ = await useCase.start()
+    let editor = EditorFake()
+    let binding = EditorBindingUseCase(workspace: useCase, editor: editor)
+    binding.render(useCase.snapshot())
+    useCase.onChange = { binding.render($0) }
+
+    let original = useCase.snapshot().tabs[0]
+    #expect(editor.insert("recover me 🦆") == .accepted(newRevision: 1))
+    _ = await useCase.flushPersistence()
+    _ = await useCase.addScratch()
+
+    guard case .closed = await useCase.close(
+        tabID: original.id,
+        decision: .discard,
+        expectedRevision: 1
+    ) else {
+        Issue.record("dirty close should succeed")
+        return
+    }
+    #expect(useCase.canRestoreRecentlyClosedTab)
+    #expect(useCase.recentlyClosedTabCount == 1)
+    #expect(editor.snapshot(for: original.buffer.bufferID) == nil)
+
+    #expect(await useCase.restoreLastClosedTab() == .applied(.saved))
+    let restored = try! #require(useCase.snapshot().tabs.first(where: { $0.id == original.id }))
+    #expect(restored.isActive)
+    #expect(restored.isDirty)
+    #expect(restored.buffer.revision == 1)
+    #expect(editor.snapshot(for: original.buffer.bufferID)?.text == "recover me 🦆")
+    #expect(!useCase.canRestoreRecentlyClosedTab)
+    #expect(useCase.recentlyClosedTabCount == 0)
+}
+
+@Test @MainActor func undoCloseReplacesOnlyUntouchedAutomaticScratch() async {
+    let store = StoreSpy()
+    let useCase = ScratchWorkspaceUseCase(store: store)
+    _ = await useCase.start()
+    let editor = EditorFake()
+    let binding = EditorBindingUseCase(workspace: useCase, editor: editor)
+    binding.render(useCase.snapshot())
+    useCase.onChange = { binding.render($0) }
+
+    let original = useCase.snapshot().tabs[0]
+    guard case .closed(_, true, .saved) = await useCase.close(tabID: original.id) else {
+        Issue.record("final close should create a replacement")
+        return
+    }
+    let untouchedReplacement = useCase.snapshot().tabs[0]
+    #expect(await useCase.restoreLastClosedTab() == .applied(.saved))
+    #expect(useCase.snapshot().tabs.map(\.id) == [original.id])
+    #expect(editor.retired == [original.buffer.bufferID, untouchedReplacement.buffer.bufferID])
+
+    guard case .closed(_, true, .saved) = await useCase.close(tabID: original.id) else {
+        Issue.record("second final close should create a replacement")
+        return
+    }
+    let editedReplacement = useCase.snapshot().tabs[0]
+    #expect(editor.insert("keep this") == .accepted(newRevision: 1))
+    #expect(await useCase.restoreLastClosedTab() == .applied(.saved))
+    #expect(useCase.snapshot().tabs.map(\.id) == [original.id, editedReplacement.id])
+    #expect(editor.snapshot(for: editedReplacement.buffer.bufferID)?.text == "keep this")
+}
+
+@Test @MainActor func undoClosePreservesPinnedLanguageOrViewCustomizedReplacement() async {
+    for customization in 0..<3 {
+        let store = StoreSpy()
+        let useCase = ScratchWorkspaceUseCase(store: store)
+        _ = await useCase.start()
+        let editor = EditorFake()
+        let binding = EditorBindingUseCase(workspace: useCase, editor: editor)
+        binding.render(useCase.snapshot())
+        useCase.onChange = { binding.render($0) }
+        let original = useCase.snapshot().tabs[0]
+        _ = await useCase.close(tabID: original.id)
+        let replacement = useCase.snapshot().tabs[0]
+
+        switch customization {
+        case 0:
+            _ = await useCase.setPinned(replacement.id, isPinned: true)
+        case 1:
+            _ = await useCase.setLanguageOverride(
+                .manual(LanguageID(rawValue: "swift")),
+                for: replacement.id
+            )
+        default:
+            editor.setViewState(
+                EditorViewState(wordWrapEnabled: false, wrapMarkerVisible: true),
+                for: replacement.buffer.bufferID
+            )
+        }
+
+        #expect(await useCase.restoreLastClosedTab() == .applied(.saved))
+        #expect(useCase.snapshot().tabs.count == 2)
+        #expect(useCase.snapshot().tabs.contains(where: { $0.id == replacement.id }))
+        if customization == 0 {
+            #expect(useCase.snapshot().tabs.first(where: { $0.id == replacement.id })?.isPinned == true)
+        } else if customization == 1 {
+            #expect((try? useCase.recoverySession().languageOverride(for: replacement.id)) == .manual(LanguageID(rawValue: "swift")))
+        } else {
+            #expect(editor.recoveryCapture(for: replacement.buffer.bufferID)?.viewState.wordWrapEnabled == false)
+            #expect(editor.recoveryCapture(for: replacement.buffer.bufferID)?.viewState.wrapMarkerVisible == true)
+        }
+    }
+}
+
+@Test @MainActor func failedUndoCloseKeepsStackAndRetriesWithoutLeakingInstalledBuffer() async {
+    let store = StoreSpy()
+    let useCase = ScratchWorkspaceUseCase(store: store)
+    _ = await useCase.start()
+    let editor = EditorFake()
+    let binding = EditorBindingUseCase(workspace: useCase, editor: editor)
+    binding.render(useCase.snapshot())
+    var retry: PersistenceRetry?
+    useCase.onChange = { change in
+        binding.render(change)
+        retry = change.failureEvent?.retry ?? retry
+    }
+    let original = useCase.snapshot().tabs[0]
+    _ = await useCase.addScratch()
+    _ = await useCase.close(tabID: original.id)
+
+    await store.setFailure(.unavailable("restore blocked"))
+    guard case .persistenceFailed = await useCase.restoreLastClosedTab() else {
+        Issue.record("restore should expose persistence failure")
+        return
+    }
+    #expect(useCase.recentlyClosedTabCount == 1)
+    #expect(editor.snapshot(for: original.buffer.bufferID) == nil)
+
+    await store.setFailure(nil)
+    guard let retry else {
+        Issue.record("restore failure should publish a typed retry")
+        return
+    }
+    #expect(await useCase.retry(retry) == .saved)
+    #expect(useCase.snapshot().tabs.contains(where: { $0.id == original.id }))
+    #expect(useCase.recentlyClosedTabCount == 0)
+    #expect(editor.snapshot(for: original.buffer.bufferID) != nil)
+}
+
+@Test @MainActor func staleRestoreRetryCannotConsumeNextRecentlyClosedEntry() async {
+    let store = StoreSpy()
+    let useCase = ScratchWorkspaceUseCase(store: store)
+    _ = await useCase.start()
+    let editor = EditorFake()
+    let binding = EditorBindingUseCase(workspace: useCase, editor: editor)
+    binding.render(useCase.snapshot())
+    var failedRetry: PersistenceRetry?
+    useCase.onChange = { change in
+        binding.render(change)
+        failedRetry = change.failureEvent?.retry ?? failedRetry
+    }
+    let older = useCase.snapshot().tabs[0]
+    _ = await useCase.addScratch()
+    let newest = useCase.snapshot().tabs[1]
+    _ = await useCase.addScratch()
+    _ = await useCase.close(tabID: older.id)
+    _ = await useCase.close(tabID: newest.id)
+
+    await store.setFailure(.unavailable("restore blocked"))
+    guard case .persistenceFailed = await useCase.restoreLastClosedTab() else {
+        Issue.record("newest restore should fail")
+        return
+    }
+    let retry = try! #require(failedRetry)
+    await store.setFailure(nil)
+    #expect(await useCase.restoreLastClosedTab() == .applied(.saved))
+    #expect(useCase.snapshot().tabs.contains(where: { $0.id == newest.id }))
+    #expect(!useCase.snapshot().tabs.contains(where: { $0.id == older.id }))
+    #expect(useCase.recentlyClosedTabCount == 1)
+
+    guard case .failed = await useCase.retry(retry) else {
+        Issue.record("stale retry must be rejected")
+        return
+    }
+    #expect(!useCase.snapshot().tabs.contains(where: { $0.id == older.id }))
+    #expect(useCase.recentlyClosedTabCount == 1)
+}
+
+@Test @MainActor func recentlyClosedStackIsLIFOAndEvictsBeyondTwentyEntries() async {
+    let store = StoreSpy()
+    let useCase = ScratchWorkspaceUseCase(store: store)
+    _ = await useCase.start()
+    let editor = EditorFake()
+    let binding = EditorBindingUseCase(workspace: useCase, editor: editor)
+    binding.render(useCase.snapshot())
+    useCase.onChange = { binding.render($0) }
+    for _ in 0..<21 { _ = await useCase.addScratch() }
+    let closedIDs = Array(useCase.snapshot().tabs.dropLast().map(\.id))
+    for id in closedIDs { _ = await useCase.close(tabID: id) }
+    #expect(useCase.recentlyClosedTabCount == 20)
+
+    for _ in 0..<20 {
+        #expect(await useCase.restoreLastClosedTab() == .applied(.saved))
+    }
+    #expect(!useCase.snapshot().tabs.contains(where: { $0.id == closedIDs[0] }))
+    #expect(Set(useCase.snapshot().tabs.map(\.id)).isSuperset(of: Set(closedIDs.dropFirst())))
+    #expect(useCase.recentlyClosedTabCount == 0)
+}
+
+@Test @MainActor func undoCloseWithReopenedFileCreatesDirtyUnboundRecoveryCopy() async {
+    let store = StoreSpy()
+    let useCase = ScratchWorkspaceUseCase(store: store)
+    _ = await useCase.start()
+    let editor = EditorFake()
+    let binding = EditorBindingUseCase(workspace: useCase, editor: editor)
+    binding.render(useCase.snapshot())
+    useCase.onChange = { binding.render($0) }
+    let file = FileBinding(
+        canonicalPath: "/tmp/reopened.swift",
+        encoding: .utf8,
+        byteOrderMark: .absent,
+        lineEnding: .lf,
+        observedIdentity: FileIdentity(
+            canonicalPath: "/tmp/reopened.swift",
+            device: 1,
+            inode: 2,
+            byteCount: 3,
+            modifiedNanoseconds: 4,
+            contentToken: "reopened"
+        )
+    )
+    let closed = useCase.snapshot().tabs[0]
+    _ = await useCase.bindSavedFile(
+        tabID: closed.id,
+        binding: file,
+        title: "reopened.swift",
+        savedRevision: 0
+    )
+    _ = await useCase.addScratch()
+    _ = await useCase.close(tabID: closed.id)
+    _ = await useCase.addOpenedFile(binding: file, title: "reopened.swift")
+
+    #expect(await useCase.restoreLastClosedTab() == .applied(.saved))
+    let restored = try! #require(useCase.snapshot().tabs.first(where: { $0.id == closed.id }))
+    #expect(restored.title == "reopened.swift (restored)")
+    #expect(restored.isDirty)
+    #expect(restored.fullPath == nil)
+    #expect(useCase.snapshot().tabs.filter { $0.fullPath == file.canonicalPath }.count == 1)
 }
 
 @Test @MainActor func editorBindingUsesRevisionCheckedIncrementalEdits() async {

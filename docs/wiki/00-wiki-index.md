@@ -45,8 +45,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 31 | [Phase 10 independent code review](reviews/2026-09-03-phase-10-standard-editing-shortcuts-code-review.md) | **Content approved — latest Phase 10 evidence** | Cmd-N termination join, Scintilla IME responder semantics, fallback revision-exhaustion remediation을 0 Blocker, 0 Major, 0 Minor로 승인했다. candidate freeze/signing이 허가됐고 exact receipt는 pending이다. |
 | 32 | [Phase 11 workspace chrome and document dropdown](14-workspace-chrome-and-document-dropdown.md) | **Approved, committed and pushed** | 상단 blank-space 제거, compact multiline tabs, stable-ID document dropdown, 실제 status bar, language dropdown, Scintilla gutter/palette polish와 84% footprint 교체 앱 아이콘을 기록한다. commit `fff6c1c`가 exact receipt/audit 후 `origin/main`에 push됐다. |
 | 33 | [Phase 11 independent code review](reviews/2026-09-03-phase-11-workspace-chrome-code-review.md) | **Approved — latest Phase 11 evidence** | dropdown O(1) 증분 갱신, synchronous termination chrome admission, 네 모서리·전체 ICNS round-trip을 0 Blocker/Major/Minor로 독립 재검증했다. |
-| 34 | [Phase 12 searchable document switcher](15-searchable-document-switcher.md) | **Content approved; exact receipt pending** | title/path ranked filtering, stable-ID keyboard activation, adaptive native popover, `Command-Shift-O`, 5,000-tab budget와 termination admission을 기록한다. |
+| 34 | [Phase 12 searchable document switcher](15-searchable-document-switcher.md) | **Approved, committed and pushed** | title/path ranked filtering, stable-ID keyboard activation, adaptive native popover, `Command-Shift-O`, 5,000-tab budget와 termination admission을 기록한다. commit `5f816e0`가 exact receipt/audit 후 `origin/main`에 push됐다. |
 | 35 | [Phase 12 independent code review](reviews/2026-09-03-phase-12-searchable-document-switcher-code-review.md) | **Content approved — latest Phase 12 evidence** | 최초 2 Major/1 Minor, 두 remediation round와 exact-tier/popover lifecycle closure를 기록하며 최종 0 Blocker/Major/Minor로 승인한다. |
+| 36 | [Phase 13 recently closed tab restoration](16-recently-closed-tabs.md) | **Content approved; exact receipt pending** | 최근 20개 탭의 stable metadata와 UTF-8/view snapshot 복구, `Command-Shift-T`, durable restore, 종료 경쟁 및 자동 빈 탭 치환을 기록한다. |
+| 37 | [Phase 13 independent code review](reviews/2026-09-03-phase-13-recently-closed-tabs-code-review.md) | **Content approved — latest Phase 13 evidence** | 최초 2 Major와 automatic-replacement/stable-retry remediation, off-main capture materialization 및 duplicate-path safety를 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -102,6 +104,15 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 13 recently closed tabs independent review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 13 구현과 remediation에는 참여하지 않았다.
+- **Initial findings:** final automatic scratch의 pin/language/view-only customization 유실과 identity 없는 stale restore Retry의 다음 LIFO entry 오복구를 각각 Major로 판정했다. builder가 별도로 발견한 close-path snapshot materialization 동안 freeze를 보류했다.
+- **Closure:** exact replacement metadata/default editor capture 검증, UUID-bound Retry preflight, immutable capture 보관과 explicit restore의 off-main materialization으로 두 Major와 hot path를 닫았다. reopened canonical path는 closed bytes를 dirty unbound restored scratch로 보존한다. pinned file/language, 20-entry LIFO/cap, durable recovery publication, termination join도 현재 bytes/tests에서 확인했다.
+- **Evidence:** independent exact-final focused 9/9와 `git diff --check` PASS. final duplicate-path case 직전 independent Debug 214/214는 exact-final claim에서 제외하며, builder exact-final Debug/Release 215/215를 supporting evidence로 기록한다.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** exact staged-candidate receipt는 pending이다.
+- **Boundary:** review 문서와 index row/work log만 수정했다. source/tests/work docs/stage/sign/commit/push는 건드리지 않았고 doc04/vendor script/README/ignored Notepad++를 제외·보존했다.
 
 ### 2026-09-03 — Phase 12 searchable document switcher independent review
 

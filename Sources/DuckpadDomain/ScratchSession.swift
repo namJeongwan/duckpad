@@ -67,6 +67,33 @@ public struct WorkspaceTab: Codable, Equatable, Sendable {
     }
 }
 
+/// Complete metadata needed to put a closed tab back into a live session.
+/// Editor-owned text and view state remain an Application-layer concern.
+public struct ClosedTabState: Equatable, Sendable {
+    public let originalIndex: Int
+    public let tab: WorkspaceTab
+    public let document: ScratchDocument
+    public let buffer: BufferMetadata
+    public let fileBinding: FileBinding?
+    public let languageOverride: LanguageOverride?
+
+    public init(
+        originalIndex: Int,
+        tab: WorkspaceTab,
+        document: ScratchDocument,
+        buffer: BufferMetadata,
+        fileBinding: FileBinding?,
+        languageOverride: LanguageOverride?
+    ) {
+        self.originalIndex = originalIndex
+        self.tab = tab
+        self.document = document
+        self.buffer = buffer
+        self.fileBinding = fileBinding
+        self.languageOverride = languageOverride
+    }
+}
+
 public enum SessionError: Error, Equatable, Sendable {
     case unknownTab(TabID)
     case brokenDocumentReference(DocumentID)
@@ -332,6 +359,66 @@ public struct ScratchSession: Codable, Equatable, Sendable {
             if let activeTabID { recordActivation(activeTabID) }
         }
         return activeTabID
+    }
+
+    public func closedTabState(for tabID: TabID) throws -> ClosedTabState {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else {
+            throw SessionError.unknownTab(tabID)
+        }
+        let tab = tabs[index]
+        let document = try document(for: tabID)
+        guard let buffer = buffers[document.bufferID] else {
+            throw SessionError.brokenBufferReference(document.bufferID)
+        }
+        return ClosedTabState(
+            originalIndex: index,
+            tab: tab,
+            document: document,
+            buffer: buffer,
+            fileBinding: fileBindings[document.id],
+            languageOverride: languageOverrides[document.id]
+        )
+    }
+
+    /// Restores stable IDs and metadata while respecting the pinned-prefix
+    /// invariant. The restored tab becomes active, matching browser/native
+    /// Undo Close Tab behavior.
+    @discardableResult
+    public mutating func restoreClosedTab(_ state: ClosedTabState) throws -> Int {
+        guard !tabs.contains(where: { $0.id == state.tab.id }) else {
+            throw SessionError.invalidRecoveryState("duplicate restored tab ID")
+        }
+        guard documents[state.document.id] == nil else {
+            throw SessionError.invalidRecoveryState("duplicate restored document ID")
+        }
+        guard buffers[state.buffer.id] == nil else {
+            throw SessionError.duplicateBufferID(state.buffer.id)
+        }
+        guard state.tab.documentID == state.document.id,
+              state.document.bufferID == state.buffer.id else {
+            throw SessionError.invalidRecoveryState("broken closed tab state")
+        }
+        if let binding = state.fileBinding,
+           fileBindings.values.contains(where: { $0.canonicalPath == binding.canonicalPath }) {
+            throw SessionError.duplicateFileBinding(binding.canonicalPath)
+        }
+
+        documents[state.document.id] = state.document
+        buffers[state.buffer.id] = state.buffer
+        if let binding = state.fileBinding { fileBindings[state.document.id] = binding }
+        if let override = state.languageOverride { languageOverrides[state.document.id] = override }
+
+        let pinnedCount = tabs.prefix(while: \.isPinned).count
+        let index: Int
+        if state.tab.isPinned {
+            index = min(max(state.originalIndex, 0), pinnedCount)
+        } else {
+            index = min(max(state.originalIndex, pinnedCount), tabs.count)
+        }
+        tabs.insert(state.tab, at: index)
+        activeTabID = state.tab.id
+        recordActivation(state.tab.id)
+        return index
     }
 
     public var lastUsedTabID: TabID? {

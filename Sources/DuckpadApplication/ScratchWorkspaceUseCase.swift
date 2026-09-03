@@ -71,6 +71,7 @@ public enum PersistenceRetry: Equatable, Sendable {
     case addScratch
     case activate(TabID)
     case close(TabID, CloseDecision?, expectedRevision: UInt64?)
+    case restoreClosedTab(UUID)
     case moveTab(TabID, Int)
     case pinTab(TabID, Bool)
     case languageOverride(TabID, LanguageOverride)
@@ -187,6 +188,14 @@ private actor OrderedSessionWriter {
 
 @MainActor
 public final class ScratchWorkspaceUseCase {
+    private struct RecentlyClosedTab {
+        let id: UUID
+        let state: ClosedTabState
+        let editor: EditorRecoveryCapture
+        let automaticReplacement: ClosedTabState?
+    }
+
+    private static let recentlyClosedLimit = 20
     private let store: any SessionStore
     private let writer: OrderedSessionWriter
     private var session: ScratchSession
@@ -200,6 +209,10 @@ public final class ScratchWorkspaceUseCase {
     private var editorBatchReservationID: UUID?
     private var transactionWaiters: [CheckedContinuation<Void, Never>] = []
     private var closeRecoveryCommitter: (@MainActor (ScratchSession) async -> RecoveryOutcome)?
+    private var captureClosedBuffer: (@MainActor (BufferID) -> EditorRecoveryCapture?)?
+    private var installClosedBuffer: (@MainActor (EditorRecoverySnapshot) -> Void)?
+    private var retireClosedBuffer: (@MainActor (BufferID) -> Void)?
+    private var recentlyClosedTabs: [RecentlyClosedTab] = []
 
     public var onChange: ((WorkspaceChange) -> Void)?
 
@@ -216,6 +229,22 @@ public final class ScratchWorkspaceUseCase {
     ) {
         closeRecoveryCommitter = committer
     }
+
+    public func installClosedTabBufferBridge(
+        capture: @escaping @MainActor (BufferID) -> EditorRecoveryCapture?,
+        install: @escaping @MainActor (EditorRecoverySnapshot) -> Void,
+        retire: @escaping @MainActor (BufferID) -> Void
+    ) {
+        captureClosedBuffer = capture
+        installClosedBuffer = install
+        retireClosedBuffer = retire
+    }
+
+    public var canRestoreRecentlyClosedTab: Bool {
+        !recentlyClosedTabs.isEmpty && installClosedBuffer != nil
+    }
+
+    public var recentlyClosedTabCount: Int { recentlyClosedTabs.count }
 
     @discardableResult
     public func start() async -> PersistenceOutcome {
@@ -288,6 +317,8 @@ public final class ScratchWorkspaceUseCase {
             return outcome(from: await activate(tabID: id))
         case .close(let id, let decision, let expectedRevision):
             return outcome(from: await close(tabID: id, decision: decision, expectedRevision: expectedRevision))
+        case .restoreClosedTab(let entryID):
+            return outcome(from: await restoreLastClosedTab(expectedEntryID: entryID))
         case .moveTab(let id, let index):
             return outcome(from: await moveTab(id, to: index))
         case .pinTab(let id, let pinned):
@@ -450,6 +481,20 @@ public final class ScratchWorkspaceUseCase {
             }
         }
 
+        let closedState = try? session.closedTabState(for: tabID)
+        let closedEditor = captureClosedBuffer?(buffer.id)
+        let restorable = closedState.flatMap { state -> RecentlyClosedTab? in
+            guard let closedEditor,
+                  closedEditor.bufferID == state.buffer.id,
+                  closedEditor.revision == state.buffer.revision else { return nil }
+            return RecentlyClosedTab(
+                id: UUID(),
+                state: state,
+                editor: closedEditor,
+                automaticReplacement: nil
+            )
+        }
+
         var candidate = session
         do {
             _ = try candidate.close(tabID: tabID, discardingDirty: buffer.isDirty && decision == .discard)
@@ -469,6 +514,19 @@ public final class ScratchWorkspaceUseCase {
                     }
                 }
                 session = candidate
+                if let restorable {
+                    recentlyClosedTabs.append(RecentlyClosedTab(
+                        id: restorable.id,
+                        state: restorable.state,
+                        editor: restorable.editor,
+                        automaticReplacement: replacementCreated
+                            ? candidate.activeTabID.flatMap { try? candidate.closedTabState(for: $0) }
+                            : nil
+                    ))
+                    if recentlyClosedTabs.count > Self.recentlyClosedLimit {
+                        recentlyClosedTabs.removeFirst(recentlyClosedTabs.count - Self.recentlyClosedLimit)
+                    }
+                }
                 persistenceState = .saved
                 publish(.tabRemoved(index: removedIndex, retiredBufferID: buffer.id))
                 return .closed(activeTabID: candidate.activeTabID!, replacementCreated: replacementCreated, persistence: .saved)
@@ -479,6 +537,106 @@ public final class ScratchWorkspaceUseCase {
             }
         } catch let error as SessionError { return .rejected(error) }
         catch { preconditionFailure("ScratchSession only throws SessionError") }
+    }
+
+    @discardableResult
+    public func restoreLastClosedTab(expectedEntryID: UUID? = nil) async -> WorkspaceActionOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        guard let closed = recentlyClosedTabs.last,
+              expectedEntryID == nil || expectedEntryID == closed.id,
+              let installClosedBuffer,
+              let retireClosedBuffer else {
+            return .rejected(.invalidRecoveryState("no recently closed tab"))
+        }
+
+        let editorSnapshot: EditorRecoverySnapshot
+        do {
+            editorSnapshot = try await Task.detached(priority: .utility) {
+                try closed.editor.materializedSnapshot()
+            }.value
+        } catch {
+            return .rejected(.invalidRecoveryState("invalid recently closed editor capture"))
+        }
+        installClosedBuffer(editorSnapshot)
+        var candidate = session
+        do {
+            var retiredReplacementBufferID: BufferID?
+            if let replacement = closed.automaticReplacement,
+               let replacementID = candidate.activeTabID,
+               candidate.tabs.count == 1,
+               candidate.tabs[0].id == replacementID,
+               let currentReplacement = try? candidate.closedTabState(for: replacementID),
+               currentReplacement == replacement,
+               let replacementEditor = captureClosedBuffer?(replacement.buffer.id),
+               replacementEditor.bufferID == replacement.buffer.id,
+               replacementEditor.baseRevision == 0,
+               replacementEditor.revision == 0,
+               replacementEditor.baseUTF8.isEmpty,
+               replacementEditor.deltas.isEmpty,
+               replacementEditor.viewState == EditorViewState() {
+                retiredReplacementBufferID = replacement.buffer.id
+                _ = try candidate.close(tabID: replacementID)
+            }
+            let restorationState: ClosedTabState
+            if let binding = closed.state.fileBinding,
+               candidate.tabID(canonicalPath: binding.canonicalPath) != nil {
+                restorationState = ClosedTabState(
+                    originalIndex: closed.state.originalIndex,
+                    tab: closed.state.tab,
+                    document: ScratchDocument(
+                        id: closed.state.document.id,
+                        bufferID: closed.state.document.bufferID,
+                        title: "\(closed.state.document.title) (restored)"
+                    ),
+                    buffer: BufferMetadata(
+                        id: closed.state.buffer.id,
+                        revision: closed.state.buffer.revision,
+                        isDirty: true
+                    ),
+                    fileBinding: nil,
+                    languageOverride: closed.state.languageOverride
+                )
+            } else {
+                restorationState = closed.state
+            }
+            let index = try candidate.restoreClosedTab(restorationState)
+            switch await save(candidate) {
+            case .saved:
+                if let closeRecoveryCommitter {
+                    switch await closeRecoveryCommitter(candidate) {
+                    case .saved:
+                        break
+                    case .failed(let error):
+                        retireClosedBuffer(editorSnapshot.bufferID)
+                        let failure = PersistenceFailure(operation: .save, cause: error)
+                        persistenceState = .failed(failure)
+                        publishFailure(failure, retry: .restoreClosedTab(closed.id))
+                        return .persistenceFailed(failure)
+                    }
+                }
+                session = candidate
+                recentlyClosedTabs.removeLast()
+                persistenceState = .saved
+                if let retiredReplacementBufferID {
+                    retireClosedBuffer(retiredReplacementBufferID)
+                    publish(.reset)
+                } else {
+                    publish(.tabInserted(index: index))
+                }
+                return .applied(.saved)
+            case .failed(let failure):
+                retireClosedBuffer(editorSnapshot.bufferID)
+                persistenceState = .failed(failure)
+                publishFailure(failure, retry: .restoreClosedTab(closed.id))
+                return .persistenceFailed(failure)
+            }
+        } catch let error as SessionError {
+            retireClosedBuffer(editorSnapshot.bufferID)
+            return .rejected(error)
+        } catch {
+            preconditionFailure("ScratchSession only throws SessionError")
+        }
     }
 
     public func acceptEditorEdit(_ edit: EditorIncrementalEdit) -> EditorEditOutcome {
@@ -801,6 +959,11 @@ public final class EditorBindingUseCase {
     public init(workspace: ScratchWorkspaceUseCase, editor: any EditorPort) {
         self.workspace = workspace
         self.editor = editor
+        workspace.installClosedTabBufferBridge(
+            capture: { [weak editor] bufferID in editor?.recoveryCapture(for: bufferID) },
+            install: { [weak editor] snapshot in editor?.installRecovery(snapshot) },
+            retire: { [weak editor] bufferID in editor?.retire(bufferID: bufferID) }
+        )
         editor.onEdit = { [weak workspace] edit in
             workspace?.acceptEditorEdit(edit) ?? .rejected(currentRevision: edit.expectedRevision)
         }
