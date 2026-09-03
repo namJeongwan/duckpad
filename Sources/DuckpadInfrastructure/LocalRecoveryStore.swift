@@ -349,8 +349,22 @@ public actor LocalRecoveryStore: RecoveryStore {
             index += 1
         }
         guard state.bookmarkedLines.allSatisfy({ $0 >= 0 && $0 <= maximumLine }) else { return false }
-        return isUTF8Boundary(state.anchorUTF8, in: utf8)
-            && isUTF8Boundary(state.caretUTF8, in: utf8)
+        guard isUTF8Boundary(state.anchorUTF8, in: utf8),
+              isUTF8Boundary(state.caretUTF8, in: utf8) else { return false }
+        if let secondary = state.secondaryViewState {
+            guard state.splitOrientation != nil,
+                  secondary.anchorUTF8 >= 0,
+                  secondary.caretUTF8 >= 0,
+                  secondary.firstVisibleLine >= 0,
+                  secondary.horizontalScrollOffset >= 0,
+                  secondary.anchorUTF8 <= utf8.count,
+                  secondary.caretUTF8 <= utf8.count,
+                  isUTF8Boundary(secondary.anchorUTF8, in: utf8),
+                  isUTF8Boundary(secondary.caretUTF8, in: utf8) else { return false }
+        } else if state.splitOrientation != nil {
+            return false
+        }
+        return true
     }
 
     private static func isUTF8Boundary(_ offset: Int, in utf8: Data) -> Bool {

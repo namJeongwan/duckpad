@@ -59,6 +59,8 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 45 | [Phase 17 independent code review](reviews/2026-09-03-phase-17-folder-search-code-review.md) | **Content approved — latest Phase 17 evidence** | 최초 5 Major/2 Minor의 TOCTOU, regex validation, result-memory/MainActor, directory-metadata, termination activation race를 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 46 | [Phase 18 persistent bookmarks](21-persistent-bookmarks.md) | **Implemented; review pending** | 문서별 line bookmark, 편집/undo 추적, 복구 검증, 순환 탐색과 `Command/F2` 단축키를 기록한다. |
 | 47 | [Phase 18 independent code review](reviews/2026-09-03-phase-18-persistent-bookmarks-code-review.md) | **Content approved — latest Phase 18 evidence** | 최초 4 Major의 first-line backward wrap, fallback temporary-attribute ownership, CRLF mapping, maximum-marker MainActor budget을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
+| 48 | [Phase 19 shared-document split editing](22-split-editing.md) | **Implemented; review pending** | 같은 Scintilla document/undo를 공유하면서 cursor·selection·scroll은 독립적인 좌우/상하 pane, 복구와 native 단축키를 기록한다. |
+| 49 | [Phase 19 independent code review](reviews/2026-09-03-phase-19-split-editing-code-review.md) | **Content approved — latest Phase 19 evidence** | 최초 3 Major/1 Minor의 rejected-edit 전환, per-buffer exhaustion, 양 pane language, secondary eviction 결함을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -114,6 +116,30 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 19 review remediation
+
+- **Agent/role:** `/root`, direct builder; independent reviewer verdict remains authoritative until re-review.
+- **Closure candidate:** P19-01 recovery is bound to the rejected BufferID and completed before buffer/snapshot/lifecycle transitions; P19-02 revision exhaustion is isolated per buffer; P19-03 language/indent/fold/brace/palette configuration applies to both pane views regardless of focus. P19-04 also invalidates and evicts a closed secondary native view.
+- **Regression evidence:** immediate rejected-edit switch, exhausted-to-healthy split switch, primary/secondary-focused language parity, and split cache eviction tests pass. Editor-focused 39/39 and exact-current Debug/Release 270/270 pass; independent current-byte re-review is pending.
+- **Boundary:** README, ignored Notepad++, and user-owned doc04/vendor script remain excluded. No stage/commit/push occurs before independent approval and exact receipt.
+
+### 2026-09-03 — Phase 19 independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 19 구현/remediation에는 참여하지 않았다.
+- **Initial findings:** **CHANGES_REQUIRED — 0 Blocker, 3 Major, 1 Minor.** rejected secondary edit의 immediate-switch 유실, exhausted buffer의 global input poisoning, focused-pane-only language 불일치, closed-secondary retention을 재현했다.
+- **Closure/verdict:** BufferID-bound synchronous boundary recovery, per-buffer exhaustion bookkeeping, 양 pane language 적용, close/hide native invalidation·cache eviction으로 P19-01~P19-04가 모두 닫혔다. **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** Exact receipt는 pending이다.
+- **Validation:** independent focused 6/6과 동일 external adversarial AppKit/Scintilla probe가 모두 current expected result로 전환됐다. builder current-byte editor-focused 39/39, Debug/Release 270/270를 supporting evidence로 기록했고 `git diff --check`는 PASS다.
+- **Boundary:** review 문서와 index Phase 19 review row/work log만 수정했다. source/tests/work doc, stage/commit/push, doc04, 기존 vendor script, README, ignored Notepad++는 건드리지 않았다.
+
+### 2026-09-03 — Phase 19 shared-document split editing
+
+- **Agent/role:** `/root`, direct builder; no new implementation agent was added.
+- **Implementation:** side-by-side/stacked panes share one reference-counted Scintilla document and undo history while retaining pane-local selection, cursor, scrolling, wrap, and focus. Only the primary watcher emits each shared-document mutation to Application; accepted revisions synchronize the secondary view.
+- **Recovery/lifecycle:** optional orientation and secondary view state are legacy-compatible, UTF-8/range validated, per-buffer, and removed with the buffer. Unsupported NSTextView fallback drops only split metadata.
+- **Shortcuts:** `Command-Backslash`, `Command-Option-Backslash`, `Command-Control-Backslash`, and `Command-Shift-Backslash` are collision-tested and lifecycle-gated.
+- **Validation:** focused bridge/recovery/controller/menu tests pass, including rejected secondary-edit recovery and review regressions; exact-current full Debug and Release suites each pass 270/270. Independent re-review is pending.
+- **Boundary:** workspace file browser/multiple windows follow separately. README, ignored Notepad++, and user-owned doc04/vendor script remain excluded.
 
 ### 2026-09-03 — Phase 18 persistent bookmarks
 

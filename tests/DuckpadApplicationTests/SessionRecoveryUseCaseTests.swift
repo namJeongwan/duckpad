@@ -146,6 +146,17 @@ private func recoveredFileBinding() -> FileBinding {
     #expect(roundTrip.wrapMarkerVisible)
     #expect(roundTrip.bookmarkedLines == [1, 4])
 
+    let splitRoundTrip = try JSONDecoder().decode(
+        EditorViewState.self,
+        from: JSONEncoder().encode(EditorViewState(
+            splitOrientation: .sideBySide,
+            secondaryViewState: SecondaryEditorViewState(caretUTF8: 3, wordWrapEnabled: false)
+        ))
+    )
+    #expect(splitRoundTrip.splitOrientation == .sideBySide)
+    #expect(splitRoundTrip.secondaryViewState?.caretUTF8 == 3)
+    #expect(splitRoundTrip.secondaryViewState?.wordWrapEnabled == false)
+
     let bounded = EditorViewState(bookmarkedLines: Array(0...EditorViewState.maximumBookmarkCount))
     #expect(bounded.bookmarkedLines.count == EditorViewState.maximumBookmarkCount)
     #expect(bounded.bookmarkedLines.last == EditorViewState.maximumBookmarkCount - 1)

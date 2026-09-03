@@ -136,6 +136,21 @@ public protocol BookmarkEditorPort: EditorPort {
     func clearBookmarks()
 }
 
+public enum EditorSplitOrientation: String, Codable, Equatable, Sendable {
+    case sideBySide
+    case stacked
+}
+
+/// A split keeps one shared document/undo history while each pane owns its
+/// cursor, selection, wrapping, and scroll position.
+@MainActor
+public protocol SplitEditorPort: EditorPort {
+    var splitOrientation: EditorSplitOrientation? { get }
+    func split(orientation: EditorSplitOrientation)
+    func closeSplit()
+    func focusOtherPane()
+}
+
 /// Platform-neutral edit commands surfaced by the native menu. Application
 /// owns the intent while each editor adapter owns its responder/engine details.
 public enum EditorCommand: Equatable, Sendable {

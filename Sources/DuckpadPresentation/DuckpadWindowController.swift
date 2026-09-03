@@ -653,6 +653,28 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         recoveryUseCase?.editorViewStateDidChange()
     }
 
+    @objc public func performSplitEditorRight(_ sender: Any? = nil) {
+        guard let editor = actionableSplitEditor else { return }
+        editor.split(orientation: .sideBySide)
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    @objc public func performSplitEditorDown(_ sender: Any? = nil) {
+        guard let editor = actionableSplitEditor else { return }
+        editor.split(orientation: .stacked)
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    @objc public func performFocusOtherEditorPane(_ sender: Any? = nil) {
+        actionableSplitEditor?.focusOtherPane()
+    }
+
+    @objc public func performCloseEditorSplit(_ sender: Any? = nil) {
+        guard let editor = actionableSplitEditor, editor.splitOrientation != nil else { return }
+        editor.closeSplit()
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
     @objc public func performToggleBookmark(_ sender: Any? = nil) {
         guard let editor = actionableBookmarkEditor else { return }
         editor.toggleBookmarkAtCaret()
@@ -733,6 +755,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
             menuItem.state = editor.isWrapMarkerVisible ? .on : .off
             return editor.supportsWrapMarker
+        case #selector(performSplitEditorRight(_:)):
+            guard let editor = actionableSplitEditor else { menuItem.state = .off; return false }
+            menuItem.state = editor.splitOrientation == .sideBySide ? .on : .off
+            return true
+        case #selector(performSplitEditorDown(_:)):
+            guard let editor = actionableSplitEditor else { menuItem.state = .off; return false }
+            menuItem.state = editor.splitOrientation == .stacked ? .on : .off
+            return true
+        case #selector(performFocusOtherEditorPane(_:)),
+             #selector(performCloseEditorSplit(_:)):
+            return actionableSplitEditor?.splitOrientation != nil
         default:
             return true
         }
@@ -746,6 +779,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var actionableBookmarkEditor: (any BookmarkEditorPort)? {
         guard editorCommandsAreActionable else { return nil }
         return activeEditor as? any BookmarkEditorPort
+    }
+
+    private var actionableSplitEditor: (any SplitEditorPort)? {
+        guard editorCommandsAreActionable else { return nil }
+        return activeEditor as? any SplitEditorPort
     }
 
     private func closeScope(for action: Selector?) -> TabCloseScope? {

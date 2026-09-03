@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort, EditorCommandPort, BookmarkEditorPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -18,8 +18,14 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     public static let engineVersion = "5.6.6"
     /// Stable host passed to Presentation. Each live buffer owns a Scintilla
     /// child view so switching/retiring another buffer cannot erase its undo stack.
-    public let view: NSView
-    public private(set) var activeScintillaView: DPScintillaEditorView?
+    public var view: NSView { splitView }
+    public var activeScintillaView: DPScintillaEditorView? {
+        if splitOrientation != nil, let secondaryActiveView, secondaryActiveView.hasEditorFocus {
+            return secondaryActiveView
+        }
+        return primaryActiveView
+    }
+    public var secondaryScintillaView: DPScintillaEditorView? { secondaryActiveView }
     public private(set) var lastMutationError: (any Error)?
     public private(set) var lastRecoveryJournalWorkByteCount = 0
     public private(set) var recoveryJournalAppendCount = 0
@@ -31,7 +37,16 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private var viewStates: [BufferID: EditorViewState] = [:]
     private var acceptedEdits: [BufferID: [EditorIncrementalEdit]] = [:]
     private var bufferViews: [BufferID: DPScintillaEditorView] = [:]
+    private var secondaryBufferViews: [BufferID: DPScintillaEditorView] = [:]
+    private let splitView = NSSplitView(frame: .zero)
+    private let primaryHost = NSView(frame: .zero)
+    private let secondaryHost = NSView(frame: .zero)
+    private var primaryActiveView: DPScintillaEditorView?
+    private var secondaryActiveView: DPScintillaEditorView?
+    public private(set) var splitOrientation: EditorSplitOrientation?
     private var languageConfigurations: [BufferID: EditorLanguageConfiguration] = [:]
+    private var pendingRecoveryBuffers: Set<BufferID> = []
+    private var revisionExhaustedBuffers: Set<BufferID> = []
     private var themePalette: EditorThemePalette = .light
     private var isRecovering = false
     private var inputEnabled = true
@@ -49,17 +64,26 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
 
     public init() {
         Self.prepareResources()
-        view = NSView(frame: .zero)
+        splitView.dividerStyle = .thin
+        splitView.isVertical = true
+        splitView.addArrangedSubview(primaryHost)
+        primaryHost.setAccessibilityLabel("Primary editor pane")
+        secondaryHost.setAccessibilityLabel("Secondary editor pane")
         view.translatesAutoresizingMaskIntoConstraints = false
         view.setAccessibilityIdentifier("duckpad.editor.host")
     }
 
     public func display(_ buffer: EditorBufferDescriptor) {
+        if let outgoingBufferID = activeBuffer?.bufferID {
+            guard recoverPendingBufferIfNeeded(outgoingBufferID) else { return }
+        }
+        guard recoverPendingBufferIfNeeded(buffer.bufferID) else { return }
         if activeBuffer == buffer { return }
         if let activeBuffer {
             storeViewState(bufferID: activeBuffer.bufferID)
             storeSnapshot(bufferID: activeBuffer.bufferID, revision: activeBuffer.revision)
         }
+        hideSplit(focusPrimary: false)
         let stored = snapshots[buffer.bufferID]
             ?? EditorTextSnapshot(bufferID: buffer.bufferID, revision: buffer.revision, text: "")
         let snapshot = EditorTextSnapshot(
@@ -91,15 +115,18 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         }
         restoreViewState(for: buffer.bufferID, in: editorView)
         applyStoredLanguage(to: editorView, bufferID: buffer.bufferID)
-        activeScintillaView?.removeFromSuperview()
-        activeScintillaView = editorView
-        editorView.frame = view.bounds
+        primaryActiveView?.removeFromSuperview()
+        primaryActiveView = editorView
+        editorView.frame = primaryHost.bounds
         editorView.autoresizingMask = [.width, .height]
-        editorView.isInputEnabled = inputEnabled
-        view.addSubview(editorView)
+        editorView.isInputEnabled = isInputEnabled(for: buffer.bufferID)
+        primaryHost.addSubview(editorView)
+        restoreSplitViewState(for: buffer.bufferID, primary: editorView)
     }
 
     public func install(_ snapshot: EditorTextSnapshot) {
+        pendingRecoveryBuffers.remove(snapshot.bufferID)
+        updateRevisionExhaustion(bufferID: snapshot.bufferID, revision: snapshot.revision)
         if activeBuffer?.bufferID == snapshot.bufferID { storeViewState(bufferID: snapshot.bufferID) }
         snapshots[snapshot.bufferID] = snapshot
         let bytes = Data(snapshot.text.utf8)
@@ -117,6 +144,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         acceptedEdits[snapshot.bufferID] = []
         guard let editorView = bufferViews[snapshot.bufferID] else { return }
         load(snapshot, into: editorView)
+        secondaryBufferViews[snapshot.bufferID]?.synchronizeRevision(snapshot.revision)
         if activeBuffer?.bufferID == snapshot.bufferID {
             activeBuffer = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision)
             restoreViewState(for: snapshot.bufferID, in: editorView)
@@ -124,6 +152,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     public func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? {
+        guard recoverPendingBufferIfNeeded(bufferID) else { return snapshots[bufferID] }
         if let activeBuffer, activeBuffer.bufferID == bufferID {
             storeSnapshot(bufferID: bufferID, revision: activeBuffer.revision)
         }
@@ -135,6 +164,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     public func recoveryCapture(for bufferID: BufferID) -> EditorRecoveryCapture? {
+        guard recoverPendingBufferIfNeeded(bufferID) else { return nil }
         if activeBuffer?.bufferID == bufferID { storeViewState(bufferID: bufferID) }
         guard let recovery = recoveryBuffers[bufferID] else { return nil }
         return EditorRecoveryCapture(
@@ -167,10 +197,15 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
 
     public func installRecovery(_ snapshot: EditorRecoverySnapshot) {
         guard let text = String(data: snapshot.utf8, encoding: .utf8) else { return }
-        viewStates[snapshot.bufferID] = sanitized(snapshot.viewState, for: snapshot.utf8)
+        let recoveredViewState = sanitized(snapshot.viewState, for: snapshot.utf8)
         install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text))
+        viewStates[snapshot.bufferID] = recoveredViewState
         if let editorView = bufferViews[snapshot.bufferID] {
             restoreViewState(for: snapshot.bufferID, in: editorView)
+            if activeBuffer?.bufferID == snapshot.bufferID {
+                hideSplit(focusPrimary: false)
+                restoreSplitViewState(for: snapshot.bufferID, primary: editorView)
+            }
         }
     }
 
@@ -180,21 +215,61 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         viewStates.removeValue(forKey: bufferID)
         acceptedEdits.removeValue(forKey: bufferID)
         languageConfigurations.removeValue(forKey: bufferID)
+        pendingRecoveryBuffers.remove(bufferID)
+        revisionExhaustedBuffers.remove(bufferID)
         let retiredView = bufferViews.removeValue(forKey: bufferID)
         retiredView?.onEdit = nil
         retiredView?.removeFromSuperview()
+        retiredView?.invalidate()
+        let retiredSecondary = secondaryBufferViews.removeValue(forKey: bufferID)
+        retiredSecondary?.onEdit = nil
+        retiredSecondary?.removeFromSuperview()
+        retiredSecondary?.invalidate()
         guard activeBuffer?.bufferID == bufferID else { return }
         activeBuffer = nil
-        activeScintillaView = nil
+        primaryActiveView = nil
+        secondaryActiveView = nil
     }
 
     public func setInputEnabled(_ isEnabled: Bool) {
+        if !isEnabled {
+            for bufferID in Array(pendingRecoveryBuffers) {
+                recoverPendingBufferIfNeeded(bufferID)
+            }
+        }
         inputEnabled = isEnabled
-        bufferViews.values.forEach { $0.isInputEnabled = isEnabled }
+        for (bufferID, editorView) in bufferViews {
+            editorView.isInputEnabled = isInputEnabled(for: bufferID)
+        }
+        for (bufferID, editorView) in secondaryBufferViews {
+            editorView.isInputEnabled = isInputEnabled(for: bufferID)
+        }
         view.alphaValue = isEnabled ? 1 : 0.65
     }
 
     public func focus() { activeScintillaView?.focusEditor() }
+
+    public func split(orientation: EditorSplitOrientation) {
+        guard let activeBuffer, let primary = primaryActiveView else { return }
+        configureSplit(orientation: orientation, bufferID: activeBuffer.bufferID, primary: primary)
+        storeViewState(bufferID: activeBuffer.bufferID)
+        secondaryActiveView?.focusEditor()
+    }
+
+    public func closeSplit() {
+        guard splitOrientation != nil, let bufferID = activeBuffer?.bufferID else { return }
+        storeViewState(bufferID: bufferID)
+        var state = viewStates[bufferID] ?? EditorViewState()
+        state.splitOrientation = nil
+        state.secondaryViewState = nil
+        viewStates[bufferID] = state
+        hideSplit(focusPrimary: true)
+    }
+
+    public func focusOtherPane() {
+        guard splitOrientation != nil, let primaryActiveView, let secondaryActiveView else { return }
+        (secondaryActiveView.hasEditorFocus ? primaryActiveView : secondaryActiveView).focusEditor()
+    }
 
     public var isWordWrapEnabled: Bool {
         activeScintillaView?.isWordWrapEnabled ?? true
@@ -324,18 +399,23 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
 
     @discardableResult
     public func applyLanguage(_ configuration: EditorLanguageConfiguration) -> Bool {
-        guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return false }
-        guard editorView.applyLexerNamed(
-            configuration.lexerName,
-            keywords: configuration.keywords,
-            tabWidth: UInt(configuration.indentation.width),
-            useTabs: configuration.indentation.useTabs,
-            folding: configuration.folding,
-            braceMatching: configuration.braceMatching,
-            maximumStyleBytes: UInt(configuration.maximumStyleBytes)
-        ) else { return false }
+        guard let bufferID = activeBuffer?.bufferID,
+              let primary = primaryActiveView,
+              supportsLexer(named: configuration.lexerName) else { return false }
+        let editorViews = [primary] + [secondaryActiveView].compactMap { $0 }
+        for editorView in editorViews {
+            guard editorView.applyLexerNamed(
+                configuration.lexerName,
+                keywords: configuration.keywords,
+                tabWidth: UInt(configuration.indentation.width),
+                useTabs: configuration.indentation.useTabs,
+                folding: configuration.folding,
+                braceMatching: configuration.braceMatching,
+                maximumStyleBytes: UInt(configuration.maximumStyleBytes)
+            ) else { return false }
+            editorView.apply(nativePalette(themePalette))
+        }
         languageConfigurations[bufferID] = configuration
-        editorView.apply(nativePalette(themePalette))
         return true
     }
 
@@ -343,6 +423,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         themePalette = palette
         let native = nativePalette(palette)
         bufferViews.values.forEach { $0.apply(native) }
+        secondaryBufferViews.values.forEach { $0.apply(native) }
     }
 
     public func toggleLineComment(prefix: String) -> EditorEditOutcome {
@@ -438,7 +519,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         with replacementUTF8: Data,
         expectedRevision: UInt64
     ) -> EditorEditOutcome {
-        guard let activeBuffer, let editorView = activeScintillaView,
+        guard let activeBuffer, let editorView = primaryActiveView,
               activeBuffer.revision == expectedRevision, expectedRevision < .max,
               range.location >= 0, range.length >= 0 else {
             return .rejected(currentRevision: activeBuffer?.revision ?? expectedRevision)
@@ -455,7 +536,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             return .rejected(currentRevision: activeBuffer.revision)
         }
         guard let replacement = String(data: replacementUTF8, encoding: .utf8) else {
-            scheduleRecovery()
+            scheduleRecovery(bufferID: activeBuffer.bufferID)
             return .rejected(currentRevision: activeBuffer.revision)
         }
         let edit = EditorIncrementalEdit(
@@ -466,10 +547,12 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         )
         let outcome = onEdit?(edit) ?? .rejected(currentRevision: expectedRevision)
         guard case .accepted(let revision) = outcome, revision == expectedRevision + 1 else {
-            scheduleRecovery()
+            scheduleRecovery(bufferID: activeBuffer.bufferID)
             return outcome
         }
         self.activeBuffer = EditorBufferDescriptor(bufferID: activeBuffer.bufferID, revision: revision)
+        updateRevisionExhaustion(bufferID: activeBuffer.bufferID, revision: revision)
+        secondaryActiveView?.synchronizeRevision(revision)
         acceptedEdits[activeBuffer.bufferID, default: []].append(edit)
         appendRecovery(edit, resultingRevision: revision)
         return outcome
@@ -480,7 +563,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         expectedRevision: UInt64,
         accept: ([EditorIncrementalEdit]) -> EditorEditOutcome
     ) -> EditorEditOutcome {
-        guard let activeBuffer, let editorView = activeScintillaView,
+        guard let activeBuffer, let editorView = primaryActiveView,
               activeBuffer.revision == expectedRevision,
               UInt64(replacements.count) <= UInt64.max - expectedRevision else {
             return .rejected(currentRevision: activeBuffer?.revision ?? expectedRevision)
@@ -508,10 +591,12 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         let outcome = accept(edits)
         guard case .accepted(let resultingRevision) = outcome,
               resultingRevision == expectedRevision + UInt64(edits.count) else {
-            scheduleRecovery()
+            scheduleRecovery(bufferID: activeBuffer.bufferID)
             return outcome
         }
         self.activeBuffer = EditorBufferDescriptor(bufferID: activeBuffer.bufferID, revision: resultingRevision)
+        updateRevisionExhaustion(bufferID: activeBuffer.bufferID, revision: resultingRevision)
+        secondaryActiveView?.synchronizeRevision(resultingRevision)
         for edit in edits {
             acceptedEdits[activeBuffer.bufferID, default: []].append(edit)
             appendRecovery(edit, resultingRevision: edit.expectedRevision + 1)
@@ -523,7 +608,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         guard !isRecovering, let activeBuffer, activeBuffer.bufferID == bufferID,
               bridgeEdit.baseRevision == activeBuffer.revision,
               let replacement = String(data: bridgeEdit.replacementUTF8, encoding: .utf8) else {
-            scheduleRecovery()
+            scheduleRecovery(bufferID: bufferID)
             return
         }
         let edit = EditorIncrementalEdit(
@@ -541,10 +626,12 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
                 bufferID: activeBuffer.bufferID,
                 revision: newRevision
             )
+            updateRevisionExhaustion(bufferID: activeBuffer.bufferID, revision: newRevision)
+            secondaryActiveView?.synchronizeRevision(newRevision)
             acceptedEdits[activeBuffer.bufferID, default: []].append(edit)
             appendRecovery(edit, resultingRevision: newRevision)
         case .accepted, .rejected:
-            scheduleRecovery()
+            scheduleRecovery(bufferID: bufferID)
         }
     }
 
@@ -554,7 +641,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
               edit.range.location >= 0, edit.range.length >= 0,
               edit.range.location <= recovery.byteCount,
               edit.range.length <= recovery.byteCount - edit.range.location else {
-            scheduleRecovery()
+            scheduleRecovery(bufferID: edit.bufferID)
             return
         }
         let replacement = Data(edit.replacement.utf8)
@@ -585,44 +672,156 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         acceptedEdits[bufferID] = []
     }
 
-    private func recoverActiveBuffer() {
-        guard let activeBuffer, let checkpoint = snapshots[activeBuffer.bufferID],
+    @discardableResult
+    private func recoverBuffer(_ bufferID: BufferID) -> Bool {
+        guard let checkpoint = snapshots[bufferID],
               let snapshot = recoveredSnapshot(
                 from: checkpoint,
-                edits: acceptedEdits[activeBuffer.bufferID, default: []]
-              ) else { return }
-        guard let editorView = bufferViews[activeBuffer.bufferID] else { return }
+                edits: acceptedEdits[bufferID, default: []]
+              ), let editorView = bufferViews[bufferID] else { return false }
         load(snapshot, into: editorView)
-        snapshots[activeBuffer.bufferID] = snapshot
+        secondaryBufferViews[bufferID]?.synchronizeRevision(snapshot.revision)
+        snapshots[bufferID] = snapshot
         let bytes = Data(snapshot.text.utf8)
-        recoveryBuffers[activeBuffer.bufferID] = RecoveryBuffer(
+        recoveryBuffers[bufferID] = RecoveryBuffer(
             baseRevision: snapshot.revision,
             revision: snapshot.revision,
             baseUTF8: bytes,
             deltas: [],
             byteCount: bytes.count
         )
-        acceptedEdits[activeBuffer.bufferID] = []
-        self.activeBuffer = EditorBufferDescriptor(
-            bufferID: activeBuffer.bufferID,
-            revision: snapshot.revision
-        )
-        editorView.isInputEnabled = inputEnabled
+        acceptedEdits[bufferID] = []
+        updateRevisionExhaustion(bufferID: bufferID, revision: snapshot.revision)
+        if activeBuffer?.bufferID == bufferID {
+            self.activeBuffer = EditorBufferDescriptor(
+                bufferID: bufferID,
+                revision: snapshot.revision
+            )
+        }
+        let enabled = isInputEnabled(for: bufferID)
+        editorView.isInputEnabled = enabled
+        secondaryBufferViews[bufferID]?.isInputEnabled = enabled
+        return true
     }
 
-    private func scheduleRecovery() {
-        activeScintillaView?.isInputEnabled = false
+    private func scheduleRecovery(bufferID: BufferID) {
+        pendingRecoveryBuffers.insert(bufferID)
+        bufferViews[bufferID]?.isInputEnabled = false
+        secondaryBufferViews[bufferID]?.isInputEnabled = false
         Task { @MainActor [weak self] in
             await Task.yield()
-            self?.recoverActiveBuffer()
+            self?.recoverPendingBufferIfNeeded(bufferID)
         }
+    }
+
+    @discardableResult
+    private func recoverPendingBufferIfNeeded(_ bufferID: BufferID) -> Bool {
+        guard pendingRecoveryBuffers.contains(bufferID) else { return true }
+        guard recoverBuffer(bufferID) else { return false }
+        pendingRecoveryBuffers.remove(bufferID)
+        return true
     }
 
     private func makeView(for bufferID: BufferID) -> DPScintillaEditorView {
         let editorView = DPScintillaEditorView(frame: view.bounds)
         editorView.onEdit = { [weak self] edit in self?.receive(edit, bufferID: bufferID) }
-        editorView.onError = { [weak self] error in self?.lastMutationError = error }
+        editorView.onError = { [weak self] error in
+            self?.receiveBridgeError(error, bufferID: bufferID)
+        }
         return editorView
+    }
+
+    private func attachSecondaryView(for bufferID: BufferID, primary: DPScintillaEditorView) {
+        secondaryActiveView?.removeFromSuperview()
+        let secondary: DPScintillaEditorView
+        if let existing = secondaryBufferViews[bufferID] {
+            secondary = existing
+        } else {
+            secondary = DPScintillaEditorView(frame: secondaryHost.bounds)
+            secondary.shareDocument(with: primary)
+            secondary.onError = { [weak self] error in
+                self?.receiveBridgeError(error, bufferID: bufferID)
+            }
+            secondaryBufferViews[bufferID] = secondary
+            applyStoredLanguage(to: secondary, bufferID: bufferID)
+        }
+        secondary.synchronizeRevision(primary.revision)
+        secondary.frame = secondaryHost.bounds
+        secondary.autoresizingMask = [.width, .height]
+        secondary.isInputEnabled = isInputEnabled(for: bufferID)
+        secondaryHost.addSubview(secondary)
+        secondaryActiveView = secondary
+    }
+
+    private func receiveBridgeError(_ error: Error, bufferID: BufferID) {
+        lastMutationError = error
+        let native = error as NSError
+        if native.domain == DPScintillaErrorDomain,
+           bufferViews[bufferID]?.revision == UInt64.max {
+            revisionExhaustedBuffers.insert(bufferID)
+            bufferViews[bufferID]?.isInputEnabled = false
+            secondaryBufferViews[bufferID]?.isInputEnabled = false
+        }
+    }
+
+    private func updateRevisionExhaustion(bufferID: BufferID, revision: UInt64) {
+        if revision == .max {
+            revisionExhaustedBuffers.insert(bufferID)
+        } else {
+            revisionExhaustedBuffers.remove(bufferID)
+        }
+    }
+
+    private func isInputEnabled(for bufferID: BufferID) -> Bool {
+        inputEnabled && !revisionExhaustedBuffers.contains(bufferID)
+    }
+
+    private func configureSplit(
+        orientation: EditorSplitOrientation,
+        bufferID: BufferID,
+        primary: DPScintillaEditorView
+    ) {
+        splitOrientation = orientation
+        splitView.isVertical = orientation == .sideBySide
+        if secondaryHost.superview == nil { splitView.addArrangedSubview(secondaryHost) }
+        attachSecondaryView(for: bufferID, primary: primary)
+        splitView.adjustSubviews()
+    }
+
+    private func hideSplit(focusPrimary: Bool) {
+        let releasedSecondary = secondaryActiveView
+        releasedSecondary?.onEdit = nil
+        releasedSecondary?.onError = nil
+        releasedSecondary?.removeFromSuperview()
+        if let bufferID = activeBuffer?.bufferID,
+           let releasedSecondary,
+           secondaryBufferViews[bufferID] === releasedSecondary {
+            secondaryBufferViews.removeValue(forKey: bufferID)
+        }
+        releasedSecondary?.invalidate()
+        secondaryActiveView = nil
+        if secondaryHost.superview != nil {
+            splitView.removeArrangedSubview(secondaryHost)
+            secondaryHost.removeFromSuperview()
+        }
+        splitOrientation = nil
+        if focusPrimary { primaryActiveView?.focusEditor() }
+    }
+
+    private func restoreSplitViewState(for bufferID: BufferID, primary: DPScintillaEditorView) {
+        guard let state = viewStates[bufferID],
+              let orientation = state.splitOrientation,
+              let secondaryState = state.secondaryViewState else { return }
+        configureSplit(orientation: orientation, bufferID: bufferID, primary: primary)
+        guard let secondary = secondaryActiveView else { return }
+        secondary.restoreCaretUTF8Position(
+            UInt(clamping: secondaryState.caretUTF8),
+            anchorPosition: UInt(clamping: secondaryState.anchorUTF8),
+            firstVisibleLine: UInt(clamping: secondaryState.firstVisibleLine),
+            horizontalScrollOffset: UInt(clamping: secondaryState.horizontalScrollOffset),
+            wordWrapEnabled: secondaryState.wordWrapEnabled
+        )
+        secondary.isWrapMarkerVisible = secondaryState.wrapMarkerVisible
     }
 
     private func applyStoredLanguage(to editorView: DPScintillaEditorView, bufferID: BufferID) {
@@ -652,6 +851,16 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
 
     private func storeViewState(bufferID: BufferID) {
         guard let editorView = bufferViews[bufferID] else { return }
+        let secondaryState = secondaryBufferViews[bufferID].map {
+            SecondaryEditorViewState(
+                anchorUTF8: Int(clamping: $0.anchorUTF8Position),
+                caretUTF8: Int(clamping: $0.caretUTF8Position),
+                firstVisibleLine: Int(clamping: $0.firstVisibleLine),
+                horizontalScrollOffset: Int(clamping: $0.horizontalScrollOffset),
+                wordWrapEnabled: $0.isWordWrapEnabled,
+                wrapMarkerVisible: $0.isWrapMarkerVisible
+            )
+        }
         viewStates[bufferID] = EditorViewState(
             anchorUTF8: Int(clamping: editorView.anchorUTF8Position),
             caretUTF8: Int(clamping: editorView.caretUTF8Position),
@@ -659,7 +868,9 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             horizontalScrollOffset: Int(clamping: editorView.horizontalScrollOffset),
             wordWrapEnabled: editorView.isWordWrapEnabled,
             wrapMarkerVisible: editorView.isWrapMarkerVisible,
-            bookmarkedLines: editorView.bookmarkedLines.map(\.intValue)
+            bookmarkedLines: editorView.bookmarkedLines.map(\.intValue),
+            splitOrientation: splitOrientation,
+            secondaryViewState: splitOrientation == nil ? nil : secondaryState
         )
     }
 
@@ -685,6 +896,16 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             return offset
         }
         let maximumLine = lineCount(in: utf8)
+        let secondary = state.secondaryViewState.map {
+            SecondaryEditorViewState(
+                anchorUTF8: boundary($0.anchorUTF8),
+                caretUTF8: boundary($0.caretUTF8),
+                firstVisibleLine: max(0, $0.firstVisibleLine),
+                horizontalScrollOffset: max(0, $0.horizontalScrollOffset),
+                wordWrapEnabled: $0.wordWrapEnabled,
+                wrapMarkerVisible: $0.wrapMarkerVisible
+            )
+        }
         return EditorViewState(
             anchorUTF8: boundary(state.anchorUTF8),
             caretUTF8: boundary(state.caretUTF8),
@@ -692,7 +913,9 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             horizontalScrollOffset: max(0, state.horizontalScrollOffset),
             wordWrapEnabled: state.wordWrapEnabled,
             wrapMarkerVisible: state.wrapMarkerVisible,
-            bookmarkedLines: state.bookmarkedLines.filter { $0 < maximumLine }
+            bookmarkedLines: state.bookmarkedLines.filter { $0 < maximumLine },
+            splitOrientation: secondary == nil ? nil : state.splitOrientation,
+            secondaryViewState: secondary
         )
     }
 

@@ -1,6 +1,31 @@
 import DuckpadDomain
 import Foundation
 
+public struct SecondaryEditorViewState: Codable, Equatable, Sendable {
+    public var anchorUTF8: Int
+    public var caretUTF8: Int
+    public var firstVisibleLine: Int
+    public var horizontalScrollOffset: Int
+    public var wordWrapEnabled: Bool
+    public var wrapMarkerVisible: Bool
+
+    public init(
+        anchorUTF8: Int = 0,
+        caretUTF8: Int = 0,
+        firstVisibleLine: Int = 0,
+        horizontalScrollOffset: Int = 0,
+        wordWrapEnabled: Bool = true,
+        wrapMarkerVisible: Bool = false
+    ) {
+        self.anchorUTF8 = anchorUTF8
+        self.caretUTF8 = caretUTF8
+        self.firstVisibleLine = firstVisibleLine
+        self.horizontalScrollOffset = horizontalScrollOffset
+        self.wordWrapEnabled = wordWrapEnabled
+        self.wrapMarkerVisible = wrapMarkerVisible
+    }
+}
+
 public struct EditorViewState: Codable, Equatable, Sendable {
     public static let maximumBookmarkCount = 10_000
     public var anchorUTF8: Int
@@ -10,6 +35,8 @@ public struct EditorViewState: Codable, Equatable, Sendable {
     public var wordWrapEnabled: Bool
     public var wrapMarkerVisible: Bool
     public var bookmarkedLines: [Int]
+    public var splitOrientation: EditorSplitOrientation?
+    public var secondaryViewState: SecondaryEditorViewState?
 
     public init(
         anchorUTF8: Int = 0,
@@ -18,7 +45,9 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         horizontalScrollOffset: Int = 0,
         wordWrapEnabled: Bool = true,
         wrapMarkerVisible: Bool = false,
-        bookmarkedLines: [Int] = []
+        bookmarkedLines: [Int] = [],
+        splitOrientation: EditorSplitOrientation? = nil,
+        secondaryViewState: SecondaryEditorViewState? = nil
     ) {
         self.anchorUTF8 = anchorUTF8
         self.caretUTF8 = caretUTF8
@@ -29,6 +58,8 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         self.bookmarkedLines = Array(
             Array(Set(bookmarkedLines.filter { $0 >= 0 })).sorted().prefix(Self.maximumBookmarkCount)
         )
+        self.splitOrientation = splitOrientation
+        self.secondaryViewState = splitOrientation == nil ? nil : (secondaryViewState ?? SecondaryEditorViewState())
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -39,6 +70,8 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         case wordWrapEnabled
         case wrapMarkerVisible
         case bookmarkedLines
+        case splitOrientation
+        case secondaryViewState
     }
 
     public init(from decoder: any Decoder) throws {
@@ -59,6 +92,15 @@ public struct EditorViewState: Codable, Equatable, Sendable {
             )
         }
         bookmarkedLines = Array(Set(decodedBookmarks)).sorted()
+        splitOrientation = try values.decodeIfPresent(EditorSplitOrientation.self, forKey: .splitOrientation)
+        secondaryViewState = try values.decodeIfPresent(SecondaryEditorViewState.self, forKey: .secondaryViewState)
+        guard (splitOrientation == nil) == (secondaryViewState == nil) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .secondaryViewState,
+                in: values,
+                debugDescription: "Split orientation and secondary view state must appear together"
+            )
+        }
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -70,6 +112,8 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         try values.encode(wordWrapEnabled, forKey: .wordWrapEnabled)
         try values.encode(wrapMarkerVisible, forKey: .wrapMarkerVisible)
         try values.encode(bookmarkedLines, forKey: .bookmarkedLines)
+        try values.encodeIfPresent(splitOrientation, forKey: .splitOrientation)
+        try values.encodeIfPresent(secondaryViewState, forKey: .secondaryViewState)
     }
 }
 

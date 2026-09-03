@@ -150,6 +150,14 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _scintilla.delegate = nil;
 }
 
+- (void)invalidate {
+    self.onEdit = nil;
+    self.onError = nil;
+    _scintilla.delegate = nil;
+    [_scintilla removeFromSuperview];
+    _scintilla = nil;
+}
+
 - (uint64_t)revision { return _revision; }
 - (NSError *)lastMutationError { return _lastMutationError; }
 - (NSUInteger)snapshotReadCount { return _snapshotReadCount; }
@@ -459,6 +467,22 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)clearBookmarks {
     [_scintilla message:SCI_MARKERDELETEALL wParam:DPBookmarkMarker];
+}
+
+- (void)shareDocumentWithView:(DPScintillaEditorView *)source {
+    if (source == nil || source == self) return;
+    const sptr_t document = [source->_scintilla message:SCI_GETDOCPOINTER];
+    [_scintilla message:SCI_SETDOCPOINTER wParam:0 lParam:document];
+    // The primary view remains the sole document-modification observer. A
+    // shared document notifies every attached Scintilla view, so enabling this
+    // mask here would publish each edit twice to Application.
+    [_scintilla message:SCI_SETMODEVENTMASK wParam:0];
+    [self synchronizeRevision:source.revision];
+}
+
+- (void)synchronizeRevision:(uint64_t)revision {
+    _revision = revision;
+    [_scintilla setEditable:_requestedInputEnabled && revision != UINT64_MAX];
 }
 - (BOOL)canUndo { return [[_scintilla content] canUndo]; }
 - (BOOL)canRedo { return [[_scintilla content] canRedo]; }

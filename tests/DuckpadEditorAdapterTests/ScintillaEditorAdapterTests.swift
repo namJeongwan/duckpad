@@ -506,6 +506,217 @@ struct ScintillaBridgeTests {
     }
 
     @Test @MainActor
+    func splitPanesShareTextUndoAndRevisionButKeepIndependentSelections() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: "abc"))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        let primary = try #require(adapter.activeScintillaView)
+        primary.setPrimarySelectionUTF8Range(NSRange(location: 1, length: 0))
+
+        adapter.split(orientation: .sideBySide)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        #expect(adapter.splitOrientation == .sideBySide)
+        #expect((adapter.view as? NSSplitView)?.arrangedSubviews.count == 2)
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: 3, length: 0))
+        secondary.insertCommittedText("!")
+
+        #expect(adapter.snapshot(for: bufferID)?.text == "abc!")
+        #expect(adapter.snapshot(for: bufferID)?.revision == 1)
+        #expect(primary.caretUTF8Position == 1)
+        #expect(secondary.caretUTF8Position == 4)
+        #expect(primary.canUndo)
+        primary.undo()
+        #expect(adapter.snapshot(for: bufferID)?.text == "abc")
+        #expect(adapter.snapshot(for: bufferID)?.revision == 2)
+
+        adapter.split(orientation: .stacked)
+        #expect(adapter.splitOrientation == .stacked)
+        #expect((adapter.view as? NSSplitView)?.isVertical == false)
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: 2, length: 0))
+        let recovery = try #require(adapter.recoverySnapshot(for: bufferID))
+        #expect(recovery.viewState.splitOrientation == .stacked)
+        #expect(recovery.viewState.secondaryViewState?.caretUTF8 == 2)
+
+        let restored = ScintillaEditorAdapter()
+        restored.installRecovery(recovery)
+        restored.display(.init(bufferID: bufferID, revision: recovery.revision))
+        #expect(restored.splitOrientation == .stacked)
+        #expect(restored.secondaryScintillaView?.caretUTF8Position == 2)
+        #expect(restored.secondaryScintillaView?.contentUTF8 == Data("abc".utf8))
+
+        let otherBufferID = BufferID()
+        adapter.display(.init(bufferID: otherBufferID, revision: 0))
+        #expect(adapter.splitOrientation == nil)
+        adapter.display(.init(bufferID: bufferID, revision: 2))
+        #expect(adapter.splitOrientation == .stacked)
+        #expect(adapter.secondaryScintillaView?.caretUTF8Position == 2)
+
+        adapter.closeSplit()
+        #expect(adapter.splitOrientation == nil)
+        #expect((adapter.view as? NSSplitView)?.arrangedSubviews.count == 1)
+    }
+
+    @Test @MainActor
+    func splitFocusChoosesPaneSpecificViewOptions() throws {
+        _ = NSApplication.shared
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = adapter.view
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        secondary.focusEditor()
+        #expect(secondary.hasEditorFocus)
+        #expect(adapter.activeScintillaView === secondary)
+        adapter.setWordWrapEnabled(false)
+        #expect(!secondary.isWordWrapEnabled)
+        #expect(primary.isWordWrapEnabled)
+
+        adapter.focusOtherPane()
+        #expect(primary.hasEditorFocus)
+        #expect(adapter.activeScintillaView === primary)
+    }
+
+    @Test @MainActor
+    func rejectedSecondaryPaneEditRecoversBothPanesAndReenablesInput() async throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: "safe"))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        adapter.onEdit = { .rejected(currentRevision: $0.expectedRevision) }
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: 4, length: 0))
+
+        secondary.insertCommittedText("!")
+        for _ in 0..<100 where primary.contentUTF8 != Data("safe".utf8) { await Task.yield() }
+
+        #expect(primary.contentUTF8 == Data("safe".utf8))
+        #expect(secondary.contentUTF8 == Data("safe".utf8))
+        #expect(primary.isInputEnabled)
+        #expect(secondary.isInputEnabled)
+        #expect(adapter.snapshot(for: bufferID)?.revision == 0)
+    }
+
+    @Test @MainActor
+    func rejectedSecondaryEditIsRecoveredBeforeImmediateBufferSwitch() throws {
+        let adapter = ScintillaEditorAdapter()
+        let rejectedBufferID = BufferID()
+        let healthyBufferID = BufferID()
+        adapter.install(.init(bufferID: rejectedBufferID, revision: 0, text: "safe"))
+        adapter.install(.init(bufferID: healthyBufferID, revision: 0, text: "healthy"))
+        adapter.display(.init(bufferID: rejectedBufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        adapter.onEdit = { .rejected(currentRevision: $0.expectedRevision) }
+        let secondary = try #require(adapter.secondaryScintillaView)
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: 4, length: 0))
+
+        secondary.insertCommittedText("!")
+        adapter.display(.init(bufferID: healthyBufferID, revision: 0))
+        adapter.display(.init(bufferID: rejectedBufferID, revision: 0))
+
+        #expect(adapter.snapshot(for: rejectedBufferID)?.text == "safe")
+        #expect(adapter.activeScintillaView?.contentUTF8 == Data("safe".utf8))
+    }
+
+    @Test @MainActor
+    func revisionExhaustionInSplitIsIsolatedToItsBuffer() throws {
+        let adapter = ScintillaEditorAdapter()
+        let exhaustedBufferID = BufferID()
+        let healthyBufferID = BufferID()
+        adapter.install(.init(bufferID: exhaustedBufferID, revision: .max, text: "full"))
+        adapter.install(.init(bufferID: healthyBufferID, revision: 0, text: "ready"))
+        adapter.display(.init(bufferID: exhaustedBufferID, revision: .max))
+        adapter.split(orientation: .sideBySide)
+        let exhaustedSecondary = try #require(adapter.secondaryScintillaView)
+        exhaustedSecondary.insertCommittedText("!")
+        #expect(adapter.activeScintillaView?.isInputEnabled == false)
+
+        adapter.display(.init(bufferID: healthyBufferID, revision: 0))
+        adapter.split(orientation: .stacked)
+
+        #expect(adapter.activeScintillaView?.isInputEnabled == true)
+        #expect(adapter.secondaryScintillaView?.isInputEnabled == true)
+        #expect(adapter.snapshot(for: healthyBufferID)?.text == "ready")
+    }
+
+    @Test @MainActor
+    func splitLanguageConfigurationAlwaysUpdatesBothPanes() throws {
+        _ = NSApplication.shared
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: "int main() { return 0; }"))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        let cpp = EditorLanguageConfiguration(
+            languageID: .init(rawValue: "cpp"), lexerName: "cpp", keywords: ["int return"],
+            indentation: .init(width: 8, useTabs: true), folding: true, braceMatching: true
+        )
+
+        #expect(adapter.applyLanguage(cpp))
+        for pane in [primary, secondary] {
+            #expect(pane.lexerName == "cpp")
+            #expect(pane.configuredTabWidth == 8)
+            #expect(pane.configuredUseTabs)
+            #expect(pane.configuredFoldingEnabled)
+            #expect(pane.configuredBraceMatchingEnabled)
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = adapter.view
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        secondary.focusEditor()
+        let python = EditorLanguageConfiguration(
+            languageID: .init(rawValue: "python"), lexerName: "python", keywords: ["def return"],
+            indentation: .init(width: 2), folding: false, braceMatching: false
+        )
+        #expect(adapter.applyLanguage(python))
+        for pane in [primary, secondary] {
+            #expect(pane.lexerName == "python")
+            #expect(pane.configuredTabWidth == 2)
+            #expect(!pane.configuredUseTabs)
+            #expect(!pane.configuredFoldingEnabled)
+            #expect(!pane.configuredBraceMatchingEnabled)
+        }
+    }
+
+    @Test @MainActor
+    func closeSplitInvalidatesAndEvictsSecondaryNativeView() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        let closedSecondary = try #require(adapter.secondaryScintillaView)
+
+        adapter.closeSplit()
+        #expect(adapter.secondaryScintillaView == nil)
+        adapter.split(orientation: .sideBySide)
+        let replacementSecondary = try #require(adapter.secondaryScintillaView)
+
+        #expect(replacementSecondary !== closedSecondary)
+        #expect(replacementSecondary.contentUTF8 == adapter.activeScintillaView?.contentUTF8)
+    }
+
+    @Test @MainActor
     func standardEditCommandsPreserveScintillaRevisionAndUndoOwnership() throws {
         let adapter = ScintillaEditorAdapter()
         let bufferID = BufferID()

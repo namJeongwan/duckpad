@@ -850,6 +850,23 @@ struct AppKitHostedTests {
         #expect(!controller.validateMenuItem(wrapSymbols))
         #expect(wrapSymbols.state == .off)
     }
+    let splitRight = menuItem("Split Editor Right", in: menu)
+    let splitDown = menuItem("Split Editor Down", in: menu)
+    let focusOtherPane = menuItem("Focus Other Editor Pane", in: menu)
+    let closeSplit = menuItem("Close Editor Split", in: menu)
+    #expect(splitRight?.action == #selector(DuckpadWindowController.performSplitEditorRight(_:)))
+    #expect(splitRight?.keyEquivalent == "\\")
+    #expect(splitRight?.keyEquivalentModifierMask == [.command])
+    #expect(splitDown?.action == #selector(DuckpadWindowController.performSplitEditorDown(_:)))
+    #expect(splitDown?.keyEquivalentModifierMask == [.command, .option])
+    #expect(focusOtherPane?.action == #selector(DuckpadWindowController.performFocusOtherEditorPane(_:)))
+    #expect(focusOtherPane?.keyEquivalentModifierMask == [.command, .control])
+    #expect(closeSplit?.action == #selector(DuckpadWindowController.performCloseEditorSplit(_:)))
+    #expect(closeSplit?.keyEquivalentModifierMask == [.command, .shift])
+    if let splitRight, let closeSplit {
+        #expect(!controller.validateMenuItem(splitRight))
+        #expect(!controller.validateMenuItem(closeSplit))
+    }
 }
 
 @Test @MainActor func terminationWaitsForAcceptedBulkClosePersistence() async {

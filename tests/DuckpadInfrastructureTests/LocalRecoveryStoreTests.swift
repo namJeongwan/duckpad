@@ -213,6 +213,33 @@ func incompleteGenerationNeverReplacesPrevious(_ fault: RecoveryStoreFault) asyn
     #expect(loaded.archive == previous)
 }
 
+@Test func outOfRangeSecondarySplitCaretRejectsNewestAndFallsBack() async throws {
+    let root = recoveryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let previous = try recoveryArchive(text: "previous")
+    let splitState = EditorViewState(
+        splitOrientation: .sideBySide,
+        secondaryViewState: SecondaryEditorViewState(caretUTF8: 1)
+    )
+    let newest = try recoveryArchive(text: "two", viewState: splitState)
+    let store = LocalRecoveryStore(root: root)
+    _ = try await store.commit(previous, generation: PersistenceGeneration(rawValue: 1))
+    _ = try await store.commit(newest, generation: PersistenceGeneration(rawValue: 2))
+    try mutateManifest(root: root, generation: 2) { manifest in
+        var buffers = manifest["buffers"] as! [[String: Any]]
+        var viewState = buffers[0]["viewState"] as! [String: Any]
+        var secondary = viewState["secondaryViewState"] as! [String: Any]
+        secondary["caretUTF8"] = 99
+        viewState["secondaryViewState"] = secondary
+        buffers[0]["viewState"] = viewState
+        manifest["buffers"] = buffers
+    }
+
+    let loaded = try #require(try await store.loadLatest())
+    #expect(loaded.generation.rawValue == 1)
+    #expect(loaded.archive == previous)
+}
+
 @Test func manifestWithTwoTabsOwningOneDocumentIsRejectedAtLoad() async throws {
     let root = recoveryRoot()
     defer { try? FileManager.default.removeItem(at: root) }

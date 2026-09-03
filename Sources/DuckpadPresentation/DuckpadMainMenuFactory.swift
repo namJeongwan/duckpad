@@ -90,6 +90,11 @@ public enum DuckpadMainMenuFactory {
         let viewMenu = NSMenu(title: "View")
         add("Word Wrap", #selector(DuckpadWindowController.performToggleWordWrap(_:)), "", target, modifiers: [], to: viewMenu)
         add("Show Wrap Symbols", #selector(DuckpadWindowController.performToggleWrapMarker(_:)), "", target, modifiers: [], to: viewMenu)
+        viewMenu.addItem(.separator())
+        add("Split Editor Right", #selector(DuckpadWindowController.performSplitEditorRight(_:)), "\\", target, to: viewMenu)
+        add("Split Editor Down", #selector(DuckpadWindowController.performSplitEditorDown(_:)), "\\", target, modifiers: [.command, .option], to: viewMenu)
+        add("Focus Other Editor Pane", #selector(DuckpadWindowController.performFocusOtherEditorPane(_:)), "\\", target, modifiers: [.command, .control], to: viewMenu)
+        add("Close Editor Split", #selector(DuckpadWindowController.performCloseEditorSplit(_:)), "\\", target, modifiers: [.command, .shift], to: viewMenu)
         viewItem.submenu = viewMenu
 
         let tabItem = NSMenuItem()

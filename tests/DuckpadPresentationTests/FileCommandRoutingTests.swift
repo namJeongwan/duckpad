@@ -99,6 +99,74 @@ private actor RoutingRecoveryStore: RecoveryStore {
     func latestBookmarkedLines() -> [Int]? { stored?.archive.buffers.values.first?.viewState.bookmarkedLines }
 }
 
+@MainActor
+private final class SplitRecordingEditor: SplitEditorPort {
+    var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
+    private var snapshots: [BufferID: EditorTextSnapshot] = [:]
+    private var active: EditorBufferDescriptor?
+    private(set) var splitOrientation: EditorSplitOrientation?
+    private(set) var focusOtherCount = 0
+
+    func display(_ buffer: EditorBufferDescriptor) {
+        active = buffer
+        snapshots[buffer.bufferID] = snapshots[buffer.bufferID]
+            ?? EditorTextSnapshot(bufferID: buffer.bufferID, revision: buffer.revision, text: "")
+    }
+    func install(_ snapshot: EditorTextSnapshot) { snapshots[snapshot.bufferID] = snapshot }
+    func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? { snapshots[bufferID] }
+    func retire(bufferID: BufferID) { snapshots.removeValue(forKey: bufferID) }
+    func setInputEnabled(_ isEnabled: Bool) {}
+    func focus() {}
+    func recoverySnapshot(for bufferID: BufferID) -> EditorRecoverySnapshot? {
+        snapshots[bufferID].map { EditorRecoverySnapshot(bufferID: bufferID, revision: $0.revision, utf8: Data($0.text.utf8)) }
+    }
+    func recoveryCapture(for bufferID: BufferID) -> EditorRecoveryCapture? {
+        recoverySnapshot(for: bufferID).map {
+            EditorRecoveryCapture(bufferID: bufferID, baseRevision: $0.revision, revision: $0.revision, baseUTF8: $0.utf8, deltas: [], viewState: $0.viewState)
+        }
+    }
+    func acknowledgeRecoverySnapshot(_ snapshot: EditorRecoverySnapshot) {}
+    func installRecovery(_ snapshot: EditorRecoverySnapshot) {
+        snapshots[snapshot.bufferID] = EditorTextSnapshot(
+            bufferID: snapshot.bufferID,
+            revision: snapshot.revision,
+            text: String(decoding: snapshot.utf8, as: UTF8.self)
+        )
+    }
+    func split(orientation: EditorSplitOrientation) { splitOrientation = orientation }
+    func closeSplit() { splitOrientation = nil }
+    func focusOtherPane() { focusOtherCount += 1 }
+}
+
+@Test @MainActor func controllerRoutesSplitCommandsAndValidationToCapableEditor() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = SplitRecordingEditor()
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(frame: .zero),
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    let splitDown = NSMenuItem(title: "Split", action: #selector(DuckpadWindowController.performSplitEditorDown(_:)), keyEquivalent: "")
+    let closeSplit = NSMenuItem(title: "Close", action: #selector(DuckpadWindowController.performCloseEditorSplit(_:)), keyEquivalent: "")
+    let focusOther = NSMenuItem(title: "Focus", action: #selector(DuckpadWindowController.performFocusOtherEditorPane(_:)), keyEquivalent: "")
+
+    #expect(controller.validateMenuItem(splitDown))
+    #expect(!controller.validateMenuItem(closeSplit))
+    controller.performSplitEditorDown()
+    #expect(editor.splitOrientation == .stacked)
+    #expect(controller.validateMenuItem(closeSplit))
+    controller.performFocusOtherEditorPane()
+    #expect(editor.focusOtherCount == 1)
+    controller.performCloseEditorSplit()
+    #expect(editor.splitOrientation == nil)
+    #expect(!controller.validateMenuItem(focusOther))
+}
+
 @Test @MainActor func controllerBookmarkCommandsPersistViewStateWithoutDirtyingDocument() async {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())

@@ -124,6 +124,10 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (void)toggleBookmarkAtCaret;
 - (BOOL)navigateToBookmarkForward:(BOOL)forward;
 - (void)clearBookmarks;
+- (void)shareDocumentWithView:(DPScintillaEditorView *)source;
+- (void)synchronizeRevision:(uint64_t)revision;
+/// Disconnects native callbacks and document watchers before a pane is discarded.
+- (void)invalidate;
 - (BOOL)addSelectionUTF8Range:(NSRange)range;
 - (void)insertCommittedText:(NSString *)text;
 - (void)setMarkedText:(NSString *)text

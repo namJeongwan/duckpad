@@ -117,10 +117,13 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
 
     public func installRecovery(_ snapshot: EditorRecoverySnapshot) {
         guard let text = String(data: snapshot.utf8, encoding: .utf8) else { return }
-        viewStates[snapshot.bufferID] = snapshot.viewState
+        var supportedState = snapshot.viewState
+        supportedState.splitOrientation = nil
+        supportedState.secondaryViewState = nil
+        viewStates[snapshot.bufferID] = supportedState
         install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text))
         if activeBuffer?.bufferID == snapshot.bufferID {
-            applyWordWrap(snapshot.viewState.wordWrapEnabled)
+            applyWordWrap(supportedState.wordWrapEnabled)
             renderBookmarks()
         }
     }
