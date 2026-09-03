@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -38,6 +38,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private var acceptedEdits: [BufferID: [EditorIncrementalEdit]] = [:]
     private var bufferViews: [BufferID: DPScintillaEditorView] = [:]
     private var secondaryBufferViews: [BufferID: DPScintillaEditorView] = [:]
+    private var documentIntelligenceContextIDs: [ObjectIdentifier: DocumentIntelligenceContextID] = [:]
     private let splitView = NSSplitView(frame: .zero)
     private let primaryHost = NSView(frame: .zero)
     private let secondaryHost = NSView(frame: .zero)
@@ -218,10 +219,16 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         pendingRecoveryBuffers.remove(bufferID)
         revisionExhaustedBuffers.remove(bufferID)
         let retiredView = bufferViews.removeValue(forKey: bufferID)
+        if let retiredView {
+            documentIntelligenceContextIDs.removeValue(forKey: ObjectIdentifier(retiredView))
+        }
         retiredView?.onEdit = nil
         retiredView?.removeFromSuperview()
         retiredView?.invalidate()
         let retiredSecondary = secondaryBufferViews.removeValue(forKey: bufferID)
+        if let retiredSecondary {
+            documentIntelligenceContextIDs.removeValue(forKey: ObjectIdentifier(retiredSecondary))
+        }
         retiredSecondary?.onEdit = nil
         retiredSecondary?.removeFromSuperview()
         retiredSecondary?.invalidate()
@@ -387,6 +394,53 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
     public var activeDocumentByteLength: Int {
         Int(clamping: activeScintillaView?.documentByteLength ?? 0)
+    }
+
+    public var activeDocumentIntelligenceBuffer: EditorBufferDescriptor? { activeBuffer }
+
+    public var activeDocumentIntelligenceByteLength: Int { activeDocumentByteLength }
+
+    public func captureDocumentIntelligence(maximumBytes: Int) -> DocumentIntelligenceCapture? {
+        guard maximumBytes >= 0,
+              let activeBuffer,
+              let editorView = activeScintillaView,
+              editorView.revision == activeBuffer.revision,
+              editorView.documentByteLength <= maximumBytes,
+              let contextID = documentIntelligenceContextIDs[ObjectIdentifier(editorView)] else { return nil }
+        return DocumentIntelligenceCapture(
+            buffer: activeBuffer,
+            utf8: editorView.contentUTF8,
+            caretUTF8: Int(clamping: editorView.caretUTF8Position),
+            languageID: activeLanguageID,
+            contextID: contextID
+        )
+    }
+
+    @discardableResult
+    public func presentCompletionItems(
+        _ items: [String],
+        replacingPrefixByteCount: Int,
+        expectedBuffer: EditorBufferDescriptor,
+        expectedCaretUTF8: Int,
+        expectedContextID: DocumentIntelligenceContextID
+    ) -> Bool {
+        guard replacingPrefixByteCount >= 0,
+              activeBuffer == expectedBuffer,
+              let editorView = activeScintillaView,
+              documentIntelligenceContextIDs[ObjectIdentifier(editorView)] == expectedContextID,
+              editorView.revision == expectedBuffer.revision,
+              editorView.caretUTF8Position == expectedCaretUTF8,
+              editorView.selectionCount == 1,
+              !editorView.hasMarkedText() else { return false }
+        return editorView.showCompletionItems(
+            items,
+            replacingPrefixByteCount: UInt(replacingPrefixByteCount)
+        )
+    }
+
+    public func cancelCompletion() {
+        bufferViews.values.forEach { $0.cancelCompletion() }
+        secondaryBufferViews.values.forEach { $0.cancelCompletion() }
     }
 
     public func detectionPrefix(maximumBytes: Int) -> Data {
@@ -724,6 +778,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
 
     private func makeView(for bufferID: BufferID) -> DPScintillaEditorView {
         let editorView = DPScintillaEditorView(frame: view.bounds)
+        documentIntelligenceContextIDs[ObjectIdentifier(editorView)] = DocumentIntelligenceContextID()
         editorView.onEdit = { [weak self] edit in self?.receive(edit, bufferID: bufferID) }
         editorView.onError = { [weak self] error in
             self?.receiveBridgeError(error, bufferID: bufferID)
@@ -738,6 +793,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             secondary = existing
         } else {
             secondary = DPScintillaEditorView(frame: secondaryHost.bounds)
+            documentIntelligenceContextIDs[ObjectIdentifier(secondary)] = DocumentIntelligenceContextID()
             secondary.shareDocument(with: primary)
             secondary.onError = { [weak self] error in
                 self?.receiveBridgeError(error, bufferID: bufferID)
@@ -790,6 +846,9 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
 
     private func hideSplit(focusPrimary: Bool) {
         let releasedSecondary = secondaryActiveView
+        if let releasedSecondary {
+            documentIntelligenceContextIDs.removeValue(forKey: ObjectIdentifier(releasedSecondary))
+        }
         releasedSecondary?.onEdit = nil
         releasedSecondary?.onError = nil
         releasedSecondary?.removeFromSuperview()

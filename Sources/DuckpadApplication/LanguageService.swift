@@ -329,6 +329,12 @@ public final class LanguageWorkspaceUseCase {
 
     public func applyTheme(_ palette: EditorThemePalette) { editor?.applyTheme(palette) }
 
+    public var activeCompletionTerms: [String] {
+        guard case .ready(let detection, _) = state,
+              let definition = registry[detection.languageID] else { return [] }
+        return definition.keywordLists
+    }
+
     public func toggleLineComment() -> EditorEditOutcome? {
         guard case .ready(let detection, _) = state,
               let prefix = registry[detection.languageID]?.capabilities.comments.line else { return nil }

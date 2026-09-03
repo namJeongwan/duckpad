@@ -84,6 +84,15 @@ public enum DuckpadMainMenuFactory {
         add("Make Uppercase", #selector(DuckpadWindowController.performUppercase(_:)), "", target, modifiers: [], to: editMenu)
         add("Make Lowercase", #selector(DuckpadWindowController.performLowercase(_:)), "", target, modifiers: [], to: editMenu)
         add("Trim Trailing Whitespace", #selector(DuckpadWindowController.performTrimTrailingWhitespace(_:)), "", target, modifiers: [], to: editMenu)
+        editMenu.addItem(.separator())
+        add(
+            "Complete Current Document Word",
+            #selector(DuckpadWindowController.performCompleteCurrentDocumentWord(_:)),
+            " ",
+            target,
+            modifiers: [.control],
+            to: editMenu
+        )
         editItem.submenu = editMenu
 
         let searchItem = NSMenuItem()
@@ -106,6 +115,14 @@ public enum DuckpadMainMenuFactory {
         let viewItem = NSMenuItem()
         mainMenu.addItem(viewItem)
         let viewMenu = NSMenu(title: "View")
+        add(
+            "Document Symbols…",
+            #selector(DuckpadWindowController.performShowDocumentSymbols(_:)),
+            "o",
+            target,
+            modifiers: [.command, .option],
+            to: viewMenu
+        )
         add(
             "Workspace Sidebar",
             #selector(DuckpadWindowController.performToggleWorkspaceSidebar(_:)),

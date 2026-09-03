@@ -32,6 +32,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         let searchUseCase: SearchWorkspaceUseCase
         let workspaceBrowserUseCase: WorkspaceBrowserUseCase
         let languageUseCase: LanguageWorkspaceUseCase
+        let documentIntelligenceUseCase: DocumentIntelligenceUseCase
         let extensionUseCase: ExtensionWorkspaceUseCase
     }
 
@@ -70,6 +71,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
         let searchUseCase = runtime.searchUseCase
         let workspaceBrowserUseCase = runtime.workspaceBrowserUseCase
         let languageUseCase = runtime.languageUseCase
+        let documentIntelligenceUseCase = runtime.documentIntelligenceUseCase
         let extensionUseCase = runtime.extensionUseCase
         windowController = controller
         terminationCoordinator.installApplicationRetryHandler {
@@ -174,6 +176,29 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
                     preconditionFailure("Python lexer switch smoke failed")
                 }
                 print("Duckpad language smoke ready: Lexilla 5.5.3 Swift/Python + dark palette")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
+        } else if environment["DUCKPAD_INTELLIGENCE_SMOKE"] == "1" {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                guard let view = editor.activeScintillaView else {
+                    preconditionFailure("document intelligence smoke editor missing")
+                }
+                let text = "func paddle() {}\npaddling pad"
+                view.insertCommittedText(text)
+                await workspace.waitForPendingPersistence()
+                let completion = await documentIntelligenceUseCase.complete()
+                guard case .presented(let count) = completion, count == 2,
+                      view.isCompletionActive else {
+                    preconditionFailure("current-document completion did not present exact candidates")
+                }
+                let outline = await documentIntelligenceUseCase.outline()
+                guard case .ready(let result) = outline,
+                      result.symbols.map(\.name) == ["paddle"] else {
+                    preconditionFailure("document symbol outline did not parse the active buffer")
+                }
+                print("Duckpad document intelligence smoke ready: completion + symbol outline")
                 fflush(stdout)
                 Darwin._exit(0)
             }
@@ -314,6 +339,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             editor: editor,
             configurationIssue: languageConfigurationIssue
         )
+        let documentIntelligenceUseCase = DocumentIntelligenceUseCase(editor: editor)
         #if DEBUG
         let allowsDevelopmentExtensions = environment["DUCKPAD_ALLOW_DEVELOPMENT_EXTENSIONS"] == "1"
         #else
@@ -342,6 +368,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             folderSearchUseCase: folderSearchUseCase,
             workspaceBrowserUseCase: workspaceBrowserUseCase,
             languageUseCase: languageUseCase,
+            documentIntelligenceUseCase: documentIntelligenceUseCase,
             extensionUseCase: extensionUseCase
         )
         return WindowRuntime(
@@ -353,6 +380,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
             searchUseCase: searchUseCase,
             workspaceBrowserUseCase: workspaceBrowserUseCase,
             languageUseCase: languageUseCase,
+            documentIntelligenceUseCase: documentIntelligenceUseCase,
             extensionUseCase: extensionUseCase
         )
     }

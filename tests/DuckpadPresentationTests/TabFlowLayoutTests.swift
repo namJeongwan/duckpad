@@ -100,7 +100,7 @@ private final class WeakBox<Value: AnyObject> {
 }
 
 @MainActor
-private final class HostedLanguageEditorFake: LanguageEditorPort {
+private final class HostedLanguageEditorFake: LanguageEditorPort, DocumentIntelligenceEditorPort {
     var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
     var supportedLexers: Set<String> = []
     var prefix = Data()
@@ -108,6 +108,9 @@ private final class HostedLanguageEditorFake: LanguageEditorPort {
     private(set) var mutationCount = 0
     private var activeBuffer: EditorBufferDescriptor?
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
+    private(set) var presentedCompletionItems: [String] = []
+    private(set) var revealedRange: SearchUTF8Range?
+    private(set) var completionCancellationCount = 0
 
     var activeLanguageID: LanguageID { configurations.last?.languageID ?? .plainText }
     var isLanguageStylingFallback: Bool { false }
@@ -115,6 +118,8 @@ private final class HostedLanguageEditorFake: LanguageEditorPort {
         guard let activeBuffer else { return 0 }
         return snapshots[activeBuffer.bufferID]?.text.utf8.count ?? 0
     }
+    var activeDocumentIntelligenceBuffer: EditorBufferDescriptor? { activeBuffer }
+    var activeDocumentIntelligenceByteLength: Int { activeDocumentByteLength }
 
     func display(_ buffer: EditorBufferDescriptor) {
         activeBuffer = buffer
@@ -142,6 +147,35 @@ private final class HostedLanguageEditorFake: LanguageEditorPort {
         mutationCount += 1
         return .rejected(currentRevision: activeBuffer?.revision ?? 0)
     }
+    func captureDocumentIntelligence(maximumBytes: Int) -> DocumentIntelligenceCapture? {
+        guard let activeBuffer, let snapshot = snapshots[activeBuffer.bufferID] else { return nil }
+        let bytes = Data(snapshot.text.utf8)
+        guard bytes.count <= maximumBytes else { return nil }
+        return DocumentIntelligenceCapture(
+            buffer: activeBuffer,
+            utf8: bytes,
+            caretUTF8: bytes.count,
+            languageID: activeLanguageID,
+            contextID: .init()
+        )
+    }
+    func presentCompletionItems(
+        _ items: [String],
+        replacingPrefixByteCount: Int,
+        expectedBuffer: EditorBufferDescriptor,
+        expectedCaretUTF8: Int,
+        expectedContextID: DocumentIntelligenceContextID
+    ) -> Bool {
+        guard expectedBuffer == activeBuffer,
+              expectedCaretUTF8 == activeDocumentByteLength else { return false }
+        presentedCompletionItems = items
+        return true
+    }
+    func cancelCompletion() {
+        completionCancellationCount += 1
+        presentedCompletionItems = []
+    }
+    func selectAndReveal(_ range: SearchUTF8Range) { revealedRange = range }
 }
 
 @MainActor
@@ -710,6 +744,11 @@ struct AppKitHostedTests {
     for item in [cut, copy, paste, selectAll].compactMap({ $0 }) {
         #expect(item.keyEquivalentModifierMask == [.command])
     }
+    let completeWord = menuItem("Complete Current Document Word", in: menu)
+    #expect(completeWord?.action == #selector(DuckpadWindowController.performCompleteCurrentDocumentWord(_:)))
+    #expect(completeWord?.keyEquivalent == " ")
+    #expect(completeWord?.keyEquivalentModifierMask == [.control])
+    if let completeWord { #expect(!controller.validateMenuItem(completeWord)) }
 
     let duplicateLine = menuItem("Duplicate Line", in: menu)
     let moveLineUp = menuItem("Move Line Up", in: menu)
@@ -848,6 +887,7 @@ struct AppKitHostedTests {
     let wordWrap = menuItem("Word Wrap", in: menu)
     let wrapSymbols = menuItem("Show Wrap Symbols", in: menu)
     let workspaceSidebar = menuItem("Workspace Sidebar", in: menu)
+    let documentSymbols = menuItem("Document Symbols…", in: menu)
     let addWorkspaceFolder = menuItem("Add Folder to Workspace…", in: menu)
     #expect(workspaceSidebar?.action == #selector(DuckpadWindowController.performToggleWorkspaceSidebar(_:)))
     #expect(workspaceSidebar?.keyEquivalent == "e")
@@ -855,6 +895,10 @@ struct AppKitHostedTests {
     #expect(addWorkspaceFolder?.action == #selector(DuckpadWindowController.performAddWorkspaceFolder(_:)))
     #expect(addWorkspaceFolder?.keyEquivalent == "o")
     #expect(addWorkspaceFolder?.keyEquivalentModifierMask == [.command, .control])
+    #expect(documentSymbols?.action == #selector(DuckpadWindowController.performShowDocumentSymbols(_:)))
+    #expect(documentSymbols?.keyEquivalent == "o")
+    #expect(documentSymbols?.keyEquivalentModifierMask == [.command, .option])
+    if let documentSymbols { #expect(!controller.validateMenuItem(documentSymbols)) }
     if let workspaceSidebar {
         #expect(controller.validateMenuItem(workspaceSidebar))
         #expect(workspaceSidebar.state == .on)
@@ -898,6 +942,66 @@ struct AppKitHostedTests {
         #expect(!controller.validateMenuItem(splitRight))
         #expect(!controller.validateMenuItem(closeSplit))
     }
+}
+
+@Test @MainActor func completionAndSymbolCommandsRouteThroughBoundedUseCase() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let editor = HostedLanguageEditorFake()
+    let intelligence = DocumentIntelligenceUseCase(editor: editor, maximumDocumentBytes: 4_096)
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(frame: .zero),
+        documentIntelligenceUseCase: intelligence,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    let buffer = try #require(workspace.snapshot().activeBuffer)
+    editor.install(EditorTextSnapshot(
+        bufferID: buffer.bufferID,
+        revision: buffer.revision,
+        text: "func alpha() {}\nalphabet alp"
+    ))
+
+    let menu = DuckpadMainMenuFactory.make(target: controller)
+    let completion = try #require(menuItem("Complete Current Document Word", in: menu))
+    let symbols = try #require(menuItem("Document Symbols…", in: menu))
+    #expect(controller.validateMenuItem(completion))
+    #expect(controller.validateMenuItem(symbols))
+
+    controller.performCompleteCurrentDocumentWord(completion)
+    for _ in 0..<500 where editor.presentedCompletionItems.isEmpty { await Task.yield() }
+    #expect(Set(editor.presentedCompletionItems) == Set(["alpha", "alphabet"]))
+
+    controller.performShowDocumentSymbols(symbols)
+    for _ in 0..<500 where controller.symbolOutlinePanel.symbols.isEmpty { await Task.yield() }
+    #expect(controller.symbolOutlinePanel.symbols.map(\.name) == ["alpha"])
+    #expect(controller.beginTerminationReviewAdmission())
+    #expect(editor.completionCancellationCount >= 1)
+    #expect(editor.presentedCompletionItems.isEmpty)
+    controller.cancelPreparedTerminationReview()
+}
+
+@Test @MainActor func symbolOutlineSearchMatchesNameKindLineAndDiacritics() {
+    let symbols = [
+        DocumentSymbol(name: "café", kind: .function, line: 3, range: .init(location: 0, length: 5)),
+        DocumentSymbol(name: "Duck", kind: .type, line: 8, range: .init(location: 9, length: 4)),
+    ]
+    #expect(SymbolOutlineSearch.matchingIndices(in: symbols, query: "cafe function") == [0])
+    #expect(SymbolOutlineSearch.matchingIndices(in: symbols, query: "type 8") == [1])
+    #expect(SymbolOutlineSearch.matchingIndices(in: symbols, query: "missing").isEmpty)
+
+    let panel = SymbolOutlinePanel()
+    var activated: DocumentSymbol?
+    panel.onActivate = { activated = $0 }
+    panel.apply(symbols: symbols)
+    panel.setQuery("Duck")
+    #expect(panel.filteredSymbols == [symbols[1]])
+    panel.activateSelectedResult()
+    #expect(activated == symbols[1])
 }
 
 @Test @MainActor func terminationWaitsForAcceptedBulkClosePersistence() async {

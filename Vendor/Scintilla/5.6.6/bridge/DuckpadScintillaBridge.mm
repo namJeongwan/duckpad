@@ -100,6 +100,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     NSInteger _highlightedBraceUTF8Position;
     NSInteger _matchingBraceUTF8Position;
     NSInteger _badBraceUTF8Position;
+    NSUInteger _completionItemCount;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -173,6 +174,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (NSInteger)highlightedBraceUTF8Position { return _highlightedBraceUTF8Position; }
 - (NSInteger)matchingBraceUTF8Position { return _matchingBraceUTF8Position; }
 - (NSInteger)badBraceUTF8Position { return _badBraceUTF8Position; }
+- (BOOL)isCompletionActive { return [_scintilla message:SCI_AUTOCACTIVE] != 0; }
+- (NSUInteger)completionItemCount { return _completionItemCount; }
 
 - (NSData *)contentUTF8 {
     _snapshotReadCount += 1;
@@ -227,9 +230,51 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _suppressEdit = NO;
     _revision = revision;
     _lastSearchWasZeroLength = NO;
+    _completionItemCount = 0;
     [_scintilla setEditable:_requestedInputEnabled && revision != UINT64_MAX];
     _lastMutationError = nil;
     return YES;
+}
+
+- (BOOL)showCompletionItems:(NSArray<NSString *> *)items
+   replacingPrefixByteCount:(NSUInteger)prefixByteCount {
+    if (!_requestedInputEnabled || self.hasMarkedText || items.count == 0 || items.count > 200) {
+        [self cancelCompletion];
+        return NO;
+    }
+    const NSUInteger caret = self.caretUTF8Position;
+    if (prefixByteCount > caret) {
+        [self cancelCompletion];
+        return NO;
+    }
+    NSMutableArray<NSString *> *validated = [NSMutableArray arrayWithCapacity:items.count];
+    for (NSString *item in items) {
+        if (item.length == 0 || [item rangeOfCharacterFromSet:[NSCharacterSet newlineCharacterSet]].location != NSNotFound
+            || [item dataUsingEncoding:NSUTF8StringEncoding] == nil) {
+            [self cancelCompletion];
+            return NO;
+        }
+        [validated addObject:item];
+    }
+    NSString *list = [validated componentsJoinedByString:@"\n"];
+    [_scintilla message:SCI_AUTOCSETSEPARATOR wParam:'\n'];
+    [_scintilla message:SCI_AUTOCSETIGNORECASE wParam:1];
+    [_scintilla message:SCI_AUTOCSETCHOOSESINGLE wParam:0];
+    [_scintilla message:SCI_AUTOCSETAUTOHIDE wParam:1];
+    [_scintilla message:SCI_AUTOCSETDROPRESTOFWORD wParam:1];
+    [_scintilla message:SCI_AUTOCSETOPTIONS wParam:SC_AUTOCOMPLETE_SELECT_FIRST_ITEM];
+    [_scintilla message:SCI_AUTOCSETMAXHEIGHT wParam:12];
+    [_scintilla message:SCI_AUTOCSETMAXWIDTH wParam:48];
+    [_scintilla message:SCI_AUTOCSHOW
+                 wParam:(uptr_t)prefixByteCount
+                 lParam:(sptr_t)list.UTF8String];
+    _completionItemCount = validated.count;
+    return self.isCompletionActive;
+}
+
+- (void)cancelCompletion {
+    if (_scintilla != nil) [_scintilla message:SCI_AUTOCCANCEL];
+    _completionItemCount = 0;
 }
 
 - (BOOL)replaceUTF8Range:(NSRange)range

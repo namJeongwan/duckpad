@@ -170,4 +170,90 @@ struct LanguageEditorAdapterTests {
         #expect(restored.revision > commentedRevision)
         _ = binding
     }
+
+    @Test @MainActor
+    func nativeCompletionListIsNonMutatingAndCancellable() throws {
+        let (_, view) = hostedView()
+        let text = "alpha alp"
+        try view.loadUTF8(Data(text.utf8), revision: 9)
+        view.setPrimarySelectionUTF8Range(NSRange(location: text.utf8.count, length: 0))
+        let before = view.contentUTF8
+
+        #expect(view.showCompletionItems(["alpha", "alphabet"], replacingPrefixByteCount: 3))
+        #expect(view.isCompletionActive)
+        #expect(view.completionItemCount == 2)
+        #expect(view.revision == 9)
+        #expect(view.contentUTF8 == before)
+
+        view.cancelCompletion()
+        #expect(!view.isCompletionActive)
+        #expect(view.completionItemCount == 0)
+    }
+
+    @Test @MainActor
+    func intelligenceCaptureChecksBudgetBeforeSnapshotAndBindsCaretRevision() async throws {
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        #expect(await workspace.start() == .saved)
+        let adapter = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        let buffer = try #require(workspace.snapshot().activeBuffer)
+        adapter.display(buffer)
+        let text = String(repeating: "alpha ", count: 400) + "alp"
+        adapter.install(EditorTextSnapshot(bufferID: buffer.bufferID, revision: 0, text: text))
+        adapter.activeScintillaView?.setPrimarySelectionUTF8Range(
+            NSRange(location: text.utf8.count, length: 0)
+        )
+        adapter.activeScintillaView?.resetInstrumentation()
+
+        #expect(adapter.captureDocumentIntelligence(maximumBytes: 1_024) == nil)
+        #expect(adapter.activeScintillaView?.snapshotReadCount == 0)
+        let capture = try #require(adapter.captureDocumentIntelligence(maximumBytes: 4_096))
+        #expect(capture.buffer == buffer)
+        #expect(capture.caretUTF8 == text.utf8.count)
+        #expect(adapter.activeScintillaView?.snapshotReadCount == 1)
+        #expect(adapter.presentCompletionItems(
+            ["alpha"], replacingPrefixByteCount: 3,
+            expectedBuffer: capture.buffer, expectedCaretUTF8: capture.caretUTF8,
+            expectedContextID: capture.contextID
+        ))
+        #expect(adapter.activeScintillaView?.isCompletionActive == true)
+        _ = binding
+    }
+
+    @Test @MainActor
+    func completionCaptureCannotPublishAcrossSplitPaneFocus() async throws {
+        _ = NSApplication.shared
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        #expect(await workspace.start() == .saved)
+        let adapter = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        let buffer = try #require(workspace.snapshot().activeBuffer)
+        let text = "alpha alp"
+        adapter.install(.init(bufferID: buffer.bufferID, revision: 0, text: text))
+        adapter.display(buffer)
+        adapter.split(orientation: .sideBySide)
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = adapter.view
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        primary.setPrimarySelectionUTF8Range(NSRange(location: text.utf8.count, length: 0))
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: text.utf8.count, length: 0))
+        primary.focusEditor()
+        let capture = try #require(adapter.captureDocumentIntelligence(maximumBytes: 1_024))
+
+        secondary.focusEditor()
+        #expect(!adapter.presentCompletionItems(
+            ["alpha"], replacingPrefixByteCount: 3,
+            expectedBuffer: capture.buffer, expectedCaretUTF8: capture.caretUTF8,
+            expectedContextID: capture.contextID
+        ))
+        #expect(!primary.isCompletionActive)
+        #expect(!secondary.isCompletionActive)
+        _ = binding
+    }
 }

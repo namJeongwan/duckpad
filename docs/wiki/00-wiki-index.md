@@ -63,8 +63,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 49 | [Phase 19 independent code review](reviews/2026-09-03-phase-19-split-editing-code-review.md) | **Content approved — latest Phase 19 evidence** | 최초 3 Major/1 Minor의 rejected-edit 전환, per-buffer exhaustion, 양 pane language, secondary eviction 결함을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 50 | [Phase 20 saved workspace file browser](23-workspace-file-browser.md) | **Content approved; exact receipt pending** | security-scoped folder roots, native outline browser, navigation restoration, drag/drop, Finder reveal과 `Command-Control-O`/`Command-Shift-E` 명령을 기록한다. |
 | 51 | [Phase 20 independent code review](reviews/2026-09-03-phase-20-workspace-file-browser-code-review.md) | **Content approved — latest Phase 20 evidence** | descriptor-relative file authority, serialized/reconciled root mutation, security-scope lifetime, accepted file-open termination ordering과 corrupt-state preservation을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
-| 52 | [Phase 21 native multiple windows](24-native-multiple-windows.md) | **Implemented; review pending** | `Command-Shift-N` native window, key-window command routing, window별 recovery, 전체-window quit review와 same-file identity conflict 정책을 기록한다. |
+| 52 | [Phase 21 native multiple windows](24-native-multiple-windows.md) | **Approved, committed and pushed** | `Command-Shift-N` native window, key-window command routing, window별 recovery, 전체-window quit review와 same-file identity conflict 정책을 기록한다. commit `58d6772`가 exact receipt/audit 후 `origin/main`에 push됐다. |
 | 53 | [Phase 21 independent code review](reviews/2026-09-03-phase-21-native-multiple-windows-code-review.md) | **Content approved — latest Phase 21 evidence** | 최초 3 Major/1 Minor의 late-window admission, close-reset join, recovery-root TOCTOU 및 test gap을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
+| 54 | [Phase 22 current-document completion and symbols](25-document-intelligence.md) | **Implemented; remediation re-review pending** | `Control-Space` bounded local completion, `Command-Option-O` searchable symbol outline, streamed 4 MiB analysis, exact split-pane authority와 UTF-8 navigation을 기록한다. |
+| 55 | [Phase 22 independent code review](reviews/2026-09-03-phase-22-document-intelligence-code-review.md) | **Content approved — latest Phase 22 evidence** | 최초 2 Major/1 Minor의 analyzer CPU/memory, split-pane stale routing, CR-only outline 결함을 bounded streaming/raw prefilter/cancellation, exact-pane identity, mixed-EOL scanner로 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -120,6 +122,25 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 22 current-document completion and symbols
+
+- **Agent/role:** `/root`, direct investigator and builder; no new implementation agent was added.
+- **Implementation:** Application-owned bounded analyzer and editor port, native Scintilla completion list, language keyword supplementation, searchable AppKit symbol popover/status control, UTF-8 exact reveal, menu routing and production composition/smoke.
+- **Safety:** 4 MiB pre-capture limit, 200 completion and 500 symbol caps, off-main value scanning, buffer/revision/caret/IME revalidation, cancellation on lifecycle authority changes, and no editor mutation during analysis.
+- **Shortcuts:** current-document completion uses `Control-Space`; document symbols use collision-free `Command-Option-O`. Existing `Command-Shift-O` document switcher and `Command-Shift-P` language chooser remain unchanged.
+- **Validation:** focused Application/Scintilla/AppKit tests and production smoke PASS; post-remediation exact-current Debug/Release each 313/313, parity 31/31, governance 8/8, and default checker PASS. Independent remediation re-review remains pending.
+- **Boundary:** semantic provider/API call tips, macros, README, ignored Notepad++, and user-owned doc04/vendor-script changes are excluded.
+- **Review remediation:** completion은 256-byte word를 stream하며 deterministic top-200만 보관하고 supplemental scan을 256 KiB로 제한한다. Symbol outline은 line 전체 materialization 없이 CR/LF/CRLF를 stream하고, ASCII non-symbol line을 String allocation 전에 byte-prefilter하며 1,024줄마다 cancellation을 확인하고 500개에서 중단한다. Capture에는 exact pane context identity를 추가하여 same-caret split focus 전환도 stale로 거부한다. 4 MiB unique-word/two-million-line bounds, mixed-EOL UTF-8 ranges, split-pane regressions가 통과했으며 latest full matrix와 independent re-review는 pending이다.
+
+### 2026-09-03 — Phase 22 independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 22 구현에는 참여하지 않았다.
+- **Verdict:** **CHANGES REQUIRED — 0 Blocker, 2 Major, 1 Minor.** Completion/symbol caps가 전체 intermediate collection을 제한하지 않아 adversarial 4 MiB 입력에서 4.76–5.51초 및 48–77 MB RSS를 사용했고, split-pane same-caret focus 전환 뒤 stale completion이 새 pane에 게시됐다. CR-only outline의 두 번째 symbol 누락도 기록했다.
+- **Evidence:** candidate `9e3f0ecd…` identity와 14 staged paths/cached diff-check를 확인하고 independent focused 9/9 PASS 및 external analyzer/split/EOL probes를 기록했다. Builder Debug/Release 310/310, production smoke, parity 31/31, governance 8/8은 supporting evidence로 구분했다.
+- **Boundary:** review 문서와 index review row/work log만 수정했다. source/tests/work doc, stage/commit/sign/push, doc04, vendor script, README, ignored Notepad++는 건드리지 않았다.
+- **Focused remediation re-review:** P22-02 exact-pane context와 P22-03 CR/LF/CRLF byte scanner는 external probes로 닫았다. P22-01 completion은 0.23초 Release/18 MB, symbol memory는 15 MB로 개선됐지만, 4 MiB two-byte no-symbol outline은 transient line parse와 cancellation checkpoint 부재로 Release 1.92초가 걸려 Major residual로 남겼다. Independent exact-current focused 12/12 PASS; candidate `dc5569bc…` receipt는 승인하지 않았다.
+- **Final remediation re-review:** `36cedcb5…`는 폐기했다. `9c4a37f…`의 raw-byte prefilter/cancellation으로 동일 4 MiB `a\n` probe가 Debug 0.26초/15 MB, Release 0.04초/15 MB가 됐고 cancelled task 5회는 0.07–0.15 ms에 종료됐다. accepted syntax matrix, split-pane, CR-only/mixed-EOL, oversized/supplemental bounds와 independent focused 12/12가 PASS하여 **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor**로 갱신한다. Review/index 반영 후 새 exact candidate/receipt가 필요하다.
 
 ### 2026-09-03 — Phase 21 native multiple windows
 

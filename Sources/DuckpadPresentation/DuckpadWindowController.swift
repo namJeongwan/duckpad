@@ -174,13 +174,16 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let statusBar = WorkspaceBarView(edge: .top)
     private let persistenceBanner = PersistenceErrorBanner(frame: .zero)
     private let languageStatus = NSButton(title: "Plain Text", target: nil, action: nil)
+    private let symbolStatus = NSButton(title: "Symbols", target: nil, action: nil)
     private let extensionStatus = NSButton(title: "Extensions loading…", target: nil, action: nil)
     private let extensionsPanel = ExtensionsManagerPanel()
+    let symbolOutlinePanel = SymbolOutlinePanel()
     private let workspaceSidebar = WorkspaceSidebarView(frame: .zero)
     private let workspaceContentSplit = NSSplitView(frame: .zero)
     private var searchUseCase: SearchWorkspaceUseCase?
     private let folderSearchUseCase: FolderSearchUseCase?
     private var languageUseCase: LanguageWorkspaceUseCase?
+    private let documentIntelligenceUseCase: DocumentIntelligenceUseCase?
     private var extensionUseCase: ExtensionWorkspaceUseCase?
     private var workspaceBrowserUseCase: WorkspaceBrowserUseCase?
     private var extensionState = ExtensionRegistryState(items: [])
@@ -209,6 +212,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var searchOperationID: UInt64 = 0
     private var languageValidated = false
     private var languageDetectionTask: Task<Void, Never>?
+    private var documentIntelligenceTask: Task<Void, Never>?
+    private var currentDocumentOutline: DocumentOutline?
     private var appliedThemePalette: EditorThemePalette?
     private var languageState: LanguageServiceState = .degraded("not initialized")
     private var languageStatusIsWarning = false
@@ -239,6 +244,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         folderSearchUseCase: FolderSearchUseCase? = nil,
         workspaceBrowserUseCase: WorkspaceBrowserUseCase? = nil,
         languageUseCase: LanguageWorkspaceUseCase? = nil,
+        documentIntelligenceUseCase: DocumentIntelligenceUseCase? = nil,
         extensionUseCase: ExtensionWorkspaceUseCase? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
         automaticallyStarts: Bool = true
@@ -262,6 +268,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.folderSearchUseCase = folderSearchUseCase
         self.workspaceBrowserUseCase = workspaceBrowserUseCase
         self.languageUseCase = languageUseCase
+        self.documentIntelligenceUseCase = documentIntelligenceUseCase
         self.extensionUseCase = extensionUseCase
         tabCloseCoordinator = TabCloseCoordinator(workspace: workspace)
         self.terminationCoordinator = terminationCoordinator
@@ -313,6 +320,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspace.onChange = { [weak self] change in self?.handle(change) }
         workspaceBrowserUseCase?.onStateChange = { [weak self] state in self?.renderWorkspaceBrowser(state) }
         languageUseCase?.onStateChange = { [weak self] state in self?.renderLanguageState(state) }
+        symbolOutlinePanel.onActivate = { [weak self] symbol in
+            guard let self, let outline = self.currentDocumentOutline,
+                  self.documentIntelligenceUseCase?.reveal(symbol, in: outline) == true else {
+                NSSound.beep()
+                return
+            }
+            self.activeEditor.focus()
+        }
         extensionUseCase?.onStateChange = { [weak self] state in self?.renderExtensionState(state) }
         extensionsPanel.onSetEnabled = { [weak self] id, enabled in
             Task { @MainActor [weak self] in
@@ -338,6 +353,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         startTask?.cancel()
         searchTask?.cancel()
         languageDetectionTask?.cancel()
+        documentIntelligenceTask?.cancel()
         workspaceRestoreTask?.cancel()
         pendingNewScratchTasks.values.forEach { $0.cancel() }
         pendingFolderActivationTasks.values.forEach { $0.cancel() }
@@ -355,6 +371,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func tearDownWindow() {
         guard !hasTornDownWindow else { return }
         hasTornDownWindow = true
+        documentIntelligenceTask?.cancel()
+        documentIntelligenceTask = nil
+        documentIntelligenceUseCase?.cancel()
+        symbolOutlinePanel.dismiss()
         if let terminationCoordinator, let recoveryUseCase {
             terminationCoordinator.trackWindowCloseCleanup {
                 if case .saved = await recoveryUseCase.reset() { return true }
@@ -370,6 +390,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspace.onChange = nil
         activeEditor.onEdit = nil
         languageUseCase?.onStateChange = nil
+        documentIntelligenceUseCase?.cancel()
+        symbolOutlinePanel.dismiss()
         extensionUseCase?.onStateChange = nil
         workspaceBrowserUseCase?.onStateChange = nil
         editorBinding = nil
@@ -655,6 +677,61 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         tabStrip.documentSwitcher.showDocumentSwitcher()
     }
 
+    @objc public func performCompleteCurrentDocumentWord(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable,
+              let documentIntelligenceUseCase else { return }
+        documentIntelligenceTask?.cancel()
+        let terms = languageUseCase?.activeCompletionTerms ?? []
+        documentIntelligenceTask = Task { @MainActor [weak self] in
+            let outcome = await documentIntelligenceUseCase.complete(supplementalTerms: terms)
+            guard let self, !Task.isCancelled, self.workspaceInteractionsAreActionable else { return }
+            switch outcome {
+            case .overBudget(let actual, let maximum):
+                self.setStatus(
+                    self.symbolStatus,
+                    text: "Completion paused · \(actual / 1_024 / 1_024) MiB",
+                    warning: true
+                )
+                self.symbolStatus.toolTip = "Completion limit: \(maximum) bytes"
+            case .noPrefix, .noMatches:
+                NSSound.beep()
+            case .presented, .unavailable, .stale:
+                break
+            }
+        }
+    }
+
+    @objc public func performShowDocumentSymbols(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable,
+              let documentIntelligenceUseCase else { return }
+        documentIntelligenceTask?.cancel()
+        documentIntelligenceTask = Task { @MainActor [weak self] in
+            let outcome = await documentIntelligenceUseCase.outline()
+            guard let self, !Task.isCancelled, self.workspaceInteractionsAreActionable else { return }
+            switch outcome {
+            case .ready(let outline):
+                self.currentDocumentOutline = outline
+                self.setStatus(
+                    self.symbolStatus,
+                    text: outline.symbols.isEmpty ? "Symbols" : "Symbols \(outline.symbols.count)",
+                    warning: false
+                )
+                self.symbolStatus.setAccessibilityValue("\(outline.symbols.count) current document symbols")
+                self.symbolOutlinePanel.present(symbols: outline.symbols, relativeTo: self.symbolStatus)
+            case .overBudget(let actual, let maximum):
+                self.setStatus(
+                    self.symbolStatus,
+                    text: "Symbols paused · \(actual / 1_024 / 1_024) MiB",
+                    warning: true
+                )
+                self.symbolStatus.toolTip = "Symbol outline limit: \(maximum) bytes"
+                NSSound.beep()
+            case .unavailable, .stale:
+                break
+            }
+        }
+    }
+
     @objc public func performMoveActiveTabLeft(_ sender: Any? = nil) {
         moveActiveTab(by: -1)
     }
@@ -848,6 +925,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performShowLanguageChooser(_:)),
              #selector(performShowExtensions(_:)):
             return workspaceInteractionsAreActionable
+        case #selector(performCompleteCurrentDocumentWord(_:)),
+             #selector(performShowDocumentSymbols(_:)):
+            return workspaceInteractionsAreActionable && documentIntelligenceUseCase != nil
         case #selector(performAddWorkspaceFolder(_:)):
             guard let workspaceBrowserUseCase else { return false }
             return workspaceBrowserCommandsAreActionable
@@ -1183,6 +1263,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     func beginTerminationReviewAdmission() -> Bool {
         guard !terminationReviewInProgress else { return false }
         terminationReviewInProgress = true
+        documentIntelligenceTask?.cancel()
+        documentIntelligenceTask = nil
+        documentIntelligenceUseCase?.cancel()
+        symbolOutlinePanel.dismiss()
+        currentDocumentOutline = nil
         workspaceBrowserUseCase?.suspendCommands()
         workspaceRestoreTask?.cancel()
         workspaceRestoreTask = nil
@@ -1422,7 +1507,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             action: #selector(performShowExtensions(_:)),
             accessibilityIdentifier: "duckpad.extensions.status"
         )
+        configureStatusButton(
+            symbolStatus,
+            imageName: "list.bullet.indent",
+            action: #selector(performShowDocumentSymbols(_:)),
+            accessibilityIdentifier: "duckpad.symbols.status"
+        )
         statusBar.addSubview(extensionStatus)
+        statusBar.addSubview(symbolStatus)
         statusBar.addSubview(languageStatus)
         NSLayoutConstraint.activate([
             persistenceBanner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
@@ -1445,6 +1537,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             extensionStatus.leadingAnchor.constraint(equalTo: statusBar.leadingAnchor, constant: 6),
             extensionStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
             extensionStatus.heightAnchor.constraint(equalToConstant: 20),
+            symbolStatus.leadingAnchor.constraint(greaterThanOrEqualTo: extensionStatus.trailingAnchor, constant: 8),
+            symbolStatus.centerXAnchor.constraint(equalTo: statusBar.centerXAnchor),
+            symbolStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
+            symbolStatus.heightAnchor.constraint(equalToConstant: 20),
+            symbolStatus.trailingAnchor.constraint(lessThanOrEqualTo: languageStatus.leadingAnchor, constant: -8),
             languageStatus.trailingAnchor.constraint(equalTo: statusBar.trailingAnchor, constant: -6),
             languageStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
             languageStatus.heightAnchor.constraint(equalToConstant: 20),
@@ -1515,6 +1612,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func handle(_ change: WorkspaceChange) {
+        if shouldInvalidateDocumentIntelligence(for: change) {
+            documentIntelligenceTask?.cancel()
+            documentIntelligenceTask = nil
+            if shouldCancelCompletion(for: change) { documentIntelligenceUseCase?.cancel() }
+            symbolOutlinePanel.dismiss()
+            currentDocumentOutline = nil
+            setStatus(symbolStatus, text: "Symbols", warning: false)
+            symbolStatus.setAccessibilityValue("Current document symbols")
+        }
         tabStrip.apply(change: change)
         updateWorkspaceInteractionAdmission(change.snapshot)
         let firstLanguageValidation = change.snapshot.startup == .ready && !languageValidated
@@ -1554,6 +1660,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         tabStrip.setInteractionsEnabled(enabled)
         workspaceSidebar.setInteractionsEnabled(enabled && workspaceBrowserUseCase?.acceptsCommands == true)
         languageStatus.isEnabled = enabled
+        symbolStatus.isEnabled = enabled && documentIntelligenceUseCase != nil
         extensionStatus.isEnabled = enabled
     }
 
@@ -1564,6 +1671,26 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case .tabUpdated(let index):
             return change.snapshot.tabs.indices.contains(index) && change.snapshot.tabs[index].isActive
         case .bufferEdited, .persistence, .tabsReordered:
+            return false
+        }
+    }
+
+    private func shouldInvalidateDocumentIntelligence(for change: WorkspaceChange) -> Bool {
+        switch change.kind {
+        case .bufferEdited, .reset, .tabInserted, .activeTabChanged, .tabRemoved:
+            return true
+        case .tabUpdated(let index):
+            return change.snapshot.tabs.indices.contains(index) && change.snapshot.tabs[index].isActive
+        case .persistence, .tabsReordered:
+            return false
+        }
+    }
+
+    private func shouldCancelCompletion(for change: WorkspaceChange) -> Bool {
+        switch change.kind {
+        case .reset, .tabInserted, .activeTabChanged, .tabRemoved:
+            return true
+        case .bufferEdited, .tabUpdated, .persistence, .tabsReordered:
             return false
         }
     }

@@ -93,6 +93,8 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, readonly) NSInteger highlightedBraceUTF8Position;
 @property(nonatomic, readonly) NSInteger matchingBraceUTF8Position;
 @property(nonatomic, readonly) NSInteger badBraceUTF8Position;
+@property(nonatomic, readonly, getter=isCompletionActive) BOOL completionActive;
+@property(nonatomic, readonly) NSUInteger completionItemCount;
 
 - (BOOL)loadUTF8:(NSData *)content
          revision:(uint64_t)revision
@@ -163,6 +165,9 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (void)toggleFoldAtLine:(NSUInteger)line;
 - (void)updateBraceHighlight;
 - (BOOL)toggleLineCommentsWithPrefixUTF8:(NSData *)prefix;
+- (BOOL)showCompletionItems:(NSArray<NSString *> *)items
+   replacingPrefixByteCount:(NSUInteger)prefixByteCount;
+- (void)cancelCompletion;
 + (BOOL)supportsLexerNamed:(NSString *)lexerName;
 - (void)resetInstrumentation;
 @end
