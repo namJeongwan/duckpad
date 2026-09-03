@@ -131,6 +131,20 @@ private func recoveredFileBinding() -> FileBinding {
     )
 }
 
+@Test func legacyEditorViewStateDefaultsWrapMarkerToHidden() throws {
+    let legacy = Data(#"{"anchorUTF8":1,"caretUTF8":2,"firstVisibleLine":3,"horizontalScrollOffset":4,"wordWrapEnabled":false}"#.utf8)
+    let decoded = try JSONDecoder().decode(EditorViewState.self, from: legacy)
+    #expect(decoded.anchorUTF8 == 1)
+    #expect(!decoded.wordWrapEnabled)
+    #expect(!decoded.wrapMarkerVisible)
+
+    let roundTrip = try JSONDecoder().decode(
+        EditorViewState.self,
+        from: JSONEncoder().encode(EditorViewState(wrapMarkerVisible: true))
+    )
+    #expect(roundTrip.wrapMarkerVisible)
+}
+
 @Test @MainActor func startupRestoresTabOrderActiveDirtyFileTextAndViewStateBeforeEditing() async throws {
     var session = ScratchSession()
     let firstBuffer = BufferMetadata(revision: 2, isDirty: true)
@@ -260,5 +274,18 @@ private func recoveredFileBinding() -> FileBinding {
     let before = await store.commitCount
     for value in ["a", "b", "c"] { _ = editor.insert(value) }
     await recovery.waitForPendingAutosave()
+    #expect(await store.commitCount == before + 1)
+}
+
+@Test @MainActor func editorViewOptionChangeSchedulesRecoveryWithoutDocumentEdit() async {
+    let store = RecoveryStoreFake()
+    let (_, _, _, recovery) = recoveryHarness(store: store)
+    _ = await recovery.start()
+    await recovery.waitForPendingAutosave()
+    let before = await store.commitCount
+
+    recovery.editorViewStateDidChange()
+    await recovery.waitForPendingAutosave()
+
     #expect(await store.commitCount == before + 1)
 }

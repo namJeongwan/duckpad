@@ -370,6 +370,7 @@ struct ScintillaBridgeTests {
             horizontalScrollOffset: 11,
             wordWrapEnabled: false
         )
+        view.isWrapMarkerVisible = true
         view.resetInstrumentation()
 
         let recovery = try #require(adapter.recoverySnapshot(for: bufferID))
@@ -377,6 +378,7 @@ struct ScintillaBridgeTests {
         #expect(recovery.viewState.anchorUTF8 == 5)
         #expect(recovery.viewState.caretUTF8 == 18)
         #expect(recovery.viewState.wordWrapEnabled == false)
+        #expect(recovery.viewState.wrapMarkerVisible == true)
         #expect(view.snapshotReadCount == 0)
 
         let restored = ScintillaEditorAdapter()
@@ -386,7 +388,31 @@ struct ScintillaBridgeTests {
         #expect(restoredView.anchorUTF8Position == 5)
         #expect(restoredView.caretUTF8Position == 18)
         #expect(restoredView.isWordWrapEnabled == false)
+        #expect(restoredView.isWrapMarkerVisible == true)
         #expect(restored.recoverySnapshot(for: bufferID)?.utf8 == Data(text.utf8))
+    }
+
+    @Test @MainActor
+    func viewOptionsArePerBufferAndDoNotMutateDocumentRevision() throws {
+        let adapter = ScintillaEditorAdapter()
+        let first = BufferID()
+        let second = BufferID()
+        adapter.display(EditorBufferDescriptor(bufferID: first, revision: 0))
+
+        adapter.setWordWrapEnabled(false)
+        adapter.setWrapMarkerVisible(true)
+        #expect(!adapter.isWordWrapEnabled)
+        #expect(adapter.isWrapMarkerVisible)
+        #expect(adapter.snapshot(for: first)?.revision == 0)
+
+        adapter.display(EditorBufferDescriptor(bufferID: second, revision: 0))
+        #expect(adapter.isWordWrapEnabled)
+        #expect(!adapter.isWrapMarkerVisible)
+
+        adapter.display(EditorBufferDescriptor(bufferID: first, revision: 0))
+        #expect(!adapter.isWordWrapEnabled)
+        #expect(adapter.isWrapMarkerVisible)
+        #expect(try #require(adapter.recoveryCapture(for: first)).viewState.wrapMarkerVisible)
     }
 
     @Test @MainActor

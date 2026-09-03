@@ -128,7 +128,7 @@ private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
 }
 
 @MainActor
-public final class DuckpadWindowController: NSWindowController, NSWindowDelegate {
+public final class DuckpadWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
     private let workspace: ScratchWorkspaceUseCase
     let tabStrip = MultilineTabStripView(frame: .zero)
     private let fallbackEditor: TextViewEditorAdapter?
@@ -401,7 +401,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         Task { [weak workspace] in _ = await workspace?.activate(tabID: id) }
     }
 
-    func performClose(_ id: TabID, decision: CloseDecision? = nil) {
+    @discardableResult
+    func performClose(_ id: TabID, decision: CloseDecision? = nil) -> Task<Void, Never> {
         Task { [weak self] in await self?.requestClose(tabID: id, decision: decision) }
     }
 
@@ -454,6 +455,50 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
     @objc public func performCloseFindPanel(_ sender: Any? = nil) {
         closeSearchPanel()
+    }
+
+    @objc public func performToggleWordWrap(_ sender: Any? = nil) {
+        guard let editor = actionableEditorViewOptions else { return }
+        editor.setWordWrapEnabled(!editor.isWordWrapEnabled)
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    @objc public func performToggleWrapMarker(_ sender: Any? = nil) {
+        guard let editor = actionableEditorViewOptions,
+              editor.supportsWrapMarker else { return }
+        editor.setWrapMarkerVisible(!editor.isWrapMarkerVisible)
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(performToggleWordWrap(_:)):
+            guard let editor = actionableEditorViewOptions else {
+                menuItem.state = .off
+                return false
+            }
+            menuItem.state = editor.isWordWrapEnabled ? .on : .off
+            return true
+        case #selector(performToggleWrapMarker(_:)):
+            guard let editor = actionableEditorViewOptions else {
+                menuItem.state = .off
+                return false
+            }
+            menuItem.state = editor.isWrapMarkerVisible ? .on : .off
+            return editor.supportsWrapMarker
+        default:
+            return true
+        }
+    }
+
+    private var actionableEditorViewOptions: (any EditorViewOptionsPort)? {
+        let snapshot = workspace.snapshot()
+        guard snapshot.startup == .ready,
+              snapshot.activeBuffer != nil,
+              !terminationReviewInProgress else {
+            return nil
+        }
+        return activeEditor as? any EditorViewOptionsPort
     }
 
     public func routeOpenFile() async {

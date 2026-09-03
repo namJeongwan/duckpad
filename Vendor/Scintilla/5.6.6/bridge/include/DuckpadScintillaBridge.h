@@ -49,6 +49,7 @@ typedef NS_ENUM(NSInteger, DPScintillaPalette) {
                                 error:(NSError * _Nullable * _Nullable)error;
 @property(nonatomic, getter=isInputEnabled) BOOL inputEnabled;
 @property(nonatomic, getter=isWordWrapEnabled) BOOL wordWrapEnabled;
+@property(nonatomic, getter=isWrapMarkerVisible) BOOL wrapMarkerVisible;
 @property(nonatomic, readonly) NSUInteger selectionCount;
 @property(nonatomic, readonly) NSUInteger caretUTF8Position;
 @property(nonatomic, readonly) NSUInteger anchorUTF8Position;

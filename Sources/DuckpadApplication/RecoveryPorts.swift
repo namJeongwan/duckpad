@@ -7,19 +7,51 @@ public struct EditorViewState: Codable, Equatable, Sendable {
     public var firstVisibleLine: Int
     public var horizontalScrollOffset: Int
     public var wordWrapEnabled: Bool
+    public var wrapMarkerVisible: Bool
 
     public init(
         anchorUTF8: Int = 0,
         caretUTF8: Int = 0,
         firstVisibleLine: Int = 0,
         horizontalScrollOffset: Int = 0,
-        wordWrapEnabled: Bool = true
+        wordWrapEnabled: Bool = true,
+        wrapMarkerVisible: Bool = false
     ) {
         self.anchorUTF8 = anchorUTF8
         self.caretUTF8 = caretUTF8
         self.firstVisibleLine = firstVisibleLine
         self.horizontalScrollOffset = horizontalScrollOffset
         self.wordWrapEnabled = wordWrapEnabled
+        self.wrapMarkerVisible = wrapMarkerVisible
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case anchorUTF8
+        case caretUTF8
+        case firstVisibleLine
+        case horizontalScrollOffset
+        case wordWrapEnabled
+        case wrapMarkerVisible
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        anchorUTF8 = try values.decode(Int.self, forKey: .anchorUTF8)
+        caretUTF8 = try values.decode(Int.self, forKey: .caretUTF8)
+        firstVisibleLine = try values.decode(Int.self, forKey: .firstVisibleLine)
+        horizontalScrollOffset = try values.decode(Int.self, forKey: .horizontalScrollOffset)
+        wordWrapEnabled = try values.decode(Bool.self, forKey: .wordWrapEnabled)
+        wrapMarkerVisible = try values.decodeIfPresent(Bool.self, forKey: .wrapMarkerVisible) ?? false
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(anchorUTF8, forKey: .anchorUTF8)
+        try values.encode(caretUTF8, forKey: .caretUTF8)
+        try values.encode(firstVisibleLine, forKey: .firstVisibleLine)
+        try values.encode(horizontalScrollOffset, forKey: .horizontalScrollOffset)
+        try values.encode(wordWrapEnabled, forKey: .wordWrapEnabled)
+        try values.encode(wrapMarkerVisible, forKey: .wrapMarkerVisible)
     }
 }
 

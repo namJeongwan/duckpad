@@ -375,10 +375,8 @@ struct FileLifecycleTests {
 
         dirty(editor, with: "reviewed")
         let originalTab = workspace.snapshot().tabs[0]
-        controller.performClose(originalTab.id)
-        for _ in 0..<200 where panels.failures.isEmpty {
-            try? await Task.sleep(for: .milliseconds(5))
-        }
+        let failedClose = controller.performClose(originalTab.id)
+        await failedClose.value
 
         #expect(workspace.snapshot().tabs.contains(where: { $0.id == originalTab.id }))
         #expect(workspace.snapshot().tabs.first(where: { $0.id == originalTab.id })?.isDirty == true)
@@ -388,7 +386,15 @@ struct FileLifecycleTests {
 
         // The retry starts a fresh serialized review. It must save the text and
         // revision accepted after the failed attempt, not the stale review.
+        // Drain the earlier edit's pending workspace transaction before the
+        // synchronous test edit; polling after a rejected edit cannot revive it.
+        await workspace.waitForPendingPersistence()
+        let failedRevision = workspace.snapshot().tabs.first(where: { $0.id == originalTab.id })!.buffer.revision
         dirty(editor, with: "newest revision 🙂")
+        #expect(workspace.snapshot().tabs.first(where: { $0.id == originalTab.id })!.buffer.revision == failedRevision + 1)
+        #expect(editor.textView.string == "newest revision 🙂")
+        #expect(editor.snapshot(for: originalTab.buffer.bufferID)?.text == "newest revision 🙂")
+        await workspace.waitForPendingPersistence()
         await files.setWriteError(nil)
         panels.retryLastFileFailure()
         for _ in 0..<200 where workspace.snapshot().tabs.contains(where: { $0.id == originalTab.id }) {
@@ -492,6 +498,36 @@ struct FileLifecycleTests {
         #expect(Set(panels.decisionTabs).count == 2)
         #expect(!controller.hasDirtyDocuments)
         controller.close()
+    }
+
+    @Test @MainActor func viewOptionsAreInertDuringTerminationReview() async {
+        let (controller, _, editor, panels, _) = await makeController(
+            decisions: [.cancel],
+            blocksDecisions: true
+        )
+        defer { controller.close() }
+        dirty(editor, with: "keep this")
+        let review = Task { @MainActor in
+            await controller.reviewDirtyDocumentsForTermination()
+        }
+        for _ in 0..<200 where panels.decisionTabs.isEmpty {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(panels.decisionTabs.count == 1)
+
+        let wordWrap = NSMenuItem(
+            title: "Word Wrap",
+            action: #selector(DuckpadWindowController.performToggleWordWrap(_:)),
+            keyEquivalent: ""
+        )
+        #expect(!controller.validateMenuItem(wordWrap))
+        controller.performToggleWordWrap(wordWrap)
+        #expect(editor.isWordWrapEnabled)
+
+        panels.releaseDecisions()
+        #expect(await review.value == false)
+        #expect(controller.validateMenuItem(wordWrap))
+        #expect(wordWrap.state == .on)
     }
 
     @Test @MainActor func redCloseThenRepeatedQuitTriggersShareOneCancelledReview() async {

@@ -115,6 +115,17 @@ public protocol EditorPort: AnyObject {
     func installRecovery(_ snapshot: EditorRecoverySnapshot)
 }
 
+/// View-only editor controls. Implementations keep these options outside the
+/// document text transaction while recovery captures their visible state.
+@MainActor
+public protocol EditorViewOptionsPort: EditorPort {
+    var isWordWrapEnabled: Bool { get }
+    var isWrapMarkerVisible: Bool { get }
+    var supportsWrapMarker: Bool { get }
+    func setWordWrapEnabled(_ isEnabled: Bool)
+    func setWrapMarkerVisible(_ isVisible: Bool)
+}
+
 public enum EditorThemePalette: Equatable, Sendable {
     case light
     case dark

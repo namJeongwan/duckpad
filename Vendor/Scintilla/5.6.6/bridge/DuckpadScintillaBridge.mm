@@ -365,6 +365,15 @@ NSString *DPScintillaResourcePath(NSString *name) {
 - (void)setWordWrapEnabled:(BOOL)value {
     [_scintilla message:SCI_SETWRAPMODE wParam:value ? SC_WRAP_WORD : SC_WRAP_NONE];
 }
+- (BOOL)isWrapMarkerVisible {
+    return [_scintilla message:SCI_GETWRAPVISUALFLAGS] != SC_WRAPVISUALFLAG_NONE;
+}
+- (void)setWrapMarkerVisible:(BOOL)value {
+    const uptr_t flags = value
+        ? SC_WRAPVISUALFLAG_START | SC_WRAPVISUALFLAG_END
+        : SC_WRAPVISUALFLAG_NONE;
+    [_scintilla message:SCI_SETWRAPVISUALFLAGS wParam:flags];
+}
 - (NSUInteger)selectionCount { return (NSUInteger)[_scintilla message:SCI_GETSELECTIONS]; }
 - (NSUInteger)caretUTF8Position { return (NSUInteger)[_scintilla message:SCI_GETCURRENTPOS]; }
 - (NSUInteger)anchorUTF8Position { return (NSUInteger)[_scintilla message:SCI_GETANCHOR]; }

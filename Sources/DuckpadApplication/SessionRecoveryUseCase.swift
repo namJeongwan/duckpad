@@ -82,6 +82,14 @@ public final class SessionRecoveryUseCase {
         }
     }
 
+    /// View options are recovery state, not document mutations. They still
+    /// need their own autosave signal because no workspace revision changes.
+    public func editorViewStateDidChange() {
+        guard !isRestoring else { return }
+        changeSerial &+= 1
+        scheduleAutosave()
+    }
+
     @discardableResult
     public func flush() async -> RecoveryOutcome {
         pendingToken = nil

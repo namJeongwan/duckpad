@@ -37,6 +37,13 @@ public enum DuckpadMainMenuFactory {
         add("Close Find Panel", #selector(DuckpadWindowController.performCloseFindPanel(_:)), "\u{1b}", target, modifiers: [], to: searchMenu)
         searchItem.submenu = searchMenu
 
+        let viewItem = NSMenuItem()
+        mainMenu.addItem(viewItem)
+        let viewMenu = NSMenu(title: "View")
+        add("Word Wrap", #selector(DuckpadWindowController.performToggleWordWrap(_:)), "", target, modifiers: [], to: viewMenu)
+        add("Show Wrap Symbols", #selector(DuckpadWindowController.performToggleWrapMarker(_:)), "", target, modifiers: [], to: viewMenu)
+        viewItem.submenu = viewMenu
+
         let tabItem = NSMenuItem()
         mainMenu.addItem(tabItem)
         let tabMenu = NSMenu(title: "Tabs")

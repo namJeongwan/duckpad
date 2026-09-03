@@ -379,11 +379,13 @@ struct AppKitHostedTests {
     #expect((activeItem?.view.accessibilityValue() as? String)?.contains("selected") == true)
 }
 
-@Test @MainActor func mainMenuPublishesNativeTabSelectorsAndExactShortcuts() {
+@Test @MainActor func mainMenuPublishesNativeTabSelectorsAndExactShortcuts() async {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
     let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
     defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
     let menu = DuckpadMainMenuFactory.make(target: controller)
 
     let close = menuItem("Close Tab", in: menu)
@@ -420,6 +422,24 @@ struct AppKitHostedTests {
     #expect(toggleComment?.keyEquivalentModifierMask == [.command])
     #expect(languagePalette?.action == #selector(DuckpadWindowController.performShowLanguageChooser(_:)))
     #expect(languagePalette?.keyEquivalentModifierMask == [.command, .shift])
+
+    let wordWrap = menuItem("Word Wrap", in: menu)
+    let wrapSymbols = menuItem("Show Wrap Symbols", in: menu)
+    #expect(wordWrap?.action == #selector(DuckpadWindowController.performToggleWordWrap(_:)))
+    #expect(wrapSymbols?.action == #selector(DuckpadWindowController.performToggleWrapMarker(_:)))
+    if let wordWrap {
+        #expect(controller.validateMenuItem(wordWrap))
+        #expect(wordWrap.state == .on)
+        controller.performToggleWordWrap(wordWrap)
+        #expect(controller.validateMenuItem(wordWrap))
+        #expect(wordWrap.state == .off)
+        #expect(controller.editor.textView.isHorizontallyResizable)
+        #expect(controller.editor.scrollView.hasHorizontalScroller)
+    }
+    if let wrapSymbols {
+        #expect(!controller.validateMenuItem(wrapSymbols))
+        #expect(wrapSymbols.state == .off)
+    }
 }
 
 @Test @MainActor func layoutCacheIsSinglePassOOneLookupAndInvalidatesForEngineChanges() {
@@ -605,6 +625,32 @@ struct AppKitHostedTests {
     #expect(editor.snapshot(for: descriptor.bufferID)?.revision == 0)
 }
 
+@Test @MainActor func textViewFallbackKeepsWordWrapPerBufferAndAcrossRecovery() throws {
+    let editor = TextViewEditorAdapter()
+    let first = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+    let second = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+    editor.display(first)
+    editor.setWordWrapEnabled(false)
+    #expect(editor.textView.isHorizontallyResizable)
+    #expect(editor.scrollView.hasHorizontalScroller)
+
+    editor.display(second)
+    #expect(editor.isWordWrapEnabled)
+    #expect(!editor.textView.isHorizontallyResizable)
+
+    editor.display(first)
+    #expect(!editor.isWordWrapEnabled)
+    let recovery = try #require(editor.recoverySnapshot(for: first.bufferID))
+    #expect(!recovery.viewState.wordWrapEnabled)
+
+    let restored = TextViewEditorAdapter()
+    restored.installRecovery(recovery)
+    restored.display(first)
+    #expect(!restored.isWordWrapEnabled)
+    #expect(restored.scrollView.hasHorizontalScroller)
+    #expect(!restored.supportsWrapMarker)
+}
+
 @Test @MainActor func textViewAdapterRetirementDropsTextAndUndoButPreservesInactiveOpenBuffer() {
     let editor = TextViewEditorAdapter()
     let first = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
@@ -780,6 +826,14 @@ struct AppKitHostedTests {
     #expect(workspace.snapshot().startup == .restoring)
     #expect(!controller.editor.textView.isEditable)
     #expect(!controller.editor.textView.isSelectable)
+    let wordWrap = NSMenuItem(
+        title: "Word Wrap",
+        action: #selector(DuckpadWindowController.performToggleWordWrap(_:)),
+        keyEquivalent: ""
+    )
+    #expect(!controller.validateMenuItem(wordWrap))
+    controller.performToggleWordWrap(wordWrap)
+    #expect(controller.editor.isWordWrapEnabled)
     controller.editor.textView.insertText("blocked", replacementRange: NSRange(location: 0, length: 0))
     #expect(controller.editor.textView.string == "")
 
@@ -788,6 +842,8 @@ struct AppKitHostedTests {
     #expect(workspace.snapshot().startup == .ready)
     #expect(controller.editor.textView.isEditable)
     #expect(controller.editor.textView.isSelectable)
+    #expect(controller.validateMenuItem(wordWrap))
+    #expect(wordWrap.state == .on)
     #expect(controller.editor.textView.string == "")
     controller.close()
 }

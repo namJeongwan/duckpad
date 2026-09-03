@@ -9,7 +9,7 @@ private final class BufferTextView: NSTextView {
 }
 
 @MainActor
-public final class TextViewEditorAdapter: NSObject, EditorPort, @preconcurrency NSTextStorageDelegate {
+public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOptionsPort, @preconcurrency NSTextStorageDelegate {
     public let scrollView: NSScrollView
     public let textView: NSTextView
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
@@ -17,6 +17,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, @preconcurrency 
     private var activeBuffer: EditorBufferDescriptor?
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
     private var undoManagers: [BufferID: UndoManager] = [:]
+    private var viewStates: [BufferID: EditorViewState] = [:]
     private var isRendering = false
 
     public override init() {
@@ -64,10 +65,12 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, @preconcurrency 
         (textView as? BufferTextView)?.activeUndoManager = undoManager
         activeBuffer = buffer
         setTextWithoutEditing(snapshot.text)
+        applyWordWrap(viewStates[buffer.bufferID]?.wordWrapEnabled ?? true)
     }
 
     public func install(_ snapshot: EditorTextSnapshot) {
         snapshots[snapshot.bufferID] = snapshot
+        viewStates[snapshot.bufferID] = viewStates[snapshot.bufferID] ?? EditorViewState()
         undoManagers[snapshot.bufferID] = UndoManager()
         guard activeBuffer?.bufferID == snapshot.bufferID else { return }
         activeBuffer = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision)
@@ -79,9 +82,34 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, @preconcurrency 
         snapshots[bufferID]
     }
 
+    public func recoverySnapshot(for bufferID: BufferID) -> EditorRecoverySnapshot? {
+        try? recoveryCapture(for: bufferID)?.materializedSnapshot()
+    }
+
+    public func recoveryCapture(for bufferID: BufferID) -> EditorRecoveryCapture? {
+        guard let snapshot = snapshots[bufferID] else { return nil }
+        return EditorRecoveryCapture(
+            bufferID: bufferID,
+            baseRevision: snapshot.revision,
+            revision: snapshot.revision,
+            baseUTF8: Data(snapshot.text.utf8),
+            viewState: viewStates[bufferID] ?? EditorViewState()
+        )
+    }
+
+    public func installRecovery(_ snapshot: EditorRecoverySnapshot) {
+        guard let text = String(data: snapshot.utf8, encoding: .utf8) else { return }
+        viewStates[snapshot.bufferID] = snapshot.viewState
+        install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text))
+        if activeBuffer?.bufferID == snapshot.bufferID {
+            applyWordWrap(snapshot.viewState.wordWrapEnabled)
+        }
+    }
+
     public func retire(bufferID: BufferID) {
         snapshots.removeValue(forKey: bufferID)
         undoManagers.removeValue(forKey: bufferID)
+        viewStates.removeValue(forKey: bufferID)
         guard activeBuffer?.bufferID == bufferID else { return }
         activeBuffer = nil
         (textView as? BufferTextView)?.activeUndoManager = nil
@@ -97,6 +125,24 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, @preconcurrency 
     public func focus() {
         textView.window?.makeFirstResponder(textView)
     }
+
+    public var isWordWrapEnabled: Bool {
+        guard let bufferID = activeBuffer?.bufferID else { return true }
+        return viewStates[bufferID]?.wordWrapEnabled ?? true
+    }
+
+    public var isWrapMarkerVisible: Bool { false }
+    public let supportsWrapMarker = false
+
+    public func setWordWrapEnabled(_ isEnabled: Bool) {
+        guard let bufferID = activeBuffer?.bufferID else { return }
+        var state = viewStates[bufferID] ?? EditorViewState()
+        state.wordWrapEnabled = isEnabled
+        viewStates[bufferID] = state
+        applyWordWrap(isEnabled)
+    }
+
+    public func setWrapMarkerVisible(_ isVisible: Bool) {}
 
     public func textStorage(
         _ textStorage: NSTextStorage,
@@ -170,5 +216,15 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, @preconcurrency 
             let location = min(range.location, (text as NSString).length)
             return NSValue(range: NSRange(location: location, length: 0))
         }
+    }
+
+    private func applyWordWrap(_ isEnabled: Bool) {
+        textView.isHorizontallyResizable = !isEnabled
+        textView.textContainer?.widthTracksTextView = isEnabled
+        textView.textContainer?.containerSize = NSSize(
+            width: isEnabled ? max(scrollView.contentSize.width, 1) : CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        scrollView.hasHorizontalScroller = !isEnabled
     }
 }

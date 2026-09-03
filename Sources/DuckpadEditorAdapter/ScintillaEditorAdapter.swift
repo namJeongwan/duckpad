@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -190,6 +190,28 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     public func focus() { activeScintillaView?.focusEditor() }
+
+    public var isWordWrapEnabled: Bool {
+        activeScintillaView?.isWordWrapEnabled ?? true
+    }
+
+    public var isWrapMarkerVisible: Bool {
+        activeScintillaView?.isWrapMarkerVisible ?? false
+    }
+
+    public let supportsWrapMarker = true
+
+    public func setWordWrapEnabled(_ isEnabled: Bool) {
+        guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return }
+        editorView.isWordWrapEnabled = isEnabled
+        storeViewState(bufferID: bufferID)
+    }
+
+    public func setWrapMarkerVisible(_ isVisible: Bool) {
+        guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return }
+        editorView.isWrapMarkerVisible = isVisible
+        storeViewState(bufferID: bufferID)
+    }
 
     public var activeLanguageID: LanguageID {
         guard let id = activeBuffer?.bufferID else { return .plainText }
@@ -546,7 +568,8 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             caretUTF8: Int(clamping: editorView.caretUTF8Position),
             firstVisibleLine: Int(clamping: editorView.firstVisibleLine),
             horizontalScrollOffset: Int(clamping: editorView.horizontalScrollOffset),
-            wordWrapEnabled: editorView.isWordWrapEnabled
+            wordWrapEnabled: editorView.isWordWrapEnabled,
+            wrapMarkerVisible: editorView.isWrapMarkerVisible
         )
     }
 
@@ -559,6 +582,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             horizontalScrollOffset: UInt(clamping: state.horizontalScrollOffset),
             wordWrapEnabled: state.wordWrapEnabled
         )
+        editorView.isWrapMarkerVisible = state.wrapMarkerVisible
     }
 
     private func sanitized(_ state: EditorViewState, for utf8: Data) -> EditorViewState {
@@ -574,7 +598,8 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             caretUTF8: boundary(state.caretUTF8),
             firstVisibleLine: max(0, state.firstVisibleLine),
             horizontalScrollOffset: max(0, state.horizontalScrollOffset),
-            wordWrapEnabled: state.wordWrapEnabled
+            wordWrapEnabled: state.wordWrapEnabled,
+            wrapMarkerVisible: state.wrapMarkerVisible
         )
     }
 

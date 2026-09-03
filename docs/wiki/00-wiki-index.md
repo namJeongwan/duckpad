@@ -37,8 +37,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 23 | [Phase 6 remediation re-review](reviews/2026-09-03-phase-6-search-replace-rereview.md) | **Rejected — superseded review evidence** | P6-01/P6-02 closure와 당시 selection nil/invalidation이 전체 문서 치환으로 확장되던 P6-03 잔여 Major를 기록한다. |
 | 24 | [Phase 6 final remediation re-review](reviews/2026-09-03-phase-6-search-replace-final-rereview.md) | **Content approved — latest Phase 6 evidence** | 공통 typed selection preflight, 무변경/undo/recovery 보존, P6-01~P6-03 closure와 132-test evidence를 기록한다. |
 | 25 | [Phase 7 language and Lexilla integration](10-language-support.md) | **Implemented; review pending** | official Lexilla 5.5.3 provenance, 78-language registry/detection, exact 20-language keyword-complete tier, persisted overrides, bounded semantic styling, fold/brace/indent/comment UX를 기록한다. |
-| 26 | [Phase 8 secure extension platform](11-extension-platform.md) | **Changes required; remediation awaiting re-review** | official WAMR 2.4.5 interpreter, signed package identity, durable scoped consent, isolated Process-host Developer Preview, grouped UTF-8 edits와 P8-01/P8-02 remediation을 기록한다. |
-| 27 | [Phase 8 independent code review](reviews/2026-09-03-phase-8-extension-platform-code-review.md) | **Rejected — latest Phase 8 review evidence** | P8-01 durability restart latch와 P8-02 termination cancel/join 결함을 판정했다. 후속 직접 수정은 새 독립 re-review 전까지 승인 근거가 아니다. |
+| 26 | [Phase 8 secure extension platform](11-extension-platform.md) | **Approved, committed and audited** | official WAMR 2.4.5 interpreter, signed package identity, durable scoped consent, isolated Process-host Developer Preview와 termination-safe grouped edits를 기록한다. commit `1f60bedd`와 exact signed receipt가 audit를 통과했다. |
+| 27 | [Phase 8 independent code review](reviews/2026-09-03-phase-8-extension-platform-code-review.md) | **Approved — latest Phase 8 evidence** | P8-01/P8-02와 Process teardown remediation, WAMR 168/168 재현을 0 Blocker/Major/Minor로 승인했다. receipt SHA-256은 `bd5dfc59a078fc9170ce1112ff9797e8108471d42dd7cf9c1ff02a2112e15e3e`다. |
+| 28 | [Phase 9 editor view options](12-editor-view-options.md) | **Content approved; exact receipt pending** | 탭별 word wrap, Scintilla wrap symbols, recovery 호환성, lifecycle-gated native View menu를 기록한다. |
+| 29 | [Phase 9 independent code review](reviews/2026-09-03-phase-9-editor-view-options-code-review.md) | **Content approved — latest Phase 9 evidence** | view/recovery/Scintilla/menu/close-race와 P9-01 remediation을 0 Blocker, 0 Major, 0 Minor로 승인했다. exact receipt는 pending이다. |
 
 상태 정의:
 
@@ -94,6 +96,43 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 9 P9-01 independent focused re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent focused reviewer; builder의 P9-01 closure만 현재 bytes에서 재검증했다.
+- **Closure:** shared `actionableEditorViewOptions`가 action/validation 모두에 `.ready`, active buffer, no termination review를 강제한다. delayed restore와 blocked termination에서 command는 disabled/inert이고 정상 admission 복귀 뒤 다시 활성화된다.
+- **Validation:** independent debug focused pair 5회, 합계 10/10; release focused 2/2; full debug 189/189 PASS. builder full release 189/189는 supporting evidence로 구분했다.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** exact staged receipt는 pending이다.
+- **Safety:** review record/index만 수정했다. source/tests/work doc/stage/sign/commit과 기존 unrelated doc04/old vendor script는 변경하지 않았다.
+
+### 2026-09-03 — Phase 9 P9-01 direct remediation
+
+- **Agent/role:** `/root`, direct builder; 구현 subagent를 추가하지 않았다.
+- **Closure:** View option action과 validation에 동일한 workspace `.ready`, active buffer, termination-review admission을 적용했다. delayed restore의 provisional state와 종료 검토 중에는 command가 disabled/inert이며, 이후 다시 활성화된다.
+- **Validation:** 신규 startup/termination 회귀 2/2, debug/release 전체 각 189/189 PASS. `git diff --check` PASS 후 동일 independent reviewer의 focused re-review와 exact receipt를 기다린다.
+- **Safety:** document bytes/revision/dirty/undo는 건드리지 않는다. README, ignored Notepad++ reference, 기존 unstaged doc04/old vendor script를 범위 밖으로 보존한다.
+
+### 2026-09-03 — Phase 9 editor view-options independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; 직접 구현한 `/root`와 분리해 현재 15-path diff만 판정했다.
+- **Scope:** Application port/recovery migration, Scintilla flags와 buffer isolation, fallback capability, native View menu, view-only recovery signal, close-test synchronization을 검토했다.
+- **Validation:** independent focused 7/7, close Retry 10/10, debug/release 188/188, production Scintilla tab smoke PASS. fresh 188/188와 macOS 13 x86_64 build는 builder supporting evidence로 구분했다.
+- **Verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 1 Minor.** P9-01은 startup/termination 중 View menu readiness gating이 없어 provisional toggle이 유실될 수 있는 non-blocking lifecycle UX 결함이다.
+- **Safety:** review record/index만 수정했다. source/tests/stage/sign/commit과 기존 doc04/old vendor script는 변경하지 않았다.
+
+### 2026-09-03 — Phase 9 editor view options direct implementation
+
+- **Agent/role:** `/root`, direct investigator and builder; 추가 구현 agent를 만들지 않았다.
+- **Scope:** Application `EditorViewOptionsPort`, backward-compatible recovery view state, Scintilla wrap visual flags, `NSTextView` fallback behavior, native View menu/check state와 focused tests를 구현했다.
+- **Invariant:** option toggle은 document bytes/revision/dirty/undo를 바꾸지 않으며 view-state 변경만 recovery autosave를 예약한다. marker를 동등하게 그릴 수 없는 fallback은 capability를 명시해 menu action을 disable한다.
+- **Validation:** view/recovery/menu 및 close-race focused 7/7, close retry 10/10, debug/release/fresh 각 188/188, macOS 13 x86_64 release build/link PASS다. full-suite가 드러낸 기존 close-retry test timing은 이전 persistence를 drain하고 accepted revision/text를 즉시 단언하도록 결정화했다.
+- **Boundary:** README, ignored Notepad++ reference, 기존 unstaged 문서 04와 old Scintilla vendor script는 범위 밖으로 보존한다. 독립 review와 exact receipt 전에는 commit하지 않는다.
+
+### 2026-09-03 — Phase 8 verified local commit
+
+- **Commit:** `1f60beddc60336b7a7d2b130887bb948f730437e` (`feat: add secure extension platform`).
+- **Review gate:** candidate `a3f1b08f52e8097c42cc235789c310a0a2707de0c17d8376f5dae8ec6c1e6236`와 receipt SHA-256 `bd5dfc59a078fc9170ce1112ff9797e8108471d42dd7cf9c1ff02a2112e15e3e`가 exact identity 검증을 통과했다.
+- **Audit/safety:** 전체 8 commits audit PASS, remote 없음, ignored Notepad++ reference clean, 사용자 변경 doc04/old Scintilla script 보존.
 
 ### 2026-09-03 — Phase 8 P8-01/P8-02 direct remediation
 
