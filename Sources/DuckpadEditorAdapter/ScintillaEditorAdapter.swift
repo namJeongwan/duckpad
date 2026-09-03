@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort, EditorStandardCommandPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorViewOptionsPort, EditorCommandPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -213,7 +213,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         storeViewState(bufferID: bufferID)
     }
 
-    public func canPerform(_ command: EditorStandardCommand) -> Bool {
+    public func canPerform(_ command: EditorCommand) -> Bool {
         guard let editorView = activeScintillaView else { return false }
         switch command {
         case .undo:
@@ -230,10 +230,13 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             return editorView.canDelete
         case .selectAll:
             return editorView.canSelectAll
+        case .duplicateLine, .moveLineUp, .moveLineDown, .deleteLine, .joinLines,
+             .uppercase, .lowercase, .indent, .unindent, .trimTrailingWhitespace:
+            return editorView.canPerform(nativeEditingCommand(command))
         }
     }
 
-    public func perform(_ command: EditorStandardCommand) {
+    public func perform(_ command: EditorCommand) {
         guard canPerform(command), let editorView = activeScintillaView else { return }
         switch command {
         case .undo: editorView.undo()
@@ -243,6 +246,26 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         case .paste: editorView.paste()
         case .delete: editorView.deleteSelectionOrNextCharacter()
         case .selectAll: editorView.selectAll()
+        case .duplicateLine, .moveLineUp, .moveLineDown, .deleteLine, .joinLines,
+             .uppercase, .lowercase, .indent, .unindent, .trimTrailingWhitespace:
+            editorView.perform(nativeEditingCommand(command))
+        }
+    }
+
+    private func nativeEditingCommand(_ command: EditorCommand) -> DPScintillaEditingCommand {
+        switch command {
+        case .duplicateLine: .duplicateLine
+        case .moveLineUp: .moveLineUp
+        case .moveLineDown: .moveLineDown
+        case .deleteLine: .deleteLine
+        case .joinLines: .joinLines
+        case .uppercase: .uppercase
+        case .lowercase: .lowercase
+        case .indent: .indent
+        case .unindent: .unindent
+        case .trimTrailingWhitespace: .trimTrailingWhitespace
+        case .undo, .redo, .cut, .copy, .paste, .delete, .selectAll:
+            preconditionFailure("Standard responder command has no native editing-command mapping")
         }
     }
 

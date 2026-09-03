@@ -699,6 +699,25 @@ struct AppKitHostedTests {
         #expect(item.keyEquivalentModifierMask == [.command])
     }
 
+    let duplicateLine = menuItem("Duplicate Line", in: menu)
+    let moveLineUp = menuItem("Move Line Up", in: menu)
+    let moveLineDown = menuItem("Move Line Down", in: menu)
+    let deleteLine = menuItem("Delete Line", in: menu)
+    let joinLines = menuItem("Join Lines", in: menu)
+    #expect(duplicateLine?.keyEquivalent == "d")
+    #expect(duplicateLine?.keyEquivalentModifierMask == [.command])
+    #expect(moveLineUp?.keyEquivalent == String(UnicodeScalar(NSUpArrowFunctionKey)!))
+    #expect(moveLineUp?.keyEquivalentModifierMask == [.option])
+    #expect(moveLineDown?.keyEquivalent == String(UnicodeScalar(NSDownArrowFunctionKey)!))
+    #expect(moveLineDown?.keyEquivalentModifierMask == [.option])
+    #expect(deleteLine?.keyEquivalent == "k")
+    #expect(deleteLine?.keyEquivalentModifierMask == [.command, .shift])
+    #expect(joinLines?.keyEquivalent == "j")
+    #expect(joinLines?.keyEquivalentModifierMask == [.control])
+    for title in ["Indent Line(s)", "Unindent Line(s)", "Make Uppercase", "Make Lowercase", "Trim Trailing Whitespace"] {
+        #expect(menuItem(title, in: menu)?.keyEquivalent.isEmpty == true)
+    }
+
     let shortcuts = flattenedMenuItems(in: menu).compactMap { item -> String? in
         guard !item.keyEquivalent.isEmpty else { return nil }
         return "\(item.keyEquivalentModifierMask.rawValue):\(item.keyEquivalent.lowercased())"
@@ -1190,6 +1209,68 @@ struct AppKitHostedTests {
     #expect(editor.textView.string == "ac")
 }
 
+@Test @MainActor func textViewFallbackPerformsAdvancedLineCommandsAsSingleUndoableEdits() {
+    let editor = TextViewEditorAdapter()
+    let bufferID = BufferID()
+    editor.display(EditorBufferDescriptor(bufferID: bufferID, revision: 0))
+    editor.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+    editor.install(EditorTextSnapshot(bufferID: bufferID, revision: 0, text: "alpha\nbeta"))
+
+    editor.textView.setSelectedRange(NSRange(location: 6, length: 4))
+    editor.perform(.duplicateLine)
+    #expect(editor.textView.string == "alpha\nbeta\nbeta")
+    editor.perform(.undo)
+    #expect(editor.textView.string == "alpha\nbeta")
+
+    editor.textView.setSelectedRange(NSRange(location: 6, length: 4))
+    editor.perform(.uppercase)
+    #expect(editor.textView.string == "alpha\nBETA")
+    editor.perform(.lowercase)
+    #expect(editor.textView.string == "alpha\nbeta")
+    editor.perform(.moveLineUp)
+    #expect(editor.textView.string == "beta\nalpha")
+    editor.perform(.moveLineDown)
+    #expect(editor.textView.string == "alpha\nbeta")
+
+    editor.textView.setSelectedRange(NSRange(location: 0, length: 0))
+    editor.perform(.joinLines)
+    #expect(editor.textView.string == "alpha beta")
+    editor.perform(.undo)
+    #expect(editor.textView.string == "alpha\nbeta")
+
+    editor.textView.setSelectedRange(NSRange(location: 0, length: 5))
+    editor.perform(.indent)
+    #expect(editor.textView.string == "\talpha\nbeta")
+    editor.perform(.unindent)
+    #expect(editor.textView.string == "alpha\nbeta")
+
+    editor.install(EditorTextSnapshot(bufferID: bufferID, revision: 20, text: "alpha  \nbeta\t"))
+    editor.perform(.trimTrailingWhitespace)
+    #expect(editor.textView.string == "alpha\nbeta")
+
+    editor.install(EditorTextSnapshot(bufferID: bufferID, revision: 30, text: "longer\nx"))
+    editor.textView.setSelectedRange(NSRange(location: 0, length: 6))
+    editor.perform(.moveLineDown)
+    #expect(editor.textView.string == "x\nlonger")
+    #expect(editor.textView.selectedRange() == NSRange(location: 2, length: 6))
+    editor.perform(.deleteLine)
+    #expect(editor.textView.string == "x\n")
+
+    editor.install(EditorTextSnapshot(bufferID: bufferID, revision: 40, text: "a\n"))
+    editor.textView.setSelectedRange(NSRange(location: 2, length: 0))
+    editor.perform(.moveLineUp)
+    #expect(editor.textView.string == "\na")
+    #expect(editor.textView.selectedRange() == NSRange(location: 0, length: 1))
+
+    editor.install(EditorTextSnapshot(bufferID: bufferID, revision: 50, text: "한글\r\nx"))
+    editor.textView.setSelectedRange(NSRange(location: 0, length: 2))
+    editor.perform(.moveLineDown)
+    #expect(editor.textView.string == "x\r\n한글")
+    #expect(editor.textView.selectedRange() == NSRange(location: 3, length: 2))
+    editor.perform(.deleteLine)
+    #expect(editor.textView.string == "x\r\n")
+}
+
 @Test @MainActor func textViewFallbackRevisionExhaustionDisablesEveryMutationCommand() {
     let editor = TextViewEditorAdapter()
     let bufferID = BufferID()
@@ -1206,11 +1287,21 @@ struct AppKitHostedTests {
     #expect(!editor.textView.isEditable)
     #expect(editor.textView.isSelectable)
     for command in [
-        EditorStandardCommand.undo,
+        EditorCommand.undo,
         .redo,
         .cut,
         .paste,
         .delete,
+        .duplicateLine,
+        .moveLineUp,
+        .moveLineDown,
+        .deleteLine,
+        .joinLines,
+        .uppercase,
+        .lowercase,
+        .indent,
+        .unindent,
+        .trimTrailingWhitespace,
     ] {
         #expect(!editor.canPerform(command))
         editor.perform(command)

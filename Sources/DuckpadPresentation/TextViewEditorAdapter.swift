@@ -9,7 +9,7 @@ private final class BufferTextView: NSTextView {
 }
 
 @MainActor
-public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOptionsPort, EditorStandardCommandPort, @preconcurrency NSTextStorageDelegate {
+public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOptionsPort, EditorCommandPort, @preconcurrency NSTextStorageDelegate {
     public let scrollView: NSScrollView
     public let textView: NSTextView
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
@@ -155,7 +155,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
 
     public func setWrapMarkerVisible(_ isVisible: Bool) {}
 
-    public func canPerform(_ command: EditorStandardCommand) -> Bool {
+    public func canPerform(_ command: EditorCommand) -> Bool {
         guard activeBuffer != nil else { return false }
         let selection = textView.selectedRange()
         switch command {
@@ -173,10 +173,26 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
             return textView.isEditable && (selection.length > 0 || selection.location < textView.string.utf16.count)
         case .selectAll:
             return !textView.string.isEmpty
+        case .duplicateLine, .indent, .unindent:
+            return textView.isEditable && !textView.hasMarkedText()
+        case .moveLineUp:
+            return textView.isEditable && !textView.hasMarkedText() && selectedLineRange().location > 0
+        case .moveLineDown:
+            return textView.isEditable && !textView.hasMarkedText()
+                && NSMaxRange(selectedLineRange()) < (textView.string as NSString).length
+        case .deleteLine, .trimTrailingWhitespace:
+            return textView.isEditable && !textView.hasMarkedText() && !textView.string.isEmpty
+        case .joinLines:
+            guard textView.isEditable && !textView.hasMarkedText() else { return false }
+            let lines = selectedLineRange()
+            return NSMaxRange(lines) < (textView.string as NSString).length
+                || lineChunks(in: lines).count > 1
+        case .uppercase, .lowercase:
+            return textView.isEditable && !textView.hasMarkedText() && selection.length > 0
         }
     }
 
-    public func perform(_ command: EditorStandardCommand) {
+    public func perform(_ command: EditorCommand) {
         guard canPerform(command) else { return }
         switch command {
         case .undo: textView.undoManager?.undo()
@@ -186,7 +202,200 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         case .paste: textView.paste(nil)
         case .delete: textView.deleteForward(nil)
         case .selectAll: textView.selectAll(nil)
+        case .duplicateLine: duplicateSelectedLines()
+        case .moveLineUp: moveSelectedLines(up: true)
+        case .moveLineDown: moveSelectedLines(up: false)
+        case .deleteLine: replaceText(in: selectedLineRange(), with: "", selection: NSRange(location: selectedLineRange().location, length: 0))
+        case .joinLines: joinSelectedLines()
+        case .uppercase: replaceSelection { $0.uppercased() }
+        case .lowercase: replaceSelection { $0.lowercased() }
+        case .indent: changeIndent(removing: false)
+        case .unindent: changeIndent(removing: true)
+        case .trimTrailingWhitespace: trimTrailingWhitespace()
         }
+    }
+
+    private struct LineChunk {
+        let body: String
+        let ending: String
+    }
+
+    private func selectedLineRange() -> NSRange {
+        let source = textView.string as NSString
+        let selection = textView.selectedRange()
+        let start = min(selection.location, source.length)
+        var end = min(NSMaxRange(selection), source.length)
+        if end > start {
+            let endLine = source.lineRange(for: NSRange(location: end, length: 0))
+            if end == endLine.location { end -= 1 }
+        }
+        return source.lineRange(for: NSRange(location: start, length: max(0, end - start)))
+    }
+
+    private func lineChunks(in range: NSRange, includingTerminalEmptyLine: Bool = false) -> [LineChunk] {
+        let value = (textView.string as NSString).substring(with: range)
+        guard !value.isEmpty else { return [LineChunk(body: "", ending: "")] }
+        let utf16 = value as NSString
+        var chunks: [LineChunk] = []
+        var index = 0
+        while index < utf16.length {
+            let bodyStart = index
+            while index < utf16.length {
+                let codeUnit = utf16.character(at: index)
+                if codeUnit == 10 || codeUnit == 13 { break }
+                index += 1
+            }
+            let body = utf16.substring(with: NSRange(location: bodyStart, length: index - bodyStart))
+            let endingStart = index
+            if index < utf16.length {
+                if utf16.character(at: index) == 13 {
+                    index += 1
+                    if index < utf16.length, utf16.character(at: index) == 10 { index += 1 }
+                } else {
+                    index += 1
+                }
+            }
+            chunks.append(LineChunk(
+                body: body,
+                ending: utf16.substring(with: NSRange(location: endingStart, length: index - endingStart))
+            ))
+        }
+        if includingTerminalEmptyLine,
+           NSMaxRange(range) == (textView.string as NSString).length,
+           chunks.last?.ending.isEmpty == false {
+            chunks.append(LineChunk(body: "", ending: ""))
+        }
+        return chunks
+    }
+
+    private func rendered(_ chunks: [LineChunk]) -> String {
+        chunks.map { $0.body + $0.ending }.joined()
+    }
+
+    private func duplicateSelectedLines() {
+        let range = selectedLineRange()
+        let chunks = lineChunks(in: range)
+        let original = rendered(chunks)
+        let separator: String
+        if chunks.last?.ending.isEmpty == true {
+            let newline = textView.string.contains("\r\n") ? "\r\n" : "\n"
+            separator = newline
+        } else {
+            separator = ""
+        }
+        replaceText(
+            in: range,
+            with: original + separator + original,
+            selection: NSRange(
+                location: range.location + original.utf16.count + separator.utf16.count,
+                length: original.utf16.count
+            )
+        )
+    }
+
+    private func moveSelectedLines(up: Bool) {
+        let source = textView.string as NSString
+        let current = selectedLineRange()
+        let adjacent: NSRange
+        if up {
+            adjacent = source.lineRange(for: NSRange(location: current.location - 1, length: 0))
+        } else {
+            adjacent = source.lineRange(for: NSRange(location: NSMaxRange(current), length: 0))
+        }
+        let currentChunks = lineChunks(in: current)
+        let adjacentChunks = lineChunks(in: adjacent)
+        let combined = up ? NSUnionRange(adjacent, current) : NSUnionRange(current, adjacent)
+        let first = up ? currentChunks : adjacentChunks
+        let second = up ? adjacentChunks : currentChunks
+        var reordered = first + second
+        let original = lineChunks(in: combined, includingTerminalEmptyLine: true)
+        for index in reordered.indices where index < original.count {
+            reordered[index] = LineChunk(body: reordered[index].body, ending: original[index].ending)
+        }
+        let movedChunkRange: Range<Int>
+        if up {
+            movedChunkRange = 0..<currentChunks.count
+        } else {
+            movedChunkRange = adjacentChunks.count..<(adjacentChunks.count + currentChunks.count)
+        }
+        let prefix = rendered(Array(reordered[..<movedChunkRange.lowerBound]))
+        let moved = rendered(Array(reordered[movedChunkRange]))
+        replaceText(
+            in: combined,
+            with: rendered(reordered),
+            selection: NSRange(
+                location: combined.location + prefix.utf16.count,
+                length: moved.utf16.count
+            )
+        )
+    }
+
+    private func joinSelectedLines() {
+        let source = textView.string as NSString
+        var range = selectedLineRange()
+        if lineChunks(in: range).count == 1, NSMaxRange(range) < source.length {
+            range = NSUnionRange(range, source.lineRange(for: NSRange(location: NSMaxRange(range), length: 0)))
+        }
+        let chunks = lineChunks(in: range)
+        guard chunks.count > 1 else { return }
+        let ending = chunks.last?.ending ?? ""
+        let joined = chunks.map(\.body).joined(separator: " ") + ending
+        replaceText(in: range, with: joined, selection: NSRange(location: range.location, length: joined.utf16.count - ending.utf16.count))
+    }
+
+    private func replaceSelection(_ transform: (String) -> String) {
+        let range = textView.selectedRange()
+        let value = (textView.string as NSString).substring(with: range)
+        let replacement = transform(value)
+        replaceText(in: range, with: replacement, selection: NSRange(location: range.location, length: replacement.utf16.count))
+    }
+
+    private func changeIndent(removing: Bool) {
+        let range = selectedLineRange()
+        var chunks = lineChunks(in: range)
+        for index in chunks.indices {
+            var body = chunks[index].body
+            if removing {
+                if body.hasPrefix("\t") {
+                    body.removeFirst()
+                } else {
+                    let spaces = body.prefix(4).prefix(while: { $0 == " " }).count
+                    body.removeFirst(spaces)
+                }
+            } else {
+                body = "\t" + body
+            }
+            chunks[index] = LineChunk(body: body, ending: chunks[index].ending)
+        }
+        let replacement = rendered(chunks)
+        replaceText(in: range, with: replacement, selection: NSRange(location: range.location, length: replacement.utf16.count))
+    }
+
+    private func trimTrailingWhitespace() {
+        let source = textView.string
+        let expression = try? NSRegularExpression(pattern: "[ \\t]+(?=\\r?$)", options: [.anchorsMatchLines])
+        let range = NSRange(location: 0, length: source.utf16.count)
+        let replacement = expression?.stringByReplacingMatches(in: source, range: range, withTemplate: "") ?? source
+        guard replacement != source else { return }
+        let selection = textView.selectedRange()
+        let safeSelection = NSRange(
+            location: min(selection.location, replacement.utf16.count),
+            length: min(selection.length, max(0, replacement.utf16.count - min(selection.location, replacement.utf16.count)))
+        )
+        replaceText(in: range, with: replacement, selection: safeSelection)
+    }
+
+    private func replaceText(in range: NSRange, with replacement: String, selection: NSRange) {
+        let undoManager = textView.undoManager
+        undoManager?.beginUndoGrouping()
+        textView.insertText(replacement, replacementRange: range)
+        let currentLength = (textView.string as NSString).length
+        let safeLocation = min(selection.location, currentLength)
+        textView.setSelectedRange(NSRange(
+            location: safeLocation,
+            length: min(selection.length, currentLength - safeLocation)
+        ))
+        undoManager?.endUndoGrouping()
     }
 
     public func textStorage(

@@ -458,6 +458,101 @@ struct ScintillaBridgeTests {
     }
 
     @Test @MainActor
+    func advancedLineCommandsUseNativeUTF8EditsAndGroupedUndo() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        adapter.install(EditorTextSnapshot(
+            bufferID: bufferID,
+            revision: 0,
+            text: "one  \ntwo\t\nTHREE\nfour"
+        ))
+        adapter.display(EditorBufferDescriptor(bufferID: bufferID, revision: 0))
+        let view = try #require(adapter.activeScintillaView)
+
+        #expect(adapter.canPerform(.trimTrailingWhitespace))
+        adapter.perform(.trimTrailingWhitespace)
+        #expect(adapter.snapshot(for: bufferID)?.text == "one\ntwo\nTHREE\nfour")
+        adapter.perform(.undo)
+        #expect(adapter.snapshot(for: bufferID)?.text == "one  \ntwo\t\nTHREE\nfour")
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: 11, length: 5))
+        #expect(adapter.canPerform(.lowercase))
+        adapter.perform(.lowercase)
+        #expect(adapter.snapshot(for: bufferID)?.text.contains("three") == true)
+        adapter.perform(.uppercase)
+        #expect(adapter.snapshot(for: bufferID)?.text.contains("THREE") == true)
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: 7, length: 0))
+        adapter.perform(.duplicateLine)
+        #expect(adapter.snapshot(for: bufferID)?.text == "one  \ntwo\t\ntwo\t\nTHREE\nfour")
+        #expect(adapter.canPerform(.moveLineUp))
+        adapter.perform(.moveLineUp)
+        #expect(adapter.snapshot(for: bufferID)?.text == "two\t\none  \ntwo\t\nTHREE\nfour")
+        adapter.perform(.moveLineDown)
+        #expect(adapter.snapshot(for: bufferID)?.text == "one  \ntwo\t\ntwo\t\nTHREE\nfour")
+        adapter.perform(.deleteLine)
+        #expect(adapter.snapshot(for: bufferID)?.text == "one  \ntwo\t\nTHREE\nfour")
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: 7, length: 0))
+        adapter.perform(.joinLines)
+        #expect(adapter.snapshot(for: bufferID)?.text == "one  \ntwo\t THREE\nfour")
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+        let beforeIndent = adapter.snapshot(for: bufferID)?.text
+        adapter.perform(.indent)
+        #expect(adapter.snapshot(for: bufferID)?.text != beforeIndent)
+        #expect(adapter.snapshot(for: bufferID)?.text.hasPrefix("one") == false)
+        adapter.perform(.unindent)
+        #expect(adapter.snapshot(for: bufferID)?.text == beforeIndent)
+
+        adapter.install(EditorTextSnapshot(
+            bufferID: bufferID,
+            revision: .max - 1,
+            text: "a  \nb  \n"
+        ))
+        adapter.setInputEnabled(true)
+        for command in [
+            EditorCommand.duplicateLine,
+            .moveLineUp,
+            .moveLineDown,
+            .deleteLine,
+            .joinLines,
+            .uppercase,
+            .lowercase,
+            .indent,
+            .unindent,
+            .trimTrailingWhitespace,
+        ] {
+            #expect(!adapter.canPerform(command))
+            adapter.perform(command)
+        }
+        #expect(adapter.snapshot(for: bufferID)?.text == "a  \nb  \n")
+        #expect(adapter.snapshot(for: bufferID)?.revision == UInt64.max - 1)
+        #expect(adapter.activeScintillaView?.canUndo == false)
+    }
+
+    @Test @MainActor
+    func joinLinesStopsAtExactLFAndCRLFSelectionBoundary() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        adapter.install(EditorTextSnapshot(bufferID: bufferID, revision: 0, text: "a\nb\nc"))
+        adapter.display(EditorBufferDescriptor(bufferID: bufferID, revision: 0))
+        let view = try #require(adapter.activeScintillaView)
+
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 4))
+        adapter.perform(.joinLines)
+        #expect(adapter.snapshot(for: bufferID)?.text == "a b\nc")
+
+        let unicodeCRLF = "한\r\n🙂\r\nc"
+        adapter.install(EditorTextSnapshot(bufferID: bufferID, revision: 10, text: unicodeCRLF))
+        let selectedBytes = Data("한\r\n🙂\r\n".utf8).count
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: selectedBytes))
+        adapter.perform(.joinLines)
+        #expect(adapter.snapshot(for: bufferID)?.text == "한 🙂\r\nc")
+    }
+
+    @Test @MainActor
     func standardUndoAndPasteHonorActiveKoreanComposition() throws {
         let adapter = ScintillaEditorAdapter()
         let bufferID = BufferID()

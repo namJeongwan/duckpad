@@ -601,13 +601,23 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         closeSearchPanel()
     }
 
-    @objc public func performUndo(_ sender: Any? = nil) { performStandardEditorCommand(.undo) }
-    @objc public func performRedo(_ sender: Any? = nil) { performStandardEditorCommand(.redo) }
-    @objc public func performCut(_ sender: Any? = nil) { performStandardEditorCommand(.cut) }
-    @objc public func performCopy(_ sender: Any? = nil) { performStandardEditorCommand(.copy) }
-    @objc public func performPaste(_ sender: Any? = nil) { performStandardEditorCommand(.paste) }
-    @objc public func performDelete(_ sender: Any? = nil) { performStandardEditorCommand(.delete) }
-    @objc public func performSelectAll(_ sender: Any? = nil) { performStandardEditorCommand(.selectAll) }
+    @objc public func performUndo(_ sender: Any? = nil) { performEditorCommand(.undo) }
+    @objc public func performRedo(_ sender: Any? = nil) { performEditorCommand(.redo) }
+    @objc public func performCut(_ sender: Any? = nil) { performEditorCommand(.cut) }
+    @objc public func performCopy(_ sender: Any? = nil) { performEditorCommand(.copy) }
+    @objc public func performPaste(_ sender: Any? = nil) { performEditorCommand(.paste) }
+    @objc public func performDelete(_ sender: Any? = nil) { performEditorCommand(.delete) }
+    @objc public func performSelectAll(_ sender: Any? = nil) { performEditorCommand(.selectAll) }
+    @objc public func performDuplicateLine(_ sender: Any? = nil) { performEditorCommand(.duplicateLine) }
+    @objc public func performMoveLineUp(_ sender: Any? = nil) { performEditorCommand(.moveLineUp) }
+    @objc public func performMoveLineDown(_ sender: Any? = nil) { performEditorCommand(.moveLineDown) }
+    @objc public func performDeleteLine(_ sender: Any? = nil) { performEditorCommand(.deleteLine) }
+    @objc public func performJoinLines(_ sender: Any? = nil) { performEditorCommand(.joinLines) }
+    @objc public func performUppercase(_ sender: Any? = nil) { performEditorCommand(.uppercase) }
+    @objc public func performLowercase(_ sender: Any? = nil) { performEditorCommand(.lowercase) }
+    @objc public func performIndent(_ sender: Any? = nil) { performEditorCommand(.indent) }
+    @objc public func performUnindent(_ sender: Any? = nil) { performEditorCommand(.unindent) }
+    @objc public func performTrimTrailingWhitespace(_ sender: Any? = nil) { performEditorCommand(.trimTrailingWhitespace) }
 
     @objc public func performToggleWordWrap(_ sender: Any? = nil) {
         guard let editor = actionableEditorViewOptions else { return }
@@ -623,8 +633,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if let command = standardEditorCommand(for: menuItem.action) {
-            return actionableStandardEditorCommands?.canPerform(command) ?? false
+        if let command = editorCommand(for: menuItem.action) {
+            return actionableEditorCommands?.canPerform(command) ?? false
         }
         if menuItem.action == #selector(performNewScratch(_:)) {
             return workspace.snapshot().startup == .ready && !terminationReviewInProgress
@@ -693,9 +703,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    private var actionableStandardEditorCommands: (any EditorStandardCommandPort)? {
+    private var actionableEditorCommands: (any EditorCommandPort)? {
         guard editorCommandsAreActionable else { return nil }
-        return activeEditor as? any EditorStandardCommandPort
+        return activeEditor as? any EditorCommandPort
     }
 
     private var editorCommandsAreActionable: Bool {
@@ -725,12 +735,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    private func performStandardEditorCommand(_ command: EditorStandardCommand) {
-        guard let editor = actionableStandardEditorCommands, editor.canPerform(command) else { return }
+    private func performEditorCommand(_ command: EditorCommand) {
+        guard let editor = actionableEditorCommands, editor.canPerform(command) else { return }
         editor.perform(command)
     }
 
-    private func standardEditorCommand(for action: Selector?) -> EditorStandardCommand? {
+    private func editorCommand(for action: Selector?) -> EditorCommand? {
         switch action {
         case #selector(performUndo(_:)): .undo
         case #selector(performRedo(_:)): .redo
@@ -739,6 +749,16 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case #selector(performPaste(_:)): .paste
         case #selector(performDelete(_:)): .delete
         case #selector(performSelectAll(_:)): .selectAll
+        case #selector(performDuplicateLine(_:)): .duplicateLine
+        case #selector(performMoveLineUp(_:)): .moveLineUp
+        case #selector(performMoveLineDown(_:)): .moveLineDown
+        case #selector(performDeleteLine(_:)): .deleteLine
+        case #selector(performJoinLines(_:)): .joinLines
+        case #selector(performUppercase(_:)): .uppercase
+        case #selector(performLowercase(_:)): .lowercase
+        case #selector(performIndent(_:)): .indent
+        case #selector(performUnindent(_:)): .unindent
+        case #selector(performTrimTrailingWhitespace(_:)): .trimTrailingWhitespace
         default: nil
         }
     }

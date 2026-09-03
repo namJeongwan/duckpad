@@ -40,6 +40,32 @@ public enum DuckpadMainMenuFactory {
         add("Delete", #selector(DuckpadWindowController.performDelete(_:)), "", target, modifiers: [], to: editMenu)
         editMenu.addItem(.separator())
         add("Select All", #selector(DuckpadWindowController.performSelectAll(_:)), "a", target, to: editMenu)
+        editMenu.addItem(.separator())
+        add("Duplicate Line", #selector(DuckpadWindowController.performDuplicateLine(_:)), "d", target, to: editMenu)
+        add(
+            "Move Line Up",
+            #selector(DuckpadWindowController.performMoveLineUp(_:)),
+            String(UnicodeScalar(NSUpArrowFunctionKey)!),
+            target,
+            modifiers: [.option],
+            to: editMenu
+        )
+        add(
+            "Move Line Down",
+            #selector(DuckpadWindowController.performMoveLineDown(_:)),
+            String(UnicodeScalar(NSDownArrowFunctionKey)!),
+            target,
+            modifiers: [.option],
+            to: editMenu
+        )
+        add("Delete Line", #selector(DuckpadWindowController.performDeleteLine(_:)), "k", target, modifiers: [.command, .shift], to: editMenu)
+        add("Join Lines", #selector(DuckpadWindowController.performJoinLines(_:)), "j", target, modifiers: [.control], to: editMenu)
+        editMenu.addItem(.separator())
+        add("Indent Line(s)", #selector(DuckpadWindowController.performIndent(_:)), "", target, modifiers: [], to: editMenu)
+        add("Unindent Line(s)", #selector(DuckpadWindowController.performUnindent(_:)), "", target, modifiers: [], to: editMenu)
+        add("Make Uppercase", #selector(DuckpadWindowController.performUppercase(_:)), "", target, modifiers: [], to: editMenu)
+        add("Make Lowercase", #selector(DuckpadWindowController.performLowercase(_:)), "", target, modifiers: [], to: editMenu)
+        add("Trim Trailing Whitespace", #selector(DuckpadWindowController.performTrimTrailingWhitespace(_:)), "", target, modifiers: [], to: editMenu)
         editItem.submenu = editMenu
 
         let searchItem = NSMenuItem()

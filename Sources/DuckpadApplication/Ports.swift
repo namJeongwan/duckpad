@@ -128,7 +128,7 @@ public protocol EditorViewOptionsPort: EditorPort {
 
 /// Platform-neutral edit commands surfaced by the native menu. Application
 /// owns the intent while each editor adapter owns its responder/engine details.
-public enum EditorStandardCommand: Equatable, Sendable {
+public enum EditorCommand: Equatable, Sendable {
     case undo
     case redo
     case cut
@@ -136,12 +136,22 @@ public enum EditorStandardCommand: Equatable, Sendable {
     case paste
     case delete
     case selectAll
+    case duplicateLine
+    case moveLineUp
+    case moveLineDown
+    case deleteLine
+    case joinLines
+    case uppercase
+    case lowercase
+    case indent
+    case unindent
+    case trimTrailingWhitespace
 }
 
 @MainActor
-public protocol EditorStandardCommandPort: EditorPort {
-    func canPerform(_ command: EditorStandardCommand) -> Bool
-    func perform(_ command: EditorStandardCommand)
+public protocol EditorCommandPort: EditorPort {
+    func canPerform(_ command: EditorCommand) -> Bool
+    func perform(_ command: EditorCommand)
 }
 
 public enum EditorThemePalette: Equatable, Sendable {

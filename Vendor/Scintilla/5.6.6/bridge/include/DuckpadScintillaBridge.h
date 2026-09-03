@@ -26,6 +26,19 @@ typedef NS_ENUM(NSInteger, DPScintillaPalette) {
     DPScintillaPaletteHighContrastDark = 3,
 };
 
+typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
+    DPScintillaEditingCommandDuplicateLine = 0,
+    DPScintillaEditingCommandMoveLineUp = 1,
+    DPScintillaEditingCommandMoveLineDown = 2,
+    DPScintillaEditingCommandDeleteLine = 3,
+    DPScintillaEditingCommandJoinLines = 4,
+    DPScintillaEditingCommandUppercase = 5,
+    DPScintillaEditingCommandLowercase = 6,
+    DPScintillaEditingCommandIndent = 7,
+    DPScintillaEditingCommandUnindent = 8,
+    DPScintillaEditingCommandTrimTrailingWhitespace = 9,
+};
+
 /// An owned edit value. `range` is measured in UTF-8 bytes, never UTF-16.
 @interface DPScintillaEdit : NSObject
 @property(nonatomic, readonly) NSRange range;
@@ -120,6 +133,8 @@ typedef NS_ENUM(NSInteger, DPScintillaPalette) {
 - (void)selectAll;
 - (void)undo;
 - (void)redo;
+- (BOOL)canPerformEditingCommand:(DPScintillaEditingCommand)command;
+- (void)performEditingCommand:(DPScintillaEditingCommand)command;
 - (void)beginGroupedUndo;
 - (void)endGroupedUndo;
 - (void)focusEditor;

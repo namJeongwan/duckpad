@@ -51,6 +51,8 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 37 | [Phase 13 independent code review](reviews/2026-09-03-phase-13-recently-closed-tabs-code-review.md) | **Content approved — latest Phase 13 evidence** | 최초 2 Major와 automatic-replacement/stable-retry remediation, off-main capture materialization 및 duplicate-path safety를 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 38 | [Phase 14 tab lifecycle commands](17-tab-lifecycle-commands.md) | **Content approved; exact receipt pending** | 최근 닫은 탭 기록 100개, Close All/Others/Left/Right/Unchanged/Unpinned의 native 메뉴·우클릭 경로, pinned 보호, dirty review 및 종료 경쟁 처리를 기록한다. |
 | 39 | [Phase 14 independent code review](reviews/2026-09-03-phase-14-tab-lifecycle-code-review.md) | **Content approved — latest Phase 14 evidence** | 초기 accepted-close termination race Major와 LIFO test Minor를 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
+| 40 | [Phase 15 advanced editing commands](18-advanced-editing-commands.md) | **Content approved; exact receipt pending** | 줄 복제/이동/삭제/합치기, 들여쓰기, 대소문자 변환, 후행 공백 제거와 충돌 없는 native shortcut surface를 기록한다. |
+| 41 | [Phase 15 independent code review](reviews/2026-09-03-phase-15-advanced-editing-code-review.md) | **Content approved — latest Phase 15 evidence** | 최초 3 Major의 Join 경계, revision exhaustion 원자성, fallback selection/EOL 결함을 focused remediation 재검증으로 모두 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -106,6 +108,26 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 15 independent review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 15 구현에는 참여하지 않았다.
+- **Initial verdict:** **CHANGES_REQUIRED — 0 Blocker, 3 Major, 0 Minor.** External probes reproduced Join overreach, partial near-exhaustion trim, and fallback line-move selection/EOL corruption.
+- **Focused re-review:** execution-time Join endpoint correction, conservative whole-command revision budget, UTF-16/terminal-empty fallback line model and rendered selection rebasing을 현재 바이트에서 확인했다. 동일 probe는 `a b\nc`, near-exhaustion 무변경, `{2,6}` selection/후속 Delete 보존, native와 같은 terminal `\na`를 산출했다.
+- **Validation:** independent focused Debug 5/5 및 Release 5/5, `git diff --check` PASS.
+- **Final verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** exact staged-candidate review/receipt는 pending이다.
+- **Final doc consistency:** 제품/테스트 바이트 무변경, builder Debug/Release 224/224 및 corrected doc18 approval evidence를 확인했다. exact current 10-path digest는 `89590bbc2c5daf36f95507cf95fe33b5b192bec16175a08dcbfe22b1e8068b9d`다.
+- **Boundary:** review evidence/index만 수정했으며 doc04, 기존 vendor script, README, ignored Notepad++, source/tests, stage/commit/push는 건드리지 않았다.
+
+### 2026-09-03 — Phase 15 advanced editing commands
+
+- **Agent/role:** `/root`, direct investigator and builder; independent review verdict is separate.
+- **Implementation:** Application-owned `EditorCommand` intent, narrow Scintilla editing enum, native Edit menu routing, and behavior-compatible `NSTextView` fallback now cover duplicate/move/delete/join lines, indent/unindent, case conversion, and trailing whitespace removal.
+- **Shortcuts:** `Command-D`, `Option-Up/Down`, `Command-Shift-K`, and `Control-J` follow established editor conventions. Commands without a reliable collision-free macOS convention have no default chord and remain native-menu searchable.
+- **Safety:** all selectors and validation share ready/active/no-termination admission. Scintilla retains UTF-8 bytes, revision notifications, selection, and grouped undo; revision-exhausted/input-disabled documents reject all advanced mutations. Macro recording/playback remains excluded.
+- **Validation:** final remediated Debug/Release 224/224와 independent focused Debug/Release 5/5 및 `git diff --check`가 PASS했다.
+- **Initial review remediation:** Join은 exact selection-end normalization을 공유하고, native bridge는 mutation 전 conservative whole-command revision budget을 예약하며, fallback move는 terminal empty line과 destination-rendered selection range를 보존한다. LF/CRLF/Unicode, near-overflow, unequal-length, terminal-empty, follow-up Delete fixture를 독립 재검증해 3 Major를 모두 닫았다.
+- **Boundary:** README, ignored Notepad++, and the existing user changes in doc04/vendor script are untouched by this phase.
 
 ### 2026-09-03 — Phase 14 tab lifecycle independent review
 

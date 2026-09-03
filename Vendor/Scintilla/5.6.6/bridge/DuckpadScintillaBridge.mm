@@ -462,6 +462,118 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (void)selectAll { [[_scintilla content] selectAll:nil]; }
 - (void)undo { if ([self preflightUserMutation]) [[_scintilla content] undo:nil]; }
 - (void)redo { if ([self preflightUserMutation]) [[_scintilla content] redo:nil]; }
+- (BOOL)canPerformEditingCommand:(DPScintillaEditingCommand)command {
+    if (!self.isInputEnabled || [[_scintilla content] hasMarkedText]) return NO;
+    const NSInteger length = [_scintilla message:SCI_GETLENGTH];
+    // A native command may publish multiple synchronous SCN_MODIFIED records.
+    // Reserve a conservative whole-command budget before any byte changes so
+    // revision exhaustion can never leave a partially applied operation.
+    const uint64_t byteLength = static_cast<uint64_t>(MAX(0, length));
+    if (byteLength > (UINT64_MAX / 2) - 1) return NO;
+    const uint64_t requiredRevisionBudget = 2 * (byteLength + 1);
+    if (_revision > UINT64_MAX - requiredRevisionBudget) return NO;
+    const NSInteger anchor = [_scintilla message:SCI_GETANCHOR];
+    const NSInteger caret = [_scintilla message:SCI_GETCURRENTPOS];
+    const NSInteger lower = MIN(anchor, caret);
+    const NSInteger upper = MAX(anchor, caret);
+    const NSInteger firstLine = [_scintilla message:SCI_LINEFROMPOSITION wParam:lower];
+    NSInteger lastLine = [_scintilla message:SCI_LINEFROMPOSITION wParam:upper];
+    if (upper > lower && [_scintilla message:SCI_POSITIONFROMLINE wParam:lastLine] == upper) lastLine -= 1;
+    const NSInteger lineCount = [_scintilla message:SCI_GETLINECOUNT];
+    switch (command) {
+        case DPScintillaEditingCommandDuplicateLine:
+        case DPScintillaEditingCommandIndent:
+        case DPScintillaEditingCommandUnindent:
+            return YES;
+        case DPScintillaEditingCommandMoveLineUp:
+            return firstLine > 0;
+        case DPScintillaEditingCommandMoveLineDown:
+            return lastLine + 1 < lineCount;
+        case DPScintillaEditingCommandDeleteLine:
+        case DPScintillaEditingCommandTrimTrailingWhitespace:
+            return length > 0;
+        case DPScintillaEditingCommandJoinLines:
+            return firstLine < lastLine || lastLine + 1 < lineCount;
+        case DPScintillaEditingCommandUppercase:
+        case DPScintillaEditingCommandLowercase:
+            return upper > lower;
+    }
+}
+
+- (void)performEditingCommand:(DPScintillaEditingCommand)command {
+    if (![self canPerformEditingCommand:command] || ![self preflightUserMutation]) return;
+    switch (command) {
+        case DPScintillaEditingCommandDuplicateLine:
+            [_scintilla message:SCI_LINEDUPLICATE];
+            break;
+        case DPScintillaEditingCommandMoveLineUp:
+            [_scintilla message:SCI_MOVESELECTEDLINESUP];
+            break;
+        case DPScintillaEditingCommandMoveLineDown:
+            [_scintilla message:SCI_MOVESELECTEDLINESDOWN];
+            break;
+        case DPScintillaEditingCommandDeleteLine:
+            [_scintilla message:SCI_LINEDELETE];
+            break;
+        case DPScintillaEditingCommandJoinLines: {
+            const NSInteger anchor = [_scintilla message:SCI_GETANCHOR];
+            const NSInteger caret = [_scintilla message:SCI_GETCURRENTPOS];
+            NSInteger lower = MIN(anchor, caret);
+            NSInteger upper = MAX(anchor, caret);
+            const NSInteger firstLine = [_scintilla message:SCI_LINEFROMPOSITION wParam:lower];
+            NSInteger lastLine = [_scintilla message:SCI_LINEFROMPOSITION wParam:upper];
+            if (upper > lower && [_scintilla message:SCI_POSITIONFROMLINE wParam:lastLine] == upper) {
+                lastLine -= 1;
+            }
+            if (firstLine == lastLine) lastLine += 1;
+            lower = [_scintilla message:SCI_POSITIONFROMLINE wParam:firstLine];
+            upper = [_scintilla message:SCI_GETLINEENDPOSITION wParam:lastLine];
+            [_scintilla message:SCI_SETTARGETSTART wParam:lower];
+            [_scintilla message:SCI_SETTARGETEND wParam:upper];
+            [_scintilla message:SCI_LINESJOIN];
+            break;
+        }
+        case DPScintillaEditingCommandUppercase:
+            [_scintilla message:SCI_UPPERCASE];
+            break;
+        case DPScintillaEditingCommandLowercase:
+            [_scintilla message:SCI_LOWERCASE];
+            break;
+        case DPScintillaEditingCommandIndent:
+            [_scintilla message:SCI_TAB];
+            break;
+        case DPScintillaEditingCommandUnindent:
+            [_scintilla message:SCI_BACKTAB];
+            break;
+        case DPScintillaEditingCommandTrimTrailingWhitespace: {
+            const NSInteger lineCount = [_scintilla message:SCI_GETLINECOUNT];
+            std::vector<std::pair<NSInteger, NSInteger>> ranges;
+            ranges.reserve(static_cast<size_t>(MAX(0, lineCount)));
+            for (NSInteger line = 0; line < lineCount; line += 1) {
+                const NSInteger start = [_scintilla message:SCI_POSITIONFROMLINE wParam:line];
+                const NSInteger end = [_scintilla message:SCI_GETLINEENDPOSITION wParam:line];
+                NSInteger whitespaceStart = end;
+                while (whitespaceStart > start) {
+                    const NSInteger character = [_scintilla message:SCI_GETCHARAT wParam:whitespaceStart - 1];
+                    if (character != ' ' && character != '\t') break;
+                    whitespaceStart -= 1;
+                }
+                if (whitespaceStart < end) ranges.push_back({whitespaceStart, end});
+            }
+            [_scintilla message:SCI_BEGINUNDOACTION];
+            static const char empty = '\0';
+            for (auto iterator = ranges.rbegin(); iterator != ranges.rend(); ++iterator) {
+                [_scintilla message:SCI_SETTARGETSTART wParam:iterator->first];
+                [_scintilla message:SCI_SETTARGETEND wParam:iterator->second];
+                [_scintilla message:SCI_REPLACETARGET
+                             wParam:0
+                             lParam:reinterpret_cast<sptr_t>(&empty)];
+            }
+            [_scintilla message:SCI_ENDUNDOACTION];
+            break;
+        }
+    }
+}
 - (void)beginGroupedUndo { [_scintilla message:SCI_BEGINUNDOACTION]; }
 - (void)endGroupedUndo { [_scintilla message:SCI_ENDUNDOACTION]; }
 - (void)focusEditor { [self.window makeFirstResponder:[_scintilla content]]; }
