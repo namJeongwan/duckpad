@@ -266,6 +266,116 @@ private func flattenedMenuItems(in menu: NSMenu) -> [NSMenuItem] {
 
 @Suite(.serialized)
 struct AppKitHostedTests {
+@Test @MainActor func documentDropdownMirrorsOpenTabsAndRoutesExactStableIdentity() {
+    _ = NSApplication.shared
+    let tabs = makeTabs(count: 3, activeIndex: 1, dirtyIndex: 2)
+    let (window, _, strip) = hostStrip(width: 420, height: 280, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    #expect(strip.documentSwitcher.tabs.count == 3)
+    #expect(strip.documentSwitcher.title == "3")
+    #expect(strip.documentSwitcher.menuItems.map(\.state) == [.off, .on, .off])
+    #expect(strip.documentSwitcher.menuItems[2].title == "3. new 3 — Edited")
+    #expect(strip.documentSwitcher.menuItems[2].toolTip == "Unsaved scratch document")
+
+    var activated: TabID?
+    strip.onActivate = { activated = $0 }
+    let first = strip.documentSwitcher.menuItems[0]
+    #expect(NSApplication.shared.sendAction(first.action!, to: first.target, from: first))
+    #expect(activated == tabs[0].id)
+
+    let before = strip.documentSwitcher.updateMetrics
+    var updated = tabs
+    updated[2] = TabSnapshot(
+        id: tabs[2].id,
+        title: tabs[2].title,
+        isActive: false,
+        isDirty: false,
+        isPinned: tabs[2].isPinned,
+        buffer: EditorBufferDescriptor(bufferID: tabs[2].buffer.bufferID, revision: 2)
+    )
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(),
+            tabs: updated,
+            activeBuffer: updated[1].buffer,
+            persistence: .saved,
+            startup: .ready
+        ),
+        kind: .bufferEdited(index: 2)
+    ))
+    #expect(strip.documentSwitcher.updateMetrics.fullRebuilds == before.fullRebuilds)
+    #expect(strip.documentSwitcher.updateMetrics.itemUpdates == before.itemUpdates + 1)
+    #expect(
+        strip.documentSwitcher.updateMetrics.incrementalItemInspections
+            == before.incrementalItemInspections + 1
+    )
+    #expect(strip.documentSwitcher.menuItems[2].title == "3. new 3")
+
+    let activeBefore = strip.documentSwitcher.updateMetrics
+    updated[1] = TabSnapshot(
+        id: updated[1].id, title: updated[1].title, isActive: false,
+        isDirty: updated[1].isDirty, isPinned: updated[1].isPinned,
+        buffer: updated[1].buffer
+    )
+    updated[0] = TabSnapshot(
+        id: updated[0].id, title: updated[0].title, isActive: true,
+        isDirty: updated[0].isDirty, isPinned: updated[0].isPinned,
+        buffer: updated[0].buffer
+    )
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(), tabs: updated,
+            activeBuffer: updated[0].buffer, persistence: .saved, startup: .ready
+        ),
+        kind: .activeTabChanged(previousIndex: 1, currentIndex: 0)
+    ))
+    #expect(strip.documentSwitcher.menuItems.map(\.state) == [.on, .off, .off])
+    #expect(strip.documentSwitcher.updateMetrics.itemUpdates == activeBefore.itemUpdates + 2)
+    #expect(
+        strip.documentSwitcher.updateMetrics.incrementalItemInspections
+            == activeBefore.incrementalItemInspections + 2
+    )
+}
+
+@Test @MainActor func documentDropdownIncrementalWorkStaysConstantAtScale() {
+    _ = NSApplication.shared
+    for count in [500, 5_000] {
+        let button = DocumentSwitcherButton(frame: .zero)
+        var tabs = makeTabs(count: count, activeIndex: count / 2)
+        button.apply(tabs: tabs)
+        let index = count / 3
+        let original = tabs[index]
+        tabs[index] = TabSnapshot(
+            id: original.id, title: original.title, isActive: original.isActive,
+            isDirty: true, isPinned: original.isPinned,
+            buffer: EditorBufferDescriptor(
+                bufferID: original.buffer.bufferID,
+                revision: original.buffer.revision + 1
+            )
+        )
+        let before = button.updateMetrics
+        button.apply(change: WorkspaceChange(
+            snapshot: WorkspaceSnapshot(
+                sessionID: SessionID(), tabs: tabs,
+                activeBuffer: tabs[count / 2].buffer,
+                persistence: .pending, startup: .ready
+            ),
+            kind: .bufferEdited(index: index)
+        ))
+        #expect(button.updateMetrics.fullRebuilds == before.fullRebuilds)
+        #expect(button.updateMetrics.itemUpdates == before.itemUpdates + 1)
+        #expect(
+            button.updateMetrics.incrementalItemInspections
+                == before.incrementalItemInspections + 1
+        )
+    }
+}
+
 @Test @MainActor func unavailableRecoveredLanguageIsVisibleAndAutoResetIsExplicit() async throws {
     let missingID = LanguageID(rawValue: "removed-language")
     var restored = ScratchSession()
@@ -330,6 +440,9 @@ struct AppKitHostedTests {
     #expect(detection.languageID.rawValue == "python")
     #expect(!controller.languageStatusSmokeState().isWarning)
     #expect(controller.languageStatusSmokeState().text == "Python")
+    let languageMenu = controller.makeLanguageStatusMenu()
+    #expect(menuItem("Automatic Detection", in: languageMenu)?.state == .on)
+    #expect(menuItem("Python", in: languageMenu)?.state == .off)
     #expect(try workspace.recoverySession().languageOverride(for: tabID) == .automatic)
     #expect(workspace.snapshot().activeBuffer?.revision == beforeBuffer?.revision)
     #expect(editor.snapshot(for: beforeText.bufferID) == beforeText)
@@ -850,6 +963,7 @@ struct AppKitHostedTests {
     }
     #expect(strip.updateMetrics.fullReloads == before.fullReloads)
     #expect(strip.updateMetrics.itemReloads == before.itemReloads + 1)
+    #expect(strip.documentSwitcher.updateMetrics.incrementalItemInspections == 1)
     #expect(elapsed < .milliseconds(250))
 }
 
@@ -972,6 +1086,26 @@ struct AppKitHostedTests {
     controller.close()
 }
 
+@Test @MainActor func compactChromeCollapsesEmptyBannerAndKeepsStatusOutsideEditor() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+
+    let chrome = controller.workspaceChromeSmokeState()
+    #expect(chrome.documentCount == 1)
+    #expect(chrome.bannerHeight == 0)
+    #expect(chrome.tabStripHeight == 34)
+    #expect(chrome.statusBarHeight == 24)
+    #expect(!chrome.editorOverlapsStatusBar)
+    #expect(chrome.interactionsEnabled)
+    #expect(chrome.languageStatusEnabled)
+    #expect(chrome.extensionStatusEnabled)
+    #expect(controller.tabStrip.documentSwitcher.accessibilityIdentifier() == "duckpad.tab.documents")
+}
+
 @Test @MainActor func realControllerTypingWithFiveHundredTabsPerformsOneItemReload() async {
     var session = ScratchSession()
     for _ in 0..<500 { session.addUntitled() }
@@ -981,6 +1115,7 @@ struct AppKitHostedTests {
     controller.start()
     await controller.waitForStartup()
     let before = controller.tabStrip.updateMetrics
+    let documentBefore = controller.tabStrip.documentSwitcher.updateMetrics
     let clock = ContinuousClock()
     let elapsed = clock.measure {
         controller.editor.textView.textStorage?.replaceCharacters(
@@ -992,6 +1127,12 @@ struct AppKitHostedTests {
     #expect(workspace.snapshot().tabs.last?.isDirty == true)
     #expect(controller.tabStrip.updateMetrics.fullReloads == before.fullReloads)
     #expect(controller.tabStrip.updateMetrics.itemReloads == before.itemReloads + 1)
+    #expect(controller.tabStrip.documentSwitcher.updateMetrics.fullRebuilds == documentBefore.fullRebuilds)
+    #expect(controller.tabStrip.documentSwitcher.updateMetrics.itemUpdates == documentBefore.itemUpdates + 1)
+    #expect(
+        controller.tabStrip.documentSwitcher.updateMetrics.incrementalItemInspections
+            == documentBefore.incrementalItemInspections + 1
+    )
     #expect(elapsed < .milliseconds(250))
     await workspace.waitForPendingPersistence()
     #expect(controller.tabStrip.updateMetrics.fullReloads == before.fullReloads)

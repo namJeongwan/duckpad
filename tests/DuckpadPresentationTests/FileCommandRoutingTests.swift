@@ -53,6 +53,32 @@ private actor BlockingNewScratchSessionStore: SessionStore {
     func releaseCommit() { releaseBlockedCommit = true }
 }
 
+private actor DelayedStartupSessionStore: SessionStore {
+    private var loadEntered = false
+    private var loadReleased = false
+    private var stored: StoredSession?
+
+    func loadSession() async throws(SessionStoreError) -> StoredSession? {
+        loadEntered = true
+        while !loadReleased { await Task.yield() }
+        return stored
+    }
+
+    func commitSession(
+        _ session: ScratchSession,
+        generation: PersistenceGeneration
+    ) async throws(SessionStoreError) -> SessionCommitResult {
+        stored = StoredSession(session: session, generation: generation)
+        return .committed
+    }
+
+    func waitUntilLoadEntered() async {
+        while !loadEntered { await Task.yield() }
+    }
+
+    func releaseLoad() { loadReleased = true }
+}
+
 private actor RoutingRecoveryStore: RecoveryStore {
     private var stored: StoredRecoveryArchive?
     private var loadError: SessionStoreError?
@@ -618,6 +644,87 @@ struct FileLifecycleTests {
         #expect(controller.validateMenuItem(wordWrap))
         #expect(wordWrap.state == .on)
         #expect(controller.validateMenuItem(delete))
+    }
+
+    @Test @MainActor func terminationLocksChromeAcrossReadyEventsAndRestoresOnlyAfterCancel() async {
+        let (controller, workspace, editor, panels, _) = await makeController(
+            decisions: [.cancel],
+            blocksDecisions: true
+        )
+        defer { controller.close() }
+        let firstID = workspace.snapshot().tabs[0].id
+        _ = await workspace.addScratch()
+        let activeID = workspace.snapshot().tabs.first(where: \.isActive)!.id
+        dirty(editor, with: "keep active document")
+
+        var replies: [Bool] = []
+        let coordinator = controller.terminationCoordinator!
+        #expect(coordinator.applicationShouldTerminate { replies.append($0) } == .terminateLater)
+
+        var chrome = controller.workspaceChromeSmokeState()
+        #expect(!chrome.interactionsEnabled)
+        #expect(!chrome.languageStatusEnabled)
+        #expect(!chrome.extensionStatusEnabled)
+
+        for _ in 0..<200 where panels.decisionTabs.isEmpty {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(panels.decisionTabs.count == 1)
+
+        // A ready-state workspace publication must not reopen UI admission.
+        _ = await workspace.setPinned(activeID, isPinned: true)
+        chrome = controller.workspaceChromeSmokeState()
+        #expect(!chrome.interactionsEnabled)
+
+        let originalCount = workspace.snapshot().tabs.count
+        controller.performNewScratch()
+        controller.performActivate(firstID)
+        controller.tabStrip.performMiddleClick(tabID: activeID)
+        if let item = controller.tabStrip.documentSwitcher.menuItem(for: firstID) {
+            #expect(NSApplication.shared.sendAction(item.action!, to: item.target, from: item))
+        }
+        for _ in 0..<20 { await Task.yield() }
+        #expect(workspace.snapshot().tabs.count == originalCount)
+        #expect(workspace.snapshot().tabs.first(where: \.isActive)?.id == activeID)
+
+        let language = NSMenuItem(
+            title: "Language",
+            action: #selector(DuckpadWindowController.performShowLanguageChooser(_:)),
+            keyEquivalent: ""
+        )
+        #expect(!controller.validateMenuItem(language))
+
+        panels.releaseDecisions()
+        for _ in 0..<200 where replies.isEmpty {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(replies == [false])
+        chrome = controller.workspaceChromeSmokeState()
+        #expect(chrome.interactionsEnabled)
+        #expect(chrome.languageStatusEnabled)
+        #expect(chrome.extensionStatusEnabled)
+    }
+
+    @Test @MainActor func delayedStartupReadyEventCannotReenablePreparedTerminationAdmission() async {
+        _ = NSApplication.shared
+        let store = DelayedStartupSessionStore()
+        let workspace = ScratchWorkspaceUseCase(store: store)
+        let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+        defer { controller.close() }
+
+        controller.start()
+        await store.waitUntilLoadEntered()
+        #expect(controller.beginTerminationReviewAdmission())
+        #expect(!controller.workspaceChromeSmokeState().interactionsEnabled)
+
+        await store.releaseLoad()
+        await controller.waitForStartup()
+        #expect(workspace.snapshot().startup == .ready)
+        let chrome = controller.workspaceChromeSmokeState()
+        #expect(!chrome.interactionsEnabled)
+        #expect(!chrome.languageStatusEnabled)
+        #expect(!chrome.extensionStatusEnabled)
+        #expect(await controller.continuePreparedTerminationReview())
     }
 
     @Test @MainActor func redCloseThenRepeatedQuitTriggersShareOneCancelledReview() async {

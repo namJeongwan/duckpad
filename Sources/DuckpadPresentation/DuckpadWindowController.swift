@@ -24,6 +24,17 @@ public struct ExtensionStatusSmokeState: Equatable, Sendable {
     public let commandCount: Int
 }
 
+public struct WorkspaceChromeSmokeState: Equatable, Sendable {
+    public let documentCount: Int
+    public let bannerHeight: Double
+    public let tabStripHeight: Double
+    public let statusBarHeight: Double
+    public let editorOverlapsStatusBar: Bool
+    public let interactionsEnabled: Bool
+    public let languageStatusEnabled: Bool
+    public let extensionStatusEnabled: Bool
+}
+
 private enum CloseRetryContext {
     /// Stable IDs capture the exact single/bulk command target set without
     /// retaining a stale tab snapshot or AppKit object.
@@ -87,6 +98,7 @@ private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
     private let message = NSTextField(labelWithString: "")
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
     private var retryAction: (@MainActor () -> Void)?
+    private var heightConstraint: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -101,8 +113,9 @@ private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
         retryButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(message)
         addSubview(retryButton)
+        heightConstraint = heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 36),
+            heightConstraint,
             message.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             message.centerYAnchor.constraint(equalTo: centerYAnchor),
             retryButton.leadingAnchor.constraint(greaterThanOrEqualTo: message.trailingAnchor, constant: 8),
@@ -118,11 +131,13 @@ private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
     func present(failure: PersistenceFailure, retry: @escaping @MainActor () -> Void) {
         message.stringValue = "Session \(failure.operation.rawValue) failed: \(failure.cause)"
         retryAction = retry
+        heightConstraint.constant = 36
         isHidden = false
     }
 
     @objc private func retryPressed() {
         isHidden = true
+        heightConstraint.constant = 0
         retryAction?()
     }
 }
@@ -138,8 +153,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
     private let activeEditor: any EditorPort
     private let searchPanel = SearchPanelView(frame: .zero)
-    private let languageStatus = NSTextField(labelWithString: "Plain Text")
-    private let extensionStatus = NSTextField(labelWithString: "Extensions loading…")
+    private let statusBar = WorkspaceBarView(edge: .top)
+    private let persistenceBanner = PersistenceErrorBanner(frame: .zero)
+    private let languageStatus = NSButton(title: "Plain Text", target: nil, action: nil)
+    private let extensionStatus = NSButton(title: "Extensions loading…", target: nil, action: nil)
     private let extensionsPanel = ExtensionsManagerPanel()
     private var searchUseCase: SearchWorkspaceUseCase?
     private var languageUseCase: LanguageWorkspaceUseCase?
@@ -167,6 +184,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var languageValidated = false
     private var languageDetectionTask: Task<Void, Never>?
     private var appliedThemePalette: EditorThemePalette?
+    private var languageState: LanguageServiceState = .degraded("not initialized")
+    private var languageStatusIsWarning = false
+    private var extensionStatusIsWarning = false
     private var terminationReviewInProgress = false
     private var pendingNewScratchTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -242,12 +262,19 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         extensionUseCase?.onStateChange = { [weak self] state in self?.renderExtensionState(state) }
         extensionsPanel.onSetEnabled = { [weak self] id, enabled in
             Task { @MainActor [weak self] in
-                do { try await self?.extensionUseCase?.setEnabled(id, enabled: enabled) }
-                catch { self?.renderExtensionError(error) }
+                guard let self, self.workspaceInteractionsAreActionable else { return }
+                do { try await self.extensionUseCase?.setEnabled(id, enabled: enabled) }
+                catch { self.renderExtensionError(error) }
             }
         }
-        extensionsPanel.onGrantRequested = { [weak self] item in self?.reviewCapabilities(for: item, allow: true) }
-        extensionsPanel.onRevoke = { [weak self] item in self?.reviewCapabilities(for: item, allow: false) }
+        extensionsPanel.onGrantRequested = { [weak self] item in
+            guard self?.workspaceInteractionsAreActionable == true else { return }
+            self?.reviewCapabilities(for: item, allow: true)
+        }
+        extensionsPanel.onRevoke = { [weak self] item in
+            guard self?.workspaceInteractionsAreActionable == true else { return }
+            self?.reviewCapabilities(for: item, allow: false)
+        }
         renderInitial(workspace.snapshot())
         if automaticallyStarts { start() }
     }
@@ -306,14 +333,29 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public func languageStatusSmokeState() -> LanguageStatusSmokeState {
         LanguageStatusSmokeState(
-            text: languageStatus.stringValue,
-            isWarning: languageStatus.textColor == .systemOrange
+            text: languageStatus.title,
+            isWarning: languageStatusIsWarning
         )
     }
 
     public func extensionStatusSmokeState() -> ExtensionStatusSmokeState {
-        ExtensionStatusSmokeState(text: extensionStatus.stringValue, isWarning: extensionStatus.textColor == .systemOrange,
+        ExtensionStatusSmokeState(text: extensionStatus.title, isWarning: extensionStatusIsWarning,
                                   commandCount: extensionCommands.count)
+    }
+
+    public func workspaceChromeSmokeState() -> WorkspaceChromeSmokeState {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        let overlap = editorHostView.frame.intersection(statusBar.frame)
+        return WorkspaceChromeSmokeState(
+            documentCount: tabStrip.documentSwitcher.tabs.count,
+            bannerHeight: persistenceBanner.frame.height,
+            tabStripHeight: tabStrip.frame.height,
+            statusBarHeight: statusBar.frame.height,
+            editorOverlapsStatusBar: overlap.width > 0 && overlap.height > 0,
+            interactionsEnabled: tabStrip.interactionsEnabled,
+            languageStatusEnabled: languageStatus.isEnabled,
+            extensionStatusEnabled: extensionStatus.isEnabled
+        )
     }
 
     public func extensionReviewDisclosure(for id: ExtensionID, revoking: Bool) -> String? {
@@ -342,7 +384,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }.sorted { $0.title < $1.title }
     }
 
-    @objc public func performShowExtensions(_ sender: Any?) { extensionsPanel.show(relativeTo: window) }
+    @objc public func performShowExtensions(_ sender: Any?) {
+        guard workspaceInteractionsAreActionable else { return }
+        extensionsPanel.show(relativeTo: window)
+    }
 
     @objc public func performExtensionCommand(_ sender: NSMenuItem) {
         guard !terminationReviewInProgress else { return }
@@ -358,24 +403,35 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     public var languageDefinitions: [LanguageDefinition] { languageUseCase?.registry.definitions ?? [] }
 
     @objc public func performAutomaticLanguage(_ sender: Any?) {
-        Task { @MainActor [weak self] in _ = await self?.languageUseCase?.setOverride(.automatic) }
-    }
-
-    @objc public func performChooseLanguage(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String else { return }
+        guard workspaceInteractionsAreActionable else { return }
         Task { @MainActor [weak self] in
-            _ = await self?.languageUseCase?.setOverride(.manual(LanguageID(rawValue: raw)))
+            guard let self, self.workspaceInteractionsAreActionable else { return }
+            _ = await self.languageUseCase?.setOverride(.automatic)
         }
     }
 
-    @objc public func performToggleLineComment(_ sender: Any?) { _ = languageUseCase?.toggleLineComment() }
+    @objc public func performChooseLanguage(_ sender: NSMenuItem) {
+        guard workspaceInteractionsAreActionable,
+              let raw = sender.representedObject as? String else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.workspaceInteractionsAreActionable else { return }
+            _ = await self.languageUseCase?.setOverride(.manual(LanguageID(rawValue: raw)))
+        }
+    }
+
+    @objc public func performToggleLineComment(_ sender: Any?) {
+        guard workspaceInteractionsAreActionable else { return }
+        _ = languageUseCase?.toggleLineComment()
+    }
 
     @objc public func performShowLanguageChooser(_ sender: Any?) {
-        guard let window else { return }
-        let alert = NSAlert()
-        alert.messageText = "Choose Language"
-        alert.informativeText = "Use the Language menu to choose from \(languageDefinitions.count) bundled languages."
-        alert.beginSheetModal(for: window)
+        guard workspaceInteractionsAreActionable else { return }
+        let menu = makeLanguageStatusMenu()
+        menu.popUp(
+            positioning: menu.items.first(where: { $0.state == .on }),
+            at: NSPoint(x: languageStatus.bounds.minX, y: languageStatus.bounds.maxY + 3),
+            in: languageStatus
+        )
     }
 
     func start() {
@@ -413,12 +469,19 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     func performActivate(_ id: TabID) {
-        Task { [weak workspace] in _ = await workspace?.activate(tabID: id) }
+        guard workspaceInteractionsAreActionable else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.workspaceInteractionsAreActionable else { return }
+            _ = await self.workspace.activate(tabID: id)
+        }
     }
 
     @discardableResult
     func performClose(_ id: TabID, decision: CloseDecision? = nil) -> Task<Void, Never> {
-        Task { [weak self] in await self?.requestClose(tabID: id, decision: decision) }
+        Task { @MainActor [weak self] in
+            guard let self, self.workspaceInteractionsAreActionable else { return }
+            await self.requestClose(tabID: id, decision: decision)
+        }
     }
 
     @objc public func performCloseActiveTab(_ sender: Any? = nil) {
@@ -427,23 +490,23 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     @objc public func performNextTab(_ sender: Any? = nil) {
-        Task { [weak workspace] in _ = await workspace?.navigateTabs(.next) }
+        navigateTabs(.next)
     }
 
     @objc public func performPreviousTab(_ sender: Any? = nil) {
-        Task { [weak workspace] in _ = await workspace?.navigateTabs(.previous) }
+        navigateTabs(.previous)
     }
 
     @objc public func performLastUsedTab(_ sender: Any? = nil) {
-        Task { [weak workspace] in _ = await workspace?.navigateTabs(.lastUsed) }
+        navigateTabs(.lastUsed)
     }
 
     @objc public func performMoveActiveTabLeft(_ sender: Any? = nil) {
-        Task { [weak workspace] in _ = await workspace?.moveActiveTab(by: -1) }
+        moveActiveTab(by: -1)
     }
 
     @objc public func performMoveActiveTabRight(_ sender: Any? = nil) {
-        Task { [weak workspace] in _ = await workspace?.moveActiveTab(by: 1) }
+        moveActiveTab(by: 1)
     }
 
     @objc public func performOpenFile(_ sender: Any? = nil) {
@@ -458,13 +521,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         Task { [weak self] in await self?.routeSaveFileAs() }
     }
 
-    @objc public func performShowFind(_ sender: Any? = nil) { searchPanel.show(replace: false) }
-    @objc public func performShowReplace(_ sender: Any? = nil) { searchPanel.show(replace: true) }
+    @objc public func performShowFind(_ sender: Any? = nil) {
+        guard !terminationReviewInProgress else { return }
+        searchPanel.show(replace: false)
+    }
+    @objc public func performShowReplace(_ sender: Any? = nil) {
+        guard !terminationReviewInProgress else { return }
+        searchPanel.show(replace: true)
+    }
     @objc public func performFindNext(_ sender: Any? = nil) {
+        guard !terminationReviewInProgress else { return }
         if searchPanel.isHidden { searchPanel.show(replace: false); return }
         routeFind(searchPanel.currentQuery())
     }
     @objc public func performFindPrevious(_ sender: Any? = nil) {
+        guard !terminationReviewInProgress else { return }
         if searchPanel.isHidden { searchPanel.show(replace: false); return }
         routeFind(searchPanel.currentQuery(direction: .backward))
     }
@@ -501,6 +572,24 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return workspace.snapshot().startup == .ready && !terminationReviewInProgress
         }
         switch menuItem.action {
+        case #selector(performCloseActiveTab(_:)),
+             #selector(performNextTab(_:)),
+             #selector(performPreviousTab(_:)),
+             #selector(performLastUsedTab(_:)),
+             #selector(performMoveActiveTabLeft(_:)),
+             #selector(performMoveActiveTabRight(_:)),
+             #selector(performOpenFile(_:)),
+             #selector(performSaveFile(_:)),
+             #selector(performSaveFileAs(_:)),
+             #selector(performToggleLineComment(_:)),
+             #selector(performShowLanguageChooser(_:)),
+             #selector(performShowExtensions(_:)):
+            return workspaceInteractionsAreActionable
+        case #selector(performShowFind(_:)),
+             #selector(performShowReplace(_:)),
+             #selector(performFindNext(_:)),
+             #selector(performFindPrevious(_:)):
+            return !terminationReviewInProgress
         case #selector(performToggleWordWrap(_:)):
             guard let editor = actionableEditorViewOptions else {
                 menuItem.state = .off
@@ -537,6 +626,26 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             && !terminationReviewInProgress
     }
 
+    private var workspaceInteractionsAreActionable: Bool {
+        workspace.snapshot().startup == .ready && !terminationReviewInProgress
+    }
+
+    private func navigateTabs(_ command: TabNavigationCommand) {
+        guard workspaceInteractionsAreActionable else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.workspaceInteractionsAreActionable else { return }
+            _ = await self.workspace.navigateTabs(command)
+        }
+    }
+
+    private func moveActiveTab(by offset: Int) {
+        guard workspaceInteractionsAreActionable else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.workspaceInteractionsAreActionable else { return }
+            _ = await self.workspace.moveActiveTab(by: offset)
+        }
+    }
+
     private func performStandardEditorCommand(_ command: EditorStandardCommand) {
         guard let editor = actionableStandardEditorCommands, editor.canPerform(command) else { return }
         editor.perform(command)
@@ -556,14 +665,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func routeOpenFile() async {
-        guard let fileUseCase, let url = await filePanels?.chooseOpenURL(attachedTo: window) else { return }
+        guard workspaceInteractionsAreActionable,
+              let fileUseCase,
+              let url = await filePanels?.chooseOpenURL(attachedTo: window),
+              workspaceInteractionsAreActionable else { return }
         await handle(fileOutcome: await fileUseCase.open(url)) { [weak self] in
             Task { @MainActor [weak self] in await self?.routeOpenFile() }
         }
     }
 
     public func routeSaveFile() async {
-        guard let fileUseCase else { return }
+        guard workspaceInteractionsAreActionable, let fileUseCase else { return }
         let outcome = await fileUseCase.saveActive()
         if case .requiresDestination = outcome {
             await routeSaveFileAs()
@@ -575,8 +687,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func routeSaveFileAs() async {
-        guard let fileUseCase, let context = workspace.activeFileContext(),
-              let url = await filePanels?.chooseSaveURL(suggestedName: context.title, attachedTo: window) else { return }
+        guard workspaceInteractionsAreActionable,
+              let fileUseCase,
+              let context = workspace.activeFileContext(),
+              let url = await filePanels?.chooseSaveURL(suggestedName: context.title, attachedTo: window),
+              workspaceInteractionsAreActionable else { return }
         _ = await resolve(fileOutcome: await fileUseCase.saveAs(url)) { [weak self] in
             Task { @MainActor [weak self] in await self?.routeSaveFileAs() }
         }
@@ -614,15 +729,33 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     /// Shared red-close/Cmd-Q gate. Discard is remembered only for this review;
     /// a concurrently dirtied, previously saved tab is reviewed again.
     public func reviewDirtyDocumentsForTermination() async -> Bool {
+        guard beginTerminationReviewAdmission() else { return false }
+        return await performPreparedTerminationReview()
+    }
+
+    func beginTerminationReviewAdmission() -> Bool {
         guard !terminationReviewInProgress else { return false }
         terminationReviewInProgress = true
+        updateWorkspaceInteractionAdmission(workspace.snapshot())
+        cancelSearch()
         activeEditor.setInputEnabled(false)
+        return true
+    }
+
+    func continuePreparedTerminationReview() async -> Bool {
+        guard terminationReviewInProgress else { return false }
+        return await performPreparedTerminationReview()
+    }
+
+    private func performPreparedTerminationReview() async -> Bool {
         var approved = false
         defer {
-            terminationReviewInProgress = false
             if !approved {
+                terminationReviewInProgress = false
                 extensionUseCase?.resumeInvocations()
-                activeEditor.setInputEnabled(true)
+                let snapshot = workspace.snapshot()
+                updateWorkspaceInteractionAdmission(snapshot)
+                editorBinding.render(snapshot)
             }
         }
         await waitForAcceptedNewScratchTasks()
@@ -679,6 +812,86 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         Task { [weak self] in _ = await self?.flushRecovery() }
     }
 
+    private func configureStatusButton(
+        _ button: NSButton,
+        imageName: String,
+        action: Selector,
+        accessibilityIdentifier: String
+    ) {
+        button.target = self
+        button.action = action
+        button.bezelStyle = .inline
+        button.isBordered = false
+        button.image = NSImage(systemSymbolName: imageName, accessibilityDescription: nil)
+        button.imagePosition = .imageLeading
+        button.imageScaling = .scaleProportionallyDown
+        button.contentTintColor = .secondaryLabelColor
+        button.lineBreakMode = .byTruncatingTail
+        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        button.setAccessibilityIdentifier(accessibilityIdentifier)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        setStatus(button, text: button.title, warning: false)
+    }
+
+    private func setStatus(_ button: NSButton, text: String, warning: Bool) {
+        let color: NSColor = warning ? .systemOrange : .secondaryLabelColor
+        button.attributedTitle = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: color,
+            ]
+        )
+        button.contentTintColor = color
+        button.toolTip = text
+        button.setAccessibilityLabel(text)
+        if button === languageStatus { languageStatusIsWarning = warning }
+        if button === extensionStatus { extensionStatusIsWarning = warning }
+    }
+
+    func makeLanguageStatusMenu() -> NSMenu {
+        let menu = NSMenu(title: "Language")
+        let automatic = menu.addItem(
+            withTitle: "Automatic Detection",
+            action: #selector(performAutomaticLanguage(_:)),
+            keyEquivalent: ""
+        )
+        automatic.target = self
+        let manuallySelectedID: LanguageID?
+        switch languageState {
+        case .ready(let detection, _):
+            manuallySelectedID = detection.confidence == .manual ? detection.languageID : nil
+            automatic.state = manuallySelectedID == nil ? .on : .off
+        case .unavailableManual:
+            manuallySelectedID = nil
+            automatic.state = .off
+        case .degraded:
+            manuallySelectedID = nil
+            automatic.state = .on
+        }
+        menu.addItem(.separator())
+        var currentGroup: String?
+        for definition in languageDefinitions {
+            if definition.group != currentGroup {
+                if currentGroup != nil { menu.addItem(.separator()) }
+                let heading = NSMenuItem(title: definition.group, action: nil, keyEquivalent: "")
+                heading.isEnabled = false
+                menu.addItem(heading)
+                currentGroup = definition.group
+            }
+            let item = menu.addItem(
+                withTitle: definition.displayName,
+                action: #selector(performChooseLanguage(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = definition.id.rawValue
+            item.indentationLevel = 1
+            item.state = manuallySelectedID == definition.id ? .on : .off
+        }
+        return menu
+    }
+
     private func configureContent(
         injectedPresenter: (any PersistenceErrorPresenting)?
     ) -> any PersistenceErrorPresenting {
@@ -698,56 +911,66 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
         }
         root.view = dropView
-        let banner = PersistenceErrorBanner(frame: .zero)
-        root.view.addSubview(banner)
+        root.view.addSubview(persistenceBanner)
         root.view.addSubview(tabStrip)
         root.view.addSubview(searchPanel)
         root.view.addSubview(editorHostView)
-        languageStatus.translatesAutoresizingMaskIntoConstraints = false
-        languageStatus.font = .systemFont(ofSize: 11)
-        languageStatus.textColor = .secondaryLabelColor
-        languageStatus.alignment = .right
-        languageStatus.setAccessibilityIdentifier("duckpad.language.status")
-        root.view.addSubview(languageStatus)
-        extensionStatus.translatesAutoresizingMaskIntoConstraints = false
-        extensionStatus.font = .systemFont(ofSize: 11)
-        extensionStatus.textColor = .secondaryLabelColor
-        extensionStatus.setAccessibilityIdentifier("duckpad.extensions.status")
-        root.view.addSubview(extensionStatus)
+        root.view.addSubview(statusBar)
+        statusBar.setAccessibilityIdentifier("duckpad.status.bar")
+        configureStatusButton(
+            languageStatus,
+            imageName: "chevron.left.forwardslash.chevron.right",
+            action: #selector(performShowLanguageChooser(_:)),
+            accessibilityIdentifier: "duckpad.language.status"
+        )
+        configureStatusButton(
+            extensionStatus,
+            imageName: "puzzlepiece.extension",
+            action: #selector(performShowExtensions(_:)),
+            accessibilityIdentifier: "duckpad.extensions.status"
+        )
+        statusBar.addSubview(extensionStatus)
+        statusBar.addSubview(languageStatus)
         NSLayoutConstraint.activate([
-            banner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
-            banner.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            banner.topAnchor.constraint(equalTo: root.view.topAnchor),
+            persistenceBanner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            persistenceBanner.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            persistenceBanner.topAnchor.constraint(equalTo: root.view.topAnchor),
             tabStrip.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             tabStrip.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            tabStrip.topAnchor.constraint(equalTo: banner.bottomAnchor),
+            tabStrip.topAnchor.constraint(equalTo: persistenceBanner.bottomAnchor),
             searchPanel.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             searchPanel.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             searchPanel.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
             editorHostView.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             editorHostView.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             editorHostView.topAnchor.constraint(equalTo: searchPanel.bottomAnchor),
-            editorHostView.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
-            languageStatus.trailingAnchor.constraint(equalTo: root.view.trailingAnchor, constant: -10),
-            languageStatus.bottomAnchor.constraint(equalTo: root.view.bottomAnchor, constant: -5),
-            extensionStatus.leadingAnchor.constraint(equalTo: root.view.leadingAnchor, constant: 10),
-            extensionStatus.bottomAnchor.constraint(equalTo: root.view.bottomAnchor, constant: -5),
+            editorHostView.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            statusBar.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            statusBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            statusBar.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
+            statusBar.heightAnchor.constraint(equalToConstant: 24),
+            extensionStatus.leadingAnchor.constraint(equalTo: statusBar.leadingAnchor, constant: 6),
+            extensionStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
+            extensionStatus.heightAnchor.constraint(equalToConstant: 20),
+            languageStatus.trailingAnchor.constraint(equalTo: statusBar.trailingAnchor, constant: -6),
+            languageStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
+            languageStatus.heightAnchor.constraint(equalToConstant: 20),
+            extensionStatus.trailingAnchor.constraint(lessThanOrEqualTo: languageStatus.leadingAnchor, constant: -12),
         ])
         window?.contentViewController = root
-        return injectedPresenter ?? banner
+        return injectedPresenter ?? persistenceBanner
     }
 
     private func renderInitial(_ snapshot: WorkspaceSnapshot) {
         tabStrip.apply(tabs: snapshot.tabs)
-        let enabled = snapshot.startup == .ready
-        tabStrip.setInteractionsEnabled(enabled)
+        updateWorkspaceInteractionAdmission(snapshot)
         editorBinding.render(snapshot)
         updateWindowTitle(snapshot)
     }
 
     private func handle(_ change: WorkspaceChange) {
         tabStrip.apply(change: change)
-        tabStrip.setInteractionsEnabled(change.snapshot.startup == .ready)
+        updateWorkspaceInteractionAdmission(change.snapshot)
         let firstLanguageValidation = change.snapshot.startup == .ready && !languageValidated
         var registryReady = true
         if firstLanguageValidation {
@@ -778,6 +1001,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             guard let self else { return }
             Task { [weak workspace] in _ = await workspace?.retry(event.retry) }
         }
+    }
+
+    private func updateWorkspaceInteractionAdmission(_ snapshot: WorkspaceSnapshot) {
+        let enabled = snapshot.startup == .ready && !terminationReviewInProgress
+        tabStrip.setInteractionsEnabled(enabled)
+        languageStatus.isEnabled = enabled
+        extensionStatus.isEnabled = enabled
     }
 
     private func shouldRefreshLanguage(for change: WorkspaceChange) -> Bool {
@@ -870,15 +1100,23 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func performMove(_ tabID: TabID, to index: Int) {
-        Task { [weak workspace] in _ = await workspace?.moveTab(tabID, to: index) }
+        guard workspaceInteractionsAreActionable else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.workspaceInteractionsAreActionable else { return }
+            _ = await self.workspace.moveTab(tabID, to: index)
+        }
     }
 
     private func performContextAction(_ action: TabContextAction, for tabID: TabID) {
+        guard workspaceInteractionsAreActionable else { return }
         switch action {
         case .close(let scope):
             Task { [weak self] in await self?.requestClose(scope: scope, relativeTo: tabID) }
         case .setPinned(let pinned):
-            Task { [weak workspace] in _ = await workspace?.setPinned(tabID, isPinned: pinned) }
+            Task { @MainActor [weak self] in
+                guard let self, self.workspaceInteractionsAreActionable else { return }
+                _ = await self.workspace.setPinned(tabID, isPinned: pinned)
+            }
         case .copyFullPath:
             guard let path = workspace.snapshot().tabs.first(where: { $0.id == tabID })?.fullPath else { return }
             pathActionHandler.copyFullPath(path)
@@ -889,7 +1127,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func routeFind(_ query: SearchQuery) {
-        guard !query.pattern.isEmpty, let searchUseCase else { return }
+        guard workspaceInteractionsAreActionable,
+              !query.pattern.isEmpty, let searchUseCase else { return }
         let operation = beginSearchOperation()
         searchPanel.presentStatus("Searching…")
         searchTask = Task { [weak self] in
@@ -914,7 +1153,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func routeFindAll(_ query: SearchQuery, incremental: Bool = false) {
-        guard !query.pattern.isEmpty, let searchUseCase else { return }
+        guard workspaceInteractionsAreActionable,
+              !query.pattern.isEmpty, let searchUseCase else { return }
         let operation = beginSearchOperation()
         searchPanel.presentStatus("Searching…")
         searchTask = Task { [weak self] in
@@ -939,7 +1179,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func routeReplace(_ query: SearchQuery) {
-        guard !query.pattern.isEmpty, let searchUseCase else { return }
+        guard workspaceInteractionsAreActionable,
+              !query.pattern.isEmpty, let searchUseCase else { return }
         let operation = beginSearchOperation()
         searchTask = Task { [weak self] in
             do {
@@ -962,7 +1203,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func routeReplaceAll(_ query: SearchQuery) {
-        guard !query.pattern.isEmpty, let searchUseCase else { return }
+        guard workspaceInteractionsAreActionable,
+              !query.pattern.isEmpty, let searchUseCase else { return }
         let operation = beginSearchOperation()
         searchTask = Task { [weak self] in
             do {
@@ -985,7 +1227,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func routeActivateSearchMatch(_ match: SearchMatch) {
-        guard let searchUseCase else { return }
+        guard workspaceInteractionsAreActionable, let searchUseCase else { return }
         let operation = beginSearchOperation()
         searchTask = Task { [weak self] in
             do {
@@ -1126,20 +1368,26 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func renderLanguageState(_ state: LanguageServiceState) {
+        languageState = state
         switch state {
         case .ready(let detection, let fallback):
             let name = languageUseCase?.registry[detection.languageID]?.displayName ?? detection.languageID.rawValue
             let tier = languageUseCase?.registry[detection.languageID]?.supportTier
             let suffix = tier == .structural ? " · structural" : ""
-            languageStatus.stringValue = fallback ? "\(name) · styling paused (large file)" : name + suffix
-            languageStatus.textColor = .secondaryLabelColor
+            setStatus(
+                languageStatus,
+                text: fallback ? "\(name) · styling paused (large file)" : name + suffix,
+                warning: false
+            )
         case .unavailableManual(let requestedID, let fallbackID):
             let fallbackName = languageUseCase?.registry[fallbackID]?.displayName ?? fallbackID.rawValue
-            languageStatus.stringValue = "Unavailable language: \(requestedID.rawValue) · using \(fallbackName)"
-            languageStatus.textColor = .systemOrange
+            setStatus(
+                languageStatus,
+                text: "Unavailable language: \(requestedID.rawValue) · using \(fallbackName)",
+                warning: true
+            )
         case .degraded(let reason):
-            languageStatus.stringValue = "Plain Text · \(reason)"
-            languageStatus.textColor = .systemOrange
+            setStatus(languageStatus, text: "Plain Text · \(reason)", warning: true)
         }
     }
 
@@ -1159,17 +1407,23 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         extensionState = state; extensionsPanel.render(state)
         let enabled = state.items.filter(\.enabled).count
         if !state.discoveryFailures.isEmpty {
-            extensionStatus.stringValue = "Extensions: \(enabled) enabled · \(state.discoveryFailures.count) issue(s)"
-            extensionStatus.textColor = .systemOrange
+            setStatus(
+                extensionStatus,
+                text: "Extensions: \(enabled) enabled · \(state.discoveryFailures.count) issue(s)",
+                warning: true
+            )
         } else {
-            extensionStatus.stringValue = state.operationStatus ?? "Extensions: \(enabled) enabled"
-            extensionStatus.textColor = .secondaryLabelColor
+            setStatus(
+                extensionStatus,
+                text: state.operationStatus ?? "Extensions: \(enabled) enabled",
+                warning: false
+            )
         }
         onExtensionCommandsChanged?()
     }
 
     private func renderExtensionError(_ error: any Error) {
-        extensionStatus.stringValue = "Extension error: \(error)"; extensionStatus.textColor = .systemOrange
+        setStatus(extensionStatus, text: "Extension error: \(error)", warning: true)
     }
 
     private func reviewCapabilities(for item: ExtensionRegistryItem, allow: Bool) {

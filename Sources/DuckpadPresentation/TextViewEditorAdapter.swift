@@ -31,7 +31,14 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorViewOption
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.allowsUndo = true
         textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        textView.textContainerInset = NSSize(width: 10, height: 10)
+        textView.textColor = .textColor
+        textView.backgroundColor = .textBackgroundColor
+        textView.insertionPointColor = .labelColor
+        textView.selectedTextAttributes = [
+            .backgroundColor: NSColor.selectedTextBackgroundColor,
+            .foregroundColor: NSColor.selectedTextColor,
+        ]
+        textView.textContainerInset = NSSize(width: 12, height: 10)
         textView.autoresizingMask = [.width]
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false

@@ -108,6 +108,7 @@ struct LanguageEditorAdapterTests {
         let canUndo = view.canUndo
         let snapshotReads = view.snapshotReadCount
         view.apply(.dark)
+        #expect(view.foregroundColor(forStyle: 33) != view.foregroundColor(forStyle: 0))
         view.apply(.highContrastLight)
         #expect(view.revision == revision)
         #expect(view.canUndo == canUndo)

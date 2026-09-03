@@ -80,8 +80,12 @@ public final class ApplicationTerminationCoordinator {
 
     private func beginReview(using windowController: DuckpadWindowController) {
         precondition(inFlightReview == nil)
+        guard windowController.beginTerminationReviewAdmission() else {
+            finishReview(approved: false)
+            return
+        }
         inFlightReview = Task { @MainActor [weak self, weak windowController] in
-            let approved = await windowController?.reviewDirtyDocumentsForTermination() ?? false
+            let approved = await windowController?.continuePreparedTerminationReview() ?? false
             self?.finishReview(approved: approved)
         }
     }

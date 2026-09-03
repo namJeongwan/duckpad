@@ -36,12 +36,12 @@ public struct TabFlowLayoutEngine: Sendable {
     public var maximumItemWidth: CGFloat
 
     public init(
-        rowHeight: CGFloat = 34,
-        horizontalSpacing: CGFloat = 4,
-        verticalSpacing: CGFloat = 4,
-        insets: NSEdgeInsets = NSEdgeInsets(top: 4, left: 6, bottom: 4, right: 6),
-        minimumItemWidth: CGFloat = 96,
-        maximumItemWidth: CGFloat = 220
+        rowHeight: CGFloat = 28,
+        horizontalSpacing: CGFloat = 2,
+        verticalSpacing: CGFloat = 2,
+        insets: NSEdgeInsets = NSEdgeInsets(top: 3, left: 6, bottom: 3, right: 6),
+        minimumItemWidth: CGFloat = 88,
+        maximumItemWidth: CGFloat = 210
     ) {
         self.rowHeight = rowHeight
         self.horizontalSpacing = horizontalSpacing
@@ -94,7 +94,7 @@ public struct TabStripViewportPolicy: Equatable, Sendable {
     public init(
         maximumRows: Int = 4,
         maximumWorkspaceFraction: CGFloat = 0.34,
-        minimumHeight: CGFloat = 42
+        minimumHeight: CGFloat = 34
     ) {
         self.maximumRows = maximumRows
         self.maximumWorkspaceFraction = maximumWorkspaceFraction
@@ -141,7 +141,7 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
     private var rowIndices: [Int] = []
     private var rows: [RowCache] = []
     private var cachedRowCount = 0
-    private var calculatedSize = NSSize(width: 0, height: 42)
+    private var calculatedSize = NSSize(width: 0, height: 34)
     private var widthsVersion: UInt64 = 0
     private var preparedWidthsVersion: UInt64 = .max
     private var preparedWidth: CGFloat = -.greatestFiniteMagnitude

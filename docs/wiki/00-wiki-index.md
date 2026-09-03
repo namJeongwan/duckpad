@@ -43,6 +43,8 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 29 | [Phase 9 independent code review](reviews/2026-09-03-phase-9-editor-view-options-code-review.md) | **Approved — latest Phase 9 evidence** | view/recovery/Scintilla/menu/close-race와 P9-01 remediation을 0 Blocker, 0 Major, 0 Minor로 승인했다. receipt SHA-256은 `b43abeabd167a748b25bad4d72f6951703188f973275995b920515808a979f8b`다. |
 | 30 | [Phase 10 standard editing commands and shortcuts](13-standard-editing-shortcuts.md) | **Content approved; exact receipt pending** | native Edit menu, Cmd-N/Z/Shift-Z/X/C/V/A, shortcut collision 검사, editor별 undo/clipboard command 계약과 세 review remediation을 기록한다. |
 | 31 | [Phase 10 independent code review](reviews/2026-09-03-phase-10-standard-editing-shortcuts-code-review.md) | **Content approved — latest Phase 10 evidence** | Cmd-N termination join, Scintilla IME responder semantics, fallback revision-exhaustion remediation을 0 Blocker, 0 Major, 0 Minor로 승인했다. candidate freeze/signing이 허가됐고 exact receipt는 pending이다. |
+| 32 | [Phase 11 workspace chrome and document dropdown](14-workspace-chrome-and-document-dropdown.md) | **Content approved; exact receipt pending** | 상단 blank-space 제거, compact multiline tabs, stable-ID document dropdown, 실제 status bar, language dropdown, Scintilla gutter/palette polish와 84% footprint 교체 앱 아이콘을 기록한다. P11-01…P11-03 독립 재검토가 0 Blocker/Major/Minor로 승인됐다. |
+| 33 | [Phase 11 independent code review](reviews/2026-09-03-phase-11-workspace-chrome-code-review.md) | **Content approved — latest Phase 11 evidence** | dropdown O(1) 증분 갱신, synchronous termination chrome admission, 네 모서리·전체 ICNS round-trip을 독립 재검증했다. exact staged receipt는 아직 발급하지 않았다. |
 
 상태 정의:
 
@@ -98,6 +100,38 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 11 P11-01…P11-03 independent focused re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; remediation 구현에는 참여하지 않았다.
+- **Closure:** dropdown edit 1-item/active max-2 갱신과 500/5,000-tab inspection, tab-strip cached active index, synchronous termination admission과 ready/direct/queued action lock, cancel-only restoration, four-corner/84%-bounds/full ICNS extraction 검증으로 P11-01…P11-03을 모두 닫았다.
+- **Validation:** independent focused 9/9, Debug 200/200, isolated-scratch Release 200/200 PASS. builder macOS 13 x86_64 link와 production Scintilla 50-tab smoke는 supporting evidence다.
+- **Verdict:** **APPROVED — 0 Blocker, 0 Major, 0 Minor.** Phase 11 content freeze와 exact staged-candidate review/signing 준비를 허가하며 receipt는 아직 없다.
+- **Boundary:** review 문서와 이 index만 변경했다. source/tests/resources/work docs/stage/sign/commit은 건드리지 않았고 기존 doc04/vendor script/README/ignored Notepad++를 제외·보존했다.
+
+### 2026-09-03 — Phase 11 P11-01…P11-03 remediation
+
+- **Agent/role:** `/root`, direct builder; 독립 reviewer verdict를 변경하지 않는다.
+- **Fix:** document dropdown edit는 1 item, active 전환은 최대 2 item만 configure하고 500/5,000-tab inspection을 계측한다. termination coordinator는 async task 전 chrome admission을 동기 잠그고 ready event와 queued/direct action이 이를 다시 열지 못하게 하며, cancel 뒤에만 복구한다. icon test는 네 모서리, 84% 중앙 alpha bounds와 전체 ICNS extraction을 검증한다.
+- **ICNS detail:** modern PNG chunk는 RGBA exact equality를 요구한다. macOS `iconutil`의 legacy 1x `ic04`/`ic05` ARGB edge quantization은 동일 alpha bounds와 normalized RMSE `< 0.035`로 제한한다.
+- **Validation:** focused remediation 8/8, Debug/Release 전체 각 200/200와 `git diff --check` PASS. 첫 전체 실행에서 startup 전 Find panel 표시 계약 회귀가 검출되어 non-mutating panel open은 허용하고 실제 search/replace admission만 ready로 유지한 뒤 focused/full을 재통과했다.
+- **Boundary:** review verdict 문서, README, ignored Notepad++ checkout, 기존 unstaged doc04/vendor script를 변경하지 않았고 stage/sign/commit하지 않았다. 새 독립 re-review 전까지 직전 Changes Required verdict가 유효하다.
+
+### 2026-09-03 — Phase 11 independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 11 구현에는 참여하지 않았다.
+- **Scope:** workspace chrome/layout/dropdown/status/language/palette와 최종 84% iconset/ICNS의 현재 바이트만 검토했다.
+- **Findings:** 0 Blocker, 2 Major, 1 Minor. dropdown의 단일-item 계측 뒤 전체 menu state 순회와 termination 중 새 chrome action admission이 승인을 차단한다. 아이콘 테스트의 네 모서리/ICNS pixel-identity coverage는 Minor다.
+- **Validation:** focused UI/palette 5/5, icon 1/1, Debug 197/197, Release 197/197, source SHA/10-size/four-corner alpha/ICNS RGBA round-trip와 diff check가 통과했다. exact 23-path manifest digest는 review 문서에 기록한다.
+- **Boundary:** 제품/source/test/resource 및 stage/receipt/commit은 변경하지 않았고, doc04/vendor script/README/ignored Notepad++는 제외·보존했다.
+
+### 2026-09-03 — Phase 11 workspace chrome and document dropdown
+
+- **Agent/role:** `/root`, direct builder; 새 구현 subagent를 만들지 않았다.
+- **Scope:** hidden error-banner collapse, 34pt multiline tab chrome, stable-ID Open Documents dropdown, 24pt non-overlapping status bar, clickable language/extension controls, semantic Scintilla gutter/caret-line palette와 fallback editor colors를 구현했다. 새 Duckpad duck-and-pencil 아이콘은 외부 canvas를 투명화하고 84% 중앙 정렬해 Dock visual footprint를 맞춘 표준 PNG/ICNS 리소스로 교체했다.
+- **Performance/safety:** ordinary buffer edit는 tab item과 document-menu item을 각각 하나만 갱신한다. UI action은 `TabID`를 Presentation에서 workspace로 전달하고 revision/recovery/file authority를 우회하지 않는다.
+- **Validation:** 신규 dropdown/chrome/palette focused tests, Debug/Release 전체 각 197/197, clean macOS 13 x86_64 release link와 production Scintilla 50-tab multiline smoke PASS. 첫 병렬 Debug의 기존 persistence timing test 1건은 isolated test와 clean full rerun에서 PASS했다.
+- **Boundary:** README, parity baseline, ignored Notepad++ checkout과 기존 unstaged doc04/vendor script는 변경하지 않았다. 독립 reviewer 승인과 exact receipt 전에는 commit-authorized가 아니다.
 
 ### 2026-09-03 — Phase 10 P10-01/P10-02/P10-03 independent focused re-review
 

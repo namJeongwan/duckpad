@@ -120,11 +120,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         _matchingBraceUTF8Position = -1;
         _badBraceUTF8Position = -1;
         [_scintilla message:SCI_SETMARGINTYPEN wParam:0 lParam:SC_MARGIN_NUMBER];
-        [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:44];
+        [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:40];
         [_scintilla message:SCI_SETMARGINTYPEN wParam:1 lParam:SC_MARGIN_SYMBOL];
         [_scintilla message:SCI_SETMARGINMASKN wParam:1 lParam:SC_MASK_FOLDERS];
         [_scintilla message:SCI_SETMARGINSENSITIVEN wParam:1 lParam:1];
-        [_scintilla message:SCI_SETMARGINWIDTHN wParam:1 lParam:14];
+        [_scintilla message:SCI_SETMARGINWIDTHN wParam:1 lParam:12];
         [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEROPEN lParam:SC_MARK_BOXMINUS];
         [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDER lParam:SC_MARK_BOXPLUS];
         [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERSUB lParam:SC_MARK_VLINE];
@@ -515,7 +515,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETPROPERTY
                      wParam:reinterpret_cast<uptr_t>("fold")
                      lParam:reinterpret_cast<sptr_t>(effectiveFolding ? "1" : "0")];
-    [_scintilla message:SCI_SETMARGINWIDTHN wParam:1 lParam:effectiveFolding ? 14 : 0];
+    [_scintilla message:SCI_SETMARGINWIDTHN wParam:1 lParam:effectiveFolding ? 12 : 0];
     if (!_braceMatchingEnabled) [self updateBraceHighlight];
     for (NSUInteger index = 0; index < 16; index += 1) {
         [_scintilla message:SCI_SETKEYWORDS wParam:index lParam:reinterpret_cast<sptr_t>("")];
@@ -541,6 +541,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const BOOL highContrast = palette == DPScintillaPaletteHighContrastLight || palette == DPScintillaPaletteHighContrastDark;
     const int foreground = dark ? 0xE8E8E8 : 0x202020;
     const int background = dark ? 0x1E1E1E : 0xFFFFFF;
+    const int gutterBackground = dark ? 0x262626 : 0xF6F6F6;
+    const int gutterForeground = dark ? 0x8A8A8A : 0x747474;
+    const int caretLineBackground = dark ? 0x292929 : 0xF8F8F8;
     const int comment = dark ? 0x7FD47F : 0x397A32;
     const int number = dark ? 0xD7A0F8 : 0x7C2F8E;
     const int keyword = dark ? 0xFFB36B : 0xA23B00;
@@ -552,6 +555,18 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_STYLESETFONT wParam:STYLE_DEFAULT lParam:reinterpret_cast<sptr_t>("Menlo")];
     [_scintilla message:SCI_STYLESETSIZE wParam:STYLE_DEFAULT lParam:13];
     [_scintilla message:SCI_STYLECLEARALL];
+    [_scintilla message:SCI_STYLESETFORE wParam:STYLE_LINENUMBER lParam:gutterForeground];
+    [_scintilla message:SCI_STYLESETBACK wParam:STYLE_LINENUMBER lParam:gutterBackground];
+    [_scintilla message:SCI_STYLESETFONT wParam:STYLE_LINENUMBER lParam:reinterpret_cast<sptr_t>("SF Mono")];
+    [_scintilla message:SCI_STYLESETSIZE wParam:STYLE_LINENUMBER lParam:11];
+    [_scintilla message:SCI_SETMARGINBACKN wParam:0 lParam:gutterBackground];
+    [_scintilla message:SCI_SETMARGINBACKN wParam:1 lParam:gutterBackground];
+    [_scintilla message:SCI_SETFOLDMARGINCOLOUR wParam:1 lParam:gutterBackground];
+    [_scintilla message:SCI_SETFOLDMARGINHICOLOUR wParam:1 lParam:gutterBackground];
+    [_scintilla message:SCI_SETMARGINLEFT wParam:0 lParam:8];
+    [_scintilla message:SCI_SETMARGINRIGHT wParam:0 lParam:8];
+    [_scintilla message:SCI_SETEXTRAASCENT wParam:2 lParam:0];
+    [_scintilla message:SCI_SETEXTRADESCENT wParam:2 lParam:0];
     [_scintilla message:SCI_STYLESETFORE wParam:STYLE_BRACELIGHT lParam:dark ? 0x80FFFF : 0x7A3D00];
     [_scintilla message:SCI_STYLESETBACK wParam:STYLE_BRACELIGHT lParam:dark ? 0x503000 : 0xB8F1FF];
     [_scintilla message:SCI_STYLESETBOLD wParam:STYLE_BRACELIGHT lParam:1];
@@ -563,7 +578,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_MARKERSETBACK wParam:marker lParam:dark ? 0x505050 : 0xD8D8D8];
     }
     for (const auto &[style, role] : _semanticStyleRoles) {
-        if (style == STYLE_BRACELIGHT || style == STYLE_BRACEBAD || style == STYLE_DEFAULT) continue;
+        if (style >= STYLE_DEFAULT && style <= STYLE_LASTPREDEFINED) continue;
         int colour = foreground;
         switch (role) {
             case 1: colour = comment; break;
@@ -578,6 +593,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_STYLESETBOLD wParam:style lParam:highContrast && role == 3];
     }
     [_scintilla message:SCI_SETCARETFORE wParam:highContrast ? (dark ? 0xFFFFFF : 0x000000) : foreground];
+    [_scintilla message:SCI_SETCARETLINEVISIBLE wParam:1 lParam:0];
+    [_scintilla message:SCI_SETCARETLINEBACK wParam:0 lParam:caretLineBackground];
+    [_scintilla message:SCI_SETCARETLINEBACKALPHA wParam:highContrast ? 42 : 24 lParam:0];
     [_scintilla message:SCI_SETSELBACK wParam:1 lParam:dark ? 0x704020 : 0xFFD8B0];
     [_scintilla setNeedsDisplay:YES];
 }
