@@ -750,6 +750,33 @@ struct AppKitHostedTests {
     #expect(completeWord?.keyEquivalentModifierMask == [.control])
     if let completeWord { #expect(!controller.validateMenuItem(completeWord)) }
 
+    let utf8 = menuItem("UTF-8 without BOM", in: menu)
+    let utf8BOM = menuItem("UTF-8 with BOM", in: menu)
+    let utf16LE = menuItem("UTF-16 LE with BOM", in: menu)
+    let utf16LENoBOM = menuItem("UTF-16 LE without BOM", in: menu)
+    let utf16BE = menuItem("UTF-16 BE with BOM", in: menu)
+    let utf16BENoBOM = menuItem("UTF-16 BE without BOM", in: menu)
+    let lf = menuItem("Unix (LF)", in: menu)
+    let crlf = menuItem("Windows (CRLF)", in: menu)
+    let cr = menuItem("Classic Mac (CR)", in: menu)
+    let openUTF16LE = menuItem("Open as UTF-16 LE…", in: menu)
+    #expect(utf8?.action == #selector(DuckpadWindowController.performConvertToUTF8(_:)))
+    #expect(utf8BOM?.action == #selector(DuckpadWindowController.performConvertToUTF8BOM(_:)))
+    #expect(utf16LE?.action == #selector(DuckpadWindowController.performConvertToUTF16LittleEndian(_:)))
+    #expect(utf16LENoBOM?.action == #selector(DuckpadWindowController.performConvertToUTF16LittleEndianWithoutBOM(_:)))
+    #expect(utf16BE?.action == #selector(DuckpadWindowController.performConvertToUTF16BigEndian(_:)))
+    #expect(utf16BENoBOM?.action == #selector(DuckpadWindowController.performConvertToUTF16BigEndianWithoutBOM(_:)))
+    #expect(lf?.action == #selector(DuckpadWindowController.performConvertToLF(_:)))
+    #expect(crlf?.action == #selector(DuckpadWindowController.performConvertToCRLF(_:)))
+    #expect(cr?.action == #selector(DuckpadWindowController.performConvertToCR(_:)))
+    #expect(openUTF16LE?.action == #selector(DuckpadWindowController.performOpenAsUTF16LittleEndian(_:)))
+    for item in [utf8, utf8BOM, utf16LE, utf16LENoBOM, utf16BE, utf16BENoBOM, lf, crlf, cr, openUTF16LE].compactMap({ $0 }) {
+        #expect(item.keyEquivalent.isEmpty)
+        #expect(item.keyEquivalentModifierMask.isEmpty)
+        #expect(!controller.validateMenuItem(item))
+    }
+    #expect(utf8?.state == .on)
+
     let duplicateLine = menuItem("Duplicate Line", in: menu)
     let moveLineUp = menuItem("Move Line Up", in: menu)
     let moveLineDown = menuItem("Move Line Down", in: menu)

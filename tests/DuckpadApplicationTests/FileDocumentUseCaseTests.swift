@@ -594,6 +594,101 @@ private final class FileEditorFake: EditorPort, EditorSelectionPort {
     #expect(await useCase.resolveConflict(.cancel) == .cancelled(tabID))
 }
 
+@Test @MainActor func rebindBeforeConflictOverwritePreservesNewAuthorityAndOldBytes() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let originalURL = URL(fileURLWithPath: "/tmp/duckpad-overwrite-original.txt")
+    let reboundURL = URL(fileURLWithPath: "/tmp/duckpad-overwrite-rebound.txt")
+    await files.seed("base", at: originalURL)
+    await files.seed("rebound", at: reboundURL)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    _ = await useCase.open(originalURL)
+    editor.replaceWith("mine")
+    await files.externalReplace("external", at: originalURL)
+    guard case .conflict(let tabID, _) = await useCase.saveActive(),
+          let reboundRead = await files.result(at: reboundURL),
+          let context = workspace.fileContext(tabID: tabID) else {
+        Issue.record("conflict fixture unavailable")
+        return
+    }
+    let reboundBinding = FileBinding(
+        canonicalPath: reboundRead.identity.canonicalPath,
+        encoding: .utf8,
+        byteOrderMark: .absent,
+        lineEnding: .none,
+        observedIdentity: reboundRead.identity
+    )
+    guard case .applied = await workspace.bindSavedFile(
+        tabID: tabID,
+        binding: reboundBinding,
+        title: reboundURL.lastPathComponent,
+        savedRevision: context.buffer.revision
+    ) else {
+        Issue.record("rebind failed")
+        return
+    }
+
+    #expect(await useCase.resolveConflict(.overwrite) == .failed(.comparisonInvalidated))
+    #expect(workspace.fileContext(tabID: tabID)?.binding == reboundBinding)
+    #expect(await files.text(at: originalURL) == "external")
+    #expect(await files.text(at: reboundURL) == "rebound")
+}
+
+@Test @MainActor func rebindDuringConflictOverwriteWriteCannotClobberNewBinding() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = binding
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let originalURL = URL(fileURLWithPath: "/tmp/duckpad-overwrite-race-original.txt")
+    let reboundURL = URL(fileURLWithPath: "/tmp/duckpad-overwrite-race-rebound.txt")
+    await files.seed("base", at: originalURL)
+    await files.seed("rebound", at: reboundURL)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    _ = await useCase.open(originalURL)
+    editor.replaceWith("mine")
+    await files.externalReplace("external", at: originalURL)
+    guard case .conflict(let tabID, _) = await useCase.saveActive(),
+          let reboundRead = await files.result(at: reboundURL),
+          let context = workspace.fileContext(tabID: tabID) else {
+        Issue.record("conflict fixture unavailable")
+        return
+    }
+    let reboundBinding = FileBinding(
+        canonicalPath: reboundRead.identity.canonicalPath,
+        encoding: .utf8,
+        byteOrderMark: .absent,
+        lineEnding: .none,
+        observedIdentity: reboundRead.identity
+    )
+    await files.armBlockedWrite()
+    let overwrite = Task { await useCase.resolveConflict(.overwrite) }
+    await files.waitForBlockedWrite()
+    guard case .applied = await workspace.bindSavedFile(
+        tabID: tabID,
+        binding: reboundBinding,
+        title: reboundURL.lastPathComponent,
+        savedRevision: context.buffer.revision
+    ) else {
+        Issue.record("rebind failed")
+        await files.releaseWrite()
+        return
+    }
+    await files.releaseWrite()
+
+    #expect(await overwrite.value == .failed(.comparisonInvalidated))
+    #expect(workspace.fileContext(tabID: tabID)?.binding == reboundBinding)
+    #expect(await files.text(at: originalURL) == "mine")
+    #expect(await files.text(at: reboundURL) == "rebound")
+}
+
 @Test @MainActor func editAcceptedDuringSaveRemainsDirtyAfterOlderSnapshotBecomesDurable() async {
     let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
     let editor = FileEditorFake()
@@ -615,6 +710,48 @@ private final class FileEditorFake: EditorPort, EditorSelectionPort {
     #expect(await files.text(at: url) == "snapshot")
     #expect(workspace.snapshot().tabs[0].isDirty)
     #expect(editor.snapshot(for: workspace.activeFileContext()!.buffer.bufferID)?.text == "newer edit")
+}
+
+@Test @MainActor func queuedFormatSaveRejectsActiveTabChangeBeforeOperationAdmission() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    editor.display(workspace.snapshot().activeBuffer!)
+    editor.replaceWith("first")
+    _ = await workspace.flushPersistence()
+    let files = FileStoreFake()
+    await files.armBlockedWrite()
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let firstURL = URL(fileURLWithPath: "/tmp/duckpad-queued-first.txt")
+    let rejectedURL = URL(fileURLWithPath: "/tmp/duckpad-queued-rejected.txt")
+    let originalContext = workspace.activeFileContext()!
+    let firstSave = Task {
+        await useCase.saveAs(firstURL, expectedContext: originalContext)
+    }
+    await files.waitForBlockedWrite()
+
+    _ = await workspace.addScratch()
+    let conversion = TextFileConversion(
+        encoding: .utf16BigEndian,
+        byteOrderMark: .absent,
+        lineEnding: .crlf
+    )
+    let queuedSave = Task {
+        await useCase.saveAs(
+            rejectedURL,
+            conversion: conversion,
+            expectedContext: originalContext
+        )
+    }
+    await Task.yield()
+    await files.releaseWrite()
+
+    #expect(await firstSave.value == .saved(originalContext.tabID))
+    #expect(await queuedSave.value == .failed(.comparisonInvalidated))
+    #expect(await files.data(at: rejectedURL) == nil)
+    #expect(workspace.activeFileContext()?.tabID != originalContext.tabID)
 }
 
 @Test @MainActor func explicitFormatConversionPersistsAcrossFollowingOrdinarySave() async throws {

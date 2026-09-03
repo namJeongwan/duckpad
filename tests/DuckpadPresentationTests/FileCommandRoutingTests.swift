@@ -232,6 +232,9 @@ private actor RoutingFileStore: TextFileStore {
     private var blockNextRead = false
     private var blockedReadEntered = false
     private var releaseBlockedRead = false
+    private var blockNextWrite = false
+    private var blockedWriteEntered = false
+    private var releaseBlockedWrite = false
     func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL { url.standardizedFileURL }
     func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult {
         if blockNextRead {
@@ -244,6 +247,11 @@ private actor RoutingFileStore: TextFileStore {
     }
     func writeAtomically(_ data: Data, to url: URL, expectedIdentity: FileIdentity?, overwrite: Bool) async throws(TextFileStoreError) -> FileWriteReceipt {
         if let forcedWriteError { throw forcedWriteError }
+        if blockNextWrite {
+            blockNextWrite = false
+            blockedWriteEntered = true
+            while !releaseBlockedWrite { await Task.yield() }
+        }
         let current = values[url.path]
         if let expectedIdentity, current?.identity != expectedIdentity { throw .conflict(current: current?.identity) }
         generation += 1
@@ -252,12 +260,15 @@ private actor RoutingFileStore: TextFileStore {
         return FileWriteReceipt(identity: identity)
     }
     func seed(_ text: String, at url: URL) {
+        seed(Data(text.utf8), at: url)
+    }
+    func seed(_ data: Data, at url: URL) {
         generation += 1
-        let data = Data(text.utf8)
         let identity = FileIdentity(canonicalPath: url.path, device: 1, inode: 1, byteCount: UInt64(data.count), modifiedNanoseconds: Int64(generation), contentToken: "routing-\(generation)")
         values[url.path] = FileReadResult(data: data, identity: identity)
     }
     func text(at url: URL) -> String? { values[url.path].flatMap { String(data: $0.data, encoding: .utf8) } }
+    func data(at url: URL) -> Data? { values[url.path]?.data }
     func result(at url: URL) -> FileReadResult? { values[url.path] }
     func setWriteError(_ error: TextFileStoreError?) { forcedWriteError = error }
     func armNextRead() {
@@ -269,6 +280,15 @@ private actor RoutingFileStore: TextFileStore {
         while !blockedReadEntered { await Task.yield() }
     }
     func releaseRead() { releaseBlockedRead = true }
+    func armNextWrite() {
+        blockNextWrite = true
+        blockedWriteEntered = false
+        releaseBlockedWrite = false
+    }
+    func waitUntilWriteIsBlocked() async {
+        while !blockedWriteEntered { await Task.yield() }
+    }
+    func releaseWrite() { releaseBlockedWrite = true }
 }
 
 private struct PreparedWorkspaceRootStore: WorkspaceRootStore {
@@ -320,10 +340,20 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
     private(set) var comparisons: [ExternalFileComparison] = []
     var decisions: [CloseDecision] = []
     var blocksDecisions = false
+    var blocksSavePanel = false
+    private var savePanelEntered = false
     private(set) var decisionTabs: [String] = []
     private var decisionWaiters: [CheckedContinuation<Void, Never>] = []
+    private var savePanelWaiters: [CheckedContinuation<Void, Never>] = []
     func chooseOpenURL(attachedTo window: NSWindow?) async -> URL? { openRequests += 1; return openURL }
-    func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL? { saveRequests += 1; return saveURL }
+    func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL? {
+        saveRequests += 1
+        savePanelEntered = true
+        if blocksSavePanel {
+            await withCheckedContinuation { savePanelWaiters.append($0) }
+        }
+        return saveURL
+    }
     func chooseFolderURL(attachedTo window: NSWindow?) async -> URL? { folderRequests += 1; return folderURL }
     func resolveExternalConflict(attachedTo window: NSWindow?) async -> FileConflictResolution {
         conflictResolutions.isEmpty ? .cancel : conflictResolutions.removeFirst()
@@ -351,6 +381,15 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
         blocksDecisions = false
         let waiters = decisionWaiters
         decisionWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
+    func waitUntilSavePanelEntered() async {
+        while !savePanelEntered { await Task.yield() }
+    }
+    func releaseSavePanel() {
+        blocksSavePanel = false
+        let waiters = savePanelWaiters
+        savePanelWaiters = []
         for waiter in waiters { waiter.resume() }
     }
 }
@@ -654,6 +693,215 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     #expect(panels.saveRequests == 1)
     #expect(await files.text(at: saveAsURL) == "")
     #expect(panels.failures.isEmpty)
+}
+
+@Test @MainActor func controllerOpensExplicitUTF16AndConvertsDurableFormat() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-routing-format.txt")
+    let original = "한\r둘🙂"
+    await files.seed(
+        TextFileCodec.encode(
+            original,
+            encoding: .utf16LittleEndian,
+            byteOrderMark: .absent
+        ),
+        at: url
+    )
+    let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let panels = PanelFake()
+    panels.openURL = url
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: fileUseCase,
+        filePanels: panels,
+        fileConflictPresenter: panels,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+
+    await controller.routeOpenFile(encodingHint: .utf16LittleEndian)
+    #expect(editor.textView.string == original)
+    #expect(controller.fileFormatStatusSmokeState().encoding == .utf16LittleEndian)
+    #expect(controller.fileFormatStatusSmokeState().byteOrderMark == .absent)
+    #expect(controller.fileFormatStatusSmokeState().lineEnding == .cr)
+    let originalEncodingItem = NSMenuItem(
+        title: "UTF-16 LE without BOM",
+        action: #selector(DuckpadWindowController.performConvertToUTF16LittleEndianWithoutBOM(_:)),
+        keyEquivalent: ""
+    )
+    #expect(controller.validateMenuItem(originalEncodingItem))
+    #expect(originalEncodingItem.state == .on)
+
+    await controller.routeSaveFile(conversion: TextFileConversion(
+        encoding: .utf8,
+        byteOrderMark: .present,
+        lineEnding: .crlf
+    ))
+    let saved = try #require(await files.data(at: url))
+    #expect(saved.starts(with: Data([0xEF, 0xBB, 0xBF])))
+    #expect(String(data: saved.dropFirst(3), encoding: .utf8) == "한\r\n둘🙂")
+    let binding = try #require(workspace.activeFileContext()?.binding)
+    #expect(binding.encoding == .utf8)
+    #expect(binding.byteOrderMark == .present)
+    #expect(binding.lineEnding == .crlf)
+    #expect(controller.fileFormatStatusSmokeState().text == "UTF-8 BOM · CRLF")
+    #expect(controller.fileFormatStatusSmokeState().isEnabled)
+    let encodingItem = NSMenuItem(
+        title: "UTF-8 with BOM",
+        action: #selector(DuckpadWindowController.performConvertToUTF8BOM(_:)),
+        keyEquivalent: ""
+    )
+    let endingItem = NSMenuItem(
+        title: "Windows (CRLF)",
+        action: #selector(DuckpadWindowController.performConvertToCRLF(_:)),
+        keyEquivalent: ""
+    )
+    #expect(controller.validateMenuItem(encodingItem))
+    #expect(controller.validateMenuItem(endingItem))
+    #expect(encodingItem.state == .on)
+    #expect(endingItem.state == .on)
+}
+
+@Test @MainActor func scratchFormatConversionUsesSaveAsAndPreservesChosenBytes() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-routing-scratch-format.txt")
+    let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let panels = PanelFake()
+    panels.saveURL = url
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: fileUseCase,
+        filePanels: panels,
+        fileConflictPresenter: panels,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    editor.textView.insertText("가\r나🙂", replacementRange: NSRange(location: 0, length: 0))
+
+    await controller.routeSaveFile(conversion: TextFileConversion(
+        encoding: .utf16BigEndian,
+        byteOrderMark: .absent,
+        lineEnding: .lf
+    ))
+
+    #expect(panels.saveRequests == 1)
+    let saved = try #require(await files.data(at: url))
+    #expect(!saved.starts(with: Data([0xFE, 0xFF])))
+    #expect(try TextFileCodec.decode(saved, assuming: .utf16BigEndian).text == "가\n나🙂")
+    let binding = try #require(workspace.activeFileContext()?.binding)
+    #expect(binding.encoding == .utf16BigEndian)
+    #expect(binding.byteOrderMark == .absent)
+    #expect(binding.lineEnding == .lf)
+    #expect(controller.fileFormatStatusSmokeState().text == "UTF-16 BE · LF")
+}
+
+@Test @MainActor func formatSaveAsRejectsTabSwitchWhilePanelIsOpen() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-routing-stale-format.txt")
+    let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let panels = PanelFake()
+    panels.saveURL = url
+    panels.blocksSavePanel = true
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: fileUseCase,
+        filePanels: panels,
+        fileConflictPresenter: panels,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    let original = try #require(workspace.activeFileContext())
+
+    let save = Task { @MainActor in
+        await controller.routeSaveFile(
+            conversion: TextFileConversion(
+                encoding: .utf16LittleEndian,
+                byteOrderMark: .present,
+                lineEnding: .crlf
+            ),
+            expectedContext: original
+        )
+    }
+    await panels.waitUntilSavePanelEntered()
+    #expect(await workspace.addScratch() == .applied(.saved))
+    panels.releaseSavePanel()
+    await save.value
+
+    #expect(await files.data(at: url) == nil)
+    #expect(workspace.activeFileContext()?.tabID != original.tabID)
+    #expect(workspace.activeFileContext()?.binding == nil)
+    #expect(panels.failures.isEmpty)
+}
+
+@Test @MainActor func immediateTerminationJoinsAcceptedBlockedFormatConversion() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let recoveryStore = RoutingRecoveryStore()
+    let recovery = SessionRecoveryUseCase(
+        workspace: workspace,
+        editor: editor,
+        store: recoveryStore,
+        debounce: .seconds(60)
+    )
+    let coordinator = ApplicationTerminationCoordinator()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-routing-format-termination.txt")
+    await files.seed("first\nsecond", at: url)
+    let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: fileUseCase,
+        recoveryUseCase: recovery,
+        terminationCoordinator: coordinator,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    guard case .opened = await fileUseCase.open(url) else {
+        Issue.record("format termination fixture did not open")
+        return
+    }
+    await files.armNextWrite()
+
+    controller.performConvertToCRLF()
+    var terminationReply: Bool?
+    #expect(coordinator.applicationShouldTerminate { terminationReply = $0 } == .terminateLater)
+    await files.waitUntilWriteIsBlocked()
+    for _ in 0..<20 { await Task.yield() }
+    #expect(terminationReply == nil)
+    #expect(await recoveryStore.commitCount == 0)
+
+    await files.releaseWrite()
+    for _ in 0..<2_000 where terminationReply == nil { await Task.yield() }
+    #expect(terminationReply == true)
+    #expect(await files.text(at: url) == "first\r\nsecond")
+    #expect(workspace.activeFileContext()?.binding?.lineEnding == .crlf)
+    #expect(await recoveryStore.commitCount == 1)
 }
 
 @Test @MainActor func cleanApplicationTerminationWaitsForFinalRecoveryFlush() async {

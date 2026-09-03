@@ -202,6 +202,38 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate {
                 fflush(stdout)
                 Darwin._exit(0)
             }
+        } else if let formatSmokePath = environment["DUCKPAD_FORMAT_SMOKE_FILE"] {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                let url = URL(fileURLWithPath: formatSmokePath)
+                let original = "한\r둘🙂"
+                do {
+                    try TextFileCodec.encode(
+                        original,
+                        encoding: .utf16LittleEndian,
+                        byteOrderMark: .absent
+                    ).write(to: url)
+                } catch {
+                    preconditionFailure("format smoke seed failed: \(error)")
+                }
+                guard case .opened = await fileUseCase.open(url, assuming: .utf16LittleEndian),
+                      controller.fileFormatStatusSmokeState().encoding == .utf16LittleEndian,
+                      controller.fileFormatStatusSmokeState().lineEnding == .cr else {
+                    preconditionFailure("explicit UTF-16 LE open did not publish format state")
+                }
+                guard case .saved = await fileUseCase.saveActive(conversion: TextFileConversion(
+                    encoding: .utf8,
+                    byteOrderMark: .present,
+                    lineEnding: .crlf
+                )), let saved = try? Data(contentsOf: url),
+                saved.starts(with: Data([0xEF, 0xBB, 0xBF])),
+                String(data: saved.dropFirst(3), encoding: .utf8) == "한\r\n둘🙂" else {
+                    preconditionFailure("UTF-8 BOM/CRLF conversion did not persist exact bytes")
+                }
+                print("Duckpad format smoke ready: UTF-16 LE open -> UTF-8 BOM + CRLF")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
         } else if environment["DUCKPAD_SEARCH_SMOKE"] == "1" {
             Task { @MainActor in
                 await controller.waitForStartup()

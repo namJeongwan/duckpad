@@ -228,18 +228,31 @@ public final class FileDocumentUseCase {
         return .activated(tabID)
     }
 
-    public func saveActive(conversion: TextFileConversion? = nil) async -> FileSaveOutcome {
+    public func saveActive(
+        conversion: TextFileConversion? = nil,
+        expectedContext: FileWorkspaceContext? = nil
+    ) async -> FileSaveOutcome {
         await acquireOperation()
         defer { releaseOperation() }
         guard let context = workspace.activeFileContext() else { return .failed(.noActiveDocument) }
+        guard expectedContext == nil || expectedContext == context else {
+            return .failed(.comparisonInvalidated)
+        }
         guard let binding = context.binding else { return .requiresDestination(context.tabID) }
         return await save(context: context, to: URL(fileURLWithPath: binding.canonicalPath), conversion: conversion, overwrite: false)
     }
 
-    public func saveAs(_ url: URL, conversion: TextFileConversion? = nil) async -> FileSaveOutcome {
+    public func saveAs(
+        _ url: URL,
+        conversion: TextFileConversion? = nil,
+        expectedContext: FileWorkspaceContext? = nil
+    ) async -> FileSaveOutcome {
         await acquireOperation()
         defer { releaseOperation() }
         guard let context = workspace.activeFileContext() else { return .failed(.noActiveDocument) }
+        guard expectedContext == nil || expectedContext == context else {
+            return .failed(.comparisonInvalidated)
+        }
         do {
             let canonical = try await store.canonicalURL(for: url)
             return await save(context: context, to: canonical, conversion: conversion, overwrite: false)
@@ -375,6 +388,10 @@ public final class FileDocumentUseCase {
         conversion: TextFileConversion?,
         overwrite: Bool
     ) async -> FileSaveOutcome {
+        guard workspace.fileContext(tabID: context.tabID) == context else {
+            pendingConflict = nil
+            return .failed(.comparisonInvalidated)
+        }
         if let duplicate = workspace.tabID(canonicalPath: url.path), duplicate != context.tabID {
             return .failed(.session(.duplicateFileBinding(url.path)))
         }
@@ -406,16 +423,21 @@ public final class FileDocumentUseCase {
                 lineEnding: lineEnding == .none ? inferLineEnding(text) : lineEnding,
                 observedIdentity: identity
             )
-            switch await workspace.bindSavedFile(
+            switch await workspace.bindSavedFileIfCurrent(
                 tabID: context.tabID,
                 binding: binding,
                 title: url.lastPathComponent,
-                savedRevision: snapshot.revision
+                savedRevision: snapshot.revision,
+                expectedBufferID: context.buffer.bufferID,
+                expectedBinding: context.binding
             ) {
             case .applied:
                 pendingConflict = nil
                 return .saved(context.tabID)
             case .persistenceFailed(let failure): return .failed(.workspace(failure))
+            case .rejected(.fileBindingConflict), .rejected(.unknownTab):
+                pendingConflict = nil
+                return .failed(.comparisonInvalidated)
             case .rejected(let error): return .failed(.session(error))
             }
         } catch .conflict(let current) {

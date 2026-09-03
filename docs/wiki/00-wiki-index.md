@@ -65,8 +65,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 51 | [Phase 20 independent code review](reviews/2026-09-03-phase-20-workspace-file-browser-code-review.md) | **Content approved — latest Phase 20 evidence** | descriptor-relative file authority, serialized/reconciled root mutation, security-scope lifetime, accepted file-open termination ordering과 corrupt-state preservation을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 52 | [Phase 21 native multiple windows](24-native-multiple-windows.md) | **Approved, committed and pushed** | `Command-Shift-N` native window, key-window command routing, window별 recovery, 전체-window quit review와 same-file identity conflict 정책을 기록한다. commit `58d6772`가 exact receipt/audit 후 `origin/main`에 push됐다. |
 | 53 | [Phase 21 independent code review](reviews/2026-09-03-phase-21-native-multiple-windows-code-review.md) | **Content approved — latest Phase 21 evidence** | 최초 3 Major/1 Minor의 late-window admission, close-reset join, recovery-root TOCTOU 및 test gap을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
-| 54 | [Phase 22 current-document completion and symbols](25-document-intelligence.md) | **Implemented; remediation re-review pending** | `Control-Space` bounded local completion, `Command-Option-O` searchable symbol outline, streamed 4 MiB analysis, exact split-pane authority와 UTF-8 navigation을 기록한다. |
+| 54 | [Phase 22 current-document completion and symbols](25-document-intelligence.md) | **Approved, committed and pushed** | `Control-Space` bounded local completion, `Command-Option-O` searchable symbol outline, streamed 4 MiB analysis와 exact split-pane authority를 기록한다. commit `83dcb74`가 exact receipt/audit 후 `origin/main`에 push됐다. |
 | 55 | [Phase 22 independent code review](reviews/2026-09-03-phase-22-document-intelligence-code-review.md) | **Content approved — latest Phase 22 evidence** | 최초 2 Major/1 Minor의 analyzer CPU/memory, split-pane stale routing, CR-only outline 결함을 bounded streaming/raw prefilter/cancellation, exact-pane identity, mixed-EOL scanner로 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
+| 56 | [Phase 23 encoding and line endings](26-encoding-and-line-endings.md) | **Content approved; exact receipt pending** | Format menu/status control, explicit BOM-less UTF-16 open, UTF-8/BOM/UTF-16 및 LF/CRLF/CR durable conversion과 exact binding/lifecycle authority를 기록한다. |
+| 57 | [Phase 23 independent code review](reviews/2026-09-03-phase-23-encoding-eol-code-review.md) | **Content approved — latest Phase 23 evidence** | 최초 2 Major의 conflict/post-write binding authority와 accepted format-task termination join 결함을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 
 상태 정의:
 
@@ -122,6 +124,32 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 23 P23-01/P23-02 remediation
+
+- **Agent/role:** `/root`, direct remediation builder; independent reviewer verdict 문서는 수정하지 않았다.
+- **P23-01:** conflict overwrite는 write 전에 exact `FileWorkspaceContext`를 재검증하고, receipt publication은 workspace transaction 안에서 expected BufferID와 prior `FileBinding`을 비교한다. rebind-before-write는 old bytes를 보존하며, rebind-during-durable-write는 newer binding/dirty authority를 보존하고 typed invalidation으로 끝난다.
+- **P23-02:** native Open/Save/Save As/format actions를 synchronous file-task registry에 등록하고 accepted save는 later termination lock을 통과시킨다. application/window termination은 이 task를 dirty review와 final recovery flush 전에 join한다.
+- **Validation:** adversarial remediation 3/3 및 surrounding file/lifecycle focused 9/9 PASS. Exact-current Debug/Release each 320/320 PASS; independent remediation re-review remains pending.
+- **Boundary:** README, ignored Notepad++, user-owned doc04/vendor script와 reviewer verdict는 보존했다.
+
+### 2026-09-03 — Phase 23 encoding and line endings
+
+- **Agent/role:** `/root`, direct investigator and builder; no new implementation agent was added.
+- **Implementation:** authoritative `FileBinding`-driven format status, native Format/status menus, explicit UTF-8/UTF-16 open hints, UTF-8/BOM/UTF-16 and LF/CRLF/CR durable conversion routing through existing atomic save/conflict retry.
+- **Safety:** selecting the active format is a no-op; encoding and EOL choices preserve one another; scratch conversion requires Save As; startup/termination admission disables all commands. Exact context capture rejects Save-panel and serialized-operation tab-switch races without writing the rejected destination. No new shortcut is assigned, so existing shortcut uniqueness remains intact.
+- **Validation:** focused menu/routing/race tests pass. Exact-current Debug and Release each pass 317/317 tests; the real local-store production smoke verifies UTF-16 LE open to exact UTF-8 BOM/CRLF bytes; parity 31/31, governance 8/8, default checker, and diff-check pass. Independent review remains pending.
+- **Boundary:** legacy guessed code pages, macros, README, ignored Notepad++, and user-owned doc04/vendor-script changes are excluded.
+
+### 2026-09-03 — Phase 23 independent code review
+
+- **Agent/role:** `/root/phase1_code_review`, independent content reviewer; Phase 23 구현에는 참여하지 않았다.
+- **Scope:** exact nine-path candidate의 explicit UTF-16 open, durable encoding/EOL conversion, scratch Save As, conflict/context authority, termination ordering, native menus/status/accessibility/shortcut을 검토했다.
+- **Initial verdict:** **CHANGES REQUIRED — 0 Blocker, 2 Major, 0 Minor.** P23-01은 stale conflict/write가 newer binding을 덮고, P23-02는 accepted format Task가 termination barrier에 등록/join되지 않았다.
+- **Focused closure:** exact transactional BufferID/binding publication이 pre-write 및 post-write rebind를 안전하게 거절한다. synchronous file-task registry와 accepted-before-termination path가 즉시 Cmd-Q에도 blocked write를 join한 뒤 final recovery를 flush한다.
+- **Validation:** remediation candidate/tree/diff/message 및 exclusion/cached check PASS; independent adversarial 3/3, combined focused 10/10 PASS. Original stale-binding probe는 typed invalidation과 B binding 보존/exit 0으로 전환됐다. Exact product/test/work-doc path+byte digest는 `2a38aa0a8e8c9aee5e7cd4c1d9296d27e3d3841d0e5e8fd3b0c16d7c5cc06edc`이다.
+- **Final verdict:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** Review/index evidence 반영 후 exact candidate refreeze와 receipt는 별도 단계다. 상세 evidence는 [Phase 23 review](reviews/2026-09-03-phase-23-encoding-eol-code-review.md)에 있다.
+- **Safety:** review 문서와 index review row/work log만 수정했다. product/source/tests/work doc/stage/commit/receipt는 변경하지 않았고 user-owned doc04/vendor script를 보존했다.
 
 ### 2026-09-03 — Phase 22 current-document completion and symbols
 

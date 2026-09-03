@@ -18,6 +18,14 @@ public struct LanguageStatusSmokeState: Equatable, Sendable {
     public let isWarning: Bool
 }
 
+public struct FileFormatStatusSmokeState: Equatable, Sendable {
+    public let text: String
+    public let encoding: TextFileEncoding
+    public let byteOrderMark: ByteOrderMark
+    public let lineEnding: LineEnding
+    public let isEnabled: Bool
+}
+
 public struct ExtensionStatusSmokeState: Equatable, Sendable {
     public let text: String
     public let isWarning: Bool
@@ -175,6 +183,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let persistenceBanner = PersistenceErrorBanner(frame: .zero)
     private let languageStatus = NSButton(title: "Plain Text", target: nil, action: nil)
     private let symbolStatus = NSButton(title: "Symbols", target: nil, action: nil)
+    private let fileFormatStatus = NSButton(title: "UTF-8 · No EOL", target: nil, action: nil)
     private let extensionStatus = NSButton(title: "Extensions loading…", target: nil, action: nil)
     private let extensionsPanel = ExtensionsManagerPanel()
     let symbolOutlinePanel = SymbolOutlinePanel()
@@ -223,6 +232,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var pendingCloseTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingRestoreClosedTabTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingFolderActivationTasks: [UUID: Task<Void, Never>] = [:]
+    private var pendingFileCommandTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingWorkspaceBrowserTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingWorkspaceFileOpenTasks: [UUID: Task<Void, Never>] = [:]
     private var workspaceRestoreTask: Task<Void, Never>?
@@ -357,6 +367,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceRestoreTask?.cancel()
         pendingNewScratchTasks.values.forEach { $0.cancel() }
         pendingFolderActivationTasks.values.forEach { $0.cancel() }
+        pendingFileCommandTasks.values.forEach { $0.cancel() }
         pendingWorkspaceBrowserTasks.values.forEach { $0.cancel() }
         pendingWorkspaceFileOpenTasks.values.forEach { $0.cancel() }
     }
@@ -438,6 +449,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         LanguageStatusSmokeState(
             text: languageStatus.title,
             isWarning: languageStatusIsWarning
+        )
+    }
+
+    public func fileFormatStatusSmokeState() -> FileFormatStatusSmokeState {
+        let format = activeTextFileFormat
+        return FileFormatStatusSmokeState(
+            text: fileFormatStatus.title,
+            encoding: format.encoding,
+            byteOrderMark: format.byteOrderMark,
+            lineEnding: format.lineEnding,
+            isEnabled: fileFormatStatus.isEnabled
         )
     }
 
@@ -741,7 +763,73 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     @objc public func performOpenFile(_ sender: Any? = nil) {
-        Task { [weak self] in await self?.routeOpenFile() }
+        guard workspaceInteractionsAreActionable else { return }
+        beginFileCommandTask { [weak self] in await self?.routeOpenFile() }
+    }
+
+    @objc public func performOpenAsUTF8(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable else { return }
+        beginFileCommandTask { [weak self] in await self?.routeOpenFile(encodingHint: .utf8) }
+    }
+
+    @objc public func performOpenAsUTF16LittleEndian(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable else { return }
+        beginFileCommandTask { [weak self] in
+            await self?.routeOpenFile(encodingHint: .utf16LittleEndian)
+        }
+    }
+
+    @objc public func performOpenAsUTF16BigEndian(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable else { return }
+        beginFileCommandTask { [weak self] in
+            await self?.routeOpenFile(encodingHint: .utf16BigEndian)
+        }
+    }
+
+    @objc public func performConvertToUTF8(_ sender: Any? = nil) {
+        routeFileFormatConversion(encoding: .utf8, byteOrderMark: .absent)
+    }
+
+    @objc public func performConvertToUTF8BOM(_ sender: Any? = nil) {
+        routeFileFormatConversion(encoding: .utf8, byteOrderMark: .present)
+    }
+
+    @objc public func performConvertToUTF16LittleEndian(_ sender: Any? = nil) {
+        routeFileFormatConversion(encoding: .utf16LittleEndian, byteOrderMark: .present)
+    }
+
+    @objc public func performConvertToUTF16LittleEndianWithoutBOM(_ sender: Any? = nil) {
+        routeFileFormatConversion(encoding: .utf16LittleEndian, byteOrderMark: .absent)
+    }
+
+    @objc public func performConvertToUTF16BigEndian(_ sender: Any? = nil) {
+        routeFileFormatConversion(encoding: .utf16BigEndian, byteOrderMark: .present)
+    }
+
+    @objc public func performConvertToUTF16BigEndianWithoutBOM(_ sender: Any? = nil) {
+        routeFileFormatConversion(encoding: .utf16BigEndian, byteOrderMark: .absent)
+    }
+
+    @objc public func performConvertToLF(_ sender: Any? = nil) {
+        routeFileFormatConversion(lineEnding: .lf)
+    }
+
+    @objc public func performConvertToCRLF(_ sender: Any? = nil) {
+        routeFileFormatConversion(lineEnding: .crlf)
+    }
+
+    @objc public func performConvertToCR(_ sender: Any? = nil) {
+        routeFileFormatConversion(lineEnding: .cr)
+    }
+
+    @objc public func performShowFileFormatMenu(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, fileUseCase != nil else { return }
+        let menu = DuckpadMainMenuFactory.makeFormatMenu(target: self)
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: fileFormatStatus.bounds.height + 2),
+            in: fileFormatStatus
+        )
     }
 
     @objc public func performAddWorkspaceFolder(_ sender: Any? = nil) {
@@ -774,11 +862,19 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     @objc public func performSaveFile(_ sender: Any? = nil) {
-        Task { [weak self] in await self?.routeSaveFile() }
+        guard workspaceInteractionsAreActionable,
+              let context = workspace.activeFileContext() else { return }
+        beginFileCommandTask { [weak self] in
+            await self?.routeAcceptedSaveFile(expectedContext: context)
+        }
     }
 
     @objc public func performSaveFileAs(_ sender: Any? = nil) {
-        Task { [weak self] in await self?.routeSaveFileAs() }
+        guard workspaceInteractionsAreActionable,
+              let context = workspace.activeFileContext() else { return }
+        beginFileCommandTask { [weak self] in
+            await self?.routeAcceptedSaveFileAs(expectedContext: context)
+        }
     }
 
     @objc public func performShowFind(_ sender: Any? = nil) {
@@ -895,6 +991,19 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if let command = editorCommand(for: menuItem.action) {
             return actionableEditorCommands?.canPerform(command) ?? false
+        }
+        if let choice = fileEncodingChoice(for: menuItem.action) {
+            let current = activeTextFileFormat
+            menuItem.state = current.encoding == choice.encoding
+                && current.byteOrderMark == choice.byteOrderMark ? .on : .off
+            return workspaceInteractionsAreActionable && fileUseCase != nil
+        }
+        if let lineEnding = fileLineEndingChoice(for: menuItem.action) {
+            menuItem.state = activeTextFileFormat.lineEnding == lineEnding ? .on : .off
+            return workspaceInteractionsAreActionable && fileUseCase != nil
+        }
+        if isOpenUsingEncodingAction(menuItem.action) {
+            return workspaceInteractionsAreActionable && fileUseCase != nil && filePanels != nil
         }
         if menuItem.action == #selector(performNewScratch(_:)) {
             return workspace.snapshot().startup == .ready && !terminationReviewInProgress
@@ -1070,13 +1179,90 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    public func routeOpenFile() async {
+    private var activeTextFileFormat: TextFileConversion {
+        textFileFormat(for: workspace.activeFileContext())
+    }
+
+    private func textFileFormat(for context: FileWorkspaceContext?) -> TextFileConversion {
+        guard let binding = context?.binding else {
+            return TextFileConversion(
+                encoding: .utf8,
+                byteOrderMark: .absent,
+                lineEnding: .none
+            )
+        }
+        return TextFileConversion(
+            encoding: binding.encoding,
+            byteOrderMark: binding.byteOrderMark,
+            lineEnding: binding.lineEnding
+        )
+    }
+
+    private func fileEncodingChoice(
+        for action: Selector?
+    ) -> (encoding: TextFileEncoding, byteOrderMark: ByteOrderMark)? {
+        switch action {
+        case #selector(performConvertToUTF8(_:)): (.utf8, .absent)
+        case #selector(performConvertToUTF8BOM(_:)): (.utf8, .present)
+        case #selector(performConvertToUTF16LittleEndian(_:)): (.utf16LittleEndian, .present)
+        case #selector(performConvertToUTF16LittleEndianWithoutBOM(_:)): (.utf16LittleEndian, .absent)
+        case #selector(performConvertToUTF16BigEndian(_:)): (.utf16BigEndian, .present)
+        case #selector(performConvertToUTF16BigEndianWithoutBOM(_:)): (.utf16BigEndian, .absent)
+        default: nil
+        }
+    }
+
+    private func fileLineEndingChoice(for action: Selector?) -> LineEnding? {
+        switch action {
+        case #selector(performConvertToLF(_:)): .lf
+        case #selector(performConvertToCRLF(_:)): .crlf
+        case #selector(performConvertToCR(_:)): .cr
+        default: nil
+        }
+    }
+
+    private func isOpenUsingEncodingAction(_ action: Selector?) -> Bool {
+        switch action {
+        case #selector(performOpenAsUTF8(_:)),
+             #selector(performOpenAsUTF16LittleEndian(_:)),
+             #selector(performOpenAsUTF16BigEndian(_:)):
+            true
+        default:
+            false
+        }
+    }
+
+    private func routeFileFormatConversion(
+        encoding: TextFileEncoding? = nil,
+        byteOrderMark: ByteOrderMark? = nil,
+        lineEnding: LineEnding? = nil
+    ) {
+        guard workspaceInteractionsAreActionable, fileUseCase != nil,
+              let context = workspace.activeFileContext() else { return }
+        let current = textFileFormat(for: context)
+        let conversion = TextFileConversion(
+            encoding: encoding ?? current.encoding,
+            byteOrderMark: byteOrderMark ?? current.byteOrderMark,
+            lineEnding: lineEnding ?? current.lineEnding
+        )
+        guard conversion != current else { return }
+        beginFileCommandTask { [weak self] in
+            await self?.routeAcceptedSaveFile(
+                conversion: conversion,
+                expectedContext: context
+            )
+        }
+    }
+
+    public func routeOpenFile(encodingHint: TextFileEncoding? = nil) async {
         guard workspaceInteractionsAreActionable,
               let fileUseCase,
               let url = await filePanels?.chooseOpenURL(attachedTo: window),
               workspaceInteractionsAreActionable else { return }
-        await handle(fileOutcome: await fileUseCase.open(url)) { [weak self] in
-            Task { @MainActor [weak self] in await self?.routeOpenFile() }
+        await handle(fileOutcome: await fileUseCase.open(url, assuming: encodingHint)) { [weak self] in
+            self?.beginFileCommandTask { [weak self] in
+                await self?.routeOpenFile(encodingHint: encodingHint)
+            }
         }
     }
 
@@ -1200,26 +1386,120 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         for task in tasks { task.cancel() }
     }
 
-    public func routeSaveFile() async {
-        guard workspaceInteractionsAreActionable, let fileUseCase else { return }
-        let outcome = await fileUseCase.saveActive()
+    private func beginFileCommandTask(
+        _ operation: @escaping @MainActor () async -> Void
+    ) {
+        let token = UUID()
+        let task = Task { @MainActor [weak self] in
+            defer { self?.pendingFileCommandTasks.removeValue(forKey: token) }
+            await operation()
+        }
+        pendingFileCommandTasks[token] = task
+    }
+
+    public func routeSaveFile(
+        conversion: TextFileConversion? = nil,
+        expectedContext: FileWorkspaceContext? = nil
+    ) async {
+        await routeSaveFile(
+            conversion: conversion,
+            expectedContext: expectedContext,
+            acceptedBeforeTermination: false
+        )
+    }
+
+    private func routeAcceptedSaveFile(
+        conversion: TextFileConversion? = nil,
+        expectedContext: FileWorkspaceContext
+    ) async {
+        await routeSaveFile(
+            conversion: conversion,
+            expectedContext: expectedContext,
+            acceptedBeforeTermination: true
+        )
+    }
+
+    private func routeSaveFile(
+        conversion: TextFileConversion?,
+        expectedContext: FileWorkspaceContext?,
+        acceptedBeforeTermination: Bool
+    ) async {
+        guard !hasTornDownWindow,
+              workspaceInteractionsAreActionable || acceptedBeforeTermination,
+              let fileUseCase,
+              let context = expectedContext ?? workspace.activeFileContext(),
+              workspace.activeFileContext() == context else { return }
+        let outcome = await fileUseCase.saveActive(
+            conversion: conversion,
+            expectedContext: context
+        )
         if case .requiresDestination = outcome {
-            await routeSaveFileAs()
+            await routeSaveFileAs(
+                conversion: conversion,
+                expectedContext: context,
+                acceptedBeforeTermination: acceptedBeforeTermination
+            )
         } else {
             _ = await resolve(fileOutcome: outcome) { [weak self] in
-                Task { @MainActor [weak self] in await self?.routeSaveFile() }
+                self?.beginFileCommandTask { [weak self] in
+                    await self?.routeSaveFile(
+                        conversion: conversion,
+                        expectedContext: context,
+                        acceptedBeforeTermination: true
+                    )
+                }
             }
         }
     }
 
-    public func routeSaveFileAs() async {
-        guard workspaceInteractionsAreActionable,
+    public func routeSaveFileAs(
+        conversion: TextFileConversion? = nil,
+        expectedContext: FileWorkspaceContext? = nil
+    ) async {
+        await routeSaveFileAs(
+            conversion: conversion,
+            expectedContext: expectedContext,
+            acceptedBeforeTermination: false
+        )
+    }
+
+    private func routeAcceptedSaveFileAs(
+        conversion: TextFileConversion? = nil,
+        expectedContext: FileWorkspaceContext
+    ) async {
+        await routeSaveFileAs(
+            conversion: conversion,
+            expectedContext: expectedContext,
+            acceptedBeforeTermination: true
+        )
+    }
+
+    private func routeSaveFileAs(
+        conversion: TextFileConversion?,
+        expectedContext: FileWorkspaceContext?,
+        acceptedBeforeTermination: Bool
+    ) async {
+        guard !hasTornDownWindow,
+              workspaceInteractionsAreActionable || acceptedBeforeTermination,
               let fileUseCase,
-              let context = workspace.activeFileContext(),
+              let context = expectedContext ?? workspace.activeFileContext(),
+              workspace.activeFileContext() == context,
               let url = await filePanels?.chooseSaveURL(suggestedName: context.title, attachedTo: window),
-              workspaceInteractionsAreActionable else { return }
-        _ = await resolve(fileOutcome: await fileUseCase.saveAs(url)) { [weak self] in
-            Task { @MainActor [weak self] in await self?.routeSaveFileAs() }
+              workspaceInteractionsAreActionable || acceptedBeforeTermination,
+              !hasTornDownWindow,
+              workspace.activeFileContext() == context else { return }
+        _ = await resolve(fileOutcome: await fileUseCase.saveAs(
+            url,
+            conversion: conversion,
+            expectedContext: context
+        )) { [weak self] in
+            self?.beginFileCommandTask { [weak self] in
+                await self?.routeSaveFileAs(
+                    conversion: conversion,
+                    expectedContext: context,
+                    acceptedBeforeTermination: true
+                )
+            }
         }
     }
 
@@ -1229,6 +1509,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public var requiresTerminationReview: Bool {
         hasDirtyDocuments || recoveryUseCase != nil || extensionUseCase != nil
+            || !pendingFileCommandTasks.isEmpty
             || !pendingWorkspaceBrowserTasks.isEmpty || !pendingWorkspaceFileOpenTasks.isEmpty
     }
 
@@ -1342,6 +1623,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             ?? pendingCloseTasks.values.first
             ?? pendingRestoreClosedTabTasks.values.first
             ?? pendingFolderActivationTasks.values.first
+            ?? pendingFileCommandTasks.values.first
             ?? pendingWorkspaceFileOpenTasks.values.first
             ?? pendingWorkspaceBrowserTasks.values.first {
             await task.value
@@ -1513,8 +1795,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             action: #selector(performShowDocumentSymbols(_:)),
             accessibilityIdentifier: "duckpad.symbols.status"
         )
+        configureStatusButton(
+            fileFormatStatus,
+            imageName: "textformat",
+            action: #selector(performShowFileFormatMenu(_:)),
+            accessibilityIdentifier: "duckpad.file-format.status"
+        )
         statusBar.addSubview(extensionStatus)
         statusBar.addSubview(symbolStatus)
+        statusBar.addSubview(fileFormatStatus)
         statusBar.addSubview(languageStatus)
         NSLayoutConstraint.activate([
             persistenceBanner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
@@ -1537,11 +1826,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             extensionStatus.leadingAnchor.constraint(equalTo: statusBar.leadingAnchor, constant: 6),
             extensionStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
             extensionStatus.heightAnchor.constraint(equalToConstant: 20),
-            symbolStatus.leadingAnchor.constraint(greaterThanOrEqualTo: extensionStatus.trailingAnchor, constant: 8),
-            symbolStatus.centerXAnchor.constraint(equalTo: statusBar.centerXAnchor),
+            symbolStatus.leadingAnchor.constraint(equalTo: extensionStatus.trailingAnchor, constant: 8),
             symbolStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
             symbolStatus.heightAnchor.constraint(equalToConstant: 20),
-            symbolStatus.trailingAnchor.constraint(lessThanOrEqualTo: languageStatus.leadingAnchor, constant: -8),
+            symbolStatus.trailingAnchor.constraint(lessThanOrEqualTo: fileFormatStatus.leadingAnchor, constant: -8),
+            fileFormatStatus.trailingAnchor.constraint(equalTo: languageStatus.leadingAnchor, constant: -8),
+            fileFormatStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
+            fileFormatStatus.heightAnchor.constraint(equalToConstant: 20),
             languageStatus.trailingAnchor.constraint(equalTo: statusBar.trailingAnchor, constant: -6),
             languageStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
             languageStatus.heightAnchor.constraint(equalToConstant: 20),
@@ -1556,6 +1847,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         updateWorkspaceInteractionAdmission(snapshot)
         editorBinding.render(snapshot)
         updateWindowTitle(snapshot)
+        renderFileFormatStatus()
     }
 
     private func renderWorkspaceBrowser(_ state: WorkspaceBrowserState) {
@@ -1634,6 +1926,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             activeEditor.setInputEnabled(false)
         }
         updateWindowTitle(change.snapshot)
+        renderFileFormatStatus()
         recoveryUseCase?.workspaceDidChange(change)
         if change.snapshot.startup == .ready, case .bufferEdited = change.kind {
             languageDetectionTask?.cancel()
@@ -1661,6 +1954,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceSidebar.setInteractionsEnabled(enabled && workspaceBrowserUseCase?.acceptsCommands == true)
         languageStatus.isEnabled = enabled
         symbolStatus.isEnabled = enabled && documentIntelligenceUseCase != nil
+        fileFormatStatus.isEnabled = enabled && fileUseCase != nil
         extensionStatus.isEnabled = enabled
     }
 
@@ -2095,6 +2389,32 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         window?.title = "\(active.title) — Duckpad"
         window?.isDocumentEdited = active.isDirty
+    }
+
+    private func renderFileFormatStatus() {
+        let format = activeTextFileFormat
+        let hasFileBinding = workspace.activeFileContext()?.binding != nil
+        let encoding: String
+        switch format.encoding {
+        case .utf8:
+            encoding = format.byteOrderMark == .present ? "UTF-8 BOM" : "UTF-8"
+        case .utf16LittleEndian:
+            encoding = format.byteOrderMark == .present ? "UTF-16 LE BOM" : "UTF-16 LE"
+        case .utf16BigEndian:
+            encoding = format.byteOrderMark == .present ? "UTF-16 BE BOM" : "UTF-16 BE"
+        }
+        let ending: String
+        switch format.lineEnding {
+        case .none where !hasFileBinding: ending = "Unsaved"
+        case .none: ending = "No EOL"
+        case .lf: ending = "LF"
+        case .crlf: ending = "CRLF"
+        case .cr: ending = "CR"
+        case .mixed: ending = "Mixed EOL"
+        }
+        setStatus(fileFormatStatus, text: "\(encoding) · \(ending)", warning: false)
+        fileFormatStatus.toolTip = "Encoding: \(encoding); line endings: \(ending). Choose to convert and save."
+        fileFormatStatus.setAccessibilityValue("\(encoding), \(ending)")
     }
 
     private func renderLanguageState(_ state: LanguageServiceState) {
