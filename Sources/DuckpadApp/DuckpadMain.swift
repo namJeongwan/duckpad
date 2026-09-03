@@ -22,7 +22,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private var workspaceRootStore: LocalWorkspaceRootStore!
     private var extensionLoader: LocalExtensionPackageLoader!
     private var extensionPolicy: LocalExtensionPreferenceStore!
-    private var extensionTransport: ProcessPluginHostTransport!
+    private var extensionTransport: (any PluginHostTransport)!
     private var languageRegistry: LanguageRegistry!
     private var languageConfigurationIssue: String?
     private var settingsUseCase: AppSettingsUseCase!
@@ -58,10 +58,23 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     }
 
     private func finishLaunching() {
-        recoveryBase = environment["DUCKPAD_RECOVERY_ROOT"].map {
-            URL(fileURLWithPath: $0, isDirectory: true)
-        } ?? LocalRecoveryStore.defaultRoot()
-        fileStore = LocalTextFileStore()
+        let securityScopeSmokeNamespace = environment["DUCKPAD_SECURITY_SCOPE_SMOKE_NAMESPACE"].flatMap {
+            $0.range(of: #"^[a-zA-Z0-9-]{1,64}$"#, options: .regularExpression) == nil ? nil : $0
+        }
+        if let namespace = securityScopeSmokeNamespace {
+            recoveryBase = LocalRecoveryStore.defaultRoot().deletingLastPathComponent()
+                .appendingPathComponent("SecurityScopeSmoke", isDirectory: true)
+                .appendingPathComponent(namespace, isDirectory: true)
+        } else {
+            recoveryBase = environment["DUCKPAD_RECOVERY_ROOT"].map {
+                URL(fileURLWithPath: $0, isDirectory: true)
+            } ?? LocalRecoveryStore.defaultRoot()
+        }
+        let bookmarkArchive = securityScopeSmokeNamespace.map {
+            recoveryBase.deletingLastPathComponent()
+                .appendingPathComponent("\($0)-document-bookmarks.json", isDirectory: false)
+        } ?? LocalTextFileStore.defaultBookmarkArchiveURL()
+        fileStore = LocalTextFileStore(bookmarkArchiveURL: bookmarkArchive)
         folderSearchStore = LocalFolderSearchFileStore()
         let workspaceRootsArchive = environment["DUCKPAD_WORKSPACE_ROOTS_FILE"].map {
             URL(fileURLWithPath: $0, isDirectory: false)
@@ -80,7 +93,13 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             ?? LocalExtensionPreferenceStore.defaultRoot()
         extensionLoader = LocalExtensionPackageLoader(root: extensionsRoot)
         extensionPolicy = LocalExtensionPreferenceStore(root: policyRoot)
-        extensionTransport = ProcessPluginHostTransport(executableURL: ProcessPluginHostTransport.siblingOfCurrentExecutable())
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            extensionTransport = XPCPluginHostTransport()
+        } else {
+            extensionTransport = ProcessPluginHostTransport(
+                executableURL: ProcessPluginHostTransport.siblingOfCurrentExecutable()
+            )
+        }
         let runtime = makeWindowRuntime(recoveryRoot: recoveryBase)
         let controller = runtime.controller
         let workspace = runtime.workspace
@@ -102,7 +121,68 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         drainPendingFinderOpenRequests()
         restoreAdditionalWindows()
 
-        if environment["DUCKPAD_SETTINGS_SMOKE"] == "1" {
+        if let expectedPath = environment["DUCKPAD_SECURITY_SCOPE_SMOKE_WRITE"] {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                let expected = URL(fileURLWithPath: expectedPath).standardizedFileURL.path
+                for _ in 0..<4_000 {
+                    if workspace.activeFileContext()?.binding?.canonicalPath == expected { break }
+                    await Task.yield()
+                }
+                guard workspace.activeFileContext()?.binding?.canonicalPath == expected,
+                      workspace.activeFileContext()?.binding?.securityScopedBookmark != nil,
+                      let view = editor.activeScintillaView else {
+                    preconditionFailure("security-scope smoke did not bind a bookmarked Finder document")
+                }
+                view.insertCommittedText("bookmark-relaunch")
+                guard case .saved = await recoveryUseCase.flush() else {
+                    preconditionFailure("security-scope smoke recovery flush failed")
+                }
+                print("Duckpad security-scope smoke wrote bookmarked recovery")
+                fflush(stdout); Darwin._exit(86)
+            }
+        } else if let expectedPath = environment["DUCKPAD_SECURITY_SCOPE_SMOKE_VERIFY"] {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                let expected = URL(fileURLWithPath: expectedPath).standardizedFileURL.path
+                guard workspace.activeFileContext()?.binding?.canonicalPath == expected,
+                      workspace.activeFileContext()?.binding?.securityScopedBookmark != nil else {
+                    preconditionFailure("security-scoped bookmark was not restored after relaunch")
+                }
+                let saveOutcome = await fileUseCase.saveActive()
+                let savedText = try? String(contentsOf: URL(fileURLWithPath: expected), encoding: .utf8)
+                guard case .saved = saveOutcome, savedText == "bookmark-relaunch" else {
+                    FileHandle.standardError.write(Data(
+                        "restored security-scoped document could not be saved: \(saveOutcome), bytes: \(savedText ?? "<unreadable>")\n".utf8
+                    ))
+                    Darwin._exit(87)
+                }
+                guard case .saved = await recoveryUseCase.reset() else {
+                    preconditionFailure("security-scope smoke recovery cleanup failed")
+                }
+                await fileUseCase.releaseAllSecurityScopedAccess()
+                let bookmarkCleanup = await fileUseCase.clearPersistedSecurityScopedBookmarks()
+                precondition(bookmarkCleanup == nil, "security-scope bookmark cleanup failed")
+                print("Duckpad security-scope smoke restored bookmark and saved after relaunch")
+                fflush(stdout); Darwin._exit(0)
+            }
+        } else if let expectedPath = environment["DUCKPAD_FINDER_SMOKE_EXPECT"] {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                let expected = URL(fileURLWithPath: expectedPath).standardizedFileURL.path
+                for _ in 0..<4_000 {
+                    if workspace.activeFileContext()?.binding?.canonicalPath == expected { break }
+                    await Task.yield()
+                }
+                precondition(
+                    workspace.activeFileContext()?.binding?.canonicalPath == expected,
+                    "Finder/Open With request did not bind the requested document"
+                )
+                print("Duckpad Finder smoke ready: LaunchServices -> queued open -> bound document")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
+        } else if environment["DUCKPAD_SETTINGS_SMOKE"] == "1" {
             Task { @MainActor in
                 await controller.waitForStartup()
                 let requested = AppSettings(
@@ -180,6 +260,63 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 fflush(stdout)
                 Darwin._exit(0)
             }
+        } else if environment["DUCKPAD_EXTENSION_ISOLATION_SMOKE"] == "1" {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                let timeoutRequest = extensionIsolationRequest(
+                    requestID: UUID(),
+                    timeoutMilliseconds: 75
+                )
+                do {
+                    _ = try await extensionTransport.invoke(timeoutRequest)
+                    preconditionFailure("looping XPC module unexpectedly completed")
+                } catch let failure as ExtensionFailure {
+                    precondition(failure == .timedOut, "looping XPC module was not timed out: \(failure)")
+                } catch {
+                    preconditionFailure("looping XPC timeout was untyped: \(error)")
+                }
+
+                let cancelledID = UUID()
+                let cancelledTask = Task {
+                    try await extensionTransport.invoke(extensionIsolationRequest(
+                        requestID: cancelledID,
+                        timeoutMilliseconds: 10_000
+                    ))
+                }
+                try? await Task.sleep(for: .milliseconds(75))
+                await extensionTransport.cancel(requestID: cancelledID)
+                do {
+                    _ = try await cancelledTask.value
+                    preconditionFailure("cancelled looping XPC module unexpectedly completed")
+                } catch let failure as ExtensionFailure {
+                    precondition(failure == .cancelled, "looping XPC module was not cancelled: \(failure)")
+                } catch {
+                    preconditionFailure("looping XPC cancellation was untyped: \(error)")
+                }
+
+                guard let view = editor.activeScintillaView else {
+                    preconditionFailure("extension isolation smoke editor missing")
+                }
+                view.insertCommittedText("z\na")
+                view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 3))
+                await workspace.waitForPendingPersistence()
+                do {
+                    _ = try await extensionUseCase.invoke(
+                        ExtensionCommandID(rawValue: "com.duckpad.text-tools.sortSelectedLines")
+                    )
+                } catch {
+                    FileHandle.standardError.write(Data(
+                        "fresh XPC service did not recover after teardown: \(error)\n".utf8
+                    ))
+                    Darwin._exit(88)
+                }
+                precondition(
+                    editor.snapshot(for: workspace.snapshot().activeBuffer!.bufferID)?.text == "a\nz",
+                    "fresh XPC service returned an invalid edit"
+                )
+                print("Duckpad XPC isolation smoke ready: timeout + cancel teardown + fresh service")
+                fflush(stdout); Darwin._exit(0)
+            }
         } else if environment["DUCKPAD_EXTENSION_SMOKE"] == "1" {
             Task { @MainActor in
                 await controller.waitForStartup()
@@ -193,6 +330,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 do {
                     _ = try await extensionUseCase.invoke(ExtensionCommandID(rawValue: "com.duckpad.text-tools.sortSelectedLines"))
                 } catch {
+                    FileHandle.standardError.write(Data("Duckpad extension smoke failed: \(error)\n".utf8))
                     preconditionFailure("extension smoke invocation failed: \(error)")
                 }
                 guard editor.snapshot(for: workspace.snapshot().activeBuffer!.bufferID)?.text == "앞🙂\na\nz\n뒤🙂" else {
@@ -389,6 +527,46 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             }
         }
     }
+
+    private func extensionIsolationRequest(
+        requestID: UUID,
+        timeoutMilliseconds: UInt32
+    ) -> ExtensionHostRequest {
+        ExtensionHostRequest(
+            requestID: requestID,
+            module: Self.nonTerminatingWasmModule,
+            context: ExtensionInvocationContext(
+                extensionID: ExtensionID(rawValue: "com.duckpad.isolation-smoke"),
+                commandID: ExtensionCommandID(rawValue: "com.duckpad.isolation-smoke.loop"),
+                operation: 0,
+                inputScope: .document,
+                tabID: TabID(),
+                bufferID: BufferID(),
+                revision: 0,
+                selection: ExtensionUTF8Range(location: 0, length: 0),
+                utf8: Data()
+            ),
+            limits: ExtensionHostLimits(timeoutMilliseconds: timeoutMilliseconds)
+        )
+    }
+
+    private static let nonTerminatingWasmModule = Data([
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x0c, 0x02,
+        0x60, 0x03, 0x7f, 0x7f, 0x7f, 0x01, 0x7f,
+        0x60, 0x00, 0x01, 0x7f,
+        0x03, 0x04, 0x03, 0x00, 0x01, 0x01,
+        0x05, 0x04, 0x01, 0x01, 0x01, 0x01,
+        0x07, 0x4c, 0x04,
+        0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00,
+        0x0e, 0x64, 0x75, 0x63, 0x6b, 0x70, 0x61, 0x64, 0x5f, 0x69, 0x6e, 0x76, 0x6f, 0x6b, 0x65, 0x00, 0x00,
+        0x16, 0x64, 0x75, 0x63, 0x6b, 0x70, 0x61, 0x64, 0x5f, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x5f, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x00, 0x01,
+        0x15, 0x64, 0x75, 0x63, 0x6b, 0x70, 0x61, 0x64, 0x5f, 0x6f, 0x75, 0x74, 0x70, 0x75, 0x74, 0x5f, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68, 0x00, 0x02,
+        0x0a, 0x15, 0x03,
+        0x09, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x41, 0x00, 0x0b,
+        0x04, 0x00, 0x41, 0x00, 0x0b,
+        0x04, 0x00, 0x41, 0x00, 0x0b,
+    ])
 
     private func makeWindowRuntime(
         recoveryRoot: URL,
@@ -587,6 +765,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     @objc func performClearRecentDocuments(_ sender: Any?) {
         guard terminationCoordinator.permitsApplicationCommands else { return }
         NSDocumentController.shared.clearRecentDocuments(sender)
+        let task = Task { [fileStore] in _ = try? await fileStore?.clearPersistedSecurityScopedBookmarks() }
+        terminationCoordinator.trackApplicationTask(task)
         if let target = activeDocumentController { installMainMenu(target: target) }
     }
 
@@ -681,7 +861,9 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     }
 
     private func installDevelopmentAppIcon() {
-        guard let url = Bundle.module.url(forResource: "Duckpad", withExtension: "icns"),
+        let iconURL = Bundle.main.url(forResource: "Duckpad", withExtension: "icns")
+            ?? Bundle.module.url(forResource: "Duckpad", withExtension: "icns")
+        guard let url = iconURL,
               let image = NSImage(contentsOf: url) else {
             assertionFailure("Bundled Duckpad.icns is missing or invalid")
             return

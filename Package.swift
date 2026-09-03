@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "DuckpadEditorAdapter", targets: ["DuckpadEditorAdapter"]),
         .executable(name: "DuckpadApp", targets: ["DuckpadApp"]),
         .executable(name: "DuckpadPluginHost", targets: ["DuckpadPluginHost"]),
+        .executable(name: "DuckpadPluginRuntime", targets: ["DuckpadPluginRuntime"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "6.2.4"),
@@ -130,6 +131,7 @@ let package = Package(
                 .define("WASM_ENABLE_AOT", to: "0"),
                 .define("WASM_ENABLE_JIT", to: "0"),
                 .define("WASM_ENABLE_FAST_JIT", to: "0"),
+                .define("WASM_ENABLE_INSTRUCTION_METERING", to: "1"),
                 .define("WASM_ENABLE_LIBC_BUILTIN", to: "0"),
                 .define("WASM_ENABLE_LIBC_WASI", to: "0"),
                 .define("WASM_ENABLE_UVWASI", to: "0"),
@@ -152,6 +154,12 @@ let package = Package(
         .target(
             name: "DuckpadPluginSupport",
             dependencies: ["DuckpadApplication", "DuckpadDomain"]
+        ),
+        .target(
+            name: "DuckpadPluginRuntimeCore",
+            dependencies: [
+                "DuckpadApplication", "DuckpadDomain", "DuckpadPluginSupport", "DuckpadWAMRBridge",
+            ]
         ),
         .target(name: "DuckpadDomain"),
         .target(name: "DuckpadApplication", dependencies: ["DuckpadDomain"]),
@@ -193,7 +201,13 @@ let package = Package(
         ),
         .executableTarget(
             name: "DuckpadPluginHost",
-            dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadPluginSupport", "DuckpadWAMRBridge"]
+            dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadPluginRuntimeCore", "DuckpadPluginSupport"]
+        ),
+        .executableTarget(
+            name: "DuckpadPluginRuntime",
+            dependencies: [
+                "DuckpadApplication", "DuckpadPluginRuntimeCore", "DuckpadPluginSupport", "DuckpadWAMRBridge",
+            ]
         ),
         .testTarget(
             name: "DuckpadDomainTests",
@@ -207,6 +221,7 @@ let package = Package(
                 "DuckpadInfrastructure",
                 "DuckpadPluginSupport",
                 "DuckpadPluginHost",
+                "DuckpadPluginRuntimeCore",
                 .product(name: "Testing", package: "swift-testing"),
             ]
         ),

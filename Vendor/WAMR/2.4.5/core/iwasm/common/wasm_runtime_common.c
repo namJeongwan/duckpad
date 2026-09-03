@@ -2346,7 +2346,8 @@ void
 wasm_runtime_set_instruction_count_limit(WASMExecEnv *exec_env,
                                          int instructions_to_execute)
 {
-    exec_env->instructions_to_execute = instructions_to_execute;
+    __atomic_store_n(&exec_env->instructions_to_execute,
+                     instructions_to_execute, __ATOMIC_RELEASE);
 }
 #endif
 

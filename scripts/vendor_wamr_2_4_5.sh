@@ -8,13 +8,27 @@ SOURCE_URL="https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 target="$repo_root/Vendor/WAMR/2.4.5"
 vendor_parent="$repo_root/Vendor/WAMR"
+mode="publish"
+if [ "$#" -eq 1 ] && [ "$1" = "--verify" ]; then mode="verify"
+elif [ "$#" -ne 0 ]; then
+    echo "Usage: $0 [--verify]" >&2
+    exit 64
+fi
 
 case "$target" in
     "$repo_root"/Vendor/WAMR/2.4.5) ;;
     *) echo "unsafe WAMR target: $target" >&2; exit 2 ;;
 esac
-if [ "$target" = "/" ] || [ "$target" = "$repo_root" ] || [ -e "$target" ] || [ -L "$target" ]; then
+if [ "$target" = "/" ] || [ "$target" = "$repo_root" ] || [ -L "$target" ]; then
+    echo "unsafe WAMR target: $target" >&2
+    exit 3
+fi
+if [ "$mode" = "publish" ] && [ -e "$target" ]; then
     echo "WAMR target must be an absent, non-symlink version directory: $target" >&2
+    exit 3
+fi
+if [ "$mode" = "verify" ] && [ ! -d "$target" ]; then
+    echo "WAMR verification target is absent: $target" >&2
     exit 3
 fi
 mkdir -p "$vendor_parent"
@@ -82,6 +96,22 @@ cat > "$subset/PROVENANCE.md" <<EOF
   host capability. Modules must still declare zero imports and bounded memory.
 - Text normalization: trailing horizontal whitespace and extra blank lines at
   EOF are removed so regenerated sources pass the repository review gate.
+- Duckpad sandbox patch: interpreter-only builds do not request Apple's
+  \`MAP_JIT\`; that flag remains enabled when WAMR JIT, Fast JIT, or AOT is
+  compiled. Normalized upstream \`posix_memmap.c\` SHA-256 is
+  \`5fc9ddbca5737c77748ebed4f65a0d7d4610ee1ae26c568102aa190f1f508a33\`;
+  patched SHA-256 is
+  \`58316adcf15e234f69c2b60e27c54b85f5de8e109e4d69570d4f9a8d87306e25\`.
+- Duckpad cancellation patch: instruction metering is enabled only as a
+  cooperative cancellation poll. The bridge leaves each invocation unlimited
+  at \`-1\`; an asynchronous atomic store of zero traps a tight interpreter
+  loop. Normalized upstream/patched SHA-256 pairs are
+  \`wasm_runtime_common.c\`
+  \`d2f8ce6f2a826e0bf8c733309e61f62597b446d33f66d8eab04d67625719e4e7\` /
+  \`10388968bc146574bd6a289d125533d1d37a967906d6951cd8dd93609be71e7b\`
+  and \`wasm_interp_classic.c\`
+  \`0fbb845ce4f8cc5633493d96a00e2ecd5222906b492c1ed29a50795169a5c3b4\` /
+  \`bf3ac6e09ef0083aa7539caf02f2c9dbf13ebc0b2a1cd2b0a8b2782913f5c8c5\`.
 
 Regenerate only into an absent target directory with
 \`scripts/vendor_wamr_2_4_5.sh\`. The script validates HTTPS/TLS, checksum,
@@ -132,8 +162,87 @@ rm -f \
 find "$subset" -type f -exec perl -0pi -e \
     's/[ \t]+(?=\r?\n)//g; s/(?:\r?\n){2,}\z/\n/' {} +
 
+python3 - "$subset/core/shared/platform/common/posix/posix_memmap.c" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+source = path.read_bytes()
+before = b"""#if (defined(__APPLE__) || defined(__MACH__)) && defined(__arm64__) \\
+    && defined(TARGET_OS_OSX) && TARGET_OS_OSX != 0
+"""
+after = b"""#if (defined(__APPLE__) || defined(__MACH__)) && defined(__arm64__) \\
+    && defined(TARGET_OS_OSX) && TARGET_OS_OSX != 0 \\
+    && (WASM_ENABLE_JIT != 0 || WASM_ENABLE_FAST_JIT != 0 \\
+        || WASM_ENABLE_AOT != 0)
+"""
+if source.count(before) != 1:
+    raise SystemExit("pinned WAMR MAP_JIT patch context changed")
+path.write_bytes(source.replace(before, after))
+PY
+
+python3 - \
+    "$subset/core/iwasm/common/wasm_runtime_common.c" \
+    "$subset/core/iwasm/interpreter/wasm_interp_classic.c" <<'PY'
+import pathlib
+import sys
+
+runtime = pathlib.Path(sys.argv[1])
+runtime_source = runtime.read_bytes()
+runtime_before = b"""    exec_env->instructions_to_execute = instructions_to_execute;
+"""
+runtime_after = b"""    __atomic_store_n(&exec_env->instructions_to_execute,
+                     instructions_to_execute, __ATOMIC_RELEASE);
+"""
+if runtime_source.count(runtime_before) != 1:
+    raise SystemExit("pinned WAMR instruction-limit setter patch context changed")
+runtime.write_bytes(runtime_source.replace(runtime_before, runtime_after))
+
+interpreter = pathlib.Path(sys.argv[2])
+interpreter_source = interpreter.read_bytes()
+check_before = b"""#define CHECK_INSTRUCTION_LIMIT()                                 \\
+    if (instructions_left == 0) {                                 \\
+        wasm_set_exception(module, "instruction limit exceeded"); \\
+        goto got_exception;                                       \\
+    }                                                             \\
+"""
+check_after = b"""#define CHECK_INSTRUCTION_LIMIT()                                 \\
+    if (__atomic_load_n(&exec_env->instructions_to_execute,       \\
+                        __ATOMIC_ACQUIRE) == 0                     \\
+        || instructions_left == 0) {                              \\
+        wasm_set_exception(module, "instruction limit exceeded"); \\
+        goto got_exception;                                       \\
+    }                                                             \\
+"""
+load_before = b"""    if (exec_env) {
+        instructions_left = exec_env->instructions_to_execute;
+    }
+"""
+load_after = b"""    if (exec_env) {
+        instructions_left = __atomic_load_n(
+            &exec_env->instructions_to_execute, __ATOMIC_ACQUIRE);
+    }
+"""
+if interpreter_source.count(check_before) != 1:
+    raise SystemExit("pinned WAMR instruction poll patch context changed")
+if interpreter_source.count(load_before) != 1:
+    raise SystemExit("pinned WAMR instruction-limit load patch context changed")
+interpreter.write_bytes(
+    interpreter_source.replace(check_before, check_after).replace(load_before, load_after)
+)
+PY
+
 find "$subset" -name '.DS_Store' -delete
 find "$subset" -depth -type d -empty -delete
+if [ "$(find "$subset" -type f | wc -l | tr -d ' ')" != "168" ]; then
+    echo "WAMR subset inventory is not exactly 168 files" >&2
+    exit 10
+fi
+if [ "$mode" = "verify" ]; then
+    diff -qr "$subset" "$target"
+    echo "PASS: regenerated WAMR ${VERSION} matches all 168 vendored files"
+    exit 0
+fi
 if [ -e "$stage" ] || [ -L "$stage" ]; then
     echo "unsafe pre-existing WAMR staging path" >&2
     exit 7

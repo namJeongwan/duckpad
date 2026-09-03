@@ -54,18 +54,24 @@ public struct FileBinding: Codable, Equatable, Sendable {
     public var byteOrderMark: ByteOrderMark
     public var lineEnding: LineEnding
     public var observedIdentity: FileIdentity
+    /// App-scoped security bookmark used only to regain the user's file
+    /// authority after a sandboxed relaunch. Nil remains valid for legacy
+    /// recovery archives and unsandboxed development builds.
+    public var securityScopedBookmark: Data?
 
     public init(
         canonicalPath: String,
         encoding: TextFileEncoding,
         byteOrderMark: ByteOrderMark,
         lineEnding: LineEnding,
-        observedIdentity: FileIdentity
+        observedIdentity: FileIdentity,
+        securityScopedBookmark: Data? = nil
     ) {
         self.canonicalPath = canonicalPath
         self.encoding = encoding
         self.byteOrderMark = byteOrderMark
         self.lineEnding = lineEnding
         self.observedIdentity = observedIdentity
+        self.securityScopedBookmark = securityScopedBookmark
     }
 }

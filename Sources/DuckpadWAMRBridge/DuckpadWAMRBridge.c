@@ -1,8 +1,31 @@
 #include "DuckpadWAMRBridge.h"
 #include "WAMRRuntime.h"
 
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+
+static pthread_mutex_t invocation_mutex = PTHREAD_MUTEX_INITIALIZER;
+static wasm_module_inst_t current_instance = NULL;
+static wasm_exec_env_t current_environment = NULL;
+static bool cancellation_requested = false;
+
+void dp_wamr_prepare_current(void) {
+    pthread_mutex_lock(&invocation_mutex);
+    current_instance = NULL;
+    current_environment = NULL;
+    cancellation_requested = false;
+    pthread_mutex_unlock(&invocation_mutex);
+}
+
+void dp_wamr_cancel_current(void) {
+    pthread_mutex_lock(&invocation_mutex);
+    cancellation_requested = true;
+    if (current_environment)
+        wasm_runtime_set_instruction_count_limit(current_environment, 0);
+    if (current_instance) wasm_runtime_terminate(current_instance);
+    pthread_mutex_unlock(&invocation_mutex);
+}
 
 static void copy_error(char *destination, uint32_t capacity, const char *message) {
     if (!destination || capacity == 0) return;
@@ -58,11 +81,23 @@ bool dp_wamr_invoke(
                                         limits.heap_bytes, runtime_error,
                                         sizeof(runtime_error));
     if (!instance) goto done;
+    pthread_mutex_lock(&invocation_mutex);
+    current_instance = instance;
+    bool cancel_before_instance = cancellation_requested;
+    pthread_mutex_unlock(&invocation_mutex);
+    if (cancel_before_instance) wasm_runtime_terminate(instance);
     environment = wasm_runtime_create_exec_env(instance, limits.stack_bytes);
     if (!environment) {
         copy_error(runtime_error, sizeof(runtime_error), "execution environment allocation failed");
         goto done;
     }
+    wasm_runtime_set_instruction_count_limit(environment, -1);
+    pthread_mutex_lock(&invocation_mutex);
+    current_environment = environment;
+    cancel_before_instance = cancellation_requested;
+    pthread_mutex_unlock(&invocation_mutex);
+    if (cancel_before_instance)
+        wasm_runtime_set_instruction_count_limit(environment, 0);
     if (input_length > 0) {
         input_offset = wasm_runtime_module_malloc(instance, input_length, &native_input);
         if (!input_offset || !native_input) {
@@ -104,6 +139,11 @@ bool dp_wamr_invoke(
     succeeded = true;
 
 done:
+    pthread_mutex_lock(&invocation_mutex);
+    current_instance = NULL;
+    current_environment = NULL;
+    cancellation_requested = false;
+    pthread_mutex_unlock(&invocation_mutex);
     if (!succeeded) {
         const char *exception = instance ? wasm_runtime_get_exception(instance) : NULL;
         copy_error(error, error_capacity, exception ? exception : runtime_error);

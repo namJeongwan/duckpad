@@ -1,6 +1,7 @@
 import DuckpadApplication
 import DuckpadDomain
 import DuckpadInfrastructure
+import DuckpadPluginRuntimeCore
 import DuckpadPluginSupport
 import DuckpadWAMRBridge
 import Foundation
@@ -89,6 +90,37 @@ private func currentPluginHostExecutable() throws -> URL {
     var oversized = Data([0x01, 0x00, 0x00, 0x01])
     oversized.append(0)
     #expect(throws: (any Error).self) { _ = try PluginFrameCodec.decode(ExtensionHostResponse.self, from: oversized) }
+}
+
+@Test func sharedRuntimeExecutorKeepsDevelopmentAndXPCFramesEquivalent() async throws {
+    let root = try temporaryDirectory("runtime-core")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let package = try #require((await LocalExtensionPackageLoader(root: root).discover()).packages.first)
+    let input = Data("z\na".utf8)
+    let context = ExtensionInvocationContext(
+        extensionID: package.manifest.id,
+        commandID: .init(rawValue: "com.duckpad.text-tools.sortSelectedLines"),
+        operation: 1,
+        inputScope: .selection,
+        tabID: TabID(),
+        bufferID: BufferID(),
+        revision: 7,
+        selection: .init(location: 11, length: input.count),
+        utf8: input
+    )
+    let request = ExtensionHostRequest(module: package.module, context: context, limits: .init())
+    let responseFrame = try PluginRuntimeExecutor.responseFrame(for: PluginFrameCodec.encode(request))
+    let response = try PluginFrameCodec.decode(ExtensionHostResponse.self, from: responseFrame)
+    #expect(response.failure == nil)
+    #expect(response.result?.edits == [
+        ExtensionTextEdit(range: .init(location: 11, length: input.count), replacementUTF8: Data("a\nz".utf8)),
+    ])
+
+    var trailing = try PluginFrameCodec.encode(request)
+    trailing.append(0xff)
+    #expect(throws: (any Error).self) {
+        _ = try PluginRuntimeExecutor.responseFrame(for: trailing)
+    }
 }
 
 @Test func wasmPolicyRejectsImportsStartUnboundedMemoryOversizedTableWrongABIAndLEBOverflow() async throws {

@@ -100,6 +100,7 @@ public final class FileDocumentUseCase {
     private let workspace: ScratchWorkspaceUseCase
     private let editor: any EditorPort
     private let store: any TextFileStore
+    private let securityScopeOwnerID = UUID()
     private let maximumComparisonBytes: Int
     private var pendingConflict: PendingConflict?
     private var operationBusy = false
@@ -116,6 +117,76 @@ public final class FileDocumentUseCase {
         self.editor = editor
         self.store = store
         self.maximumComparisonBytes = maximumComparisonBytes
+    }
+
+    /// Reacquires every recovered document bookmark before the window becomes
+    /// interactive. Invalid bookmarks leave the recovery buffer intact and are
+    /// reported by path so the user can still Save As to reauthorize it.
+    @discardableResult
+    public func restoreSecurityScopedAccessForOpenDocuments() async -> [String] {
+        var failures: [String] = []
+        for tab in workspace.snapshot().tabs {
+            guard let context = workspace.fileContext(tabID: tab.id),
+                  let binding = context.binding else { continue }
+            do {
+                let updated = try await store.restoreSecurityScopedAccess(
+                    for: binding,
+                    ownerID: securityScopeOwnerID
+                )
+                guard updated != binding else { continue }
+                switch await workspace.updateFileBindingIfCurrent(
+                    tabID: tab.id,
+                    binding: updated,
+                    expectedBinding: binding
+                ) {
+                case .applied:
+                    break
+                case .persistenceFailed(let failure):
+                    failures.append("\(binding.canonicalPath): \(failure)")
+                    await store.releaseSecurityScopedAccess(
+                        forCanonicalPath: updated.canonicalPath,
+                        ownerID: securityScopeOwnerID
+                    )
+                case .rejected(let error):
+                    failures.append("\(binding.canonicalPath): \(error)")
+                    await store.releaseSecurityScopedAccess(
+                        forCanonicalPath: updated.canonicalPath,
+                        ownerID: securityScopeOwnerID
+                    )
+                }
+            } catch {
+                failures.append("\(binding.canonicalPath): \(error)")
+            }
+        }
+        return failures
+    }
+
+    public func releaseSecurityScopedAccess(for binding: FileBinding) async {
+        await store.releaseSecurityScopedAccess(
+            forCanonicalPath: binding.canonicalPath,
+            ownerID: securityScopeOwnerID
+        )
+    }
+
+    public func releaseAllSecurityScopedAccess() async {
+        await store.releaseAllSecurityScopedAccess(ownerID: securityScopeOwnerID)
+    }
+
+    public func releaseSecurityScopedAccessForClosedDocuments() async {
+        let retained = Set(workspace.snapshot().tabs.compactMap {
+            workspace.fileContext(tabID: $0.id)?.binding?.canonicalPath
+        })
+        await store.reconcileSecurityScopedAccess(
+            retainingCanonicalPaths: retained,
+            ownerID: securityScopeOwnerID
+        )
+    }
+
+    public func clearPersistedSecurityScopedBookmarks() async -> TextFileStoreError? {
+        do {
+            try await store.clearPersistedSecurityScopedBookmarks()
+            return nil
+        } catch { return error }
     }
 
     public func open(
@@ -149,11 +220,42 @@ public final class FileDocumentUseCase {
         assuming encodingHint: TextFileEncoding?
     ) async -> FileOpenOutcome {
         guard !Task.isCancelled else { return .failed(.cancelled) }
+        var preparedPath: String?
         do {
-            let canonical = try await store.canonicalURL(for: url)
-            guard !Task.isCancelled else { return .failed(.cancelled) }
-            return try await openCanonical(canonical, prepared: nil, encodingHint: encodingHint)
+            let access = try await store.prepareSecurityScopedAccess(
+                to: url,
+                ownerID: securityScopeOwnerID
+            )
+            preparedPath = access.url.standardizedFileURL.path
+            let canonical = try await store.canonicalURL(for: access.url)
+            preparedPath = canonical.path
+            guard !Task.isCancelled else {
+                await store.releaseSecurityScopedAccess(
+                    forCanonicalPath: canonical.path,
+                    ownerID: securityScopeOwnerID
+                )
+                return .failed(.cancelled)
+            }
+            let outcome = try await openCanonical(
+                canonical,
+                prepared: nil,
+                encodingHint: encodingHint,
+                securityScopedBookmark: access.bookmark
+            )
+            if case .failed = outcome {
+                await store.releaseSecurityScopedAccess(
+                    forCanonicalPath: canonical.path,
+                    ownerID: securityScopeOwnerID
+                )
+            }
+            return outcome
         } catch let error {
+            if let preparedPath {
+                await store.releaseSecurityScopedAccess(
+                    forCanonicalPath: preparedPath,
+                    ownerID: securityScopeOwnerID
+                )
+            }
             return .failed(.store(error))
         }
     }
@@ -165,18 +267,43 @@ public final class FileDocumentUseCase {
         await acquireOperation()
         defer { releaseOperation() }
         guard !Task.isCancelled else { return .failed(.cancelled) }
-        let canonical = workspaceRead.url.standardizedFileURL
-        guard canonical.isFileURL,
-              workspaceRead.result.identity.canonicalPath == canonical.path else {
-            return .failed(.store(.invalidPath(workspaceRead.url.path)))
-        }
+        var preparedPath: String?
         do {
-            return try await openCanonical(
+            let access = try await store.prepareSecurityScopedAccess(
+                to: workspaceRead.url,
+                ownerID: securityScopeOwnerID
+            )
+            preparedPath = access.url.standardizedFileURL.path
+            let canonical = try await store.canonicalURL(for: access.url)
+            preparedPath = canonical.path
+            guard canonical.isFileURL,
+                  workspaceRead.result.identity.canonicalPath == canonical.path else {
+                await store.releaseSecurityScopedAccess(
+                    forCanonicalPath: canonical.path,
+                    ownerID: securityScopeOwnerID
+                )
+                return .failed(.store(.invalidPath(workspaceRead.url.path)))
+            }
+            let outcome = try await openCanonical(
                 canonical,
                 prepared: workspaceRead.result,
-                encodingHint: encodingHint
+                encodingHint: encodingHint,
+                securityScopedBookmark: access.bookmark
             )
+            if case .failed = outcome {
+                await store.releaseSecurityScopedAccess(
+                    forCanonicalPath: canonical.path,
+                    ownerID: securityScopeOwnerID
+                )
+            }
+            return outcome
         } catch let error {
+            if let preparedPath {
+                await store.releaseSecurityScopedAccess(
+                    forCanonicalPath: preparedPath,
+                    ownerID: securityScopeOwnerID
+                )
+            }
             return .failed(.store(error))
         }
     }
@@ -184,7 +311,8 @@ public final class FileDocumentUseCase {
     private func openCanonical(
         _ canonical: URL,
         prepared: FileReadResult?,
-        encodingHint: TextFileEncoding?
+        encodingHint: TextFileEncoding?,
+        securityScopedBookmark: Data?
     ) async throws(TextFileStoreError) -> FileOpenOutcome {
         if let existing = workspace.tabID(canonicalPath: canonical.path) {
             switch await workspace.activate(tabID: existing) {
@@ -205,7 +333,8 @@ public final class FileDocumentUseCase {
             encoding: decoded.encoding,
             byteOrderMark: decoded.byteOrderMark,
             lineEnding: decoded.lineEnding,
-            observedIdentity: read.identity
+            observedIdentity: read.identity,
+            securityScopedBookmark: securityScopedBookmark
         )
         guard !Task.isCancelled else { return .failed(.cancelled) }
         switch await workspace.addOpenedFile(binding: binding, title: canonical.lastPathComponent) {
@@ -277,12 +406,7 @@ public final class FileDocumentUseCase {
         guard expectedContext == nil || expectedContext == context else {
             return .failed(.comparisonInvalidated)
         }
-        do {
-            let canonical = try await store.canonicalURL(for: url)
-            return await save(context: context, to: canonical, conversion: conversion, overwrite: false)
-        } catch let error {
-            return .failed(.store(error))
-        }
+        return await save(context: context, to: url, conversion: conversion, overwrite: false)
     }
 
     /// Writes a point-in-time copy without rebinding the tab or marking it clean.
@@ -301,39 +425,54 @@ public final class FileDocumentUseCase {
         guard expectedContext == nil || expectedContext == context else {
             return .failed(.comparisonInvalidated)
         }
+        let transientOwnerID = UUID()
+        let access: SecurityScopedFileAccess
+        let canonical: URL
         do {
-            let canonical = try await store.canonicalURL(for: url)
-            if workspace.tabID(canonicalPath: canonical.path) != nil {
-                return .failed(.session(.duplicateFileBinding(canonical.path)))
-            }
-            guard let snapshot = editor.snapshot(for: context.buffer.bufferID) else {
-                return .failed(.editorSnapshotUnavailable(context.buffer.bufferID))
-            }
-            guard snapshot.revision == context.buffer.revision else {
-                return .failed(.editorRevisionMismatch(
+            access = try await store.prepareSecurityScopedAccess(to: url, ownerID: transientOwnerID)
+            canonical = try await store.canonicalURL(for: access.url)
+        } catch let error {
+            return .failed(.store(error))
+        }
+        let outcome: FileSaveOutcome
+        if workspace.tabID(canonicalPath: canonical.path) != nil {
+            outcome = .failed(.session(.duplicateFileBinding(canonical.path)))
+        } else if let snapshot = editor.snapshot(for: context.buffer.bufferID) {
+            if snapshot.revision != context.buffer.revision {
+                outcome = .failed(.editorRevisionMismatch(
                     bufferID: context.buffer.bufferID,
                     expected: context.buffer.revision,
                     actual: snapshot.revision
                 ))
+            } else {
+                let format = outputFormat(context: context, conversion: conversion)
+                let text = TextFileCodec.convert(snapshot.text, to: format.lineEnding)
+                let data = TextFileCodec.encode(
+                    text,
+                    encoding: format.encoding,
+                    byteOrderMark: format.byteOrderMark
+                )
+                do {
+                    let destinationIdentity = try await store.currentIdentity(for: canonical)
+                    _ = try await store.writeAtomically(
+                        data,
+                        to: canonical,
+                        expectedIdentity: destinationIdentity,
+                        overwrite: false
+                    )
+                    outcome = .saved(context.tabID)
+                } catch let error {
+                    outcome = .failed(.store(error))
+                }
             }
-            let format = outputFormat(context: context, conversion: conversion)
-            let text = TextFileCodec.convert(snapshot.text, to: format.lineEnding)
-            let data = TextFileCodec.encode(
-                text,
-                encoding: format.encoding,
-                byteOrderMark: format.byteOrderMark
-            )
-            let destinationIdentity = try await store.currentIdentity(for: canonical)
-            _ = try await store.writeAtomically(
-                data,
-                to: canonical,
-                expectedIdentity: destinationIdentity,
-                overwrite: false
-            )
-            return .saved(context.tabID)
-        } catch let error {
-            return .failed(.store(error))
+        } else {
+            outcome = .failed(.editorSnapshotUnavailable(context.buffer.bufferID))
         }
+        await store.releaseSecurityScopedAccess(
+            forCanonicalPath: canonical.path,
+            ownerID: transientOwnerID
+        )
+        return outcome
     }
 
     public func resolveConflict(_ resolution: FileConflictResolution) async -> FileSaveOutcome {
@@ -367,7 +506,8 @@ public final class FileDocumentUseCase {
                     encoding: decoded.encoding,
                     byteOrderMark: decoded.byteOrderMark,
                     lineEnding: decoded.lineEnding,
-                    observedIdentity: read.identity
+                    observedIdentity: read.identity,
+                    securityScopedBookmark: context.binding?.securityScopedBookmark
                 )
                 switch await workspace.replaceFileContents(
                     tabID: context.tabID,
@@ -463,6 +603,48 @@ public final class FileDocumentUseCase {
         conversion: TextFileConversion?,
         overwrite: Bool
     ) async -> FileSaveOutcome {
+        let access: SecurityScopedFileAccess
+        let canonical: URL
+        do {
+            access = try await store.prepareSecurityScopedAccess(
+                to: url,
+                ownerID: securityScopeOwnerID
+            )
+            canonical = try await store.canonicalURL(for: access.url)
+        } catch let error {
+            return .failed(.store(error))
+        }
+        let oldPath = context.binding?.canonicalPath
+        let outcome = await savePrepared(
+            context: context,
+            to: canonical,
+            conversion: conversion,
+            overwrite: overwrite,
+            securityScopedBookmark: access.bookmark
+        )
+        if case .saved = outcome {
+            if let oldPath, oldPath != canonical.path {
+                await store.releaseSecurityScopedAccess(
+                    forCanonicalPath: oldPath,
+                    ownerID: securityScopeOwnerID
+                )
+            }
+        } else if oldPath != canonical.path {
+            await store.releaseSecurityScopedAccess(
+                forCanonicalPath: canonical.path,
+                ownerID: securityScopeOwnerID
+            )
+        }
+        return outcome
+    }
+
+    private func savePrepared(
+        context: FileWorkspaceContext,
+        to url: URL,
+        conversion: TextFileConversion?,
+        overwrite: Bool,
+        securityScopedBookmark: Data?
+    ) async -> FileSaveOutcome {
         guard workspace.fileContext(tabID: context.tabID) == context else {
             pendingConflict = nil
             return .failed(.comparisonInvalidated)
@@ -497,7 +679,8 @@ public final class FileDocumentUseCase {
                 encoding: encoding,
                 byteOrderMark: bom,
                 lineEnding: lineEnding == .none ? inferLineEnding(text) : lineEnding,
-                observedIdentity: identity
+                observedIdentity: identity,
+                securityScopedBookmark: securityScopedBookmark ?? context.binding?.securityScopedBookmark
             )
             switch await workspace.bindSavedFileIfCurrent(
                 tabID: context.tabID,

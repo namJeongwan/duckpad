@@ -19,9 +19,299 @@ public enum AtomicWriteFault: Sendable {
 /// Filesystem adapter. Every blocking syscall runs on a detached utility task;
 /// the sibling-temp + fsync + rename sequence never exposes partial contents.
 public actor LocalTextFileStore: TextFileStore {
-    private let fault: AtomicWriteFault
+    private struct ActiveSecurityScope: Sendable {
+        let url: URL
+        let bookmark: Data
+        var owners: Set<UUID>
+    }
 
-    public init(fault: AtomicWriteFault = .none) { self.fault = fault }
+    private struct StoredBookmark: Codable, Sendable {
+        let path: String
+        let bookmark: Data
+    }
+
+    private struct BookmarkArchive: Codable, Sendable {
+        let schemaVersion: Int
+        var entries: [StoredBookmark]
+    }
+
+    public static let maximumPersistedBookmarks = 100
+    public static let maximumBookmarkArchiveBytes = 4 * 1_024 * 1_024
+    private let fault: AtomicWriteFault
+    private let bookmarkArchiveURL: URL
+    private let securityScopedAccessRequired: Bool
+    private let startSecurityScopedAccess: @Sendable (URL) -> Bool
+    private let stopSecurityScopedAccess: @Sendable (URL) -> Void
+    private let createSecurityScopedBookmark: @Sendable (URL) throws -> Data
+    private let resolveSecurityScopedBookmark: @Sendable (Data) throws -> (URL, Bool)
+    private var activeSecurityScopes: [String: ActiveSecurityScope] = [:]
+    private var bookmarkArchive: BookmarkArchive?
+
+    public init(
+        fault: AtomicWriteFault = .none,
+        bookmarkArchiveURL: URL = LocalTextFileStore.defaultBookmarkArchiveURL()
+    ) {
+        self.fault = fault
+        self.bookmarkArchiveURL = bookmarkArchiveURL.standardizedFileURL
+        securityScopedAccessRequired = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+        startSecurityScopedAccess = { $0.startAccessingSecurityScopedResource() }
+        stopSecurityScopedAccess = { $0.stopAccessingSecurityScopedResource() }
+        createSecurityScopedBookmark = { url in
+            try url.bookmarkData(
+                options: [.withSecurityScope],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+        }
+        resolveSecurityScopedBookmark = { data in
+            var stale = false
+            let url = try URL(
+                resolvingBookmarkData: data,
+                options: [.withSecurityScope, .withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            )
+            return (url, stale)
+        }
+    }
+
+    init(
+        fault: AtomicWriteFault = .none,
+        bookmarkArchiveURL: URL,
+        testingSecurityScopedAccessRequired: Bool,
+        testingStartSecurityScopedAccess: @escaping @Sendable (URL) -> Bool,
+        testingStopSecurityScopedAccess: @escaping @Sendable (URL) -> Void,
+        testingCreateSecurityScopedBookmark: @escaping @Sendable (URL) throws -> Data,
+        testingResolveSecurityScopedBookmark: @escaping @Sendable (Data) throws -> (URL, Bool)
+    ) {
+        self.fault = fault
+        self.bookmarkArchiveURL = bookmarkArchiveURL.standardizedFileURL
+        securityScopedAccessRequired = testingSecurityScopedAccessRequired
+        startSecurityScopedAccess = testingStartSecurityScopedAccess
+        stopSecurityScopedAccess = testingStopSecurityScopedAccess
+        createSecurityScopedBookmark = testingCreateSecurityScopedBookmark
+        resolveSecurityScopedBookmark = testingResolveSecurityScopedBookmark
+    }
+
+    public static func defaultBookmarkArchiveURL() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return base.appendingPathComponent("Duckpad", isDirectory: true)
+            .appendingPathComponent("document-bookmarks.json", isDirectory: false)
+    }
+
+    public func prepareSecurityScopedAccess(
+        to url: URL,
+        ownerID: UUID
+    ) async throws(TextFileStoreError) -> SecurityScopedFileAccess {
+        guard securityScopedAccessRequired else { return SecurityScopedFileAccess(url: url) }
+        let requested = url.standardizedFileURL
+        guard requested.isFileURL else { throw .invalidPath(url.absoluteString) }
+        if var current = activeSecurityScopes[requested.path] {
+            current.owners.insert(ownerID)
+            activeSecurityScopes[requested.path] = current
+            return SecurityScopedFileAccess(url: current.url, bookmark: current.bookmark)
+        }
+
+        var accessedURL = requested
+        var started = startSecurityScopedAccess(requested)
+        if !started {
+            do {
+                let archive = try loadBookmarkArchive()
+                guard let stored = archive.entries.last(where: { $0.path == requested.path }) else {
+                    throw TextFileStoreError.permissionDenied(requested.path)
+                }
+                accessedURL = try resolveSecurityScopedBookmark(stored.bookmark).0
+                started = startSecurityScopedAccess(accessedURL)
+            } catch let error as TextFileStoreError { throw error }
+            catch { throw .permissionDenied(requested.path) }
+        }
+        guard started else { throw .permissionDenied(requested.path) }
+        do {
+            let canonical = try Self.canonicalize(accessedURL)
+            if var current = activeSecurityScopes[canonical.path] {
+                stopSecurityScopedAccess(accessedURL)
+                current.owners.insert(ownerID)
+                activeSecurityScopes[canonical.path] = current
+                return SecurityScopedFileAccess(url: current.url, bookmark: current.bookmark)
+            }
+            let bookmark = try createSecurityScopedBookmark(canonical)
+            try persistBookmark(bookmark, aliases: [requested.path, canonical.path])
+            activeSecurityScopes[canonical.path] = ActiveSecurityScope(
+                url: canonical,
+                bookmark: bookmark,
+                owners: [ownerID]
+            )
+            return SecurityScopedFileAccess(url: canonical, bookmark: bookmark)
+        } catch let error as TextFileStoreError {
+            stopSecurityScopedAccess(accessedURL)
+            throw error
+        } catch {
+            stopSecurityScopedAccess(accessedURL)
+            throw .io(String(describing: error))
+        }
+    }
+
+    public func restoreSecurityScopedAccess(
+        for binding: FileBinding,
+        ownerID: UUID
+    ) async throws(TextFileStoreError) -> FileBinding {
+        guard securityScopedAccessRequired else { return binding }
+        if var current = activeSecurityScopes[binding.canonicalPath] {
+            current.owners.insert(ownerID)
+            activeSecurityScopes[binding.canonicalPath] = current
+            var updated = binding
+            updated.securityScopedBookmark = current.bookmark
+            return updated
+        }
+        let bookmark: Data
+        if let embedded = binding.securityScopedBookmark { bookmark = embedded }
+        else {
+            do {
+                guard let stored = try loadBookmarkArchive().entries.last(where: {
+                    $0.path == binding.canonicalPath
+                }) else { throw TextFileStoreError.permissionDenied(binding.canonicalPath) }
+                bookmark = stored.bookmark
+            } catch let error as TextFileStoreError { throw error }
+            catch { throw .permissionDenied(binding.canonicalPath) }
+        }
+        let resolved: (URL, Bool)
+        do { resolved = try resolveSecurityScopedBookmark(bookmark) }
+        catch { throw .permissionDenied(binding.canonicalPath) }
+        guard startSecurityScopedAccess(resolved.0) else { throw .permissionDenied(binding.canonicalPath) }
+        do {
+            let canonical = try Self.canonicalize(resolved.0)
+            let refreshed = try createSecurityScopedBookmark(canonical)
+            try persistBookmark(refreshed, aliases: [binding.canonicalPath, canonical.path])
+            if var current = activeSecurityScopes[canonical.path] {
+                stopSecurityScopedAccess(resolved.0)
+                current.owners.insert(ownerID)
+                activeSecurityScopes[canonical.path] = current
+            } else {
+                activeSecurityScopes[canonical.path] = ActiveSecurityScope(
+                    url: canonical,
+                    bookmark: refreshed,
+                    owners: [ownerID]
+                )
+            }
+            var updated = binding
+            updated.securityScopedBookmark = refreshed
+            if canonical.path != binding.canonicalPath {
+                updated = FileBinding(
+                    canonicalPath: canonical.path,
+                    encoding: binding.encoding,
+                    byteOrderMark: binding.byteOrderMark,
+                    lineEnding: binding.lineEnding,
+                    observedIdentity: Self.rebased(binding.observedIdentity, canonicalPath: canonical.path),
+                    securityScopedBookmark: refreshed
+                )
+            }
+            return updated
+        } catch let error as TextFileStoreError {
+            stopSecurityScopedAccess(resolved.0)
+            throw error
+        } catch {
+            stopSecurityScopedAccess(resolved.0)
+            throw .io(String(describing: error))
+        }
+    }
+
+    public func releaseSecurityScopedAccess(forCanonicalPath path: String, ownerID: UUID) async {
+        let key = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard var current = activeSecurityScopes[key] else { return }
+        current.owners.remove(ownerID)
+        if current.owners.isEmpty {
+            activeSecurityScopes.removeValue(forKey: key)
+            stopSecurityScopedAccess(current.url)
+        } else {
+            activeSecurityScopes[key] = current
+        }
+    }
+
+    public func releaseAllSecurityScopedAccess(ownerID: UUID) async {
+        for path in Array(activeSecurityScopes.keys) {
+            await releaseSecurityScopedAccess(forCanonicalPath: path, ownerID: ownerID)
+        }
+    }
+
+    public func reconcileSecurityScopedAccess(
+        retainingCanonicalPaths paths: Set<String>,
+        ownerID: UUID
+    ) async {
+        let retained = Set(paths.map { URL(fileURLWithPath: $0).standardizedFileURL.path })
+        for path in Array(activeSecurityScopes.keys) where !retained.contains(path) {
+            await releaseSecurityScopedAccess(forCanonicalPath: path, ownerID: ownerID)
+        }
+    }
+
+    public func clearPersistedSecurityScopedBookmarks() async throws(TextFileStoreError) {
+        bookmarkArchive = BookmarkArchive(schemaVersion: 1, entries: [])
+        do {
+            if FileManager.default.fileExists(atPath: bookmarkArchiveURL.path) {
+                try FileManager.default.removeItem(at: bookmarkArchiveURL)
+            }
+        } catch { throw .io(String(describing: error)) }
+    }
+
+    private func loadBookmarkArchive() throws -> BookmarkArchive {
+        if let bookmarkArchive { return bookmarkArchive }
+        guard FileManager.default.fileExists(atPath: bookmarkArchiveURL.path) else {
+            let empty = BookmarkArchive(schemaVersion: 1, entries: [])
+            bookmarkArchive = empty
+            return empty
+        }
+        do {
+            let data = try Data(contentsOf: bookmarkArchiveURL, options: [.mappedIfSafe])
+            guard data.count <= Self.maximumBookmarkArchiveBytes else {
+                throw TextFileStoreError.io("document bookmark archive exceeds size limit")
+            }
+            let decoded = try JSONDecoder().decode(BookmarkArchive.self, from: data)
+            guard decoded.schemaVersion == 1,
+                  decoded.entries.count <= Self.maximumPersistedBookmarks,
+                  decoded.entries.allSatisfy({
+                      $0.path.hasPrefix("/") && $0.path.utf8.count <= 16 * 1_024
+                          && !$0.bookmark.isEmpty
+                  }),
+                  Set(decoded.entries.map(\.path)).count == decoded.entries.count else {
+                throw TextFileStoreError.io("invalid document bookmark archive")
+            }
+            bookmarkArchive = decoded
+            return decoded
+        } catch let error as TextFileStoreError { throw error }
+        catch { throw TextFileStoreError.io(String(describing: error)) }
+    }
+
+    private func persistBookmark(_ bookmark: Data, aliases: [String]) throws {
+        var archive = try loadBookmarkArchive()
+        for path in aliases.map({ URL(fileURLWithPath: $0).standardizedFileURL.path }) {
+            archive.entries.removeAll { $0.path == path }
+            archive.entries.append(StoredBookmark(path: path, bookmark: bookmark))
+        }
+        if archive.entries.count > Self.maximumPersistedBookmarks {
+            archive.entries.removeFirst(archive.entries.count - Self.maximumPersistedBookmarks)
+        }
+        do {
+            let directory = bookmarkArchiveURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let data = try encoder.encode(archive)
+            guard data.count <= Self.maximumBookmarkArchiveBytes else {
+                throw TextFileStoreError.io("document bookmark archive exceeds size limit")
+            }
+            try data.write(to: bookmarkArchiveURL, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: bookmarkArchiveURL.path
+            )
+            bookmarkArchive = archive
+        } catch let error as TextFileStoreError { throw error }
+        catch { throw TextFileStoreError.io(String(describing: error)) }
+    }
 
     public func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL {
         do { return try await Task.detached(priority: .utility) { try Self.canonicalize(url) }.value }
@@ -42,12 +332,104 @@ public actor LocalTextFileStore: TextFileStore {
         overwrite: Bool
     ) async throws(TextFileStoreError) -> FileWriteReceipt {
         let fault = self.fault
+        let coordinatesSandboxWrite = securityScopedAccessRequired
         do {
             return try await Task.detached(priority: .utility) {
-                try Self.writeBlocking(data, to: url, expectedIdentity: expectedIdentity, overwrite: overwrite, fault: fault)
+                if coordinatesSandboxWrite {
+                    return try Self.coordinatedWriteBlocking(
+                        data,
+                        to: url,
+                        expectedIdentity: expectedIdentity,
+                        overwrite: overwrite,
+                        fault: fault
+                    )
+                }
+                return try Self.writeBlocking(
+                    data,
+                    to: url,
+                    expectedIdentity: expectedIdentity,
+                    overwrite: overwrite,
+                    fault: fault
+                )
             }.value
         } catch let error as TextFileStoreError { throw error }
         catch { throw .io(String(describing: error)) }
+    }
+
+    private static func coordinatedWriteBlocking(
+        _ data: Data,
+        to url: URL,
+        expectedIdentity: FileIdentity?,
+        overwrite: Bool,
+        fault: AtomicWriteFault
+    ) throws -> FileWriteReceipt {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var result: Result<FileWriteReceipt, TextFileStoreError>?
+        coordinator.coordinate(
+            writingItemAt: url,
+            options: .forReplacing,
+            error: &coordinationError
+        ) { coordinatedURL in
+            do {
+                result = .success(try sandboxSafeWriteBlocking(
+                    data,
+                    to: coordinatedURL,
+                    expectedIdentity: expectedIdentity,
+                    overwrite: overwrite,
+                    fault: fault
+                ))
+            } catch let error as TextFileStoreError {
+                result = .failure(error)
+            } catch {
+                result = .failure(.io(String(describing: error)))
+            }
+        }
+        if let result { return try result.get() }
+        if let coordinationError { throw map(error: coordinationError, path: url.path) }
+        throw TextFileStoreError.atomicWriteFailed("file coordination returned no result")
+    }
+
+    /// Foundation's atomic writer uses the sandbox's related-item safe-save
+    /// extension for a user-selected file. Hand-rolled sibling names are not
+    /// authorized by a file-scoped Powerbox grant.
+    private static func sandboxSafeWriteBlocking(
+        _ data: Data,
+        to url: URL,
+        expectedIdentity: FileIdentity?,
+        overwrite: Bool,
+        fault: AtomicWriteFault
+    ) throws -> FileWriteReceipt {
+        let canonical = try canonicalize(url)
+        let current: FileIdentity?
+        do { current = try readBlocking(canonical).identity }
+        catch TextFileStoreError.notFound { current = nil }
+        if let expectedIdentity {
+            guard let current, sameObservedFile(current, expectedIdentity) else {
+                throw TextFileStoreError.conflict(current: current)
+            }
+        } else if current != nil && !overwrite {
+            throw TextFileStoreError.conflict(current: current)
+        }
+        if case .replaceDestinationBeforeCommit(let external) = fault {
+            do { try external.write(to: canonical, options: [.atomic]) }
+            catch { throw map(error: error, path: canonical.path) }
+            throw TextFileStoreError.conflict(current: try? readBlocking(canonical).identity)
+        }
+        do { try data.write(to: canonical, options: [.atomic]) }
+        catch { throw map(error: error, path: canonical.path) }
+        let descriptor = Darwin.open(canonical.path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else { throw mapErrno(path: canonical.path) }
+        defer { Darwin.close(descriptor) }
+        guard Darwin.fsync(descriptor) == 0, Darwin.fcntl(descriptor, F_FULLFSYNC) == 0 else {
+            throw TextFileStoreError.durabilityFailure(
+                state: .replacementVisibleDurabilityUncertain,
+                current: try? readBlocking(canonical).identity,
+                recoveryPath: nil,
+                detail: String(describing: mapErrno(path: canonical.path))
+            )
+        }
+        return FileWriteReceipt(identity: try readBlocking(canonical).identity)
     }
 
     private static func canonicalize(_ url: URL) throws -> URL {

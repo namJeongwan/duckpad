@@ -27,4 +27,9 @@ bool dp_wamr_invoke(
     uint32_t error_capacity
 );
 
+/// Asynchronously traps the one in-process interpreter invocation. Safe to
+/// call from the XPC invalidation/watchdog thread.
+void dp_wamr_prepare_current(void);
+void dp_wamr_cancel_current(void);
+
 #endif

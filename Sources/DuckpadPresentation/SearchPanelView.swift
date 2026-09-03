@@ -46,6 +46,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     private var incrementalTask: Task<Void, Never>?
     private var showingReplace = false
     private lazy var collapsedHeight = heightAnchor.constraint(equalToConstant: 0)
+    private var expandedVerticalConstraints: [NSLayoutConstraint] = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -105,19 +106,22 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         stack.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
+        expandedVerticalConstraints = [
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ]
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             top.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
             options.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
             resultsScroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
-        ])
+        ] + expandedVerticalConstraints)
         replaceField.isHidden = true
         replace.isHidden = true
         replaceAll.isHidden = true
         resultsScroll.isHidden = true
+        NSLayoutConstraint.deactivate(expandedVerticalConstraints)
         isHidden = true
         collapsedHeight.isActive = true
     }
@@ -131,6 +135,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         if replace { allDocuments.state = .off }
         replaceField.isHidden = !replace
         subviewsRecursiveButtons(named: ["Replace", "Replace All"]).forEach { $0.isHidden = !replace }
+        NSLayoutConstraint.activate(expandedVerticalConstraints)
         isHidden = false
         collapsedHeight.constant = 76
         window?.makeFirstResponder(findField)
@@ -258,6 +263,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     func hide() {
         incrementalTask?.cancel()
         resultsScroll.isHidden = true
+        NSLayoutConstraint.deactivate(expandedVerticalConstraints)
         collapsedHeight.constant = 0
         isHidden = true
     }

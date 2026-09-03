@@ -54,7 +54,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private var inputEnabled = true
 
     public static func prepareResources() {
-        guard let directory = Bundle.module.url(
+        guard let directory = DuckpadEditorResources.bundle.url(
             forResource: "ScintillaCursors",
             withExtension: nil
         ) else {

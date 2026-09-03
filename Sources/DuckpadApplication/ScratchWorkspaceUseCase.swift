@@ -879,6 +879,33 @@ public final class ScratchWorkspaceUseCase {
     }
 
     @discardableResult
+    public func updateFileBindingIfCurrent(
+        tabID: TabID,
+        binding: FileBinding,
+        expectedBinding: FileBinding
+    ) async -> WorkspaceActionOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        var candidate = session
+        do {
+            try candidate.updateFileBinding(
+                tabID: tabID,
+                binding: binding,
+                expectedBinding: expectedBinding
+            )
+            guard let index = candidate.tabs.firstIndex(where: { $0.id == tabID }) else {
+                return .rejected(.unknownTab(tabID))
+            }
+            return await persistMutation(
+                candidate,
+                kind: .tabUpdated(index: index),
+                retry: .saveCurrent
+            )
+        } catch let error as SessionError { return .rejected(error) }
+        catch { preconditionFailure("ScratchSession only throws SessionError") }
+    }
+
+    @discardableResult
     public func replaceFileContents(
         tabID: TabID,
         binding: FileBinding,

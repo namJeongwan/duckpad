@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Duckpad</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>txt</string><string>text</string><string>log</string>
+                <string>md</string><string>markdown</string><string>csv</string><string>tsv</string>
+                <string>json</string><string>yaml</string><string>yml</string><string>xml</string>
+                <string>plist</string><string>ini</string><string>cfg</string><string>conf</string>
+                <string>swift</string><string>c</string><string>h</string><string>cpp</string><string>hpp</string>
+                <string>m</string><string>mm</string><string>py</string><string>js</string><string>ts</string>
+                <string>html</string><string>css</string><string>sh</string><string>zsh</string>
+                <string>bash</string><string>sql</string><string>rs</string><string>go</string>
+                <string>java</string><string>kt</string>
+            </array>
+            <key>CFBundleTypeName</key>
+            <string>Text and Source Documents</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.plain-text</string>
+                <string>public.source-code</string>
+                <string>public.text</string>
+            </array>
+        </dict>
+    </array>
+    <key>CFBundleExecutable</key>
+    <string>Duckpad</string>
+    <key>CFBundleIconFile</key>
+    <string>Duckpad</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.namjeongwan.duckpad</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Duckpad</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+</dict>
+</plist>

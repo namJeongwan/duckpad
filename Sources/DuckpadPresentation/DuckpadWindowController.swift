@@ -434,11 +434,20 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         documentIntelligenceUseCase?.cancel()
         commandPalettePanel.dismiss()
         symbolOutlinePanel.dismiss()
-        if let terminationCoordinator, let recoveryUseCase {
+        if let terminationCoordinator {
             terminationCoordinator.trackWindowCloseCleanup {
-                if case .saved = await recoveryUseCase.reset() { return true }
-                return false
+                let recoverySaved: Bool
+                if let recoveryUseCase = self.recoveryUseCase {
+                    if case .saved = await recoveryUseCase.reset() { recoverySaved = true }
+                    else { recoverySaved = false }
+                } else {
+                    recoverySaved = true
+                }
+                await self.fileUseCase?.releaseAllSecurityScopedAccess()
+                return recoverySaved
             }
+        } else {
+            Task { [fileUseCase] in await fileUseCase?.releaseAllSecurityScopedAccess() }
         }
         terminationCoordinator?.detach(windowController: self)
         workspaceBrowserUseCase?.suspendCommands()
@@ -630,6 +639,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             } else {
                 _ = await workspace.start()
             }
+            _ = await fileUseCase?.restoreSecurityScopedAccessForOpenDocuments()
             _ = await workspaceBrowserUseCase?.start()
             await extensionUseCase?.refresh()
         }
@@ -731,7 +741,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             guard !self.terminationReviewInProgress,
                   self.workspace.snapshot().startup == .ready,
                   self.workspace.canRestoreRecentlyClosedTab else { return }
-            _ = await self.workspace.restoreLastClosedTab()
+            if case .applied = await self.workspace.restoreLastClosedTab() {
+                _ = await self.fileUseCase?.restoreSecurityScopedAccessForOpenDocuments()
+            }
         }
         pendingRestoreClosedTabTasks[token] = task
     }
@@ -2241,6 +2253,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                     ?? .failed(PersistenceFailure(operation: .save, cause: .unavailable("window closed")))
             }
         )
+        await fileUseCase?.releaseSecurityScopedAccessForClosedDocuments()
         if case .failed(let failure) = outcome { presentCloseFailure(failure) }
     }
 

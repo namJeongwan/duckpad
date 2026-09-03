@@ -1,7 +1,79 @@
 import DuckpadApplication
-import DuckpadInfrastructure
+import DuckpadDomain
+@testable import DuckpadInfrastructure
 import Foundation
 import Testing
+
+private final class SecurityScopeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var starts = 0
+    private var stops = 0
+
+    func start(_ url: URL) -> Bool {
+        lock.lock(); starts += 1; lock.unlock()
+        return true
+    }
+
+    func stop(_ url: URL) {
+        lock.lock(); stops += 1; lock.unlock()
+    }
+
+    var values: (starts: Int, stops: Int) {
+        lock.lock(); defer { lock.unlock() }
+        return (starts, stops)
+    }
+}
+
+@Test func documentSecurityScopesAreOwnerBalancedAndBookmarksRestoreAcrossStores() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("scope.txt")
+    try Data("duck".utf8).write(to: file)
+    let archive = directory.appendingPathComponent("bookmarks.json")
+    let counter = SecurityScopeCounter()
+    let makeStore = {
+        LocalTextFileStore(
+            bookmarkArchiveURL: archive,
+            testingSecurityScopedAccessRequired: true,
+            testingStartSecurityScopedAccess: { counter.start($0) },
+            testingStopSecurityScopedAccess: { counter.stop($0) },
+            testingCreateSecurityScopedBookmark: { Data($0.path.utf8) },
+            testingResolveSecurityScopedBookmark: {
+                (URL(fileURLWithPath: String(decoding: $0, as: UTF8.self)), false)
+            }
+        )
+    }
+    let first = makeStore()
+    let firstOwner = UUID()
+    let secondOwner = UUID()
+    let access = try await first.prepareSecurityScopedAccess(to: file, ownerID: firstOwner)
+    _ = try await first.prepareSecurityScopedAccess(to: file, ownerID: firstOwner)
+    _ = try await first.prepareSecurityScopedAccess(to: file, ownerID: secondOwner)
+    #expect(counter.values == (1, 0))
+    await first.releaseSecurityScopedAccess(forCanonicalPath: file.path, ownerID: firstOwner)
+    #expect(counter.values == (1, 0))
+    await first.releaseSecurityScopedAccess(forCanonicalPath: file.path, ownerID: secondOwner)
+    #expect(counter.values == (1, 1))
+
+    let identity = try await first.read(from: file).identity
+    let binding = FileBinding(
+        canonicalPath: file.path,
+        encoding: .utf8,
+        byteOrderMark: .absent,
+        lineEnding: .none,
+        observedIdentity: identity,
+        securityScopedBookmark: access.bookmark
+    )
+    let relaunched = makeStore()
+    let relaunchOwner = UUID()
+    #expect(try await relaunched.restoreSecurityScopedAccess(
+        for: binding,
+        ownerID: relaunchOwner
+    ).securityScopedBookmark == Data(file.path.utf8))
+    await relaunched.releaseAllSecurityScopedAccess(ownerID: relaunchOwner)
+    #expect(counter.values == (2, 2))
+}
 
 @Test func atomicFailurePreservesOriginalBytes() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

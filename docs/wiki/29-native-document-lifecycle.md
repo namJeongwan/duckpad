@@ -1,6 +1,6 @@
 # Phase 25B — Native document lifecycle and save set
 
-Status: **Implemented; independent review pending**
+Status: **Approved, committed and pushed** (`34c3ef83b66eb8af16f968007d3752841bac76be`)
 
 ## User contract
 
@@ -75,11 +75,18 @@ ahead of it.
   destination, writes only the newly selected path, and leaves the source dirty.
 - Full Debug and Release suites each pass 347 tests after final remediation.
 
+## Delivery
+
+The exact candidate `df49292e00f84298c089400ce3b51816b4fbcf9b57c3b961952844c51fa0bdc8`
+was approved with 0 Blocker/Major/Minor findings, committed as `34c3ef8`,
+audited across 26 commits, and pushed to `origin/main`. The immutable receipt
+SHA-256 is `30bc1be63d4dc8d6377160e6225f70364bcdaa41a59d68d5f3110f0ceacbe1e5`.
+
 ## Deliberate boundary
 
 The `.app` document-type declaration, sandbox entitlements, bundle assembly,
-signing, and Finder launch smoke are the next packaging slice; this phase builds
-the in-process lifecycle they exercise. Open tabs remain unlimited. The separate
+signing, and Finder launch smoke belong to Phase 26; this phase builds the
+in-process lifecycle they exercise. Open tabs remain unlimited. The separate
 recently-closed-tab recovery stack remains bounded to 100 entries and is not an
 open-tab cap. Macro features remain excluded. README, the ignored Notepad++
 checkout, and user-owned doc04/vendor-script changes remain untouched.

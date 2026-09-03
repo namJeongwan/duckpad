@@ -1548,7 +1548,9 @@ get_global_addr(uint8 *global_data, WASMGlobalInstance *global)
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
 #define CHECK_INSTRUCTION_LIMIT()                                 \
-    if (instructions_left == 0) {                                 \
+    if (__atomic_load_n(&exec_env->instructions_to_execute,       \
+                        __ATOMIC_ACQUIRE) == 0                     \
+        || instructions_left == 0) {                              \
         wasm_set_exception(module, "instruction limit exceeded"); \
         goto got_exception;                                       \
     }                                                             \
@@ -1605,7 +1607,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
     int instructions_left = -1;
     if (exec_env) {
-        instructions_left = exec_env->instructions_to_execute;
+        instructions_left = __atomic_load_n(
+            &exec_env->instructions_to_execute, __ATOMIC_ACQUIRE);
     }
 #endif
 

@@ -73,8 +73,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 59 | [Phase 24 independent code review](reviews/2026-09-03-phase-24-settings-code-review.md) | **Approved — 0 findings** | Descriptor-bound durable settings authority, live accessibility, zero-window Settings ownership, accepted-update termination join을 독립 재검증했다. |
 | 60 | [Phase 25A command palette and unified registry](28-command-palette.md) | **Approved, committed and pushed** | `Shift-Command-P` 검색 팔레트에 core/native/extension menu command를 하나의 validation/dispatch authority로 통합했고 commit `aa2e523`을 exact receipt/audit 후 `origin/main`에 반영했다. |
 | 61 | [Phase 25A independent code review](reviews/2026-09-03-phase-25a-command-palette-code-review.md) | **Approved — 0 findings** | Exact-target dispatch/current validation, live extension refresh와 hosted popover lifecycle을 remediation 후 독립 재검증했다. |
-| 62 | [Phase 25B native document lifecycle and save set](29-native-document-lifecycle.md) | **Implemented; review pending** | Finder/Open With/drag 다중 열기, native 최근 문서, Save Copy와 Save All 및 충돌 없는 macOS 단축키를 하나의 직렬화된 문서 수명주기로 묶는다. |
-| 63 | [Phase 25B independent code review](reviews/2026-09-03-phase-25b-native-document-lifecycle-code-review.md) | **Content approved — 0 findings** | Fresh panel/identity Save Copy retry까지 재검증해 P25B-01~03을 모두 닫았으며 exact receipt refreeze만 남았다. |
+| 62 | [Phase 25B native document lifecycle and save set](29-native-document-lifecycle.md) | **Approved, committed and pushed** | Finder/Open With/drag 다중 열기, native 최근 문서, Save Copy와 Save All을 commit `34c3ef8`로 exact receipt/audit 후 `origin/main`에 반영했다. |
+| 63 | [Phase 25B independent code review](reviews/2026-09-03-phase-25b-native-document-lifecycle-code-review.md) | **Approved — 0 findings** | Fresh panel/identity Save Copy retry까지 P25B-01~03을 모두 닫았다. receipt SHA-256은 `30bc1be63d4dc8d6377160e6225f70364bcdaa41a59d68d5f3110f0ceacbe1e5`다. |
+| 64 | [Phase 26 macOS distribution and sandboxed XPC](30-macos-distribution.md) | **Content approved; exact receipt pending** | Universal `.app`, Finder document declarations, packaged resources/icon, exact sandbox entitlements, Hardened Runtime signing pipeline과 embedded XPC WebAssembly runtime을 구현한다. |
+| 65 | [Phase 26 independent code review](reviews/2026-09-03-phase-26-macos-distribution-code-review.md) | **Content approved — 0 findings** | 최초 4 Major의 XPC remote teardown, sandbox document scope/bookmark lifecycle, WAMR semantic-patch reproduction, exclusive artifact publication 결함을 remediation 후 독립 재검증해 모두 닫았다. |
 
 상태 정의:
 
@@ -130,6 +132,30 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-04 — Phase 26 focused remediation independent re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent remediation reviewer; Phase 26 구현에는 참여하지 않았다.
+- **Closure:** P26-01 tight-loop timeout/cancel과 즉시 XPC 재사용, P26-02 owner-balanced document bookmark/lease 및 two-launch save, P26-03 세 semantic patch의 exact 168-file regeneration, P26-04 same-volume `RENAME_EXCL` publication을 current bytes에서 모두 재검증했다.
+- **Independent validation:** security-scope 1/1, shared runtime 1/1, publication governance 2/2, real Darwin race 1/1, WAMR 168/168, current-byte native app static verification/full smoke PASS, XPC isolation 반복 3/3 PASS. Builder Debug/Release modules 349/349와 governance 10/10은 supporting evidence로만 사용했다.
+- **Verdict/boundary:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** 40-path product/test/work-doc staged-blob manifest digest는 `8bb7f50892f1a9957445176f798d4af82193c42b05dccc288df22caa70e8b1b2`다. review/index evidence 반영 후 exact candidate refreeze/receipt가 필요하다. user-owned doc04/vendor script, README, ignored Notepad++, product/source/tests/stage/commit/push는 불변이다.
+
+### 2026-09-04 — Phase 26 direct remediation
+
+- **Agent/role:** `/root`, direct remediation builder; no new implementation agent was used and the independent verdict was not rewritten.
+- **P26-01:** packaged XPC execution moved to a cancellation-responsive serial worker. WAMR classic-interpreter instruction polling uses atomic zero as an asynchronous trap, logical cancellation/deadline survive connection restarts, and the clean-process fallback is bounded. The signed-app adversary proves tight-loop timeout, explicit cancel, then immediate valid Sort Lines recovery.
+- **P26-02:** ordinary document access now owns app-scoped bookmarks and owner-refcounted leases. Recovery refreshes persisted bindings before interaction; close/teardown/rebind/Clear Recent reconcile exact leases. A two-launch Finder-open → bookmark recovery → save smoke updates the exact external file, and a store test proves balanced ownership across stores.
+- **P26-03/P26-04:** the pinned WAMR generator now reproduces both semantic patches and verifies all 168 files byte-for-byte. App publication stages beside the resolved destination and uses `RENAME_EXCL` plus inode/cross-volume checks; concurrent appearance and cross-volume governance tests pass.
+- **Validation:** Debug and Release modules each pass 349/349 (AppKit presentation tests isolated per helper because a long-lived macOS 26.5 test helper can crash while retiring a prior test window animation); governance 10/10, WAMR 168/168 regeneration, native signed-bundle static verification, Finder/Open With, two-launch bookmark, valid extension and adversarial XPC smokes pass. Independent re-review and exact receipt remain pending.
+- **Boundary:** open tabs remain unlimited; only recent-close/bookmark archives are bounded to 100. Macros, README, ignored Notepad++, user-owned doc04 and the untracked Scintilla vendor script remain excluded.
+
+### 2026-09-03 — Phase 26 independent content review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 26 구현에는 참여하지 않았다.
+- **Scope:** exact staged 25-path Universal app/XPC packaging, entitlements, resources, shared WAMR runtime, scripts/tests/docs와 주변 sandbox/extension authority를 검토했다.
+- **Findings:** 0 Blocker, 4 Major, 0 Minor. XPC timeout 뒤 remote WAMR 생존, ordinary document security-scope/bookmark 부재, unreproducible vendor semantic patch, non-exclusive output publish가 승인을 차단한다.
+- **Validation:** candidate/cached diff/script syntax PASS, independent focused 3/3 PASS, built Universal app static verification/architectures/entitlements/signatures PASS, official WAMR archive hash 및 normalized-byte mismatch 재현.
+- **Verdict/boundary:** CHANGES REQUIRED. review 문서/index만 수정했으며 product/source/tests/work doc/stage/receipt/commit/push 및 user-owned doc04/vendor script, README, ignored Notepad++는 불변이다.
 
 ### 2026-09-03 — Phase 25B final residual re-review
 

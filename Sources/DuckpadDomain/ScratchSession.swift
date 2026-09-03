@@ -508,6 +508,23 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         buffers[buffer.id] = buffer
     }
 
+    /// Refreshes sandbox authority without changing the document title,
+    /// revision, dirty bit, selection, or activation order.
+    public mutating func updateFileBinding(
+        tabID: TabID,
+        binding: FileBinding,
+        expectedBinding: FileBinding
+    ) throws {
+        let document = try document(for: tabID)
+        guard fileBindings[document.id] == expectedBinding else {
+            throw SessionError.fileBindingConflict(documentID: document.id)
+        }
+        if let duplicate = self.tabID(canonicalPath: binding.canonicalPath), duplicate != tabID {
+            throw SessionError.duplicateFileBinding(binding.canonicalPath)
+        }
+        fileBindings[document.id] = binding
+    }
+
     @discardableResult
     public mutating func replaceFileContents(
         tabID: TabID,

@@ -101,7 +101,10 @@ public struct LanguageManifestLoader: Sendable {
     }
 
     public func loadBundled() throws(LanguageManifestError) -> LanguageRegistry {
-        guard let url = Bundle.module.url(forResource: "Languages", withExtension: "json") else {
+        guard let url = DuckpadInfrastructureResources.bundle.url(
+            forResource: "Languages",
+            withExtension: "json"
+        ) else {
             throw .missingResource
         }
         do { return try load(Data(contentsOf: url)) }

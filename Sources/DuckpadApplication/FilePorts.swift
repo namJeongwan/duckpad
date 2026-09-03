@@ -44,7 +44,29 @@ public struct FileWriteReceipt: Equatable, Sendable {
     }
 }
 
+public struct SecurityScopedFileAccess: Equatable, Sendable {
+    public let url: URL
+    public let bookmark: Data?
+
+    public init(url: URL, bookmark: Data? = nil) {
+        self.url = url
+        self.bookmark = bookmark
+    }
+}
+
 public protocol TextFileStore: Sendable {
+    func prepareSecurityScopedAccess(
+        to url: URL,
+        ownerID: UUID
+    ) async throws(TextFileStoreError) -> SecurityScopedFileAccess
+    func restoreSecurityScopedAccess(
+        for binding: FileBinding,
+        ownerID: UUID
+    ) async throws(TextFileStoreError) -> FileBinding
+    func releaseSecurityScopedAccess(forCanonicalPath path: String, ownerID: UUID) async
+    func reconcileSecurityScopedAccess(retainingCanonicalPaths paths: Set<String>, ownerID: UUID) async
+    func releaseAllSecurityScopedAccess(ownerID: UUID) async
+    func clearPersistedSecurityScopedBookmarks() async throws(TextFileStoreError)
     func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL
     func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult
     func currentIdentity(for url: URL) async throws(TextFileStoreError) -> FileIdentity?
@@ -57,6 +79,23 @@ public protocol TextFileStore: Sendable {
 }
 
 public extension TextFileStore {
+    func prepareSecurityScopedAccess(
+        to url: URL,
+        ownerID: UUID
+    ) async throws(TextFileStoreError) -> SecurityScopedFileAccess {
+        SecurityScopedFileAccess(url: url)
+    }
+
+    func restoreSecurityScopedAccess(
+        for binding: FileBinding,
+        ownerID: UUID
+    ) async throws(TextFileStoreError) -> FileBinding { binding }
+
+    func releaseSecurityScopedAccess(forCanonicalPath path: String, ownerID: UUID) async {}
+    func reconcileSecurityScopedAccess(retainingCanonicalPaths paths: Set<String>, ownerID: UUID) async {}
+    func releaseAllSecurityScopedAccess(ownerID: UUID) async {}
+    func clearPersistedSecurityScopedBookmarks() async throws(TextFileStoreError) {}
+
     func currentIdentity(for url: URL) async throws(TextFileStoreError) -> FileIdentity? {
         do { return try await read(from: url).identity }
         catch .notFound { return nil }
