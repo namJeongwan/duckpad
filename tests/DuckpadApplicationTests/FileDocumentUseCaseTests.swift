@@ -780,6 +780,69 @@ private final class FileEditorFake: EditorPort, EditorSelectionPort {
     #expect(decoded.byteOrderMark == .absent)
 }
 
+@Test @MainActor func saveCopyWritesCurrentSnapshotWithoutRebindingOrCleaningDocument() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    editor.display(workspace.snapshot().activeBuffer!)
+    editor.replaceWith("한\ncopy 🙂")
+    _ = await workspace.flushPersistence()
+    let files = FileStoreFake()
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let destination = URL(fileURLWithPath: "/tmp/duckpad-copy.txt")
+    let before = try #require(workspace.activeFileContext())
+
+    let outcome = await useCase.saveCopy(
+        destination,
+        conversion: TextFileConversion(
+            encoding: .utf16LittleEndian,
+            byteOrderMark: .present,
+            lineEnding: .crlf
+        ),
+        expectedContext: before
+    )
+
+    #expect(outcome == .saved(before.tabID))
+    #expect(workspace.activeFileContext() == before)
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == true)
+    let copied = try #require(await files.data(at: destination))
+    let decoded = try TextFileCodec.decode(copied)
+    #expect(decoded.text == "한\r\ncopy 🙂")
+    #expect(decoded.encoding == .utf16LittleEndian)
+    #expect(decoded.byteOrderMark == .present)
+}
+
+@Test @MainActor func saveCopyDetectsDestinationReplacementAndPreservesExternalBytes() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    editor.display(workspace.snapshot().activeBuffer!)
+    editor.replaceWith("copy candidate")
+    _ = await workspace.flushPersistence()
+    let files = FileStoreFake()
+    let destination = URL(fileURLWithPath: "/tmp/duckpad-copy-race.txt")
+    await files.seed("consented destination", at: destination)
+    await files.armBlockedWrite()
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let save = Task { await useCase.saveCopy(destination) }
+    await files.waitForBlockedWrite()
+
+    await files.externalReplace("external replacement", at: destination)
+    await files.releaseWrite()
+
+    guard case .failed(.store(.conflict)) = await save.value else {
+        Issue.record("destination replacement was not reported as a conflict")
+        return
+    }
+    #expect(await files.text(at: destination) == "external replacement")
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == true)
+    #expect(workspace.activeFileContext()?.binding == nil)
+}
+
 @Test @MainActor func durabilityFailureDoesNotBindOrCleanLiveDocument() async {
     let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
     let editor = FileEditorFake()

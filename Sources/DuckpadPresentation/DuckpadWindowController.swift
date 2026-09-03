@@ -227,6 +227,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     public var onSettingsRequested: (() -> Void)?
     public var onBecameKey: (() -> Void)?
     public var onClosed: (() -> Void)?
+    public var onDocumentURLUsed: ((URL) -> Void)?
     private let editorHostView: NSView
     private let fileUseCase: FileDocumentUseCase?
     private let filePanels: (any FilePanelPresenting)?
@@ -947,6 +948,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    @objc public func performSaveCopyAs(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable,
+              let context = workspace.activeFileContext() else { return }
+        beginFileCommandTask { [weak self] in
+            await self?.routeSaveCopyAs(expectedContext: context)
+        }
+    }
+
+    @objc public func performSaveAll(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, fileUseCase != nil else { return }
+        beginFileCommandTask { [weak self] in
+            await self?.routeSaveAll()
+        }
+    }
+
     @objc public func performShowFind(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
         searchPanel.show(replace: false)
@@ -1104,10 +1120,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performOpenFile(_:)),
              #selector(performSaveFile(_:)),
              #selector(performSaveFileAs(_:)),
+             #selector(performSaveCopyAs(_:)),
              #selector(performToggleLineComment(_:)),
              #selector(performShowLanguageChooser(_:)),
              #selector(performShowExtensions(_:)):
             return workspaceInteractionsAreActionable
+        case #selector(performSaveAll(_:)):
+            return workspaceInteractionsAreActionable && fileUseCase != nil
+                && workspace.snapshot().tabs.contains(where: \.isDirty)
         case #selector(performCompleteCurrentDocumentWord(_:)),
              #selector(performShowDocumentSymbols(_:)):
             return workspaceInteractionsAreActionable && documentIntelligenceUseCase != nil
@@ -1330,13 +1350,77 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public func routeOpenFile(encodingHint: TextFileEncoding? = nil) async {
         guard workspaceInteractionsAreActionable,
-              let fileUseCase,
+              fileUseCase != nil,
               let url = await filePanels?.chooseOpenURL(attachedTo: window),
               workspaceInteractionsAreActionable else { return }
-        await handle(fileOutcome: await fileUseCase.open(url, assuming: encodingHint)) { [weak self] in
+        await handle(fileOutcome: await openDocumentURL(url, assuming: encodingHint)) { [weak self] in
             self?.beginFileCommandTask { [weak self] in
                 await self?.routeOpenFile(encodingHint: encodingHint)
             }
+        }
+    }
+
+    /// Finder/Open With and recent-document entry point. The entire batch is
+    /// admitted as one window-owned task so termination waits for accepted I/O.
+    public func openExternalURLs(
+        _ urls: [URL],
+        completion: (@MainActor (Bool) -> Void)? = nil
+    ) {
+        let fileURLs = urls.filter(\.isFileURL)
+        guard !fileURLs.isEmpty, !terminationReviewInProgress, !hasTornDownWindow else {
+            completion?(false)
+            return
+        }
+        beginFileCommandTask { [weak self] in
+            guard let self else {
+                completion?(false)
+                return
+            }
+            await self.waitForStartup()
+            guard self.workspaceInteractionsAreActionable,
+                  let fileUseCase = self.fileUseCase else {
+                completion?(false)
+                return
+            }
+            var succeeded = true
+            let outcomes = await fileUseCase.open(fileURLs)
+            for (url, outcome) in zip(fileURLs, outcomes) {
+                guard !Task.isCancelled, !self.hasTornDownWindow else {
+                    succeeded = false
+                    break
+                }
+                switch outcome {
+                case .opened(let tabID), .activatedExisting(let tabID):
+                    self.recordOpenedDocumentURL(tabID: tabID, fallback: url)
+                case .failed:
+                    succeeded = false
+                    await self.handle(fileOutcome: outcome) {}
+                }
+            }
+            completion?(succeeded)
+        }
+    }
+
+    private func openDocumentURL(
+        _ url: URL,
+        assuming encodingHint: TextFileEncoding? = nil
+    ) async -> FileOpenOutcome {
+        guard let fileUseCase else { return .failed(.noActiveDocument) }
+        let outcome = await fileUseCase.open(url, assuming: encodingHint)
+        switch outcome {
+        case .opened(let tabID), .activatedExisting(let tabID):
+            recordOpenedDocumentURL(tabID: tabID, fallback: url)
+        case .failed:
+            break
+        }
+        return outcome
+    }
+
+    private func recordOpenedDocumentURL(tabID: TabID, fallback: URL) {
+        if let path = workspace.fileContext(tabID: tabID)?.binding?.canonicalPath {
+            onDocumentURLUsed?(URL(fileURLWithPath: path))
+        } else {
+            onDocumentURLUsed?(fallback)
         }
     }
 
@@ -1514,7 +1598,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 acceptedBeforeTermination: acceptedBeforeTermination
             )
         } else {
-            _ = await resolve(fileOutcome: outcome) { [weak self] in
+            let resolved = await resolve(fileOutcome: outcome) { [weak self] in
                 self?.beginFileCommandTask { [weak self] in
                     await self?.routeSaveFile(
                         conversion: conversion,
@@ -1523,6 +1607,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                     )
                 }
             }
+            recordActiveDocumentURLIfSaved(resolved)
         }
     }
 
@@ -1562,7 +1647,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               workspaceInteractionsAreActionable || acceptedBeforeTermination,
               !hasTornDownWindow,
               workspace.activeFileContext() == context else { return }
-        _ = await resolve(fileOutcome: await fileUseCase.saveAs(
+        let outcome = await resolve(fileOutcome: await fileUseCase.saveAs(
             url,
             conversion: conversion,
             expectedContext: context
@@ -1575,6 +1660,66 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 )
             }
         }
+        recordActiveDocumentURLIfSaved(outcome)
+    }
+
+    private func routeSaveCopyAs(expectedContext: FileWorkspaceContext) async {
+        guard !hasTornDownWindow,
+              let fileUseCase,
+              workspace.activeFileContext() == expectedContext,
+              let url = await filePanels?.chooseSaveURL(
+                suggestedName: expectedContext.title,
+                attachedTo: window
+              ),
+              !hasTornDownWindow,
+              workspace.activeFileContext() == expectedContext else { return }
+        _ = await resolve(fileOutcome: await fileUseCase.saveCopy(
+            url,
+            expectedContext: expectedContext
+        )) { [weak self] in
+            self?.beginFileCommandTask { [weak self] in
+                await self?.routeSaveCopyAs(expectedContext: expectedContext)
+            }
+        }
+    }
+
+    private func routeSaveAll() async {
+        guard let fileUseCase else { return }
+        let originalTabID = workspace.snapshot().tabs.first(where: \.isActive)?.id
+        let dirtyTabIDs = workspace.snapshot().tabs.filter(\.isDirty).map(\.id)
+        for tabID in dirtyTabIDs {
+            guard !Task.isCancelled, !hasTornDownWindow,
+                  workspace.snapshot().tabs.contains(where: { $0.id == tabID && $0.isDirty }) else {
+                continue
+            }
+            if workspace.snapshot().tabs.first(where: \.isActive)?.id != tabID {
+                guard case .applied = await workspace.activate(tabID: tabID) else { break }
+            }
+            guard let context = workspace.activeFileContext(), context.tabID == tabID else { break }
+            var outcome = await fileUseCase.saveActive(expectedContext: context)
+            if case .requiresDestination = outcome {
+                guard let url = await filePanels?.chooseSaveURL(
+                    suggestedName: context.title,
+                    attachedTo: window
+                ), !hasTornDownWindow, workspace.activeFileContext() == context else { break }
+                outcome = await fileUseCase.saveAs(url, expectedContext: context)
+            }
+            let resolved = await resolve(fileOutcome: outcome) {}
+            guard case .saved = resolved else { break }
+            recordActiveDocumentURLIfSaved(resolved)
+        }
+        if let originalTabID,
+           !hasTornDownWindow,
+           workspace.snapshot().tabs.contains(where: { $0.id == originalTabID }),
+           workspace.snapshot().tabs.first(where: \.isActive)?.id != originalTabID {
+            _ = await workspace.activate(tabID: originalTabID)
+        }
+    }
+
+    private func recordActiveDocumentURLIfSaved(_ outcome: FileSaveOutcome) {
+        guard case .saved(let tabID) = outcome,
+              let path = workspace.fileContext(tabID: tabID)?.binding?.canonicalPath else { return }
+        onDocumentURLUsed?(URL(fileURLWithPath: path))
     }
 
     public var hasDirtyDocuments: Bool {
@@ -1824,17 +1969,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         let root = NSViewController()
         let dropView = FileDropView()
         dropView.onFiles = { [weak self] urls in
-            guard let self, let fileUseCase = self.fileUseCase else { return }
-            Task { @MainActor in
-                for url in urls {
-                    await self.handle(fileOutcome: await fileUseCase.open(url)) { [weak self] in
-                        Task { @MainActor [weak self] in
-                            guard let self, let fileUseCase = self.fileUseCase else { return }
-                            await self.handle(fileOutcome: await fileUseCase.open(url)) {}
-                        }
-                    }
-                }
-            }
+            self?.openExternalURLs(urls)
         }
         dropView.onFolders = { [weak self] urls in
             guard let self else { return }

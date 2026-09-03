@@ -100,11 +100,23 @@ private final class WeakBox<Value: AnyObject> {
 }
 
 @MainActor
-private final class ApplicationMenuTargetSpy: NSObject {
+private final class ApplicationMenuTargetSpy: NSObject, DuckpadApplicationCommandTarget {
     private(set) var settingsRequests = 0
+    private(set) var openedRecentURLs: [URL] = []
+    private(set) var clearRecentRequests = 0
 
     @objc func performShowSettings(_ sender: Any?) {
         settingsRequests += 1
+    }
+
+    @objc func performOpenRecentDocument(_ sender: Any?) {
+        if let url = (sender as? NSMenuItem)?.representedObject as? URL {
+            openedRecentURLs.append(url)
+        }
+    }
+
+    @objc func performClearRecentDocuments(_ sender: Any?) {
+        clearRecentRequests += 1
     }
 }
 
@@ -812,6 +824,16 @@ struct AppKitHostedTests {
     controller.performNewWindow()
     #expect(newWindowRequests == 1)
 
+    let saveCopy = menuItem("Save a Copy As…", in: menu)
+    let saveAll = menuItem("Save All", in: menu)
+    #expect(saveCopy?.action == #selector(DuckpadWindowController.performSaveCopyAs(_:)))
+    #expect(saveCopy?.keyEquivalent == "s")
+    #expect(saveCopy?.keyEquivalentModifierMask == [.command, .option, .shift])
+    #expect(saveAll?.action == #selector(DuckpadWindowController.performSaveAll(_:)))
+    #expect(saveAll?.keyEquivalent == "s")
+    #expect(saveAll?.keyEquivalentModifierMask == [.command, .option])
+    if let saveAll { #expect(!controller.validateMenuItem(saveAll)) }
+
     #expect(menuItem("Minimize", in: menu)?.keyEquivalentModifierMask == [.command])
     #expect(menuItem("Enter Full Screen", in: menu)?.keyEquivalentModifierMask == [.command, .control])
 
@@ -1072,6 +1094,36 @@ struct AppKitHostedTests {
         #expect(!controller.validateMenuItem(splitRight))
         #expect(!controller.validateMenuItem(closeSplit))
     }
+}
+
+@Test @MainActor func openRecentMenuUsesApplicationLifetimeTargetAndDisambiguatesNames() {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    let target = ApplicationMenuTargetSpy()
+    let first = URL(fileURLWithPath: "/tmp/one/shared.txt")
+    let second = URL(fileURLWithPath: "/var/one/shared.txt")
+    let menu = DuckpadMainMenuFactory.make(
+        target: controller,
+        applicationTarget: target,
+        recentDocumentURLs: [first, second]
+    )
+    let recent = menuItem("Open Recent", in: menu)?.submenu
+
+    #expect(recent?.items.map(\.title) == ["shared.txt — tmp/one", "shared.txt — var/one", "", "Clear Menu"])
+    let firstItem = recent?.items.first
+    #expect(firstItem?.target === target)
+    #expect(firstItem?.representedObject as? URL == first)
+    if let firstItem, let action = firstItem.action {
+        _ = NSApplication.shared.sendAction(action, to: firstItem.target, from: firstItem)
+    }
+    #expect(target.openedRecentURLs == [first])
+    let clear = recent?.items.last
+    if let clear, let action = clear.action {
+        _ = NSApplication.shared.sendAction(action, to: clear.target, from: clear)
+    }
+    #expect(target.clearRecentRequests == 1)
 }
 
 @Test @MainActor func completionAndSymbolCommandsRouteThroughBoundedUseCase() async throws {

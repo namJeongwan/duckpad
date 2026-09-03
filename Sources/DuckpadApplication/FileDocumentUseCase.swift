@@ -124,6 +124,30 @@ public final class FileDocumentUseCase {
     ) async -> FileOpenOutcome {
         await acquireOperation()
         defer { releaseOperation() }
+        return await openWithoutAcquiring(url, assuming: encodingHint)
+    }
+
+    /// Opens one external request as an indivisible ordered batch. Other file
+    /// operations wait until every member has resolved, preventing two Finder
+    /// requests from interleaving their tab order.
+    public func open(
+        _ urls: [URL],
+        assuming encodingHint: TextFileEncoding? = nil
+    ) async -> [FileOpenOutcome] {
+        await acquireOperation()
+        defer { releaseOperation() }
+        var outcomes: [FileOpenOutcome] = []
+        outcomes.reserveCapacity(urls.count)
+        for url in urls {
+            outcomes.append(await openWithoutAcquiring(url, assuming: encodingHint))
+        }
+        return outcomes
+    }
+
+    private func openWithoutAcquiring(
+        _ url: URL,
+        assuming encodingHint: TextFileEncoding?
+    ) async -> FileOpenOutcome {
         guard !Task.isCancelled else { return .failed(.cancelled) }
         do {
             let canonical = try await store.canonicalURL(for: url)
@@ -256,6 +280,57 @@ public final class FileDocumentUseCase {
         do {
             let canonical = try await store.canonicalURL(for: url)
             return await save(context: context, to: canonical, conversion: conversion, overwrite: false)
+        } catch let error {
+            return .failed(.store(error))
+        }
+    }
+
+    /// Writes a point-in-time copy without rebinding the tab or marking it clean.
+    /// The caller is expected to obtain overwrite consent (for example through
+    /// `NSSavePanel`) before setting `overwrite` to true.
+    public func saveCopy(
+        _ url: URL,
+        conversion: TextFileConversion? = nil,
+        expectedContext: FileWorkspaceContext? = nil
+    ) async -> FileSaveOutcome {
+        await acquireOperation()
+        defer { releaseOperation() }
+        guard let context = workspace.activeFileContext() else {
+            return .failed(.noActiveDocument)
+        }
+        guard expectedContext == nil || expectedContext == context else {
+            return .failed(.comparisonInvalidated)
+        }
+        do {
+            let canonical = try await store.canonicalURL(for: url)
+            if workspace.tabID(canonicalPath: canonical.path) != nil {
+                return .failed(.session(.duplicateFileBinding(canonical.path)))
+            }
+            guard let snapshot = editor.snapshot(for: context.buffer.bufferID) else {
+                return .failed(.editorSnapshotUnavailable(context.buffer.bufferID))
+            }
+            guard snapshot.revision == context.buffer.revision else {
+                return .failed(.editorRevisionMismatch(
+                    bufferID: context.buffer.bufferID,
+                    expected: context.buffer.revision,
+                    actual: snapshot.revision
+                ))
+            }
+            let format = outputFormat(context: context, conversion: conversion)
+            let text = TextFileCodec.convert(snapshot.text, to: format.lineEnding)
+            let data = TextFileCodec.encode(
+                text,
+                encoding: format.encoding,
+                byteOrderMark: format.byteOrderMark
+            )
+            let destinationIdentity = try await store.currentIdentity(for: canonical)
+            _ = try await store.writeAtomically(
+                data,
+                to: canonical,
+                expectedIdentity: destinationIdentity,
+                overwrite: false
+            )
+            return .saved(context.tabID)
         } catch let error {
             return .failed(.store(error))
         }
@@ -405,9 +480,10 @@ public final class FileDocumentUseCase {
                 actual: snapshot.revision
             ))
         }
-        let encoding = conversion?.encoding ?? context.binding?.encoding ?? .utf8
-        let bom = conversion?.byteOrderMark ?? context.binding?.byteOrderMark ?? .absent
-        let lineEnding = conversion?.lineEnding ?? context.binding?.lineEnding ?? .none
+        let format = outputFormat(context: context, conversion: conversion)
+        let encoding = format.encoding
+        let bom = format.byteOrderMark
+        let lineEnding = format.lineEnding
         // Bound EOL is a durable format choice, not a one-shot transformation.
         // Normal saves therefore normalize to the binding selected by a prior conversion.
         let text = TextFileCodec.convert(snapshot.text, to: lineEnding)
@@ -455,6 +531,17 @@ public final class FileDocumentUseCase {
 
     private func inferLineEnding(_ text: String) -> LineEnding {
         (try? TextFileCodec.decode(Data(text.utf8)).lineEnding) ?? .none
+    }
+
+    private func outputFormat(
+        context: FileWorkspaceContext,
+        conversion: TextFileConversion?
+    ) -> TextFileConversion {
+        TextFileConversion(
+            encoding: conversion?.encoding ?? context.binding?.encoding ?? .utf8,
+            byteOrderMark: conversion?.byteOrderMark ?? context.binding?.byteOrderMark ?? .absent,
+            lineEnding: conversion?.lineEnding ?? context.binding?.lineEnding ?? .none
+        )
     }
 
     private func acquireOperation() async {

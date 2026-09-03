@@ -7,7 +7,8 @@ import DuckpadInfrastructure
 import DuckpadPresentation
 
 @MainActor
-final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
+    DuckpadApplicationCommandTarget {
     private var windowController: DuckpadWindowController?
     private var windowControllers: [ObjectIdentifier: DuckpadWindowController] = [:]
     private var windowEditors: [ObjectIdentifier: ScintillaEditorAdapter] = [:]
@@ -25,6 +26,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private var languageRegistry: LanguageRegistry!
     private var languageConfigurationIssue: String?
     private var settingsUseCase: AppSettingsUseCase!
+    private var pendingFinderOpenRequests: [[URL]] = []
+    private var runtimeIsReady = false
 
     private struct WindowRuntime {
         let controller: DuckpadWindowController
@@ -95,6 +98,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         }
         register(runtime, recoveryRoot: recoveryBase)
         controller.showAndFocus()
+        runtimeIsReady = true
+        drainPendingFinderOpenRequests()
         restoreAdditionalWindows()
 
         if environment["DUCKPAD_SETTINGS_SMOKE"] == "1" {
@@ -481,6 +486,13 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             guard let self, let controller, controller.window?.isKeyWindow == true else { return }
             self.installMainMenu(target: controller)
         }
+        controller.onDocumentURLUsed = { [weak self] url in
+            guard let self else { return }
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+            if let target = self.activeDocumentController {
+                self.installMainMenu(target: target)
+            }
+        }
         controller.onClosed = { [weak self, weak controller] in
             guard let self, let controller else { return }
             let identifier = ObjectIdentifier(controller)
@@ -557,10 +569,61 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         return true
     }
 
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        let urls = filenames.map { URL(fileURLWithPath: $0, isDirectory: false) }
+        guard runtimeIsReady else {
+            pendingFinderOpenRequests.append(urls)
+            return
+        }
+        openDocumentURLs(urls, replyTo: sender)
+    }
+
+    @objc func performOpenRecentDocument(_ sender: Any?) {
+        guard let item = sender as? NSMenuItem,
+              let url = item.representedObject as? URL else { return }
+        openDocumentURLs([url], replyTo: nil)
+    }
+
+    @objc func performClearRecentDocuments(_ sender: Any?) {
+        guard terminationCoordinator.permitsApplicationCommands else { return }
+        NSDocumentController.shared.clearRecentDocuments(sender)
+        if let target = activeDocumentController { installMainMenu(target: target) }
+    }
+
+    private var activeDocumentController: DuckpadWindowController? {
+        windowControllers.values.first(where: { $0.window?.isKeyWindow == true })
+            ?? windowController
+            ?? windowControllers.values.first
+    }
+
+    private func openDocumentURLs(_ urls: [URL], replyTo application: NSApplication?) {
+        guard terminationCoordinator.permitsApplicationCommands else {
+            application?.reply(toOpenOrPrint: .failure)
+            return
+        }
+        if activeDocumentController == nil { createAdditionalWindow() }
+        guard let controller = activeDocumentController else {
+            application?.reply(toOpenOrPrint: .failure)
+            return
+        }
+        controller.showAndFocus()
+        controller.openExternalURLs(urls) { succeeded in
+            application?.reply(toOpenOrPrint: succeeded ? .success : .failure)
+        }
+    }
+
+    private func drainPendingFinderOpenRequests() {
+        guard runtimeIsReady, !pendingFinderOpenRequests.isEmpty else { return }
+        let requests = pendingFinderOpenRequests
+        pendingFinderOpenRequests.removeAll()
+        for urls in requests { openDocumentURLs(urls, replyTo: NSApplication.shared) }
+    }
+
     private func installMainMenu(target: DuckpadWindowController) {
         let menu = DuckpadMainMenuFactory.make(
             target: target,
-            applicationTarget: self
+            applicationTarget: self,
+            recentDocumentURLs: NSDocumentController.shared.recentDocumentURLs
         )
         NSApplication.shared.mainMenu = menu
         target.applicationMainMenuDidChange(menu)
@@ -573,6 +636,10 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(performShowSettings(_:)) {
+            return terminationCoordinator.permitsApplicationCommands
+        }
+        if menuItem.action == #selector(performOpenRecentDocument(_:))
+            || menuItem.action == #selector(performClearRecentDocuments(_:)) {
             return terminationCoordinator.permitsApplicationCommands
         }
         return true

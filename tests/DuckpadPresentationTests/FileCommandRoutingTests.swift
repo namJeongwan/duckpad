@@ -227,6 +227,7 @@ private final class RecoveryErrorPresenterSpy: PersistenceErrorPresenting {
 
 private actor RoutingFileStore: TextFileStore {
     private var values: [String: FileReadResult] = [:]
+    private var readPaths: [String] = []
     private var generation: UInt64 = 0
     private var forcedWriteError: TextFileStoreError?
     private var blockNextRead = false
@@ -237,6 +238,7 @@ private actor RoutingFileStore: TextFileStore {
     private var releaseBlockedWrite = false
     func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL { url.standardizedFileURL }
     func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult {
+        readPaths.append(url.path)
         if blockNextRead {
             blockNextRead = false
             blockedReadEntered = true
@@ -270,6 +272,7 @@ private actor RoutingFileStore: TextFileStore {
     func text(at url: URL) -> String? { values[url.path].flatMap { String(data: $0.data, encoding: .utf8) } }
     func data(at url: URL) -> Data? { values[url.path]?.data }
     func result(at url: URL) -> FileReadResult? { values[url.path] }
+    func orderedReadPaths() -> [String] { readPaths }
     func setWriteError(_ error: TextFileStoreError?) { forcedWriteError = error }
     func armNextRead() {
         blockNextRead = true
@@ -330,6 +333,7 @@ private struct RoutingFolderStore: FolderSearchFileStore {
 private final class PanelFake: FilePanelPresenting, FileConflictPresenting, DirtyDocumentDecisionPresenting {
     var openURL: URL?
     var saveURL: URL?
+    var saveURLs: [URL] = []
     var folderURL: URL?
     private(set) var openRequests = 0
     private(set) var saveRequests = 0
@@ -352,7 +356,7 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
         if blocksSavePanel {
             await withCheckedContinuation { savePanelWaiters.append($0) }
         }
-        return saveURL
+        return saveURLs.isEmpty ? saveURL : saveURLs.removeFirst()
     }
     func chooseFolderURL(attachedTo window: NSWindow?) async -> URL? { folderRequests += 1; return folderURL }
     func resolveExternalConflict(attachedTo window: NSWindow?) async -> FileConflictResolution {
@@ -468,6 +472,167 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     #expect(workspace.activeFileContext()?.binding?.observedIdentity == read.identity)
     #expect(editor.textView.selectedRange() == NSRange(location: 7, length: 4))
     #expect(editor.textView.string == "prefix duck suffix")
+}
+
+@Test @MainActor func externalOpenBatchPublishesSuccessfulRecentDocumentURLs() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let first = URL(fileURLWithPath: "/tmp/duckpad-finder-first.txt")
+    let second = URL(fileURLWithPath: "/tmp/duckpad-finder-second.swift")
+    await files.seed("first", at: first)
+    await files.seed("let second = 2", at: second)
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    var recent: [URL] = []
+    controller.onDocumentURLUsed = { recent.append($0) }
+    controller.start()
+
+    let succeeded = await withCheckedContinuation { continuation in
+        controller.openExternalURLs([first, second]) {
+            continuation.resume(returning: $0)
+        }
+    }
+
+    #expect(succeeded)
+    #expect(recent.map(\.path) == [first.path, second.path])
+    #expect(workspace.snapshot().tabs.compactMap(\.fullPath) == [first.path, second.path])
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.fullPath == second.path)
+}
+
+@Test @MainActor func concurrentExternalOpenBatchesRemainContiguousAndFIFO() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let urls = (1...4).map { URL(fileURLWithPath: "/tmp/duckpad-batch-\($0).txt") }
+    for (index, url) in urls.enumerated() { await files.seed("\(index)", at: url) }
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    await files.armNextRead()
+    let first = Task { @MainActor in
+        await withCheckedContinuation { continuation in
+            controller.openExternalURLs(Array(urls[0...1])) { continuation.resume(returning: $0) }
+        }
+    }
+    await files.waitUntilReadIsBlocked()
+    let second = Task { @MainActor in
+        await withCheckedContinuation { continuation in
+            controller.openExternalURLs(Array(urls[2...3])) { continuation.resume(returning: $0) }
+        }
+    }
+    for _ in 0..<20 { await Task.yield() }
+    await files.releaseRead()
+
+    #expect(await first.value)
+    #expect(await second.value)
+    #expect(await files.orderedReadPaths() == urls.map(\.path))
+    #expect(workspace.snapshot().tabs.compactMap(\.fullPath) == urls.map(\.path))
+}
+
+@Test @MainActor func saveAllWritesEveryDirtyTabAndRestoresOriginalSelection() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let panels = PanelFake()
+    let firstURL = URL(fileURLWithPath: "/tmp/duckpad-save-all-first.txt")
+    let secondURL = URL(fileURLWithPath: "/tmp/duckpad-save-all-second.txt")
+    panels.saveURLs = [firstURL, secondURL]
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
+        filePanels: panels,
+        fileConflictPresenter: panels,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    editor.textView.insertText("first", replacementRange: NSRange(location: 0, length: 0))
+    await workspace.waitForPendingPersistence()
+    _ = await workspace.addScratch()
+    editor.textView.insertText("second", replacementRange: NSRange(location: 0, length: 0))
+    await workspace.waitForPendingPersistence()
+    let originalTabID = workspace.snapshot().tabs.first(where: \.isActive)?.id
+    var recent: [URL] = []
+    controller.onDocumentURLUsed = { recent.append($0) }
+
+    controller.performSaveAll()
+    for _ in 0..<2_000 where workspace.snapshot().tabs.contains(where: \.isDirty) {
+        await Task.yield()
+    }
+
+    #expect(await files.text(at: firstURL) == "first")
+    #expect(await files.text(at: secondURL) == "second")
+    #expect(workspace.snapshot().tabs.allSatisfy { !$0.isDirty })
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.id == originalTabID)
+    #expect(panels.saveRequests == 2)
+    #expect(recent.map(\.path) == [firstURL.path, secondURL.path])
+}
+
+@Test @MainActor func saveCopyConflictRetryStartsFreshPanelAndIdentityCycle() async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let panels = PanelFake()
+    let racedURL = URL(fileURLWithPath: "/tmp/duckpad-copy-routed-race.txt")
+    let retryURL = URL(fileURLWithPath: "/tmp/duckpad-copy-routed-retry.txt")
+    await files.seed("consented", at: racedURL)
+    panels.saveURL = racedURL
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: editor.scrollView,
+        fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
+        filePanels: panels,
+        fileConflictPresenter: panels,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    editor.textView.insertText("copy me", replacementRange: NSRange(location: 0, length: 0))
+    await workspace.waitForPendingPersistence()
+    await files.armNextWrite()
+
+    controller.performSaveCopyAs()
+    await files.waitUntilWriteIsBlocked()
+    await files.seed("external replacement", at: racedURL)
+    await files.releaseWrite()
+    for _ in 0..<2_000 where panels.failures.isEmpty { await Task.yield() }
+
+    guard case .store(.conflict) = panels.failures.first else {
+        Issue.record("routed copy conflict was not presented")
+        return
+    }
+    #expect(await files.text(at: racedURL) == "external replacement")
+    panels.saveURL = retryURL
+    panels.retryLastFileFailure()
+    for _ in 0..<2_000 where await files.text(at: retryURL) == nil { await Task.yield() }
+
+    #expect(panels.saveRequests == 2)
+    #expect(await files.text(at: retryURL) == "copy me")
+    #expect(workspace.activeFileContext()?.binding == nil)
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == true)
 }
 
 @Test @MainActor func commandQJoinsCancelledFolderActivationBeforeFinalRecoveryFlush() async {

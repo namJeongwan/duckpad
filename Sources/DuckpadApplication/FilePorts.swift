@@ -47,12 +47,21 @@ public struct FileWriteReceipt: Equatable, Sendable {
 public protocol TextFileStore: Sendable {
     func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL
     func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult
+    func currentIdentity(for url: URL) async throws(TextFileStoreError) -> FileIdentity?
     func writeAtomically(
         _ data: Data,
         to url: URL,
         expectedIdentity: FileIdentity?,
         overwrite: Bool
     ) async throws(TextFileStoreError) -> FileWriteReceipt
+}
+
+public extension TextFileStore {
+    func currentIdentity(for url: URL) async throws(TextFileStoreError) -> FileIdentity? {
+        do { return try await read(from: url).identity }
+        catch .notFound { return nil }
+        catch let error { throw error }
+    }
 }
 
 public struct DecodedTextFile: Equatable, Sendable {

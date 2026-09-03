@@ -1,6 +1,6 @@
 # Phase 25A — Command palette and unified command registry
 
-Status: **Implemented; independent review pending**
+Status: **Approved, committed, and pushed** (`aa2e523`)
 
 ## User contract
 
@@ -58,8 +58,9 @@ key equivalent/modifier tuple to be unique.
   dismissal, and the animation policy is disabled when Reduce Motion is active.
 - The native menu test proves exact `Shift-Command-P` ownership and global
   shortcut uniqueness.
-- Clean scratch-path Debug and Release builds each pass all 340 tests after
-  remediation.
+- Clean scratch-path Debug and Release builds each passed all 340 tests after
+  remediation. The exact signed candidate was committed as `aa2e523` and
+  audited before `origin/main` delivery.
 
 ## Deliberate boundary
 

@@ -1,13 +1,19 @@
 import AppKit
 import DuckpadDomain
 
+@MainActor @objc public protocol DuckpadApplicationCommandTarget: AnyObject {
+    func performOpenRecentDocument(_ sender: Any?)
+    func performClearRecentDocuments(_ sender: Any?)
+}
+
 /// Native command surface kept in Presentation so shortcuts/selectors can be
 /// tested without launching the executable target.
 @MainActor
 public enum DuckpadMainMenuFactory {
     public static func make(
         target: DuckpadWindowController,
-        applicationTarget: AnyObject? = nil
+        applicationTarget: AnyObject? = nil,
+        recentDocumentURLs: [URL] = []
     ) -> NSMenu {
         let mainMenu = NSMenu()
         let appItem = NSMenuItem()
@@ -35,6 +41,10 @@ public enum DuckpadMainMenuFactory {
         add("New Scratch", #selector(DuckpadWindowController.performNewScratch(_:)), "n", target, to: fileMenu)
         add("New Window", #selector(DuckpadWindowController.performNewWindow(_:)), "n", target, modifiers: [.command, .shift], to: fileMenu)
         add("Open…", #selector(DuckpadWindowController.performOpenFile(_:)), "o", target, to: fileMenu)
+        fileMenu.addItem(makeOpenRecentItem(
+            applicationTarget: applicationTarget,
+            urls: recentDocumentURLs
+        ))
         add(
             "Add Folder to Workspace…",
             #selector(DuckpadWindowController.performAddWorkspaceFolder(_:)),
@@ -54,6 +64,8 @@ public enum DuckpadMainMenuFactory {
         fileMenu.addItem(.separator())
         add("Save", #selector(DuckpadWindowController.performSaveFile(_:)), "s", target, to: fileMenu)
         add("Save As…", #selector(DuckpadWindowController.performSaveFileAs(_:)), "s", target, modifiers: [.command, .shift], to: fileMenu)
+        add("Save a Copy As…", #selector(DuckpadWindowController.performSaveCopyAs(_:)), "s", target, modifiers: [.command, .option, .shift], to: fileMenu)
+        add("Save All", #selector(DuckpadWindowController.performSaveAll(_:)), "s", target, modifiers: [.command, .option], to: fileMenu)
         fileMenu.addItem(.separator())
         add("Close Tab", #selector(DuckpadWindowController.performCloseActiveTab(_:)), "w", target, to: fileMenu)
         fileItem.submenu = fileMenu
@@ -293,6 +305,68 @@ public enum DuckpadMainMenuFactory {
         }
         extensionsItem.submenu = extensionsMenu
         return mainMenu
+    }
+
+    private static func makeOpenRecentItem(
+        applicationTarget: AnyObject?,
+        urls: [URL]
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: "Open Recent")
+        var seen: Set<URL> = []
+        var recent: [URL] = []
+        for url in urls {
+            let standardized = url.standardizedFileURL
+            guard seen.insert(standardized).inserted else { continue }
+            recent.append(standardized)
+            if recent.count == 10 { break }
+        }
+        if recent.isEmpty {
+            let empty = NSMenuItem(title: "No Recent Documents", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+        } else {
+            for url in recent {
+                let title = recentTitle(for: url, among: recent)
+                let recentItem = NSMenuItem(
+                    title: title,
+                    action: #selector(DuckpadApplicationCommandTarget.performOpenRecentDocument(_:)),
+                    keyEquivalent: ""
+                )
+                recentItem.target = applicationTarget
+                recentItem.representedObject = url
+                recentItem.toolTip = url.path
+                recentItem.setAccessibilityLabel("Open recent document \(title)")
+                recentItem.setAccessibilityValue(url.path)
+                menu.addItem(recentItem)
+            }
+            menu.addItem(.separator())
+            let clear = NSMenuItem(
+                title: "Clear Menu",
+                action: #selector(DuckpadApplicationCommandTarget.performClearRecentDocuments(_:)),
+                keyEquivalent: ""
+            )
+            clear.target = applicationTarget
+            menu.addItem(clear)
+        }
+        item.submenu = menu
+        return item
+    }
+
+    private static func recentTitle(for url: URL, among urls: [URL]) -> String {
+        let peers = urls.filter { $0.lastPathComponent == url.lastPathComponent }
+        guard peers.count > 1 else { return url.lastPathComponent }
+        let parentComponents = peers.map {
+            $0.deletingLastPathComponent().standardizedFileURL.pathComponents.filter { $0 != "/" }
+        }
+        let own = url.deletingLastPathComponent().standardizedFileURL.pathComponents.filter { $0 != "/" }
+        let maximumDepth = parentComponents.map(\.count).max() ?? 1
+        for depth in 1...maximumDepth {
+            let labels = parentComponents.map { $0.suffix(depth).joined(separator: "/") }
+            guard Set(labels).count == peers.count else { continue }
+            return "\(url.lastPathComponent) — \(own.suffix(depth).joined(separator: "/"))"
+        }
+        return "\(url.lastPathComponent) — \(url.deletingLastPathComponent().path)"
     }
 
     static func makeFormatMenu(target: DuckpadWindowController) -> NSMenu {

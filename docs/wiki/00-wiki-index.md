@@ -71,8 +71,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 57 | [Phase 23 independent code review](reviews/2026-09-03-phase-23-encoding-eol-code-review.md) | **Content approved — latest Phase 23 evidence** | 최초 2 Major의 conflict/post-write binding authority와 accepted format-task termination join 결함을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 58 | [Phase 24 settings, themes, and accessibility](27-settings-themes-accessibility.md) | **Approved, committed and pushed** | 표준 `Command-,` 설정 창, versioned preference 저장, 시스템/라이트/다크 appearance, 실행 중 테마 재적용, 새 탭 wrap 기본값과 접근성을 commit `3721fcf`로 `origin/main`에 반영했다. |
 | 59 | [Phase 24 independent code review](reviews/2026-09-03-phase-24-settings-code-review.md) | **Approved — 0 findings** | Descriptor-bound durable settings authority, live accessibility, zero-window Settings ownership, accepted-update termination join을 독립 재검증했다. |
-| 60 | [Phase 25A command palette and unified registry](28-command-palette.md) | **Content approved; exact receipt pending** | `Shift-Command-P` 검색 팔레트에 core/native/extension menu command를 하나의 validation/dispatch authority로 통합하고 매크로 제외 경계를 기록한다. |
+| 60 | [Phase 25A command palette and unified registry](28-command-palette.md) | **Approved, committed and pushed** | `Shift-Command-P` 검색 팔레트에 core/native/extension menu command를 하나의 validation/dispatch authority로 통합했고 commit `aa2e523`을 exact receipt/audit 후 `origin/main`에 반영했다. |
 | 61 | [Phase 25A independent code review](reviews/2026-09-03-phase-25a-command-palette-code-review.md) | **Approved — 0 findings** | Exact-target dispatch/current validation, live extension refresh와 hosted popover lifecycle을 remediation 후 독립 재검증했다. |
+| 62 | [Phase 25B native document lifecycle and save set](29-native-document-lifecycle.md) | **Implemented; review pending** | Finder/Open With/drag 다중 열기, native 최근 문서, Save Copy와 Save All 및 충돌 없는 macOS 단축키를 하나의 직렬화된 문서 수명주기로 묶는다. |
+| 63 | [Phase 25B independent code review](reviews/2026-09-03-phase-25b-native-document-lifecycle-code-review.md) | **Content approved — 0 findings** | Fresh panel/identity Save Copy retry까지 재검증해 P25B-01~03을 모두 닫았으며 exact receipt refreeze만 남았다. |
 
 상태 정의:
 
@@ -128,6 +130,46 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-03 — Phase 25B final residual re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent final remediation reviewer.
+- **Closure:** P25B-01 Retry가 새 accepted task에서 panel부터 다시 시작하고 새 destination identity를 관찰함을 코드와 routed conflict test로 확인했다. P25B-02/P25B-03도 closed 상태를 유지한다.
+- **Validation:** candidate `3d3d6b1a…` exactness/cached diff-check PASS, independent focused 7/7 PASS; builder Debug/Release 347/347는 supporting evidence다.
+- **Verdict/boundary:** CONTENT APPROVED, 0 Blocker/0 Major/0 Minor. review 문서/index만 수정했으므로 evidence stage 후 새 exact candidate refreeze/receipt가 필요하다.
+
+### 2026-09-03 — Phase 25B focused remediation re-review
+
+- **Agent/role:** `/root/phase1_code_review`, independent remediation reviewer.
+- **Closure:** P25B-02 batch FIFO와 P25B-03 unique recent suffix는 closed. P25B-01은 exact identity/exclusive commit으로 외부 바이트 보존은 closed지만 failure presenter에 전달되는 Retry가 no-op이라 Major가 남는다.
+- **Validation:** remediation candidate `58c995…` identity/cached diff-check PASS, independent focused 6/6 PASS, static retry dispatch inspection FAIL.
+- **Verdict/boundary:** CHANGES REQUIRED, 0 Blocker/1 Major/0 Minor. review 문서/index만 수정했고 product/source/tests/work doc/stage/receipt/commit/push 및 제외 경계는 불변이다.
+
+### 2026-09-03 — Phase 25B independent content review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 25B 구현에는 참여하지 않았다.
+- **Scope:** exact staged 10-path Finder/Open With/drop, recent documents, Save Copy/Save All, lifecycle/menu/test/docs bytes와 주변 serialization authority를 검토했다.
+- **Findings:** 0 Blocker, 2 Major, 1 Minor. Save Copy의 panel 이후 identity-free overwrite와 concurrent external batch interleaving이 content approval을 차단한다.
+- **Validation:** candidate identity/cached diff-check PASS, independent focused 4/4 PASS. Exact-tree destination-race와 concurrent-batch probe는 각각 의도한 안전 assertion을 실패시켜 두 Major를 재현했다. Apple multi-file delegate/reply 계약상 `openFiles` 구현 자체는 적합했다.
+- **Boundary:** review 문서/index evidence만 수정했다. product/source/tests/work doc/stage/receipt/commit/push 및 user-owned doc04/vendor script, README, ignored Notepad++는 불변이다.
+
+### 2026-09-03 — Phase 25B review remediation
+
+- **Agent/role:** `/root`, direct remediation builder; independent review verdict 문서는 수정하지 않았다.
+- **P25B-01:** Save Copy가 panel 반환 뒤 destination identity를 관찰하고 `expectedIdentity` atomic swap/exclusive create에 결합한다. 쓰기 직전 교체/생성은 외부 bytes를 보존한 채 conflict로 실패하며 Retry는 새 panel/identity cycle을 시작한다.
+- **P25B-02:** `FileDocumentUseCase.open([URL])`가 batch 전체에 단일 operation admission을 보유해 concurrent Finder/drop/recent 요청의 각 batch가 섞이지 않는다.
+- **P25B-03:** duplicate recent filename은 필요한 최소 parent suffix까지 확장하고 exact duplicate URL은 제거해 같은 부모 이름도 결정적으로 구분한다.
+- **Validation:** focused remediation 7/7 PASS. full Debug/Release 347/347, parity/governance와 expected structural release=false 재검증 및 independent re-review는 pending이다.
+- **Boundary:** macros/README/ignored Notepad++/user-owned doc04/vendor script와 reviewer verdict document는 제외·보존했다.
+
+### 2026-09-03 — Phase 25B native document lifecycle and save set
+
+- **Agent/role:** `/root`, direct investigator and builder; no new implementation agent was added.
+- **Scope:** Finder/Open With 요청의 startup queue와 완료 reply, ordered multi-file open/drop, application-lifetime recent documents/Open Recent/Clear Menu, Save Copy와 Save All을 기존 file/workspace authority에 연결했다.
+- **Safety:** Save Copy는 현재 revision/format을 쓰되 binding·title·dirty를 바꾸지 않고 열린 canonical destination을 거부한다. Save All은 stable dirty-tab set을 순차 저장하고 cancel/failure에서 멈추며 가능한 경우 원래 활성 탭을 복원한다. accepted batch/save tasks는 termination final recovery보다 먼저 join된다.
+- **Shortcuts:** Save `Command-S`, Save As `Shift-Command-S`, Save Copy `Option-Shift-Command-S`, Save All `Option-Command-S`; 전체 menu tuple uniqueness를 유지한다.
+- **Validation:** focused 5/5와 exact-current Debug/Release 각각 344/344 PASS. 독립 content review와 exact receipt는 pending이다.
+- **Boundary:** `.app` bundle/document declarations/sandbox/signing은 다음 packaging slice다. 열린 탭은 무제한이고 recent-close stack만 100개다. macros/README/ignored Notepad++/user-owned doc04/vendor script는 제외·보존했다.
 
 ### 2026-09-03 — Phase 24 settings, themes, and accessibility
 
