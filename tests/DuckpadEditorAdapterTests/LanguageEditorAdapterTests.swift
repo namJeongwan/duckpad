@@ -554,6 +554,587 @@ struct LanguageEditorAdapterTests {
     }
 
     @Test @MainActor
+    func blockCommentWrapAndUnwrapPreserveUTF8CRLFAndSelectionDirection() throws {
+        let (_, view) = hostedView()
+        let prefix = "앞\r\n"
+        let payload = "한글🦆"
+        let source = prefix + payload + "\r\n뒤"
+        let payloadStart = prefix.utf8.count
+        let payloadEnd = payloadStart + payload.utf8.count
+        try view.loadUTF8(Data(source.utf8), revision: 4)
+        view.restoreCaretUTF8Position(
+            UInt(payloadStart),
+            anchorPosition: UInt(payloadEnd),
+            firstVisibleLine: 0,
+            horizontalScrollOffset: 0,
+            wordWrapEnabled: true
+        )
+
+        #expect(view.toggleBlockComments(
+            withStartUTF8: Data("/*".utf8),
+            endUTF8: Data("*/".utf8),
+            selectionOwner: view
+        ))
+
+        let wrapped = prefix + "/*" + payload + "*/\r\n뒤"
+        #expect(view.contentUTF8 == Data(wrapped.utf8))
+        #expect(view.caretUTF8Position == payloadStart)
+        #expect(view.anchorUTF8Position == payloadEnd + 4)
+        #expect(view.revision == 5)
+
+        #expect(view.toggleBlockComments(
+            withStartUTF8: Data("/*".utf8),
+            endUTF8: Data("*/".utf8),
+            selectionOwner: view
+        ))
+
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(view.caretUTF8Position == payloadStart)
+        #expect(view.anchorUTF8Position == payloadEnd)
+        #expect(view.revision == 6)
+    }
+
+    @Test @MainActor
+    func emptyCaretInsertsAndRemovesAdjacentPairAtExactBytePosition() throws {
+        let (_, view) = hostedView()
+        let source = "한글🦆x"
+        let caret = "한글🦆".utf8.count
+        try view.loadUTF8(Data(source.utf8), revision: 7)
+        view.setPrimarySelectionUTF8Range(NSRange(location: caret, length: 0))
+
+        #expect(view.toggleBlockComments(
+            withStartUTF8: Data("<!--".utf8),
+            endUTF8: Data("-->".utf8),
+            selectionOwner: view
+        ))
+        #expect(view.contentUTF8 == Data("한글🦆<!---->x".utf8))
+        #expect(view.caretUTF8Position == caret + 4)
+        #expect(view.anchorUTF8Position == caret + 4)
+        #expect(view.revision == 8)
+
+        #expect(view.toggleBlockComments(
+            withStartUTF8: Data("<!--".utf8),
+            endUTF8: Data("-->".utf8),
+            selectionOwner: view
+        ))
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(view.caretUTF8Position == caret)
+        #expect(view.anchorUTF8Position == caret)
+        #expect(view.revision == 9)
+    }
+
+    @Test @MainActor
+    func identicalDelimitersRequireTwoDisjointEdgesBeforeUnwrap() throws {
+        let (_, view) = hostedView()
+        try view.loadUTF8(Data("x|y".utf8), revision: 0)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 1, length: 1))
+
+        #expect(view.toggleBlockComments(
+            withStartUTF8: Data("|".utf8),
+            endUTF8: Data("|".utf8),
+            selectionOwner: view
+        ))
+        #expect(view.contentUTF8 == Data("x|||y".utf8))
+        #expect(view.anchorUTF8Position == 1)
+        #expect(view.caretUTF8Position == 4)
+
+        try view.loadUTF8(Data("x||y".utf8), revision: 4)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 1, length: 2))
+        #expect(view.toggleBlockComments(
+            withStartUTF8: Data("|".utf8),
+            endUTF8: Data("|".utf8),
+            selectionOwner: view
+        ))
+        #expect(view.contentUTF8 == Data("xy".utf8))
+        #expect(view.caretUTF8Position == 1)
+        #expect(view.anchorUTF8Position == 1)
+    }
+
+    @Test @MainActor
+    func nestedDelimiterTextIsHandledLiterally() throws {
+        let (_, view) = hostedView()
+        let source = "/* outer /* inner */ outer */"
+        try view.loadUTF8(Data(source.utf8), revision: 0)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: source.utf8.count))
+
+        #expect(view.toggleBlockComments(
+            withStartUTF8: Data("/*".utf8),
+            endUTF8: Data("*/".utf8),
+            selectionOwner: view
+        ))
+        let expected = " outer /* inner */ outer "
+        #expect(view.contentUTF8 == Data(expected.utf8))
+        #expect(view.anchorUTF8Position == 0)
+        #expect(view.caretUTF8Position == expected.utf8.count)
+    }
+
+    @Test @MainActor
+    func blockCommentRejectsInvalidDelimiterDataWithoutMutation() throws {
+        let (_, view) = hostedView()
+        let source = "한글"
+        try view.loadUTF8(Data(source.utf8), revision: 11)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: source.utf8.count))
+        var callbacks = 0
+        view.onEdit = { _ in callbacks += 1 }
+        let originalCaret = view.caretUTF8Position
+        let originalAnchor = view.anchorUTF8Position
+
+        for (start, end) in [
+            (Data(), Data("*/".utf8)),
+            (Data("/*".utf8), Data()),
+            (Data([0xFF]), Data("*/".utf8)),
+            (Data(String(repeating: "a", count: 65).utf8), Data("*/".utf8)),
+            (Data("/*".utf8), Data(String(repeating: "b", count: 65).utf8)),
+        ] {
+            #expect(!view.toggleBlockComments(
+                withStartUTF8: start,
+                endUTF8: end,
+                selectionOwner: view
+            ))
+            #expect(view.contentUTF8 == Data(source.utf8))
+            #expect(view.revision == 11)
+            #expect(view.caretUTF8Position == originalCaret)
+            #expect(view.anchorUTF8Position == originalAnchor)
+            #expect(callbacks == 0)
+        }
+    }
+
+    @Test @MainActor
+    func blockCommentRejectsMultiRectangularLineThinAndVirtualSelections() throws {
+        let topologyCases: [(DPScintillaSelectionShape, UInt, UInt, UInt, Bool)] = [
+            (.stream, 1, 0, 0, true),
+            (.stream, 2, 0, 0, false),
+            (.rectangle, 1, 0, 0, false),
+            (.lines, 1, 0, 0, false),
+            (.thin, 1, 0, 0, false),
+            (.stream, 1, 1, 0, false),
+            (.stream, 1, 0, 1, false),
+        ]
+        for topology in topologyCases {
+            #expect(DPScintillaEditorView.blockCommentSupportsSelectionShape(
+                topology.0,
+                count: topology.1,
+                caretVirtualSpace: topology.2,
+                anchorVirtualSpace: topology.3
+            ) == topology.4)
+        }
+
+        let (window, view) = hostedView()
+        let source = "one two"
+        try view.loadUTF8(Data(source.utf8), revision: 3)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 3))
+        #expect(view.addSelectionUTF8Range(NSRange(location: 4, length: 3)))
+        var callbacks = 0
+        view.onEdit = { _ in callbacks += 1 }
+        window.makeKeyAndOrderFront(nil)
+        view.focusEditor()
+        let focusedBefore = view.hasEditorFocus
+
+        #expect(!view.toggleBlockComments(
+            withStartUTF8: Data("/*".utf8),
+            endUTF8: Data("*/".utf8),
+            selectionOwner: view
+        ))
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(view.selectionCount == 2)
+        #expect(view.revision == 3)
+        #expect(!view.canUndo)
+        #expect(callbacks == 0)
+        #expect(view.hasEditorFocus == focusedBefore)
+        window.orderOut(nil)
+    }
+
+    @Test @MainActor
+    func blockCommentUndoRedoRestoresExactBytesSelectionAndRevision() throws {
+        let (_, view) = hostedView()
+        let prefix = "앞\r\n"
+        let payload = "한글"
+        let source = prefix + payload + "\r\n뒤"
+        let payloadStart = prefix.utf8.count
+        let payloadEnd = payloadStart + payload.utf8.count
+        try view.loadUTF8(Data(source.utf8), revision: 10)
+        view.restoreCaretUTF8Position(
+            UInt(payloadStart),
+            anchorPosition: UInt(payloadEnd),
+            firstVisibleLine: 0,
+            horizontalScrollOffset: 0,
+            wordWrapEnabled: true
+        )
+        var edits: [DPScintillaEdit] = []
+        view.onEdit = { edits.append($0) }
+
+        #expect(view.toggleBlockComments(
+            withStartUTF8: Data("<!--".utf8),
+            endUTF8: Data("-->".utf8),
+            selectionOwner: view
+        ))
+        let wrapped = prefix + "<!--" + payload + "-->\r\n뒤"
+        #expect(view.contentUTF8 == Data(wrapped.utf8))
+        #expect(view.revision == 11)
+        #expect(edits.count == 1)
+        #expect(edits[0].origin == .user)
+
+        view.undo()
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(view.caretUTF8Position == payloadStart)
+        #expect(view.anchorUTF8Position == payloadEnd)
+        #expect(view.revision == 13)
+        #expect(edits.count == 3)
+        #expect(edits.dropFirst().allSatisfy { $0.origin == .undo })
+
+        view.redo()
+        #expect(view.contentUTF8 == Data(wrapped.utf8))
+        #expect(view.revision == 15)
+        #expect(edits.count == 5)
+        #expect(edits.suffix(2).allSatisfy { $0.origin == .redo })
+    }
+
+    @Test @MainActor
+    func blockCommentReservesUndoRevisionBudget() throws {
+        let source = "payload"
+        let configuration = EditorLanguageConfiguration(
+            languageID: .init(rawValue: "cpp"),
+            lexerName: "cpp",
+            comments: .init(blockStart: "/*", blockEnd: "*/"),
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )
+
+        let rejectedAdapter = ScintillaEditorAdapter()
+        let rejectedBufferID = BufferID()
+        let rejectedRevision = UInt64.max - 2
+        rejectedAdapter.install(.init(
+            bufferID: rejectedBufferID,
+            revision: rejectedRevision,
+            text: source
+        ))
+        rejectedAdapter.display(.init(bufferID: rejectedBufferID, revision: rejectedRevision))
+        #expect(rejectedAdapter.applyLanguage(configuration))
+        let rejectedView = try #require(rejectedAdapter.activeScintillaView)
+        rejectedView.setPrimarySelectionUTF8Range(NSRange(location: 0, length: source.utf8.count))
+        var rejectedEdits: [EditorIncrementalEdit] = []
+        rejectedAdapter.onEdit = { edit in
+            rejectedEdits.append(edit)
+            return .accepted(newRevision: edit.expectedRevision + 1)
+        }
+
+        #expect(!rejectedAdapter.canToggleBlockComment)
+        #expect(rejectedAdapter.toggleBlockComment() == .rejected(currentRevision: rejectedRevision))
+        #expect(rejectedView.contentUTF8 == Data(source.utf8))
+        #expect(rejectedView.revision == rejectedRevision)
+        #expect(!rejectedView.canUndo)
+        #expect(rejectedEdits.isEmpty)
+
+        let acceptedAdapter = ScintillaEditorAdapter()
+        let acceptedBufferID = BufferID()
+        let acceptedRevision = UInt64.max - 3
+        acceptedAdapter.install(.init(
+            bufferID: acceptedBufferID,
+            revision: acceptedRevision,
+            text: source
+        ))
+        acceptedAdapter.display(.init(bufferID: acceptedBufferID, revision: acceptedRevision))
+        #expect(acceptedAdapter.applyLanguage(configuration))
+        let acceptedView = try #require(acceptedAdapter.activeScintillaView)
+        acceptedView.setPrimarySelectionUTF8Range(NSRange(location: 0, length: source.utf8.count))
+        var acceptedEdits: [EditorIncrementalEdit] = []
+        acceptedAdapter.onEdit = { edit in
+            acceptedEdits.append(edit)
+            return .accepted(newRevision: edit.expectedRevision + 1)
+        }
+
+        #expect(acceptedAdapter.canToggleBlockComment)
+        #expect(acceptedAdapter.toggleBlockComment() == .accepted(newRevision: UInt64.max - 2))
+        #expect(acceptedView.contentUTF8 == Data("/*payload*/".utf8))
+        #expect(acceptedView.revision == UInt64.max - 2)
+
+        acceptedView.undo()
+        #expect(acceptedView.contentUTF8 == Data(source.utf8))
+        #expect(acceptedView.revision == UInt64.max)
+        #expect(acceptedAdapter.activeDocumentIntelligenceBuffer?.revision == UInt64.max)
+        #expect(acceptedAdapter.recoverySnapshot(for: acceptedBufferID)?.utf8 == Data(source.utf8))
+        #expect(acceptedEdits.map(\.expectedRevision) == [
+            UInt64.max - 3,
+            UInt64.max - 2,
+            UInt64.max - 1,
+        ])
+    }
+
+    @Test @MainActor
+    func largeBlockCommentPublishesOneAggregateEditWithinExplicitCommandBudget() throws {
+        let (_, view) = hostedView()
+        let payload = Data(repeating: 0x61, count: 1 * 1_024 * 1_024)
+        try view.loadUTF8(payload, revision: 0)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: payload.count))
+        var edits: [DPScintillaEdit] = []
+        view.onEdit = { edits.append($0) }
+        view.resetInstrumentation()
+        let clock = ContinuousClock()
+        let start = clock.now
+
+        #expect(view.toggleBlockComments(
+            withStartUTF8: Data("/*".utf8),
+            endUTF8: Data("*/".utf8),
+            selectionOwner: view
+        ))
+        let duration = start.duration(to: clock.now)
+
+        #expect(view.revision == 1)
+        #expect(view.documentByteLength == payload.count + 4)
+        #expect(view.snapshotReadCount == 0)
+        #expect(view.incrementalNotificationCount == 1)
+        #expect(view.incrementalPayloadByteCount == (2 * payload.count) + 4)
+        #expect(edits.count == 1)
+        #expect(edits[0].range == NSRange(location: 0, length: payload.count))
+        #expect(edits[0].deletedUTF8.count == payload.count)
+        #expect(edits[0].replacementUTF8.count == payload.count + 4)
+        #if !DEBUG
+        #expect(duration < .milliseconds(250))
+        #endif
+    }
+
+    @Test @MainActor
+    func adapterUsesOnlyLastSuccessfullyAppliedBlockPair() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: "payload"))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        let original = EditorLanguageConfiguration(
+            languageID: .init(rawValue: "cpp"),
+            lexerName: "cpp",
+            comments: .init(blockStart: "/*", blockEnd: "*/"),
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )
+        let failedReplacement = EditorLanguageConfiguration(
+            languageID: .init(rawValue: "html"),
+            lexerName: "not-a-real-lexer",
+            comments: .init(blockStart: "<!--", blockEnd: "-->"),
+            indentation: .init(width: 2),
+            folding: true,
+            braceMatching: true
+        )
+
+        #expect(adapter.applyLanguage(original))
+        #expect(adapter.canToggleBlockComment)
+        #expect(!adapter.applyLanguage(failedReplacement))
+        #expect(adapter.canToggleBlockComment)
+        adapter.activeScintillaView?.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 7))
+
+        #expect(adapter.toggleBlockComment() == .accepted(newRevision: 1))
+        #expect(adapter.recoverySnapshot(for: bufferID)?.utf8 == Data("/*payload*/".utf8))
+    }
+
+    @Test @MainActor
+    func blockCommentAcceptanceAdvancesDirtyRecoveryExactlyOnce() async throws {
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        #expect(await workspace.start() == .saved)
+        let adapter = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        let buffer = try #require(workspace.snapshot().activeBuffer)
+        adapter.install(.init(bufferID: buffer.bufferID, revision: 0, text: "payload"))
+        adapter.display(.init(bufferID: buffer.bufferID, revision: 0))
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "cpp"),
+            lexerName: "cpp",
+            comments: .init(blockStart: "/*", blockEnd: "*/"),
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        adapter.activeScintillaView?.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 7))
+        let appendCount = adapter.recoveryJournalAppendCount
+
+        #expect(adapter.toggleBlockComment() == .accepted(newRevision: 1))
+        let workspaceSnapshot = workspace.snapshot()
+        #expect(workspaceSnapshot.activeBuffer?.revision == 1)
+        #expect(workspaceSnapshot.tabs.first?.isDirty == true)
+        #expect(adapter.recoveryJournalAppendCount == appendCount + 1)
+        let recovery = try #require(adapter.recoverySnapshot(for: buffer.bufferID))
+        #expect(recovery.revision == 1)
+        #expect(recovery.utf8 == Data("/*payload*/".utf8))
+        _ = binding
+    }
+
+    @Test @MainActor
+    func rejectedBlockCommentReloadsUnchangedAuthorityWithoutPartialDelimiter() async throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        let source = "한글 payload"
+        adapter.install(.init(bufferID: bufferID, revision: 3, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 3))
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "cpp"),
+            lexerName: "cpp",
+            comments: .init(blockStart: "/*", blockEnd: "*/"),
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let view = try #require(adapter.activeScintillaView)
+        let selection = NSRange(location: "한글 ".utf8.count, length: 7)
+        view.setPrimarySelectionUTF8Range(selection)
+        let recoveryAppends = adapter.recoveryJournalAppendCount
+        adapter.onEdit = { .rejected(currentRevision: $0.expectedRevision) }
+
+        #expect(adapter.toggleBlockComment() == .rejected(currentRevision: 3))
+        for _ in 0..<100 where view.revision != 3 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(view.revision == 3)
+        #expect(view.anchorUTF8Position == selection.location)
+        #expect(view.caretUTF8Position == selection.location + selection.length)
+        #expect(adapter.recoveryJournalAppendCount == recoveryAppends)
+        #expect(adapter.recoverySnapshot(for: bufferID)?.utf8 == Data(source.utf8))
+    }
+
+    @Test @MainActor
+    func splitBlockCommentTargetsFocusedPaneAndSharesAcceptedText() throws {
+        _ = NSApplication.shared
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: "left right"))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        adapter.split(orientation: .sideBySide)
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "cpp"),
+            lexerName: "cpp",
+            comments: .init(blockStart: "/*", blockEnd: "*/"),
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = adapter.view
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        primary.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 4))
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: 5, length: 5))
+        secondary.focusEditor()
+        #expect(adapter.activeScintillaView === secondary)
+
+        #expect(adapter.toggleBlockComment() == .accepted(newRevision: 1))
+        #expect(primary.contentUTF8 == Data("left /*right*/".utf8))
+        #expect(secondary.contentUTF8 == Data("left /*right*/".utf8))
+        #expect(primary.caretUTF8Position == 4)
+        #expect(primary.anchorUTF8Position == 0)
+        #expect(secondary.anchorUTF8Position == 5)
+        #expect(secondary.caretUTF8Position == 14)
+    }
+
+    @Test @MainActor
+    func secondaryBlockCommentUsesPrimaryAggregatePublisherWhenAcceptedOrRejected() async throws {
+        _ = NSApplication.shared
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        let source = "left right"
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "cpp"),
+            lexerName: "cpp",
+            comments: .init(blockStart: "/*", blockEnd: "*/"),
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = adapter.view
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: 5, length: 5))
+        secondary.focusEditor()
+        primary.resetInstrumentation()
+        secondary.resetInstrumentation()
+        var callbacks = 0
+        adapter.onEdit = { edit in
+            callbacks += 1
+            return .accepted(newRevision: edit.expectedRevision + 1)
+        }
+
+        #expect(adapter.toggleBlockComment() == .accepted(newRevision: 1))
+        #expect(callbacks == 1)
+        #expect(primary.incrementalNotificationCount == 1)
+        #expect(secondary.incrementalNotificationCount == 0)
+        #expect(primary.revision == 1)
+        #expect(secondary.revision == 1)
+        #expect(primary.contentUTF8 == Data("left /*right*/".utf8))
+        #expect(secondary.contentUTF8 == Data("left /*right*/".utf8))
+        #expect(secondary.anchorUTF8Position == 5)
+        #expect(secondary.caretUTF8Position == 14)
+
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: 5, length: 5))
+        secondary.focusEditor()
+        primary.resetInstrumentation()
+        secondary.resetInstrumentation()
+        let recoveryAppends = adapter.recoveryJournalAppendCount
+        callbacks = 0
+        adapter.onEdit = { edit in
+            callbacks += 1
+            return .rejected(currentRevision: edit.expectedRevision)
+        }
+
+        #expect(adapter.toggleBlockComment() == .rejected(currentRevision: 0))
+        for _ in 0..<100 where primary.revision != 0 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(callbacks == 1)
+        #expect(primary.incrementalNotificationCount == 1)
+        #expect(secondary.incrementalNotificationCount == 0)
+        #expect(primary.revision == 0)
+        #expect(secondary.revision == 0)
+        #expect(primary.contentUTF8 == Data(source.utf8))
+        #expect(secondary.contentUTF8 == Data(source.utf8))
+        #expect(secondary.anchorUTF8Position == 5)
+        #expect(secondary.caretUTF8Position == 10)
+        #expect(adapter.recoveryJournalAppendCount == recoveryAppends)
+    }
+
+    @Test @MainActor
+    func largeStyleFallbackRetainsLiteralBlockCommentCapability() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        let payload = String(repeating: "a", count: 2_048)
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: payload))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "html"),
+            lexerName: "hypertext",
+            comments: .init(blockStart: "<!--", blockEnd: "-->"),
+            indentation: .init(width: 2),
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_024
+        )))
+        let view = try #require(adapter.activeScintillaView)
+        #expect(view.languageStylingFallback)
+        #expect(adapter.canToggleBlockComment)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: payload.utf8.count))
+
+        #expect(adapter.toggleBlockComment() == .accepted(newRevision: 1))
+        #expect(view.contentUTF8 == Data(("<!--" + payload + "-->").utf8))
+    }
+
+    @Test @MainActor
     func nativeCompletionListIsNonMutatingAndCancellable() throws {
         let (_, view) = hostedView()
         let text = "alpha alp"

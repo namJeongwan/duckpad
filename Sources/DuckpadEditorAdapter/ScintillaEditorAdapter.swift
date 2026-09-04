@@ -594,7 +594,19 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         return languageConfigurations[id]?.languageID ?? .plainText
     }
 
-    public var canToggleBlockComment: Bool { false }
+    public var canToggleBlockComment: Bool {
+        guard !isInvalidated,
+              let primary = primaryActiveView,
+              let selectionOwner = activeScintillaView,
+              let delimiters = activeBlockCommentDelimiters() else {
+            return false
+        }
+        return primary.canToggleBlockComments(
+            withStartUTF8: delimiters.start,
+            endUTF8: delimiters.end,
+            selectionOwner: selectionOwner
+        )
+    }
 
     public var isLanguageStylingFallback: Bool {
         activeScintillaView?.languageStylingFallback ?? false
@@ -708,7 +720,34 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     public func toggleBlockComment() -> EditorEditOutcome {
-        .rejected(currentRevision: activeBuffer?.revision ?? 0)
+        guard !isInvalidated,
+              let activeBuffer,
+              activeBuffer.revision < .max,
+              let primary = primaryActiveView,
+              let selectionOwner = activeScintillaView,
+              let delimiters = activeBlockCommentDelimiters(),
+              primary.canToggleBlockComments(
+                withStartUTF8: delimiters.start,
+                endUTF8: delimiters.end,
+                selectionOwner: selectionOwner
+              ) else {
+            return .rejected(currentRevision: activeBuffer?.revision ?? 0)
+        }
+        let oldRevision = activeBuffer.revision
+        storeViewState(bufferID: activeBuffer.bufferID)
+        guard primary.toggleBlockComments(
+            withStartUTF8: delimiters.start,
+            endUTF8: delimiters.end,
+            selectionOwner: selectionOwner
+        ) else {
+            return .rejected(currentRevision: oldRevision)
+        }
+        guard let authoritative = self.activeBuffer,
+              authoritative.bufferID == activeBuffer.bufferID,
+              authoritative.revision == oldRevision + 1 else {
+            return .rejected(currentRevision: self.activeBuffer?.revision ?? oldRevision)
+        }
+        return .accepted(newRevision: authoritative.revision)
     }
 
     public func activeSelectionUTF8Range() -> SearchUTF8Range? {
@@ -1253,6 +1292,16 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         } else {
             pendingFoldRecoveryByView.removeValue(forKey: ObjectIdentifier(editorView))
         }
+    }
+
+    private func activeBlockCommentDelimiters() -> (start: Data, end: Data)? {
+        guard let bufferID = activeBuffer?.bufferID,
+              let comments = languageConfigurations[bufferID]?.comments,
+              let start = comments.blockStart,
+              let end = comments.blockEnd else {
+            return nil
+        }
+        return (Data(start.utf8), Data(end.utf8))
     }
 
     private func nativePalette(_ palette: EditorThemePalette) -> DPScintillaPalette {

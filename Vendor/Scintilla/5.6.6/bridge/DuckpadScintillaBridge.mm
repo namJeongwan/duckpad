@@ -19,6 +19,9 @@ static constexpr int DPBookmarkMask = 1 << DPBookmarkMarker;
 static constexpr NSInteger DPSmartIndentScanLimit = 4096;
 static constexpr NSUInteger DPMaximumSynchronousStyleBytes = 262144;
 static constexpr NSUInteger DPMaximumFoldRecoveryHeaderCount = 10000;
+static constexpr uint64_t DPBlockCommentRequiredRevisionBudget = 3;
+
+typedef NSData * _Nullable (^DPScintillaAggregateReplacementBuilder)(NSData *deletedUTF8);
 
 static BOOL DPIntegerFromNumber(NSNumber *number, NSInteger *value) {
     if (![number isKindOfClass:[NSNumber class]] || !std::isfinite(number.doubleValue)) return NO;
@@ -45,6 +48,32 @@ static int DPEOLModeForUTF8(NSData *content) {
         if (bytes[index] == '\n') return SC_EOL_LF;
     }
     return SC_EOL_LF;
+}
+
+static BOOL DPBlockCommentDelimiterIsValid(NSData *delimiter) {
+    return delimiter.length > 0
+        && delimiter.length <= 64
+        && [[NSString alloc] initWithData:delimiter encoding:NSUTF8StringEncoding] != nil;
+}
+
+static DPScintillaSelectionShape DPSelectionShapeFromScintilla(NSInteger selectionMode) {
+    switch (selectionMode) {
+        case SC_SEL_STREAM: return DPScintillaSelectionShapeStream;
+        case SC_SEL_RECTANGLE: return DPScintillaSelectionShapeRectangle;
+        case SC_SEL_LINES: return DPScintillaSelectionShapeLines;
+        case SC_SEL_THIN: return DPScintillaSelectionShapeThin;
+        default: return DPScintillaSelectionShapeThin;
+    }
+}
+
+static BOOL DPScintillaBytesMatch(ScintillaView *scintilla, NSUInteger position, NSData *bytes) {
+    const auto *expected = static_cast<const unsigned char *>(bytes.bytes);
+    for (NSUInteger index = 0; index < bytes.length; index += 1) {
+        if ([scintilla message:SCI_GETCHARAT wParam:(uptr_t)(position + index)] != expected[index]) {
+            return NO;
+        }
+    }
+    return YES;
 }
 
 void DPScintillaConfigureResourceDirectory(NSURL *directoryURL) {
@@ -87,6 +116,11 @@ NSString *DPScintillaResourcePath(NSString *name) {
 @end
 
 @interface DPScintillaEditorView () <ScintillaNotificationProtocol>
+- (BOOL)applyAggregateUserEditInRange:(NSRange)range
+                       selectionOwner:(DPScintillaEditorView *)selectionOwner
+                 resultingAnchorUTF8:(NSUInteger)anchor
+                  resultingCaretUTF8:(NSUInteger)caret
+              replacementBuilder:(DPScintillaAggregateReplacementBuilder)replacementBuilder;
 @end
 
 @interface SCIContentView (DuckpadStandardEditing)
@@ -133,6 +167,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     NSInteger _badBraceUTF8Position;
     NSUInteger _completionItemCount;
     BOOL _publishesDocumentEdits;
+    __weak DPScintillaEditorView *_documentPublisher;
     BOOL _smartEditingEnabled;
     BOOL _textInputSourceKnown;
     BOOL _directInputInsertion;
@@ -154,6 +189,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_SETCODEPAGE wParam:SC_CP_UTF8];
         [_scintilla message:SCI_SETMODEVENTMASK
                      wParam:SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT];
+        [_scintilla message:SCI_SETUNDOSELECTIONHISTORY
+                     wParam:SC_UNDO_SELECTION_HISTORY_ENABLED];
         [_scintilla message:SCI_SETWRAPMODE wParam:SC_WRAP_WORD];
         [_scintilla setFontName:@"Menlo" size:13 bold:NO italic:NO];
         _lexerName = @"null";
@@ -202,6 +239,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     self.onFoldStateChange = nil;
     self.onFoldRecoveryProgress = nil;
     _foldRecoveryProgressPending = NO;
+    _documentPublisher = nil;
     _pendingSmartCaretPosition = -1;
     _pendingSmartInsertionEnd = -1;
     _pendingSmartCharacter = 0;
@@ -630,6 +668,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     // shared document notifies every attached Scintilla view, so enabling this
     // mask here would publish each edit twice to Application.
     _publishesDocumentEdits = NO;
+    _documentPublisher = source;
     [self updateModificationEventMask];
     [self synchronizeRevision:source.revision];
 }
@@ -1242,6 +1281,259 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     }
     [_scintilla message:SCI_ENDUNDOACTION];
     return YES;
+}
+
++ (BOOL)blockCommentSupportsSelectionShape:(DPScintillaSelectionShape)shape
+                                     count:(NSUInteger)count
+                         caretVirtualSpace:(NSUInteger)caretVirtualSpace
+                        anchorVirtualSpace:(NSUInteger)anchorVirtualSpace {
+    return shape == DPScintillaSelectionShapeStream
+        && count == 1
+        && caretVirtualSpace == 0
+        && anchorVirtualSpace == 0;
+}
+
+- (BOOL)canToggleBlockCommentsWithStartUTF8:(NSData *)start
+                                    endUTF8:(NSData *)end
+                             selectionOwner:(DPScintillaEditorView *)selectionOwner {
+    DPScintillaEditorView *publisher = _documentPublisher;
+    if (publisher != nil) {
+        return [publisher canToggleBlockCommentsWithStartUTF8:start
+                                                       endUTF8:end
+                                                selectionOwner:selectionOwner];
+    }
+    if (!_publishesDocumentEdits) return NO;
+    if (!DPBlockCommentDelimiterIsValid(start) || !DPBlockCommentDelimiterIsValid(end)
+        || _scintilla == nil || selectionOwner == nil || selectionOwner->_scintilla == nil
+        || !self.isInputEnabled || !selectionOwner.isInputEnabled
+        || self.revision == UINT64_MAX || selectionOwner.revision != self.revision
+        || selectionOwner.hasMarkedText) {
+        return NO;
+    }
+    // One aggregate forward edit may be followed by two raw SCN_MODIFIED
+    // components when native Undo restores its replace target.
+    if (_revision > UINT64_MAX - DPBlockCommentRequiredRevisionBudget) return NO;
+    if ([_scintilla message:SCI_GETDOCPOINTER]
+        != [selectionOwner->_scintilla message:SCI_GETDOCPOINTER]) {
+        return NO;
+    }
+    const sptr_t selectionCount = [selectionOwner->_scintilla message:SCI_GETSELECTIONS];
+    const sptr_t caretVirtualSpace = [selectionOwner->_scintilla
+        message:SCI_GETSELECTIONNCARETVIRTUALSPACE wParam:0];
+    const sptr_t anchorVirtualSpace = [selectionOwner->_scintilla
+        message:SCI_GETSELECTIONNANCHORVIRTUALSPACE wParam:0];
+    if (selectionCount < 0 || caretVirtualSpace < 0 || anchorVirtualSpace < 0) return NO;
+    const DPScintillaSelectionShape shape = DPSelectionShapeFromScintilla(
+        [selectionOwner->_scintilla message:SCI_GETSELECTIONMODE]
+    );
+    if (![DPScintillaEditorView blockCommentSupportsSelectionShape:shape
+                                                              count:(NSUInteger)selectionCount
+                                                  caretVirtualSpace:(NSUInteger)caretVirtualSpace
+                                                 anchorVirtualSpace:(NSUInteger)anchorVirtualSpace]) {
+        return NO;
+    }
+    const NSUInteger documentLength = self.documentByteLength;
+    const NSUInteger anchor = selectionOwner.anchorUTF8Position;
+    const NSUInteger caret = selectionOwner.caretUTF8Position;
+    if (anchor > documentLength || caret > documentLength) return NO;
+    return [self isUTF8Boundary:anchor documentLength:documentLength]
+        && [self isUTF8Boundary:caret documentLength:documentLength];
+}
+
+- (BOOL)applyAggregateUserEditInRange:(NSRange)range
+                       selectionOwner:(DPScintillaEditorView *)selectionOwner
+                 resultingAnchorUTF8:(NSUInteger)anchor
+                  resultingCaretUTF8:(NSUInteger)caret
+              replacementBuilder:(DPScintillaAggregateReplacementBuilder)replacementBuilder {
+    if (replacementBuilder == nil || _scintilla == nil || selectionOwner == nil
+        || selectionOwner->_scintilla == nil || !selectionOwner.isInputEnabled
+        || selectionOwner.hasMarkedText || ![self preflightUserMutation]) {
+        return NO;
+    }
+    if ([_scintilla message:SCI_GETDOCPOINTER]
+        != [selectionOwner->_scintilla message:SCI_GETDOCPOINTER]) {
+        return NO;
+    }
+    const NSUInteger documentLength = self.documentByteLength;
+    if (range.location > documentLength || range.length > documentLength - range.location
+        || range.length == NSUIntegerMax) {
+        return NO;
+    }
+    const NSUInteger rangeEnd = range.location + range.length;
+    if (![self isUTF8Boundary:range.location documentLength:documentLength]
+        || ![self isUTF8Boundary:rangeEnd documentLength:documentLength]) {
+        return NO;
+    }
+    NSMutableData *deleted = [NSMutableData dataWithLength:range.length + 1];
+    Sci_TextRangeFull textRange = {
+        { static_cast<Sci_Position>(range.location), static_cast<Sci_Position>(rangeEnd) },
+        static_cast<char *>(deleted.mutableBytes)
+    };
+    [_scintilla message:SCI_GETTEXTRANGEFULL
+                 wParam:0
+                 lParam:reinterpret_cast<sptr_t>(&textRange)];
+    deleted.length = range.length;
+
+    NSData *replacement = replacementBuilder(deleted);
+    if (replacement == nil
+        || [[NSString alloc] initWithData:replacement encoding:NSUTF8StringEncoding] == nil) {
+        return NO;
+    }
+    if (replacement.length > NSUIntegerMax - deleted.length
+        || _incrementalNotificationCount == NSUIntegerMax
+        || _incrementalPayloadByteCount > NSUIntegerMax - (deleted.length + replacement.length)) {
+        return NO;
+    }
+    const NSUInteger retainedLength = documentLength - range.length;
+    if (replacement.length > NSUIntegerMax - retainedLength) return NO;
+    const NSUInteger resultingLength = retainedLength + replacement.length;
+    if (anchor > resultingLength || caret > resultingLength) return NO;
+
+    const uint64_t baseRevision = _revision;
+    if (baseRevision == UINT64_MAX) return NO;
+    const BOOL wasSuppressingEdit = _suppressEdit;
+    _suppressEdit = YES;
+    @try {
+        [_scintilla message:SCI_SETTARGETSTART wParam:(uptr_t)range.location];
+        [_scintilla message:SCI_SETTARGETEND wParam:(uptr_t)rangeEnd];
+        static const char emptyReplacement = '\0';
+        const void *replacementBytes = replacement.length > 0 ? replacement.bytes : &emptyReplacement;
+        [_scintilla message:SCI_REPLACETARGET
+                     wParam:(uptr_t)replacement.length
+                     lParam:(sptr_t)replacementBytes];
+        if (_foldingEnabled) {
+            const NSInteger changedLine = [_scintilla message:SCI_LINEFROMPOSITION
+                                                        wParam:(uptr_t)range.location];
+            const NSInteger lineStart = [_scintilla message:SCI_POSITIONFROMLINE
+                                                      wParam:(uptr_t)changedLine];
+            const NSInteger nextLineStart = changedLine + 1 < (NSInteger)self.lineCount
+                ? [_scintilla message:SCI_POSITIONFROMLINE wParam:(uptr_t)(changedLine + 1)]
+                : (NSInteger)self.documentByteLength;
+            [_scintilla message:SCI_COLOURISE wParam:(uptr_t)lineStart lParam:nextLineStart];
+        }
+        [selectionOwner->_scintilla message:SCI_SETSEL
+                                     wParam:(uptr_t)anchor
+                                     lParam:(sptr_t)caret];
+        [selectionOwner->_scintilla message:SCI_SCROLLCARET];
+    } @finally {
+        _suppressEdit = wasSuppressingEdit;
+    }
+
+    _revision = baseRevision + 1;
+    if (_revision == UINT64_MAX) [_scintilla setEditable:NO];
+    _incrementalNotificationCount += 1;
+    _incrementalPayloadByteCount += deleted.length + replacement.length;
+    DPScintillaEdit *edit = [[DPScintillaEdit alloc] initWithRange:range
+                                                      insertedUTF8:replacement
+                                                       deletedUTF8:deleted
+                                                      baseRevision:baseRevision
+                                                 resultingRevision:_revision
+                                                            origin:DPScintillaEditOriginUser];
+    if (self.onEdit) self.onEdit(edit);
+    return YES;
+}
+
+- (BOOL)toggleBlockCommentsWithStartUTF8:(NSData *)start
+                                 endUTF8:(NSData *)end
+                          selectionOwner:(DPScintillaEditorView *)selectionOwner {
+    DPScintillaEditorView *publisher = _documentPublisher;
+    if (publisher != nil) {
+        return [publisher toggleBlockCommentsWithStartUTF8:start
+                                                   endUTF8:end
+                                            selectionOwner:selectionOwner];
+    }
+    if (!_publishesDocumentEdits) return NO;
+    if (![self preflightUserMutation]
+        || ![self canToggleBlockCommentsWithStartUTF8:start
+                                               endUTF8:end
+                                        selectionOwner:selectionOwner]) {
+        return NO;
+    }
+
+    const NSUInteger documentLength = self.documentByteLength;
+    const NSUInteger originalAnchor = selectionOwner.anchorUTF8Position;
+    const NSUInteger originalCaret = selectionOwner.caretUTF8Position;
+    const NSUInteger lower = MIN(originalAnchor, originalCaret);
+    const NSUInteger upper = MAX(originalAnchor, originalCaret);
+    const BOOL isReversed = originalAnchor > originalCaret;
+    if (start.length > NSUIntegerMax - end.length) return NO;
+    const NSUInteger delimiterLength = start.length + end.length;
+
+    if (lower == upper) {
+        const BOOL hasAdjacentPair = lower >= start.length
+            && end.length <= documentLength - lower
+        && DPScintillaBytesMatch(_scintilla, lower - start.length, start)
+            && DPScintillaBytesMatch(_scintilla, lower, end);
+        if (hasAdjacentPair) {
+            const NSRange range = NSMakeRange(lower - start.length, delimiterLength);
+            const NSUInteger caret = lower - start.length;
+            return [self applyAggregateUserEditInRange:range
+                                        selectionOwner:selectionOwner
+                                  resultingAnchorUTF8:caret
+                                   resultingCaretUTF8:caret
+                               replacementBuilder:^NSData * _Nullable(NSData *deletedUTF8) {
+                if (deletedUTF8.length != delimiterLength
+                    || ![[deletedUTF8 subdataWithRange:NSMakeRange(0, start.length)] isEqualToData:start]
+                    || ![[deletedUTF8 subdataWithRange:NSMakeRange(start.length, end.length)] isEqualToData:end]) {
+                    return nil;
+                }
+                return [NSData data];
+            }];
+        }
+        const NSUInteger insertionLength = delimiterLength;
+        if (insertionLength > NSUIntegerMax - documentLength
+            || start.length > NSUIntegerMax - lower) {
+            return NO;
+        }
+        const NSUInteger caret = lower + start.length;
+        return [self applyAggregateUserEditInRange:NSMakeRange(lower, 0)
+                                    selectionOwner:selectionOwner
+                              resultingAnchorUTF8:caret
+                               resultingCaretUTF8:caret
+                           replacementBuilder:^NSData * _Nullable(NSData *deletedUTF8) {
+            if (deletedUTF8.length != 0) return nil;
+            NSMutableData *replacement = [NSMutableData dataWithCapacity:insertionLength];
+            [replacement appendData:start];
+            [replacement appendData:end];
+            return replacement;
+        }];
+    }
+
+    const NSUInteger selectedLength = upper - lower;
+    const BOOL unwrap = selectedLength >= delimiterLength
+        && DPScintillaBytesMatch(_scintilla, lower, start)
+        && DPScintillaBytesMatch(_scintilla, upper - end.length, end);
+    NSUInteger replacementLength = 0;
+    if (unwrap) {
+        replacementLength = selectedLength - delimiterLength;
+    } else {
+        if (selectedLength > NSUIntegerMax - delimiterLength) return NO;
+        replacementLength = selectedLength + delimiterLength;
+    }
+    if (replacementLength > NSUIntegerMax - (documentLength - selectedLength)) {
+        return NO;
+    }
+    const NSUInteger selectionEnd = lower + replacementLength;
+    const NSUInteger resultingAnchor = isReversed ? selectionEnd : lower;
+    const NSUInteger resultingCaret = isReversed ? lower : selectionEnd;
+    return [self applyAggregateUserEditInRange:NSMakeRange(lower, selectedLength)
+                                selectionOwner:selectionOwner
+                          resultingAnchorUTF8:resultingAnchor
+                           resultingCaretUTF8:resultingCaret
+                       replacementBuilder:^NSData * _Nullable(NSData *deletedUTF8) {
+        if (deletedUTF8.length != selectedLength) return nil;
+        if (unwrap) {
+            return [deletedUTF8 subdataWithRange:NSMakeRange(
+                start.length,
+                selectedLength - delimiterLength
+            )];
+        }
+        NSMutableData *replacement = [NSMutableData dataWithCapacity:replacementLength];
+        [replacement appendData:start];
+        [replacement appendData:deletedUTF8];
+        [replacement appendData:end];
+        return replacement;
+    }];
 }
 
 - (void)handleSmartCharacterAdded:(SCNotification *)notification {

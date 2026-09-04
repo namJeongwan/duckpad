@@ -19,6 +19,13 @@ typedef NS_ENUM(NSInteger, DPScintillaEditOrigin) {
     DPScintillaEditOriginRedo = 2,
 };
 
+typedef NS_ENUM(NSInteger, DPScintillaSelectionShape) {
+    DPScintillaSelectionShapeStream = 0,
+    DPScintillaSelectionShapeRectangle = 1,
+    DPScintillaSelectionShapeLines = 2,
+    DPScintillaSelectionShapeThin = 3,
+};
+
 typedef NS_ENUM(NSInteger, DPScintillaPalette) {
     DPScintillaPaletteLight = 0,
     DPScintillaPaletteDark = 1,
@@ -188,6 +195,19 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (BOOL)expandAllFolds;
 - (void)updateBraceHighlight;
 - (BOOL)toggleLineCommentsWithPrefixUTF8:(NSData *)prefix;
++ (BOOL)blockCommentSupportsSelectionShape:(DPScintillaSelectionShape)shape
+                                     count:(NSUInteger)count
+                         caretVirtualSpace:(NSUInteger)caretVirtualSpace
+                        anchorVirtualSpace:(NSUInteger)anchorVirtualSpace
+    NS_SWIFT_NAME(blockCommentSupportsSelectionShape(_:count:caretVirtualSpace:anchorVirtualSpace:));
+- (BOOL)canToggleBlockCommentsWithStartUTF8:(NSData *)start
+                                    endUTF8:(NSData *)end
+                             selectionOwner:(DPScintillaEditorView *)selectionOwner
+    NS_SWIFT_NAME(canToggleBlockComments(withStartUTF8:endUTF8:selectionOwner:));
+- (BOOL)toggleBlockCommentsWithStartUTF8:(NSData *)start
+                                 endUTF8:(NSData *)end
+                          selectionOwner:(DPScintillaEditorView *)selectionOwner
+    NS_SWIFT_NAME(toggleBlockComments(withStartUTF8:endUTF8:selectionOwner:));
 - (BOOL)showCompletionItems:(NSArray<NSString *> *)items
    replacingPrefixByteCount:(NSUInteger)prefixByteCount;
 - (void)cancelCompletion;
