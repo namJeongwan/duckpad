@@ -14,8 +14,8 @@ Last updated: 2026-09-04 (Asia/Seoul)
 | Item | Status | Evidence / next gate |
 | --- | --- | --- |
 | Phase 31 fold-state design | Chat design approved | Pane-specific Scintilla state; no parser, background service, or dependency |
-| Written Phase 31 specification | Independently reviewed; awaiting user approval | `docs/superpowers/specs/2026-09-04-fold-state-recovery-design.md`; 0 Critical / 0 Important / 0 Minor |
-| Fold recovery implementation | Not started | Starts only after written-spec approval and an executable TDD plan |
+| Written Phase 31 specification | User approved | `docs/superpowers/specs/2026-09-04-fold-state-recovery-design.md`; independent review 0 Critical / 0 Important / 0 Minor |
+| Fold recovery implementation | Plan approved; implementation next | `docs/superpowers/plans/2026-09-04-fold-state-recovery.md`; plan review 0 Critical / 0 Important / 0 Minor |
 | Keyboard and VoiceOver controls | Designed | Native View submenu, conflict-free shortcuts, menu accessibility, Command Palette discovery |
 | Phase 31 validation and review | Pending | Debug/Release, recovery/menu/AppKit, smoke, performance, independent review |
 | Phase 31 commit and push | Pending | Exact reviewed candidate only; target `feature/fold-state-recovery` |
@@ -48,9 +48,9 @@ interception and will be reconsidered only with explicit IME and undo proof.
 
 ## Current validation notes
 
-- Phase 31 has an approved chat design and an independently reviewed written
-  specification awaiting user approval. Production code and tests have not
-  started.
+- Phase 31's independently reviewed written specification was approved by the
+  user. The executable TDD plan passed independent review; production code and
+  tests have not started.
 - Debug and Release builds pass.
 - Debug and Release `LanguageEditorAdapterTests` pass.
 - Debug and Release split-pane smart-pair regression passes.
