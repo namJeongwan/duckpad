@@ -54,6 +54,7 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @interface DPScintillaEditorView : NSView
 @property(nonatomic, copy, nullable) void (^onEdit)(DPScintillaEdit *edit);
 @property(nonatomic, copy, nullable) void (^onError)(NSError *error);
+@property(nonatomic, copy, nullable) void (^onFocus)(void);
 @property(nonatomic, copy, nullable) void (^onFoldStateChange)(void);
 @property(nonatomic, copy, nullable) void (^onFoldRecoveryProgress)(void);
 @property(nonatomic, readonly, nullable) NSError *lastMutationError;

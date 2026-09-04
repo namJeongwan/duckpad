@@ -141,6 +141,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     int _pendingSmartCharacter;
     BOOL _foldRecoveryProgressPending;
     BOOL _foldRecoveryProgressScheduled;
+    NSUInteger _focusEventGeneration;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -197,6 +198,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (void)invalidate {
     self.onEdit = nil;
     self.onError = nil;
+    self.onFocus = nil;
     self.onFoldStateChange = nil;
     self.onFoldRecoveryProgress = nil;
     _foldRecoveryProgressPending = NO;
@@ -831,7 +833,19 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 - (void)beginGroupedUndo { [_scintilla message:SCI_BEGINUNDOACTION]; }
 - (void)endGroupedUndo { [_scintilla message:SCI_ENDUNDOACTION]; }
-- (void)focusEditor { [self.window makeFirstResponder:[_scintilla content]]; }
+- (void)publishFocus {
+    _focusEventGeneration += 1;
+    if (self.onFocus) self.onFocus();
+}
+
+- (void)focusEditor {
+    const BOOL wasFocused = self.hasEditorFocus;
+    const NSUInteger generation = _focusEventGeneration;
+    [self.window makeFirstResponder:[_scintilla content]];
+    if (!wasFocused && self.hasEditorFocus && generation == _focusEventGeneration) {
+        [self publishFocus];
+    }
+}
 
 + (BOOL)supportsLexerNamed:(NSString *)lexerName {
     if (lexerName.length == 0) return NO;
@@ -1344,6 +1358,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)notification:(SCNotification *)notification {
+    if (notification->nmhdr.code == SCN_FOCUSIN) {
+        [self publishFocus];
+        return;
+    }
     if (notification->nmhdr.code == SCN_MARGINCLICK && notification->margin == 1) {
         const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:notification->position];
         [self toggleFoldAtLine:(NSUInteger)line];
