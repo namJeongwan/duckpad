@@ -353,6 +353,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             token: accessibilityToken
         )
         editorBinding = EditorBindingUseCase(workspace: workspace, editor: activeEditor)
+        if let foldingEditor = activeEditor as? any FoldingEditorPort {
+            foldingEditor.onFoldStateChange = { [weak recoveryUseCase] in
+                recoveryUseCase?.editorViewStateDidChange()
+            }
+        }
         tabStrip.onActivate = { [weak self] id in self?.performActivate(id) }
         tabStrip.onClose = { [weak self] id in self?.performClose(id) }
         tabStrip.onMove = { [weak self] id, index in self?.performMove(id, to: index) }
@@ -473,6 +478,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         window?.delegate = nil
         workspace.onChange = nil
         activeEditor.onEdit = nil
+        if let foldingEditor = activeEditor as? any FoldingEditorPort {
+            foldingEditor.onFoldStateChange = nil
+            foldingEditor.invalidate()
+        }
         languageUseCase?.onStateChange = nil
         documentIntelligenceUseCase?.cancel()
         commandPalettePanel.dismiss()
@@ -1144,6 +1153,34 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         recoveryUseCase?.editorViewStateDidChange()
     }
 
+    @objc public func performCollapseCurrentFold(_ sender: Any? = nil) {
+        guard let editor = actionableFoldingEditor,
+              editor.canCollapseCurrentFold,
+              editor.collapseCurrentFold() else { return }
+        editor.focus()
+    }
+
+    @objc public func performExpandCurrentFold(_ sender: Any? = nil) {
+        guard let editor = actionableFoldingEditor,
+              editor.canExpandCurrentFold,
+              editor.expandCurrentFold() else { return }
+        editor.focus()
+    }
+
+    @objc public func performCollapseAllFolds(_ sender: Any? = nil) {
+        guard let editor = actionableFoldingEditor,
+              editor.supportsFolding,
+              editor.collapseAllFolds() else { return }
+        editor.focus()
+    }
+
+    @objc public func performExpandAllFolds(_ sender: Any? = nil) {
+        guard let editor = actionableFoldingEditor,
+              editor.hasCollapsedFolds,
+              editor.expandAllFolds() else { return }
+        editor.focus()
+    }
+
     @objc public func performSplitEditorRight(_ sender: Any? = nil) {
         guard let editor = actionableSplitEditor else { return }
         editor.split(orientation: .sideBySide)
@@ -1299,6 +1336,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return actionableDisplayOptions.map { $0.zoomLevel > -10 } ?? false
         case #selector(performResetZoom(_:)):
             return actionableDisplayOptions.map { $0.zoomLevel != 0 } ?? false
+        case #selector(performCollapseCurrentFold(_:)):
+            return actionableFoldingEditor?.canCollapseCurrentFold == true
+        case #selector(performExpandCurrentFold(_:)):
+            return actionableFoldingEditor?.canExpandCurrentFold == true
+        case #selector(performCollapseAllFolds(_:)):
+            return actionableFoldingEditor?.supportsFolding == true
+        case #selector(performExpandAllFolds(_:)):
+            return actionableFoldingEditor.map { $0.supportsFolding && $0.hasCollapsedFolds } ?? false
         case #selector(performSplitEditorRight(_:)):
             guard let editor = actionableSplitEditor else { menuItem.state = .off; return false }
             menuItem.state = editor.splitOrientation == .sideBySide ? .on : .off
@@ -1338,6 +1383,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var actionableDisplayOptions: (any EditorDisplayOptionsPort)? {
         guard editorCommandsAreActionable else { return nil }
         return activeEditor as? any EditorDisplayOptionsPort
+    }
+
+    private var actionableFoldingEditor: (any FoldingEditorPort)? {
+        guard editorCommandsAreActionable,
+              let editor = activeEditor as? any FoldingEditorPort,
+              editor.supportsFolding else { return nil }
+        return editor
     }
 
     private func closeScope(for action: Selector?) -> TabCloseScope? {

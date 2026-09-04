@@ -152,6 +152,46 @@ public enum DuckpadMainMenuFactory {
         add("Show Wrap Symbols", #selector(DuckpadWindowController.performToggleWrapMarker(_:)), "", target, modifiers: [], to: viewMenu)
         add("Show Whitespace", #selector(DuckpadWindowController.performToggleWhitespace(_:)), "", target, modifiers: [], to: viewMenu)
         add("Show Line Endings", #selector(DuckpadWindowController.performToggleLineEndings(_:)), "", target, modifiers: [], to: viewMenu)
+        let foldingItem = NSMenuItem(title: "Folding", action: nil, keyEquivalent: "")
+        let foldingMenu = NSMenu(title: "Folding")
+        add(
+            "Collapse Current Block",
+            #selector(DuckpadWindowController.performCollapseCurrentFold(_:)),
+            "[",
+            target,
+            modifiers: [.command, .option],
+            accessibilityLabel: "Collapse current code block",
+            to: foldingMenu
+        )
+        add(
+            "Expand Current Block",
+            #selector(DuckpadWindowController.performExpandCurrentFold(_:)),
+            "]",
+            target,
+            modifiers: [.command, .option],
+            accessibilityLabel: "Expand current code block",
+            to: foldingMenu
+        )
+        add(
+            "Collapse All",
+            #selector(DuckpadWindowController.performCollapseAllFolds(_:)),
+            "",
+            target,
+            modifiers: [],
+            accessibilityLabel: "Collapse all code blocks",
+            to: foldingMenu
+        )
+        add(
+            "Expand All",
+            #selector(DuckpadWindowController.performExpandAllFolds(_:)),
+            "",
+            target,
+            modifiers: [],
+            accessibilityLabel: "Expand all code blocks",
+            to: foldingMenu
+        )
+        foldingItem.submenu = foldingMenu
+        viewMenu.addItem(foldingItem)
         viewMenu.addItem(.separator())
         add("Zoom In", #selector(DuckpadWindowController.performZoomIn(_:)), "+", target, to: viewMenu)
         add("Zoom Out", #selector(DuckpadWindowController.performZoomOut(_:)), "-", target, to: viewMenu)
@@ -512,10 +552,12 @@ public enum DuckpadMainMenuFactory {
         _ keyEquivalent: String,
         _ target: AnyObject,
         modifiers: NSEvent.ModifierFlags = [.command],
+        accessibilityLabel: String? = nil,
         to menu: NSMenu
     ) {
         let item = menu.addItem(withTitle: title, action: action, keyEquivalent: keyEquivalent)
         item.keyEquivalentModifierMask = modifiers
         item.target = target
+        if let accessibilityLabel { item.setAccessibilityLabel(accessibilityLabel) }
     }
 }

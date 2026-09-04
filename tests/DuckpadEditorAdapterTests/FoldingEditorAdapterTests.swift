@@ -2,6 +2,8 @@ import AppKit
 import DuckpadApplication
 import DuckpadDomain
 @testable import DuckpadEditorAdapter
+import DuckpadInfrastructure
+@testable import DuckpadPresentation
 import DuckpadScintillaBridge
 import Foundation
 import Testing
@@ -17,6 +19,65 @@ struct FoldingEditorAdapterTests {
         braceMatching: true,
         maximumStyleBytes: 2_000_000
     )
+
+    @Test @MainActor
+    func paletteRoutesFoldToInitiatingSecondaryPaneAndRestoresFocus() async throws {
+        let fixture = try await makeRealFoldingControllerFixture(split: true)
+        let previousMainMenu = NSApplication.shared.mainMenu
+        defer {
+            fixture.controller.close()
+            NSApplication.shared.mainMenu = previousMainMenu
+        }
+        let secondary = try #require(fixture.adapter.secondaryScintillaView)
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+        secondary.focusEditor()
+        let menu = DuckpadMainMenuFactory.make(target: fixture.controller)
+        NSApplication.shared.mainMenu = menu
+        fixture.controller.applicationMainMenuDidChange(menu)
+
+        fixture.controller.performShowCommandPalette(nil)
+
+        #expect(fixture.controller.commandPalettePanel.isPresented)
+        fixture.controller.commandPalettePanel.setQuery("Collapse Current Block")
+        fixture.controller.commandPalettePanel.activateSelectedResult()
+        #expect(
+            secondary.contractedFoldHeaderLines(maximumCount: 10).map(\.intValue) == [0]
+        )
+        #expect(secondary.hasEditorFocus)
+    }
+
+    @MainActor
+    private func makeRealFoldingControllerFixture(
+        split: Bool
+    ) async throws -> (
+        workspace: ScratchWorkspaceUseCase,
+        binding: EditorBindingUseCase,
+        controller: DuckpadWindowController,
+        adapter: ScintillaEditorAdapter
+    ) {
+        _ = NSApplication.shared
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        #expect(await workspace.start() == .saved)
+        let buffer = try #require(workspace.snapshot().activeBuffer)
+        let adapter = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        adapter.install(EditorTextSnapshot(
+            bufferID: buffer.bufferID,
+            revision: buffer.revision,
+            text: "int main() {\n  return 0;\n}\n"
+        ))
+        adapter.display(buffer)
+        #expect(adapter.applyLanguage(cppFoldConfiguration))
+        if split { adapter.split(orientation: .sideBySide) }
+        let controller = DuckpadWindowController(
+            workspace: workspace,
+            editorAdapter: adapter,
+            editorView: adapter.view,
+            automaticallyStarts: false
+        )
+        controller.showAndFocus()
+        return (workspace, binding, controller, adapter)
+    }
 
     @MainActor
     private func hostedCPPView(
