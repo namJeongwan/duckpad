@@ -137,25 +137,46 @@ private func recoveredFileBinding() -> FileBinding {
     #expect(decoded.anchorUTF8 == 1)
     #expect(!decoded.wordWrapEnabled)
     #expect(!decoded.wrapMarkerVisible)
+    #expect(!decoded.whitespaceVisible)
+    #expect(!decoded.lineEndingsVisible)
+    #expect(decoded.zoomLevel == 0)
     #expect(decoded.bookmarkedLines.isEmpty)
 
     let roundTrip = try JSONDecoder().decode(
         EditorViewState.self,
-        from: JSONEncoder().encode(EditorViewState(wrapMarkerVisible: true, bookmarkedLines: [4, 1, 4]))
+        from: JSONEncoder().encode(EditorViewState(
+            wrapMarkerVisible: true,
+            whitespaceVisible: true,
+            lineEndingsVisible: true,
+            zoomLevel: 30,
+            bookmarkedLines: [4, 1, 4]
+        ))
     )
     #expect(roundTrip.wrapMarkerVisible)
+    #expect(roundTrip.whitespaceVisible)
+    #expect(roundTrip.lineEndingsVisible)
+    #expect(roundTrip.zoomLevel == 20)
     #expect(roundTrip.bookmarkedLines == [1, 4])
 
     let splitRoundTrip = try JSONDecoder().decode(
         EditorViewState.self,
         from: JSONEncoder().encode(EditorViewState(
             splitOrientation: .sideBySide,
-            secondaryViewState: SecondaryEditorViewState(caretUTF8: 3, wordWrapEnabled: false)
+            secondaryViewState: SecondaryEditorViewState(
+                caretUTF8: 3,
+                wordWrapEnabled: false,
+                whitespaceVisible: true,
+                lineEndingsVisible: true,
+                zoomLevel: -20
+            )
         ))
     )
     #expect(splitRoundTrip.splitOrientation == .sideBySide)
     #expect(splitRoundTrip.secondaryViewState?.caretUTF8 == 3)
     #expect(splitRoundTrip.secondaryViewState?.wordWrapEnabled == false)
+    #expect(splitRoundTrip.secondaryViewState?.whitespaceVisible == true)
+    #expect(splitRoundTrip.secondaryViewState?.lineEndingsVisible == true)
+    #expect(splitRoundTrip.secondaryViewState?.zoomLevel == -10)
 
     let bounded = EditorViewState(bookmarkedLines: Array(0...EditorViewState.maximumBookmarkCount))
     #expect(bounded.bookmarkedLines.count == EditorViewState.maximumBookmarkCount)

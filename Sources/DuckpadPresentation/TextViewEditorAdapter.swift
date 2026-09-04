@@ -9,7 +9,7 @@ private final class BufferTextView: NSTextView {
 }
 
 @MainActor
-public final class TextViewEditorAdapter: NSObject, EditorPort, EditorDefaultViewOptionsPort, EditorCommandPort, EditorSelectionPort, BookmarkEditorPort, @preconcurrency NSTextStorageDelegate, @preconcurrency NSLayoutManagerDelegate {
+public final class TextViewEditorAdapter: NSObject, EditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, EditorSelectionPort, BookmarkEditorPort, @preconcurrency NSTextStorageDelegate, @preconcurrency NSLayoutManagerDelegate {
     public let scrollView: NSScrollView
     public let textView: NSTextView
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
@@ -23,6 +23,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorDefaultVie
     private var bookmarkRenderScheduled = false
     private var requestedInputEnabled = true
     private var defaultViewState = EditorViewState()
+    private let navigationContextID = EditorNavigationContextID()
     private static let bookmarkTemporaryAttribute = NSAttributedString.Key("app.duckpad.bookmark")
 
     public override init() {
@@ -82,6 +83,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorDefaultVie
         let viewState = viewStates[buffer.bufferID] ?? defaultViewState
         viewStates[buffer.bufferID] = viewState
         applyWordWrap(viewState.wordWrapEnabled)
+        applyDisplayOptions(viewState)
         renderBookmarks()
         applyInputAvailability()
     }
@@ -127,6 +129,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorDefaultVie
         install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text))
         if activeBuffer?.bufferID == snapshot.bufferID {
             applyWordWrap(supportedState.wordWrapEnabled)
+            applyDisplayOptions(supportedState)
             renderBookmarks()
         }
     }
@@ -194,6 +197,87 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorDefaultVie
     public func setDefaultViewOptions(wordWrapEnabled: Bool, wrapMarkerVisible: Bool) {
         defaultViewState.wordWrapEnabled = wordWrapEnabled
         defaultViewState.wrapMarkerVisible = false
+    }
+
+    public var isWhitespaceVisible: Bool {
+        guard let bufferID = activeBuffer?.bufferID else { return false }
+        return viewStates[bufferID]?.whitespaceVisible ?? false
+    }
+
+    public var areLineEndingsVisible: Bool {
+        guard let bufferID = activeBuffer?.bufferID else { return false }
+        return viewStates[bufferID]?.lineEndingsVisible ?? false
+    }
+
+    public var zoomLevel: Int {
+        guard let bufferID = activeBuffer?.bufferID else { return 0 }
+        return viewStates[bufferID]?.zoomLevel ?? 0
+    }
+
+    public func setWhitespaceVisible(_ isVisible: Bool) {
+        updateDisplayState { $0.whitespaceVisible = isVisible }
+    }
+
+    public func setLineEndingsVisible(_ isVisible: Bool) {
+        updateDisplayState { $0.lineEndingsVisible = isVisible }
+    }
+
+    public func setZoomLevel(_ level: Int) {
+        updateDisplayState { $0.zoomLevel = min(max(level, -10), 20) }
+    }
+
+    public var navigationPosition: EditorNavigationPosition? {
+        guard activeBuffer != nil else { return nil }
+        let source = textView.string
+        let cocoaLocation = min(textView.selectedRange().location, (source as NSString).length)
+        guard let index = String.Index(utf16Offset: cocoaLocation, in: source).samePosition(in: source.utf8) else {
+            return nil
+        }
+        let line = lineNumber(atUTF16: cocoaLocation, in: source)
+        let lineStart = lineStartUTF16(line: line, in: source)
+        let prefixRange = NSRange(location: lineStart, length: max(0, cocoaLocation - lineStart))
+        let column = ((source as NSString).substring(with: prefixRange)).count + 1
+        return EditorNavigationPosition(
+            contextID: navigationContextID,
+            line: line + 1,
+            column: column,
+            utf8Offset: source.utf8.distance(from: source.utf8.startIndex, to: index),
+            lineCount: lineStartOffsets(in: source).count,
+            utf8Length: source.utf8.count
+        )
+    }
+
+    @discardableResult
+    public func goTo(line: Int, column: Int, in contextID: EditorNavigationContextID) -> Bool {
+        guard contextID == navigationContextID, line > 0, column > 0 else { return false }
+        let source = textView.string
+        let starts = lineStartOffsets(in: source)
+        guard starts.indices.contains(line - 1) else { return false }
+        let nsSource = source as NSString
+        let lineRange = nsSource.lineRange(for: NSRange(location: starts[line - 1], length: 0))
+        let rawLine = nsSource.substring(with: lineRange)
+        let content = rawLine.trimmingCharacters(in: .newlines)
+        let characterOffset = min(column - 1, content.count)
+        let targetIndex = content.index(content.startIndex, offsetBy: characterOffset)
+        let utf16Column = targetIndex.utf16Offset(in: content)
+        let target = starts[line - 1] + utf16Column
+        textView.setSelectedRange(NSRange(location: target, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: target, length: 0))
+        focus()
+        return true
+    }
+
+    @discardableResult
+    public func goTo(utf8Offset: Int, in contextID: EditorNavigationContextID) -> Bool {
+        let source = textView.string
+        guard contextID == navigationContextID, utf8Offset >= 0,
+              let utf8Index = source.utf8.index(source.utf8.startIndex, offsetBy: utf8Offset, limitedBy: source.utf8.endIndex),
+              let index = String.Index(utf8Index, within: source) else { return false }
+        let target = index.utf16Offset(in: source)
+        textView.setSelectedRange(NSRange(location: target, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: target, length: 0))
+        focus()
+        return true
     }
 
     public var hasBookmarks: Bool {
@@ -577,6 +661,25 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorDefaultVie
             height: CGFloat.greatestFiniteMagnitude
         )
         scrollView.hasHorizontalScroller = !isEnabled
+    }
+
+    private func updateDisplayState(_ update: (inout EditorViewState) -> Void) {
+        guard let bufferID = activeBuffer?.bufferID else { return }
+        var state = viewStates[bufferID] ?? defaultViewState
+        update(&state)
+        viewStates[bufferID] = state
+        applyDisplayOptions(state)
+    }
+
+    private func applyDisplayOptions(_ state: EditorViewState) {
+        // This adapter is an isolated Presentation-test fallback. AppKit exposes
+        // whitespace and line-ending glyphs through one combined layout flag;
+        // production uses Scintilla, which renders the two options independently.
+        textView.layoutManager?.showsInvisibleCharacters = state.whitespaceVisible || state.lineEndingsVisible
+        textView.font = .monospacedSystemFont(
+            ofSize: max(8, min(33, 13 + CGFloat(state.zoomLevel))),
+            weight: .regular
+        )
     }
 
     private func updateBookmarks(

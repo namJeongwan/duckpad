@@ -94,6 +94,32 @@ private final class FixedDirtyDecisionPresenter: DirtyDocumentDecisionPresenting
     ) async -> CloseDecision { result }
 }
 
+@MainActor
+private final class NavigationPresenterSpy: EditorNavigationPresenting {
+    private(set) var linePosition: EditorNavigationPosition?
+    private(set) var offsetPosition: EditorNavigationPosition?
+    var lineCompletion: ((Int, Int) -> Void)?
+    var offsetCompletion: ((Int) -> Void)?
+
+    func presentLineAndColumn(
+        current: EditorNavigationPosition,
+        in window: NSWindow,
+        completion: @escaping @MainActor (Int, Int) -> Void
+    ) {
+        linePosition = current
+        lineCompletion = completion
+    }
+
+    func presentUTF8Offset(
+        current: EditorNavigationPosition,
+        in window: NSWindow,
+        completion: @escaping @MainActor (Int) -> Void
+    ) {
+        offsetPosition = current
+        offsetCompletion = completion
+    }
+}
+
 private final class WeakBox<Value: AnyObject> {
     weak var value: Value?
     init(_ value: Value?) { self.value = value }
@@ -925,6 +951,17 @@ struct AppKitHostedTests {
     #expect(findInFolder?.action == #selector(DuckpadWindowController.performFindInFolder(_:)))
     #expect(findInFolder?.keyEquivalent == "f")
     #expect(findInFolder?.keyEquivalentModifierMask == [.command, .shift])
+    let goToLine = menuItem("Go to Line / Column…", in: menu)
+    let goToOffset = menuItem("Go to UTF-8 Offset…", in: menu)
+    #expect(goToLine?.action == #selector(DuckpadWindowController.performGoToLine(_:)))
+    #expect(goToLine?.keyEquivalent == "g")
+    #expect(goToLine?.keyEquivalentModifierMask == [.control])
+    #expect(goToOffset?.action == #selector(DuckpadWindowController.performGoToOffset(_:)))
+    #expect(goToOffset?.keyEquivalent.isEmpty == true)
+    if let goToLine, let goToOffset {
+        #expect(controller.validateMenuItem(goToLine))
+        #expect(controller.validateMenuItem(goToOffset))
+    }
 
     let f2 = String(UnicodeScalar(NSF2FunctionKey)!)
     let toggleBookmark = menuItem("Toggle Bookmark", in: menu)
@@ -1038,6 +1075,11 @@ struct AppKitHostedTests {
 
     let wordWrap = menuItem("Word Wrap", in: menu)
     let wrapSymbols = menuItem("Show Wrap Symbols", in: menu)
+    let whitespace = menuItem("Show Whitespace", in: menu)
+    let lineEndings = menuItem("Show Line Endings", in: menu)
+    let zoomIn = menuItem("Zoom In", in: menu)
+    let zoomOut = menuItem("Zoom Out", in: menu)
+    let actualSize = menuItem("Actual Size", in: menu)
     let workspaceSidebar = menuItem("Workspace Sidebar", in: menu)
     let documentSymbols = menuItem("Document Symbols…", in: menu)
     let addWorkspaceFolder = menuItem("Add Folder to Workspace…", in: menu)
@@ -1064,6 +1106,14 @@ struct AppKitHostedTests {
     }
     #expect(wordWrap?.action == #selector(DuckpadWindowController.performToggleWordWrap(_:)))
     #expect(wrapSymbols?.action == #selector(DuckpadWindowController.performToggleWrapMarker(_:)))
+    #expect(whitespace?.action == #selector(DuckpadWindowController.performToggleWhitespace(_:)))
+    #expect(lineEndings?.action == #selector(DuckpadWindowController.performToggleLineEndings(_:)))
+    #expect(zoomIn?.keyEquivalent == "+")
+    #expect(zoomOut?.keyEquivalent == "-")
+    #expect(actualSize?.keyEquivalent == "0")
+    for item in [zoomIn, zoomOut, actualSize].compactMap({ $0 }) {
+        #expect(item.keyEquivalentModifierMask == [.command])
+    }
     if let wordWrap {
         #expect(controller.validateMenuItem(wordWrap))
         #expect(wordWrap.state == .on)
@@ -1076,6 +1126,26 @@ struct AppKitHostedTests {
     if let wrapSymbols {
         #expect(!controller.validateMenuItem(wrapSymbols))
         #expect(wrapSymbols.state == .off)
+    }
+    if let whitespace, let lineEndings, let zoomIn, let zoomOut, let actualSize {
+        #expect(controller.validateMenuItem(whitespace))
+        #expect(whitespace.state == .off)
+        controller.performToggleWhitespace(whitespace)
+        #expect(controller.validateMenuItem(whitespace))
+        #expect(whitespace.state == .on)
+
+        #expect(controller.validateMenuItem(lineEndings))
+        controller.performToggleLineEndings(lineEndings)
+        #expect(controller.validateMenuItem(lineEndings))
+        #expect(lineEndings.state == .on)
+
+        #expect(controller.validateMenuItem(zoomIn))
+        #expect(controller.validateMenuItem(zoomOut))
+        #expect(!controller.validateMenuItem(actualSize))
+        controller.performZoomIn(zoomIn)
+        #expect(controller.validateMenuItem(actualSize))
+        controller.performResetZoom(actualSize)
+        #expect(!controller.validateMenuItem(actualSize))
     }
     let splitRight = menuItem("Split Editor Right", in: menu)
     let splitDown = menuItem("Split Editor Down", in: menu)
@@ -1284,6 +1354,33 @@ struct AppKitHostedTests {
     #expect(workspace.snapshot().tabs.map(\.id) == [active])
     #expect(workspace.recentlyClosedTabCount == 2)
     #expect(!controller.validateMenuItem(item))
+}
+
+@Test @MainActor func navigationPanelBindsSubmissionToThePresentedBuffer() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let presenter = NavigationPresenterSpy()
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        navigationPresenter: presenter,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+
+    controller.editor.textView.insertText("first\nsecond\nthird", replacementRange: NSRange(location: 0, length: 0))
+    controller.performGoToLine()
+    #expect(presenter.linePosition?.lineCount == 3)
+
+    _ = await workspace.addScratch()
+    presenter.lineCompletion?(3, 1)
+    #expect(controller.editor.navigationPosition?.line == 1)
+
+    controller.editor.textView.insertText("한글🙂", replacementRange: NSRange(location: 0, length: 0))
+    controller.performGoToOffset()
+    #expect(presenter.offsetPosition?.utf8Length == "한글🙂".utf8.count)
+    presenter.offsetCompletion?("한".utf8.count)
+    #expect(controller.editor.navigationPosition?.utf8Offset == "한".utf8.count)
 }
 
 @Test @MainActor func newScratchShortcutActionAddsAndActivatesUntitledTab() async {

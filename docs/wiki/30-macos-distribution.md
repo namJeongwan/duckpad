@@ -1,6 +1,6 @@
 # Phase 26 — macOS distribution and sandboxed XPC runtime
 
-Status: **Implemented; independent review pending**
+Status: **Approved, committed and pushed** (`9a4c856845b75568e4fb599149cf79c112a8abed`)
 
 ## User-facing result
 
@@ -119,11 +119,19 @@ profile; that credentialed invocation remains a final release-operation gate.
 - Packaged adversarial XPC smoke: nonterminating module timeout, explicit
   cancellation, and immediate valid Sort Lines recovery through the same
   on-demand service, PASS.
-- The original content review's P26-01 through P26-04 are remediated in current
-  bytes; independent re-review and an exact candidate receipt remain required.
+- The original content review's P26-01 through P26-04 were remediated and
+  independently closed with 0 Blocker/Major/Minor findings.
   The smoke also exposed hidden Search panel constraint conflicts. Collapsed state
   now deactivates its vertical content constraints and reactivates them only
   while expanded; the repeated packaged smoke emitted no conflict.
+
+## Delivery
+
+The exact candidate
+`a1fc44da20be62ad053b9fa3f7303b18eb2c3ffc0fbdf6e449598eba976446e1`
+was independently approved, committed as `9a4c856`, post-commit audited, and
+pushed to `origin/main`. The immutable receipt SHA-256 is
+`ef219178995122613d0ed138726c490dd54d7ce601a932787c726cf3abcfbc86`.
 
 ## Scope boundaries
 

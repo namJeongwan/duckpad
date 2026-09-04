@@ -371,6 +371,9 @@ struct ScintillaBridgeTests {
             wordWrapEnabled: false
         )
         view.isWrapMarkerVisible = true
+        view.isWhitespaceVisible = true
+        view.areLineEndingsVisible = true
+        view.zoomLevel = 4
         view.resetInstrumentation()
 
         let recovery = try #require(adapter.recoverySnapshot(for: bufferID))
@@ -379,6 +382,9 @@ struct ScintillaBridgeTests {
         #expect(recovery.viewState.caretUTF8 == 18)
         #expect(recovery.viewState.wordWrapEnabled == false)
         #expect(recovery.viewState.wrapMarkerVisible == true)
+        #expect(recovery.viewState.whitespaceVisible)
+        #expect(recovery.viewState.lineEndingsVisible)
+        #expect(recovery.viewState.zoomLevel == 4)
         #expect(view.snapshotReadCount == 0)
 
         let restored = ScintillaEditorAdapter()
@@ -389,6 +395,9 @@ struct ScintillaBridgeTests {
         #expect(restoredView.caretUTF8Position == 18)
         #expect(restoredView.isWordWrapEnabled == false)
         #expect(restoredView.isWrapMarkerVisible == true)
+        #expect(restoredView.isWhitespaceVisible)
+        #expect(restoredView.areLineEndingsVisible)
+        #expect(restoredView.zoomLevel == 4)
         #expect(restored.recoverySnapshot(for: bufferID)?.utf8 == Data(text.utf8))
     }
 
@@ -401,18 +410,55 @@ struct ScintillaBridgeTests {
 
         adapter.setWordWrapEnabled(false)
         adapter.setWrapMarkerVisible(true)
+        adapter.setWhitespaceVisible(true)
+        adapter.setLineEndingsVisible(true)
+        adapter.setZoomLevel(5)
         #expect(!adapter.isWordWrapEnabled)
         #expect(adapter.isWrapMarkerVisible)
+        #expect(adapter.isWhitespaceVisible)
+        #expect(adapter.areLineEndingsVisible)
+        #expect(adapter.zoomLevel == 5)
         #expect(adapter.snapshot(for: first)?.revision == 0)
 
         adapter.display(EditorBufferDescriptor(bufferID: second, revision: 0))
         #expect(adapter.isWordWrapEnabled)
         #expect(!adapter.isWrapMarkerVisible)
+        #expect(!adapter.isWhitespaceVisible)
+        #expect(!adapter.areLineEndingsVisible)
+        #expect(adapter.zoomLevel == 0)
 
         adapter.display(EditorBufferDescriptor(bufferID: first, revision: 0))
         #expect(!adapter.isWordWrapEnabled)
         #expect(adapter.isWrapMarkerVisible)
+        #expect(adapter.isWhitespaceVisible)
+        #expect(adapter.areLineEndingsVisible)
+        #expect(adapter.zoomLevel == 5)
         #expect(try #require(adapter.recoveryCapture(for: first)).viewState.wrapMarkerVisible)
+    }
+
+    @Test @MainActor
+    func navigationUsesOneBasedLineColumnAndRejectsInvalidUTF8Offsets() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        let source = "zero\n한글🙂\nlast"
+        adapter.install(.init(bufferID: bufferID, revision: 7, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 7))
+        let contextID = try #require(adapter.navigationPosition).contextID
+
+        #expect(adapter.goTo(line: 2, column: 2, in: contextID))
+        let linePosition = try #require(adapter.navigationPosition)
+        #expect(linePosition.line == 2)
+        #expect(linePosition.column == 2)
+        #expect(linePosition.lineCount == 3)
+        #expect(linePosition.utf8Length == source.utf8.count)
+
+        let secondHangulOffset = "zero\n한".utf8.count
+        #expect(adapter.goTo(utf8Offset: secondHangulOffset, in: contextID))
+        #expect(adapter.navigationPosition?.utf8Offset == secondHangulOffset)
+        #expect(!adapter.goTo(utf8Offset: secondHangulOffset - 1, in: contextID))
+        #expect(!adapter.goTo(line: 4, column: 1, in: contextID))
+        #expect(!adapter.goTo(line: 0, column: 1, in: contextID))
+        #expect(adapter.snapshot(for: bufferID)?.revision == 7)
     }
 
     @Test @MainActor
@@ -517,6 +563,12 @@ struct ScintillaBridgeTests {
 
         adapter.split(orientation: .sideBySide)
         let secondary = try #require(adapter.secondaryScintillaView)
+        primary.isWhitespaceVisible = true
+        primary.areLineEndingsVisible = false
+        primary.zoomLevel = 2
+        secondary.isWhitespaceVisible = false
+        secondary.areLineEndingsVisible = true
+        secondary.zoomLevel = 6
         #expect(adapter.splitOrientation == .sideBySide)
         #expect((adapter.view as? NSSplitView)?.arrangedSubviews.count == 2)
         secondary.setPrimarySelectionUTF8Range(NSRange(location: 3, length: 0))
@@ -538,6 +590,12 @@ struct ScintillaBridgeTests {
         let recovery = try #require(adapter.recoverySnapshot(for: bufferID))
         #expect(recovery.viewState.splitOrientation == .stacked)
         #expect(recovery.viewState.secondaryViewState?.caretUTF8 == 2)
+        #expect(recovery.viewState.whitespaceVisible)
+        #expect(!recovery.viewState.lineEndingsVisible)
+        #expect(recovery.viewState.zoomLevel == 2)
+        #expect(recovery.viewState.secondaryViewState?.whitespaceVisible == false)
+        #expect(recovery.viewState.secondaryViewState?.lineEndingsVisible == true)
+        #expect(recovery.viewState.secondaryViewState?.zoomLevel == 6)
 
         let restored = ScintillaEditorAdapter()
         restored.installRecovery(recovery)
@@ -545,6 +603,10 @@ struct ScintillaBridgeTests {
         #expect(restored.splitOrientation == .stacked)
         #expect(restored.secondaryScintillaView?.caretUTF8Position == 2)
         #expect(restored.secondaryScintillaView?.contentUTF8 == Data("abc".utf8))
+        #expect(restored.activeScintillaView?.isWhitespaceVisible == true)
+        #expect(restored.activeScintillaView?.zoomLevel == 2)
+        #expect(restored.secondaryScintillaView?.areLineEndingsVisible == true)
+        #expect(restored.secondaryScintillaView?.zoomLevel == 6)
 
         let otherBufferID = BufferID()
         adapter.display(.init(bufferID: otherBufferID, revision: 0))
@@ -563,6 +625,7 @@ struct ScintillaBridgeTests {
         _ = NSApplication.shared
         let adapter = ScintillaEditorAdapter()
         let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: "one\ntwo\nthree"))
         adapter.display(.init(bufferID: bufferID, revision: 0))
         adapter.split(orientation: .sideBySide)
         let primary = try #require(adapter.activeScintillaView)
@@ -583,10 +646,16 @@ struct ScintillaBridgeTests {
         adapter.setWordWrapEnabled(false)
         #expect(!secondary.isWordWrapEnabled)
         #expect(primary.isWordWrapEnabled)
+        let secondaryNavigation = try #require(adapter.navigationPosition)
 
         adapter.focusOtherPane()
         #expect(primary.hasEditorFocus)
         #expect(adapter.activeScintillaView === primary)
+        #expect(adapter.goTo(line: 3, column: 2, in: secondaryNavigation.contextID))
+        #expect(primary.caretUTF8Position == 0)
+        #expect(secondary.caretUTF8Position == "one\ntwo\nt".utf8.count)
+        #expect(secondary.hasEditorFocus)
+        #expect(adapter.activeScintillaView === secondary)
     }
 
     @Test @MainActor

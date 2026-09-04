@@ -158,6 +158,58 @@ public protocol SplitEditorPort: EditorPort {
     func focusOtherPane()
 }
 
+public struct EditorNavigationContextID: Hashable, Sendable {
+    private let rawValue: UUID
+    public init() { rawValue = UUID() }
+}
+
+public struct EditorNavigationPosition: Equatable, Sendable {
+    public let contextID: EditorNavigationContextID
+    public let line: Int
+    public let column: Int
+    public let utf8Offset: Int
+    public let lineCount: Int
+    public let utf8Length: Int
+
+    public init(
+        contextID: EditorNavigationContextID,
+        line: Int,
+        column: Int,
+        utf8Offset: Int,
+        lineCount: Int,
+        utf8Length: Int
+    ) {
+        self.contextID = contextID
+        self.line = line
+        self.column = column
+        self.utf8Offset = utf8Offset
+        self.lineCount = lineCount
+        self.utf8Length = utf8Length
+    }
+}
+
+/// Navigation uses one-based user-facing line/column values and zero-based
+/// UTF-8 offsets. Adapters reject invalid lines and non-boundary offsets, and
+/// successful navigation restores focus to the exact captured editor context.
+@MainActor
+public protocol EditorNavigationPort: EditorPort {
+    var navigationPosition: EditorNavigationPosition? { get }
+    @discardableResult func goTo(line: Int, column: Int, in contextID: EditorNavigationContextID) -> Bool
+    @discardableResult func goTo(utf8Offset: Int, in contextID: EditorNavigationContextID) -> Bool
+}
+
+/// Per-pane display metadata. These options never mutate document bytes or
+/// participate in undo; recovery persists them with the corresponding pane.
+@MainActor
+public protocol EditorDisplayOptionsPort: EditorPort {
+    var isWhitespaceVisible: Bool { get }
+    var areLineEndingsVisible: Bool { get }
+    var zoomLevel: Int { get }
+    func setWhitespaceVisible(_ isVisible: Bool)
+    func setLineEndingsVisible(_ isVisible: Bool)
+    func setZoomLevel(_ level: Int)
+}
+
 /// Platform-neutral edit commands surfaced by the native menu. Application
 /// owns the intent while each editor adapter owns its responder/engine details.
 public enum EditorCommand: Equatable, Sendable {

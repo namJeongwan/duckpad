@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -39,6 +39,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private var bufferViews: [BufferID: DPScintillaEditorView] = [:]
     private var secondaryBufferViews: [BufferID: DPScintillaEditorView] = [:]
     private var documentIntelligenceContextIDs: [ObjectIdentifier: DocumentIntelligenceContextID] = [:]
+    private var navigationContextIDs: [ObjectIdentifier: EditorNavigationContextID] = [:]
     private let splitView = NSSplitView(frame: .zero)
     private let primaryHost = NSView(frame: .zero)
     private let secondaryHost = NSView(frame: .zero)
@@ -223,6 +224,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         let retiredView = bufferViews.removeValue(forKey: bufferID)
         if let retiredView {
             documentIntelligenceContextIDs.removeValue(forKey: ObjectIdentifier(retiredView))
+            navigationContextIDs.removeValue(forKey: ObjectIdentifier(retiredView))
         }
         retiredView?.onEdit = nil
         retiredView?.removeFromSuperview()
@@ -230,6 +232,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         let retiredSecondary = secondaryBufferViews.removeValue(forKey: bufferID)
         if let retiredSecondary {
             documentIntelligenceContextIDs.removeValue(forKey: ObjectIdentifier(retiredSecondary))
+            navigationContextIDs.removeValue(forKey: ObjectIdentifier(retiredSecondary))
         }
         retiredSecondary?.onEdit = nil
         retiredSecondary?.removeFromSuperview()
@@ -305,6 +308,67 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     public func setDefaultViewOptions(wordWrapEnabled: Bool, wrapMarkerVisible: Bool) {
         defaultViewState.wordWrapEnabled = wordWrapEnabled
         defaultViewState.wrapMarkerVisible = wrapMarkerVisible
+    }
+
+    public var isWhitespaceVisible: Bool { activeScintillaView?.isWhitespaceVisible ?? false }
+    public var areLineEndingsVisible: Bool { activeScintillaView?.areLineEndingsVisible ?? false }
+    public var zoomLevel: Int { Int(activeScintillaView?.zoomLevel ?? 0) }
+
+    public func setWhitespaceVisible(_ isVisible: Bool) {
+        guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return }
+        editorView.isWhitespaceVisible = isVisible
+        storeViewState(bufferID: bufferID)
+    }
+
+    public func setLineEndingsVisible(_ isVisible: Bool) {
+        guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return }
+        editorView.areLineEndingsVisible = isVisible
+        storeViewState(bufferID: bufferID)
+    }
+
+    public func setZoomLevel(_ level: Int) {
+        guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return }
+        editorView.zoomLevel = min(max(level, -10), 20)
+        storeViewState(bufferID: bufferID)
+    }
+
+    public var navigationPosition: EditorNavigationPosition? {
+        guard let editorView = activeScintillaView,
+              let contextID = navigationContextIDs[ObjectIdentifier(editorView)] else { return nil }
+        return EditorNavigationPosition(
+            contextID: contextID,
+            line: Int(clamping: editorView.caretLine) + 1,
+            column: Int(clamping: editorView.caretColumn) + 1,
+            utf8Offset: Int(clamping: editorView.caretUTF8Position),
+            lineCount: Int(clamping: editorView.lineCount),
+            utf8Length: Int(clamping: editorView.documentByteLength)
+        )
+    }
+
+    @discardableResult
+    public func goTo(line: Int, column: Int, in contextID: EditorNavigationContextID) -> Bool {
+        guard line > 0, column > 0, let editorView = navigationView(for: contextID),
+              editorView.go(toOneBasedLine: UInt(line), column: UInt(column)) else { return false }
+        editorView.focusEditor()
+        if let bufferID = activeBuffer?.bufferID { storeViewState(bufferID: bufferID) }
+        return true
+    }
+
+    @discardableResult
+    public func goTo(utf8Offset: Int, in contextID: EditorNavigationContextID) -> Bool {
+        guard utf8Offset >= 0, let editorView = navigationView(for: contextID),
+              editorView.go(toUTF8Offset: UInt(utf8Offset)) else { return false }
+        editorView.focusEditor()
+        if let bufferID = activeBuffer?.bufferID { storeViewState(bufferID: bufferID) }
+        return true
+    }
+
+    private func navigationView(for contextID: EditorNavigationContextID) -> DPScintillaEditorView? {
+        for editorView in [primaryActiveView, secondaryActiveView].compactMap({ $0 })
+        where navigationContextIDs[ObjectIdentifier(editorView)] == contextID {
+            return editorView
+        }
+        return nil
     }
 
     public var hasBookmarks: Bool {
@@ -786,6 +850,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private func makeView(for bufferID: BufferID) -> DPScintillaEditorView {
         let editorView = DPScintillaEditorView(frame: view.bounds)
         documentIntelligenceContextIDs[ObjectIdentifier(editorView)] = DocumentIntelligenceContextID()
+        navigationContextIDs[ObjectIdentifier(editorView)] = EditorNavigationContextID()
         editorView.onEdit = { [weak self] edit in self?.receive(edit, bufferID: bufferID) }
         editorView.onError = { [weak self] error in
             self?.receiveBridgeError(error, bufferID: bufferID)
@@ -801,6 +866,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         } else {
             secondary = DPScintillaEditorView(frame: secondaryHost.bounds)
             documentIntelligenceContextIDs[ObjectIdentifier(secondary)] = DocumentIntelligenceContextID()
+            navigationContextIDs[ObjectIdentifier(secondary)] = EditorNavigationContextID()
             secondary.shareDocument(with: primary)
             secondary.onError = { [weak self] error in
                 self?.receiveBridgeError(error, bufferID: bufferID)
@@ -855,6 +921,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         let releasedSecondary = secondaryActiveView
         if let releasedSecondary {
             documentIntelligenceContextIDs.removeValue(forKey: ObjectIdentifier(releasedSecondary))
+            navigationContextIDs.removeValue(forKey: ObjectIdentifier(releasedSecondary))
         }
         releasedSecondary?.onEdit = nil
         releasedSecondary?.onError = nil
@@ -888,6 +955,9 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             wordWrapEnabled: secondaryState.wordWrapEnabled
         )
         secondary.isWrapMarkerVisible = secondaryState.wrapMarkerVisible
+        secondary.isWhitespaceVisible = secondaryState.whitespaceVisible
+        secondary.areLineEndingsVisible = secondaryState.lineEndingsVisible
+        secondary.zoomLevel = secondaryState.zoomLevel
     }
 
     private func applyStoredLanguage(to editorView: DPScintillaEditorView, bufferID: BufferID) {
@@ -924,7 +994,10 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
                 firstVisibleLine: Int(clamping: $0.firstVisibleLine),
                 horizontalScrollOffset: Int(clamping: $0.horizontalScrollOffset),
                 wordWrapEnabled: $0.isWordWrapEnabled,
-                wrapMarkerVisible: $0.isWrapMarkerVisible
+                wrapMarkerVisible: $0.isWrapMarkerVisible,
+                whitespaceVisible: $0.isWhitespaceVisible,
+                lineEndingsVisible: $0.areLineEndingsVisible,
+                zoomLevel: Int($0.zoomLevel)
             )
         }
         viewStates[bufferID] = EditorViewState(
@@ -934,6 +1007,9 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             horizontalScrollOffset: Int(clamping: editorView.horizontalScrollOffset),
             wordWrapEnabled: editorView.isWordWrapEnabled,
             wrapMarkerVisible: editorView.isWrapMarkerVisible,
+            whitespaceVisible: editorView.isWhitespaceVisible,
+            lineEndingsVisible: editorView.areLineEndingsVisible,
+            zoomLevel: Int(editorView.zoomLevel),
             bookmarkedLines: editorView.bookmarkedLines.map(\.intValue),
             splitOrientation: splitOrientation,
             secondaryViewState: splitOrientation == nil ? nil : secondaryState
@@ -950,6 +1026,9 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             wordWrapEnabled: state.wordWrapEnabled
         )
         editorView.isWrapMarkerVisible = state.wrapMarkerVisible
+        editorView.isWhitespaceVisible = state.whitespaceVisible
+        editorView.areLineEndingsVisible = state.lineEndingsVisible
+        editorView.zoomLevel = state.zoomLevel
         editorView.restoreBookmarkedLines(state.bookmarkedLines.map { NSNumber(value: $0) })
     }
 
@@ -969,7 +1048,10 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
                 firstVisibleLine: max(0, $0.firstVisibleLine),
                 horizontalScrollOffset: max(0, $0.horizontalScrollOffset),
                 wordWrapEnabled: $0.wordWrapEnabled,
-                wrapMarkerVisible: $0.wrapMarkerVisible
+                wrapMarkerVisible: $0.wrapMarkerVisible,
+                whitespaceVisible: $0.whitespaceVisible,
+                lineEndingsVisible: $0.lineEndingsVisible,
+                zoomLevel: $0.zoomLevel
             )
         }
         return EditorViewState(
@@ -979,6 +1061,9 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             horizontalScrollOffset: max(0, state.horizontalScrollOffset),
             wordWrapEnabled: state.wordWrapEnabled,
             wrapMarkerVisible: state.wrapMarkerVisible,
+            whitespaceVisible: state.whitespaceVisible,
+            lineEndingsVisible: state.lineEndingsVisible,
+            zoomLevel: state.zoomLevel,
             bookmarkedLines: state.bookmarkedLines.filter { $0 < maximumLine },
             splitOrientation: secondary == nil ? nil : state.splitOrientation,
             secondaryViewState: secondary

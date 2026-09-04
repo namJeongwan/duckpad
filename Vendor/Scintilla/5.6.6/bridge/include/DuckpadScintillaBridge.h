@@ -63,6 +63,9 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, getter=isInputEnabled) BOOL inputEnabled;
 @property(nonatomic, getter=isWordWrapEnabled) BOOL wordWrapEnabled;
 @property(nonatomic, getter=isWrapMarkerVisible) BOOL wrapMarkerVisible;
+@property(nonatomic, getter=isWhitespaceVisible) BOOL whitespaceVisible;
+@property(nonatomic, getter=areLineEndingsVisible) BOOL lineEndingsVisible;
+@property(nonatomic) NSInteger zoomLevel;
 @property(nonatomic, readonly) NSUInteger selectionCount;
 @property(nonatomic, readonly) NSUInteger caretUTF8Position;
 @property(nonatomic, readonly) NSUInteger anchorUTF8Position;
@@ -95,6 +98,9 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, readonly) NSInteger badBraceUTF8Position;
 @property(nonatomic, readonly, getter=isCompletionActive) BOOL completionActive;
 @property(nonatomic, readonly) NSUInteger completionItemCount;
+@property(nonatomic, readonly) NSUInteger lineCount;
+@property(nonatomic, readonly) NSUInteger caretLine;
+@property(nonatomic, readonly) NSUInteger caretColumn;
 
 - (BOOL)loadUTF8:(NSData *)content
          revision:(uint64_t)revision
@@ -126,6 +132,8 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (void)toggleBookmarkAtCaret;
 - (BOOL)navigateToBookmarkForward:(BOOL)forward;
 - (void)clearBookmarks;
+- (BOOL)goToOneBasedLine:(NSUInteger)line column:(NSUInteger)column;
+- (BOOL)goToUTF8Offset:(NSUInteger)offset;
 - (void)shareDocumentWithView:(DPScintillaEditorView *)source;
 - (void)synchronizeRevision:(uint64_t)revision;
 /// Disconnects native callbacks and document watchers before a pane is discarded.

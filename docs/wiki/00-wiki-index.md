@@ -75,8 +75,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 61 | [Phase 25A independent code review](reviews/2026-09-03-phase-25a-command-palette-code-review.md) | **Approved — 0 findings** | Exact-target dispatch/current validation, live extension refresh와 hosted popover lifecycle을 remediation 후 독립 재검증했다. |
 | 62 | [Phase 25B native document lifecycle and save set](29-native-document-lifecycle.md) | **Approved, committed and pushed** | Finder/Open With/drag 다중 열기, native 최근 문서, Save Copy와 Save All을 commit `34c3ef8`로 exact receipt/audit 후 `origin/main`에 반영했다. |
 | 63 | [Phase 25B independent code review](reviews/2026-09-03-phase-25b-native-document-lifecycle-code-review.md) | **Approved — 0 findings** | Fresh panel/identity Save Copy retry까지 P25B-01~03을 모두 닫았다. receipt SHA-256은 `30bc1be63d4dc8d6377160e6225f70364bcdaa41a59d68d5f3110f0ceacbe1e5`다. |
-| 64 | [Phase 26 macOS distribution and sandboxed XPC](30-macos-distribution.md) | **Content approved; exact receipt pending** | Universal `.app`, Finder document declarations, packaged resources/icon, exact sandbox entitlements, Hardened Runtime signing pipeline과 embedded XPC WebAssembly runtime을 구현한다. |
+| 64 | [Phase 26 macOS distribution and sandboxed XPC](30-macos-distribution.md) | **Approved, committed and pushed** | Universal `.app`, Finder document declarations, sandbox/bookmark lifecycle와 embedded XPC runtime을 commit `9a4c856`로 exact receipt/audit 후 `origin/main`에 반영했다. |
 | 65 | [Phase 26 independent code review](reviews/2026-09-03-phase-26-macos-distribution-code-review.md) | **Content approved — 0 findings** | 최초 4 Major의 XPC remote teardown, sandbox document scope/bookmark lifecycle, WAMR semantic-patch reproduction, exclusive artifact publication 결함을 remediation 후 독립 재검증해 모두 닫았다. |
+| 66 | [Phase 27 editor navigation and display controls](31-editor-navigation-and-display.md) | **Content approved; exact receipt pending** | `Control-G` 줄·열 이동, UTF-8 offset 이동, 표준 zoom, 공백/EOL 표시와 pane별 recovery 상태를 기록한다. |
+| 67 | [Phase 27 independent code review](reviews/2026-09-04-phase-27-editor-navigation-display-code-review.md) | **Content approved — 0 findings** | 최초 split-pane navigation responder Major를 opaque pane context와 exact-focus 복구로 닫고 Unicode/recovery/menu 경계를 최종 0 Blocker/Major/Minor로 승인했다. |
 
 상태 정의:
 
@@ -132,6 +134,13 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-04 — Phase 27 independent content review
+
+- **Agent/role:** `/root/phase1_code_review`, independent content reviewer; Phase 27 구현에는 참여하지 않았다.
+- **Scope/closure:** staged navigation/display/recovery/menu/bridge/tests/docs를 검토했다. 최초 P27-01 sheet responder 전환으로 secondary 요청이 primary를 이동하던 Major를 재현했고, opaque pane context·retirement invalidation·exact-pane focus remediation을 재검증해 닫았다.
+- **Validation:** independent Debug/Release focused 각각 6/6 PASS, cached diff-check PASS. Builder exact Debug/Release 353/353와 packaged 50-tab smoke는 supporting evidence다.
+- **Verdict/boundary:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** 15-path product/test/work-doc path digest `7638eed62f1bc5e6dae1b419f93fa657daa17c399fd890a46c0db61233da6aed`, path+byte digest `c428bccfd609e95cd9a64a1f1f1754fcb6a7552f1a2a1a19cd2744e4afdfea72`. fallback combined-invisibles는 명시된 non-production limitation이다. review/index 반영 뒤 exact refreeze/receipt가 필요하며 doc04/vendor script/README/ignored Notepad++와 product/source/tests/stage/commit/push는 불변이다.
 
 ### 2026-09-04 — Phase 26 focused remediation independent re-review
 

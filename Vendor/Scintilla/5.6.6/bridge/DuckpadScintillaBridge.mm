@@ -449,6 +449,42 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         : SC_WRAPVISUALFLAG_NONE;
     [_scintilla message:SCI_SETWRAPVISUALFLAGS wParam:flags];
 }
+- (BOOL)isWhitespaceVisible { return [_scintilla message:SCI_GETVIEWWS] != SCWS_INVISIBLE; }
+- (void)setWhitespaceVisible:(BOOL)visible {
+    [_scintilla message:SCI_SETVIEWWS wParam:visible ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE];
+}
+- (BOOL)areLineEndingsVisible { return [_scintilla message:SCI_GETVIEWEOL] != 0; }
+- (void)setLineEndingsVisible:(BOOL)visible { [_scintilla message:SCI_SETVIEWEOL wParam:visible]; }
+- (NSInteger)zoomLevel { return [_scintilla message:SCI_GETZOOM]; }
+- (void)setZoomLevel:(NSInteger)level {
+    [_scintilla message:SCI_SETZOOM wParam:(uptr_t)MAX(-10, MIN(20, level))];
+}
+- (NSUInteger)lineCount { return (NSUInteger)MAX(1, [_scintilla message:SCI_GETLINECOUNT]); }
+- (NSUInteger)caretLine {
+    return (NSUInteger)MAX(0, [_scintilla message:SCI_LINEFROMPOSITION wParam:self.caretUTF8Position]);
+}
+- (NSUInteger)caretColumn {
+    return (NSUInteger)MAX(0, [_scintilla message:SCI_GETCOLUMN wParam:self.caretUTF8Position]);
+}
+- (BOOL)goToOneBasedLine:(NSUInteger)line column:(NSUInteger)column {
+    if (line == 0 || column == 0 || line > self.lineCount) return NO;
+    const NSInteger target = [_scintilla message:SCI_FINDCOLUMN wParam:line - 1 lParam:column - 1];
+    if (target < 0) return NO;
+    [_scintilla message:SCI_GOTOPOS wParam:(uptr_t)target];
+    [_scintilla message:SCI_SCROLLCARET];
+    return YES;
+}
+- (BOOL)goToUTF8Offset:(NSUInteger)offset {
+    const NSUInteger length = self.documentByteLength;
+    if (offset > length) return NO;
+    if (offset > 0 && offset < length) {
+        const NSInteger boundary = [_scintilla message:SCI_POSITIONAFTER wParam:offset - 1];
+        if ((NSUInteger)MAX(0, boundary) != offset) return NO;
+    }
+    [_scintilla message:SCI_GOTOPOS wParam:offset];
+    [_scintilla message:SCI_SCROLLCARET];
+    return YES;
+}
 - (NSUInteger)selectionCount { return (NSUInteger)[_scintilla message:SCI_GETSELECTIONS]; }
 - (NSUInteger)caretUTF8Position { return (NSUInteger)[_scintilla message:SCI_GETCURRENTPOS]; }
 - (NSUInteger)anchorUTF8Position { return (NSUInteger)[_scintilla message:SCI_GETANCHOR]; }

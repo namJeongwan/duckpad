@@ -8,6 +8,9 @@ public struct SecondaryEditorViewState: Codable, Equatable, Sendable {
     public var horizontalScrollOffset: Int
     public var wordWrapEnabled: Bool
     public var wrapMarkerVisible: Bool
+    public var whitespaceVisible: Bool
+    public var lineEndingsVisible: Bool
+    public var zoomLevel: Int
 
     public init(
         anchorUTF8: Int = 0,
@@ -15,7 +18,10 @@ public struct SecondaryEditorViewState: Codable, Equatable, Sendable {
         firstVisibleLine: Int = 0,
         horizontalScrollOffset: Int = 0,
         wordWrapEnabled: Bool = true,
-        wrapMarkerVisible: Bool = false
+        wrapMarkerVisible: Bool = false,
+        whitespaceVisible: Bool = false,
+        lineEndingsVisible: Bool = false,
+        zoomLevel: Int = 0
     ) {
         self.anchorUTF8 = anchorUTF8
         self.caretUTF8 = caretUTF8
@@ -23,6 +29,28 @@ public struct SecondaryEditorViewState: Codable, Equatable, Sendable {
         self.horizontalScrollOffset = horizontalScrollOffset
         self.wordWrapEnabled = wordWrapEnabled
         self.wrapMarkerVisible = wrapMarkerVisible
+        self.whitespaceVisible = whitespaceVisible
+        self.lineEndingsVisible = lineEndingsVisible
+        self.zoomLevel = min(max(zoomLevel, -10), 20)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case anchorUTF8, caretUTF8, firstVisibleLine, horizontalScrollOffset
+        case wordWrapEnabled, wrapMarkerVisible
+        case whitespaceVisible, lineEndingsVisible, zoomLevel
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        anchorUTF8 = try values.decode(Int.self, forKey: .anchorUTF8)
+        caretUTF8 = try values.decode(Int.self, forKey: .caretUTF8)
+        firstVisibleLine = try values.decode(Int.self, forKey: .firstVisibleLine)
+        horizontalScrollOffset = try values.decode(Int.self, forKey: .horizontalScrollOffset)
+        wordWrapEnabled = try values.decode(Bool.self, forKey: .wordWrapEnabled)
+        wrapMarkerVisible = try values.decodeIfPresent(Bool.self, forKey: .wrapMarkerVisible) ?? false
+        whitespaceVisible = try values.decodeIfPresent(Bool.self, forKey: .whitespaceVisible) ?? false
+        lineEndingsVisible = try values.decodeIfPresent(Bool.self, forKey: .lineEndingsVisible) ?? false
+        zoomLevel = min(max(try values.decodeIfPresent(Int.self, forKey: .zoomLevel) ?? 0, -10), 20)
     }
 }
 
@@ -34,6 +62,9 @@ public struct EditorViewState: Codable, Equatable, Sendable {
     public var horizontalScrollOffset: Int
     public var wordWrapEnabled: Bool
     public var wrapMarkerVisible: Bool
+    public var whitespaceVisible: Bool
+    public var lineEndingsVisible: Bool
+    public var zoomLevel: Int
     public var bookmarkedLines: [Int]
     public var splitOrientation: EditorSplitOrientation?
     public var secondaryViewState: SecondaryEditorViewState?
@@ -45,6 +76,9 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         horizontalScrollOffset: Int = 0,
         wordWrapEnabled: Bool = true,
         wrapMarkerVisible: Bool = false,
+        whitespaceVisible: Bool = false,
+        lineEndingsVisible: Bool = false,
+        zoomLevel: Int = 0,
         bookmarkedLines: [Int] = [],
         splitOrientation: EditorSplitOrientation? = nil,
         secondaryViewState: SecondaryEditorViewState? = nil
@@ -55,6 +89,9 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         self.horizontalScrollOffset = horizontalScrollOffset
         self.wordWrapEnabled = wordWrapEnabled
         self.wrapMarkerVisible = wrapMarkerVisible
+        self.whitespaceVisible = whitespaceVisible
+        self.lineEndingsVisible = lineEndingsVisible
+        self.zoomLevel = min(max(zoomLevel, -10), 20)
         self.bookmarkedLines = Array(
             Array(Set(bookmarkedLines.filter { $0 >= 0 })).sorted().prefix(Self.maximumBookmarkCount)
         )
@@ -69,6 +106,9 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         case horizontalScrollOffset
         case wordWrapEnabled
         case wrapMarkerVisible
+        case whitespaceVisible
+        case lineEndingsVisible
+        case zoomLevel
         case bookmarkedLines
         case splitOrientation
         case secondaryViewState
@@ -82,6 +122,9 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         horizontalScrollOffset = try values.decode(Int.self, forKey: .horizontalScrollOffset)
         wordWrapEnabled = try values.decode(Bool.self, forKey: .wordWrapEnabled)
         wrapMarkerVisible = try values.decodeIfPresent(Bool.self, forKey: .wrapMarkerVisible) ?? false
+        whitespaceVisible = try values.decodeIfPresent(Bool.self, forKey: .whitespaceVisible) ?? false
+        lineEndingsVisible = try values.decodeIfPresent(Bool.self, forKey: .lineEndingsVisible) ?? false
+        zoomLevel = min(max(try values.decodeIfPresent(Int.self, forKey: .zoomLevel) ?? 0, -10), 20)
         let decodedBookmarks = try values.decodeIfPresent([Int].self, forKey: .bookmarkedLines) ?? []
         guard decodedBookmarks.count <= Self.maximumBookmarkCount,
               decodedBookmarks.allSatisfy({ $0 >= 0 }) else {
@@ -111,6 +154,9 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         try values.encode(horizontalScrollOffset, forKey: .horizontalScrollOffset)
         try values.encode(wordWrapEnabled, forKey: .wordWrapEnabled)
         try values.encode(wrapMarkerVisible, forKey: .wrapMarkerVisible)
+        try values.encode(whitespaceVisible, forKey: .whitespaceVisible)
+        try values.encode(lineEndingsVisible, forKey: .lineEndingsVisible)
+        try values.encode(zoomLevel, forKey: .zoomLevel)
         try values.encode(bookmarkedLines, forKey: .bookmarkedLines)
         try values.encodeIfPresent(splitOrientation, forKey: .splitOrientation)
         try values.encodeIfPresent(secondaryViewState, forKey: .secondaryViewState)

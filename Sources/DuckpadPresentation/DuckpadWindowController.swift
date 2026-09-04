@@ -234,6 +234,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let fileConflictPresenter: (any FileConflictPresenting)?
     private let dirtyDecisionPresenter: (any DirtyDocumentDecisionPresenting)?
     private let pathActionHandler: any TabPathActionHandling
+    private let navigationPresenter: any EditorNavigationPresenting
     private let recoveryUseCase: SessionRecoveryUseCase?
     private let tabCloseCoordinator: TabCloseCoordinator
     let terminationCoordinator: ApplicationTerminationCoordinator?
@@ -276,6 +277,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         fileConflictPresenter: (any FileConflictPresenting)? = nil,
         dirtyDecisionPresenter: (any DirtyDocumentDecisionPresenting)? = nil,
         pathActionHandler: (any TabPathActionHandling)? = nil,
+        navigationPresenter: (any EditorNavigationPresenting)? = nil,
         recoveryUseCase: SessionRecoveryUseCase? = nil,
         terminationCoordinator: ApplicationTerminationCoordinator? = nil,
         searchUseCase: SearchWorkspaceUseCase? = nil,
@@ -301,6 +303,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.fileConflictPresenter = fileConflictPresenter
         self.dirtyDecisionPresenter = dirtyDecisionPresenter
         self.pathActionHandler = pathActionHandler ?? NativeTabPathActionHandler()
+        self.navigationPresenter = navigationPresenter ?? NativeEditorNavigationPresenter()
         self.recoveryUseCase = recoveryUseCase
         self.searchUseCase = searchUseCase
         self.folderSearchUseCase = folderSearchUseCase
@@ -997,6 +1000,40 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         closeSearchPanel()
     }
 
+    @objc public func performGoToLine(_ sender: Any? = nil) {
+        guard let editor = actionableNavigationEditor,
+              let position = editor.navigationPosition,
+              let window,
+              let bufferID = workspace.snapshot().activeBuffer?.bufferID else { return }
+        navigationPresenter.presentLineAndColumn(current: position, in: window) { [weak self] line, column in
+            guard let self,
+                  self.workspace.snapshot().activeBuffer?.bufferID == bufferID,
+                  let editor = self.actionableNavigationEditor else { return }
+            if editor.goTo(line: line, column: column, in: position.contextID) {
+                self.recoveryUseCase?.editorViewStateDidChange()
+            } else {
+                NSSound.beep()
+            }
+        }
+    }
+
+    @objc public func performGoToOffset(_ sender: Any? = nil) {
+        guard let editor = actionableNavigationEditor,
+              let position = editor.navigationPosition,
+              let window,
+              let bufferID = workspace.snapshot().activeBuffer?.bufferID else { return }
+        navigationPresenter.presentUTF8Offset(current: position, in: window) { [weak self] offset in
+            guard let self,
+                  self.workspace.snapshot().activeBuffer?.bufferID == bufferID,
+                  let editor = self.actionableNavigationEditor else { return }
+            if editor.goTo(utf8Offset: offset, in: position.contextID) {
+                self.recoveryUseCase?.editorViewStateDidChange()
+            } else {
+                NSSound.beep()
+            }
+        }
+    }
+
     @objc public func performFindInFolder(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
         if searchPanel.isHidden { searchPanel.show(replace: false) }
@@ -1037,6 +1074,36 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard let editor = actionableEditorViewOptions,
               editor.supportsWrapMarker else { return }
         editor.setWrapMarkerVisible(!editor.isWrapMarkerVisible)
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    @objc public func performToggleWhitespace(_ sender: Any? = nil) {
+        guard let editor = actionableDisplayOptions else { return }
+        editor.setWhitespaceVisible(!editor.isWhitespaceVisible)
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    @objc public func performToggleLineEndings(_ sender: Any? = nil) {
+        guard let editor = actionableDisplayOptions else { return }
+        editor.setLineEndingsVisible(!editor.areLineEndingsVisible)
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    @objc public func performZoomIn(_ sender: Any? = nil) {
+        guard let editor = actionableDisplayOptions, editor.zoomLevel < 20 else { return }
+        editor.setZoomLevel(editor.zoomLevel + 1)
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    @objc public func performZoomOut(_ sender: Any? = nil) {
+        guard let editor = actionableDisplayOptions, editor.zoomLevel > -10 else { return }
+        editor.setZoomLevel(editor.zoomLevel - 1)
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    @objc public func performResetZoom(_ sender: Any? = nil) {
+        guard let editor = actionableDisplayOptions, editor.zoomLevel != 0 else { return }
+        editor.setZoomLevel(0)
         recoveryUseCase?.editorViewStateDidChange()
     }
 
@@ -1158,6 +1225,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performFindPrevious(_:)),
              #selector(performFindInFolder(_:)):
             return !terminationReviewInProgress
+        case #selector(performGoToLine(_:)),
+             #selector(performGoToOffset(_:)):
+            return actionableNavigationEditor?.navigationPosition != nil
         case #selector(performToggleBookmark(_:)):
             return actionableBookmarkEditor != nil
         case #selector(performNextBookmark(_:)),
@@ -1178,6 +1248,20 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
             menuItem.state = editor.isWrapMarkerVisible ? .on : .off
             return editor.supportsWrapMarker
+        case #selector(performToggleWhitespace(_:)):
+            guard let editor = actionableDisplayOptions else { menuItem.state = .off; return false }
+            menuItem.state = editor.isWhitespaceVisible ? .on : .off
+            return true
+        case #selector(performToggleLineEndings(_:)):
+            guard let editor = actionableDisplayOptions else { menuItem.state = .off; return false }
+            menuItem.state = editor.areLineEndingsVisible ? .on : .off
+            return true
+        case #selector(performZoomIn(_:)):
+            return actionableDisplayOptions.map { $0.zoomLevel < 20 } ?? false
+        case #selector(performZoomOut(_:)):
+            return actionableDisplayOptions.map { $0.zoomLevel > -10 } ?? false
+        case #selector(performResetZoom(_:)):
+            return actionableDisplayOptions.map { $0.zoomLevel != 0 } ?? false
         case #selector(performSplitEditorRight(_:)):
             guard let editor = actionableSplitEditor else { menuItem.state = .off; return false }
             menuItem.state = editor.splitOrientation == .sideBySide ? .on : .off
@@ -1207,6 +1291,16 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var actionableSplitEditor: (any SplitEditorPort)? {
         guard editorCommandsAreActionable else { return nil }
         return activeEditor as? any SplitEditorPort
+    }
+
+    private var actionableNavigationEditor: (any EditorNavigationPort)? {
+        guard editorCommandsAreActionable else { return nil }
+        return activeEditor as? any EditorNavigationPort
+    }
+
+    private var actionableDisplayOptions: (any EditorDisplayOptionsPort)? {
+        guard editorCommandsAreActionable else { return nil }
+        return activeEditor as? any EditorDisplayOptionsPort
     }
 
     private func closeScope(for action: Selector?) -> TabCloseScope? {
