@@ -22,14 +22,14 @@ The existing editor recovery capture is an immutable checkpoint plus bounded del
 Modes:
 
 - Normal: literal text.
-- Extended: exactly `\n`, `\r`, `\t`, `\0`, and `\\`. Hex, octal, and decimal escape families remain deferred and are not claimed as full Notepad++ Extended parity.
+- Extended: `\n`, `\r`, `\t`, `\0`, `\\`, fixed-width binary `\b11111111`, octal `\o377`, decimal `\d255`, hexadecimal `\xFF`, and UTF-16 `\uFFFF`. Adjacent valid surrogate escapes form one Unicode scalar. Malformed or short numeric escapes stay literal, matching Notepad++ rather than silently deleting bytes; an unpaired surrogate fails explicitly.
 - Regular Expression: ICU semantics with capture replacement `$0` and `$1`…`$99`, `$$` for a literal dollar, and backslash escaping. Named replacement groups are rejected as unsupported. Dot-newline is explicit.
 
 Search ranges and selections are UTF-8 byte offsets. Invalid, overflowing, or code-point-splitting ranges fail before mutation. CRLF counts as one line break; result column is deliberately a UTF-8 byte column so its unit matches the activation range.
 
 Defaults cap a document at 64 MiB, regex input at 8 MiB, a pattern at 64 KiB, results at 100,000 matches/32 MiB, aggregate replacement bytes at 16 MiB, and final document size at 128 MiB. ICU receives a 100 ms time limit and 8 MiB stack limit per operation. Search cancellation cancels the actual detached task; loops check cancellation and never publish a superseded generation. Multi-document scan uses one in-flight materialization (within the configured concurrency ceiling) rather than eagerly materializing all buffers.
 
-Replace All is intentionally current-document only. All-open Replace All, folder/workspace search, mark/bookmark operations, hex/octal extended escapes, named replacement groups, and persistent search history are deferred. Incremental count/results are delivered after a 150 ms debounce; persistent all-match editor indicators are not yet claimed.
+Replace All is intentionally current-document only. All-open Replace All, folder/workspace replacement, mark/style operations, named replacement groups, and persistent search history are deferred. Incremental count/results are delivered after a 150 ms debounce; persistent all-match editor indicators are not yet claimed.
 
 ## macOS command surface
 

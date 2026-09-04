@@ -130,30 +130,99 @@ public enum SearchPatternCodec {
     }
 
     public static func decodeExtended(_ value: String) throws(SearchFailure) -> Data {
-        let bytes = Array(value.utf8)
-        var output = Data()
-        output.reserveCapacity(bytes.count)
+        // Notepad++ Extended mode operates on fixed-width character escapes.
+        // Use UTF-16 code units so `\uD83E\uDD86` can form one scalar while
+        // ordinary non-ASCII input remains byte-exact after UTF-8 encoding.
+        let input = Array(value.utf16)
+        var output: [UInt16] = []
+        output.reserveCapacity(input.count)
         var index = 0
-        while index < bytes.count {
-            guard bytes[index] == 0x5C else {
-                output.append(bytes[index])
+        while index < input.count {
+            guard input[index] == 0x5C, index + 1 < input.count else {
+                output.append(input[index])
                 index += 1
                 continue
             }
-            let escapeOffset = index
             index += 1
-            guard index < bytes.count else { throw .invalidExtendedEscape(offset: escapeOffset) }
-            switch bytes[index] {
+            switch input[index] {
             case 0x6E: output.append(0x0A) // n
             case 0x72: output.append(0x0D) // r
             case 0x74: output.append(0x09) // t
             case 0x30: output.append(0x00) // 0
             case 0x5C: output.append(0x5C)
-            default: throw .invalidExtendedEscape(offset: escapeOffset)
+            case 0x62, 0x6F, 0x64, 0x78, 0x75: // b, o, d, x, u
+                let specification: (radix: Int, digits: Int) = switch input[index] {
+                case 0x62: (2, 8)
+                case 0x6F: (8, 3)
+                case 0x64: (10, 3)
+                case 0x78: (16, 2)
+                default: (16, 4)
+                }
+                let start = index + 1
+                let end = start + specification.digits
+                if end <= input.count,
+                   let number = fixedWidthNumber(
+                    input[start..<end],
+                    radix: specification.radix
+                   ) {
+                    output.append(number)
+                    index = end - 1
+                } else {
+                    // Notepad++ treats malformed/short numeric escapes as
+                    // literal text instead of deleting or guessing bytes.
+                    output.append(0x5C)
+                    output.append(input[index])
+                }
+            default:
+                output.append(0x5C)
+                output.append(input[index])
             }
             index += 1
         }
-        return output
+        guard isValidUTF16(output) else {
+            throw .invalidExtendedEscape(offset: firstInvalidUTF16Offset(output) ?? 0)
+        }
+        return Data(String(decoding: output, as: UTF16.self).utf8)
+    }
+
+    private static func fixedWidthNumber(
+        _ digits: ArraySlice<UInt16>,
+        radix: Int
+    ) -> UInt16? {
+        var value = 0
+        for digit in digits {
+            let numeric: Int
+            switch digit {
+            case 0x30...0x39: numeric = Int(digit - 0x30)
+            case 0x41...0x46: numeric = Int(digit - 0x41) + 10
+            case 0x61...0x66: numeric = Int(digit - 0x61) + 10
+            default: return nil
+            }
+            guard numeric < radix else { return nil }
+            value = value * radix + numeric
+        }
+        return UInt16(exactly: value)
+    }
+
+    private static func isValidUTF16(_ units: [UInt16]) -> Bool {
+        firstInvalidUTF16Offset(units) == nil
+    }
+
+    private static func firstInvalidUTF16Offset(_ units: [UInt16]) -> Int? {
+        var index = 0
+        while index < units.count {
+            switch units[index] {
+            case 0xD800...0xDBFF:
+                guard index + 1 < units.count,
+                      (0xDC00...0xDFFF).contains(units[index + 1]) else { return index }
+                index += 2
+            case 0xDC00...0xDFFF:
+                return index
+            default:
+                index += 1
+            }
+        }
+        return nil
     }
 }
 

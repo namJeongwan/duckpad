@@ -7,9 +7,10 @@ import Foundation
 import Testing
 
 private actor PresentationExtensionLoader: ExtensionPackageLoaderPort {
-    let package: LoadedExtensionPackage
-    init(_ package: LoadedExtensionPackage) { self.package = package }
-    func discover() async -> ExtensionDiscoveryReport { .init(packages: [package]) }
+    let packages: [LoadedExtensionPackage]
+    init(_ package: LoadedExtensionPackage) { packages = [package] }
+    init(_ packages: [LoadedExtensionPackage]) { self.packages = packages }
+    func discover() async -> ExtensionDiscoveryReport { .init(packages: packages) }
 }
 
 private actor PresentationExtensionPolicy: ExtensionGrantStorePort {
@@ -67,17 +68,85 @@ private final class PresentationExtensionEditor: ExtensionEditorPort {
     func replaceActiveBatch(_ edits: [SearchReplacementEdit], expectedRevision: UInt64, accept: ([EditorIncrementalEdit]) -> EditorEditOutcome) -> EditorEditOutcome { .rejected(currentRevision: descriptor?.revision ?? 0) }
 }
 
-private func presentationPackage() -> LoadedExtensionPackage {
-    let id = ExtensionID(rawValue: "com.duckpad.sample")
+private func presentationPackage(
+    id rawID: String = "com.duckpad.sample",
+    command rawCommandID: String = "com.duckpad.sample.sort",
+    title: String = "Sort",
+    shortcut: String? = "cmd+option+k",
+    digestCharacter: Character = "1",
+    secondCommand rawSecondCommandID: String? = nil,
+    secondShortcut: String? = nil
+) -> LoadedExtensionPackage {
+    let id = ExtensionID(rawValue: rawID)
+    let commandID = ExtensionCommandID(rawValue: rawCommandID)
     let requests = [ExtensionCapabilityRequest(id: .documentsRead, scope: .selection), ExtensionCapabilityRequest(id: .documentsWrite, scope: .selection)]
+    var commands = [ExtensionCommandContribution(
+        id: commandID, title: title, operation: 1, inputScope: .selection
+    )]
+    var keybindings = shortcut.map { [ExtensionKeybindingContribution(command: commandID, key: $0)] } ?? []
+    if let rawSecondCommandID {
+        let secondCommandID = ExtensionCommandID(rawValue: rawSecondCommandID)
+        commands.append(.init(id: secondCommandID, title: title, operation: 2, inputScope: .selection))
+        if let secondShortcut {
+            keybindings.append(.init(command: secondCommandID, key: secondShortcut))
+        }
+    }
     return LoadedExtensionPackage(
         manifest: .init(id: id, name: "Sample", version: .init(major: 1, minor: 2, patch: 3),
             api: .init(minimum: .init(major: 1, minor: 0, patch: 0), maximumExclusive: .init(major: 2, minor: 0, patch: 0)),
             publisher: .init(id: "com.duckpad", keyID: "sample"), runtime: .init(kind: "wasm-core", module: "module.wasm", abi: "duckpad-wasm-1"),
-            capabilities: requests, contributes: .init(commands: [.init(id: .init(rawValue: "com.duckpad.sample.sort"), title: "Sort", operation: 1, inputScope: .selection)])),
-        module: Data(), packageDigest: String(repeating: "1", count: 64), publisherFingerprint: String(repeating: "2", count: 64),
+            capabilities: requests, contributes: .init(
+                commands: commands,
+                keybindings: keybindings
+            )),
+        module: Data(), packageDigest: String(repeating: digestCharacter, count: 64), publisherFingerprint: String(repeating: "2", count: 64),
         signatureDigest: String(repeating: "3", count: 64), capabilitySchemaDigest: String(repeating: "4", count: 64), trustSource: .bundled
     )
+}
+
+@Test @MainActor
+func equalTitleExtensionShortcutCollisionUsesCommandIDAsStableTieBreak() async throws {
+    _ = NSApplication.shared
+    let package = presentationPackage(
+        command: "com.duckpad.sample.z-command",
+        title: "Same Title",
+        shortcut: "cmd+option+k",
+        digestCharacter: "3",
+        secondCommand: "com.duckpad.sample.a-command",
+        secondShortcut: "command+alt+k"
+    )
+    let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+    let editor = PresentationExtensionEditor()
+    let service = ExtensionWorkspaceUseCase(
+        loader: PresentationExtensionLoader(package),
+        grants: PresentationExtensionPolicy(),
+        transport: PresentationExtensionTransport(),
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(),
+        extensionUseCase: service,
+        automaticallyStarts: false
+    )
+    controller.start()
+    await controller.waitForStartup()
+
+    let menu = DuckpadMainMenuFactory.make(target: controller)
+    let commands = try #require(
+        menu.items.compactMap(\.submenu)
+            .first(where: { $0.title == "Extensions" })?
+            .items.filter { $0.representedObject is String }
+    )
+    #expect(commands.map { $0.representedObject as? String } == [
+        "com.duckpad.sample.a-command", "com.duckpad.sample.z-command",
+    ])
+    #expect(commands[0].keyEquivalent == "k")
+    #expect(commands[1].keyEquivalent.isEmpty)
+    #expect(commands[1].toolTip?.contains("conflicts with another command") == true)
+    controller.close()
 }
 
 @Test @MainActor
@@ -95,11 +164,54 @@ func asyncExtensionRefreshRebuildsAuthorizedMenuAndDisclosesConsentIdentity() as
     let extensions = try #require(menu.items.compactMap(\.submenu).first(where: { $0.title == "Extensions" }))
     let command = try #require(extensions.items.first(where: { $0.representedObject as? String == "com.duckpad.sample.sort" }))
     #expect(command.accessibilityLabel() == "Extension command: Sort")
+    #expect(command.keyEquivalent == "k")
+    #expect(command.keyEquivalentModifierMask == [.command, .option])
+    #expect(command.accessibilityValue() as? String == "Keyboard shortcut Command-Option-K")
     let disclosure = try #require(controller.extensionReviewDisclosure(for: package.manifest.id, revoking: false))
     #expect(disclosure.contains("com.duckpad")); #expect(disclosure.contains(String(repeating: "2", count: 64)))
     #expect(disclosure.contains("1.2.3")); #expect(disclosure.contains(String(repeating: "1", count: 64)))
     #expect(disclosure.contains("documents.read [selection]")); #expect(disclosure.contains("until revoked"))
     controller.close()
+}
+
+@Test @MainActor
+func extensionShortcutsFailClosedOnCoreCollisionOrMalformedDeclaration() async throws {
+    _ = NSApplication.shared
+    for (declaration, expectedMessage) in [
+        ("cmd+option+s", "conflicts with another command"),
+        ("shift+k", "not a supported macOS key combination"),
+        ("cmd+cmd+k", "not a supported macOS key combination"),
+        ("cmd+\u{7f}", "not a supported macOS key combination"),
+    ] {
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        let editor = PresentationExtensionEditor()
+        let service = ExtensionWorkspaceUseCase(
+            loader: PresentationExtensionLoader(presentationPackage(shortcut: declaration)),
+            grants: PresentationExtensionPolicy(),
+            transport: PresentationExtensionTransport(),
+            workspace: workspace,
+            editor: editor
+        )
+        let controller = DuckpadWindowController(
+            workspace: workspace,
+            editorAdapter: editor,
+            editorView: NSView(),
+            extensionUseCase: service,
+            automaticallyStarts: false
+        )
+        controller.start()
+        await controller.waitForStartup()
+        let menu = DuckpadMainMenuFactory.make(target: controller)
+        let command = try #require(
+            menu.items.compactMap(\.submenu)
+                .first(where: { $0.title == "Extensions" })?
+                .items.first(where: { $0.representedObject as? String == "com.duckpad.sample.sort" })
+        )
+        #expect(command.keyEquivalent.isEmpty)
+        #expect(command.keyEquivalentModifierMask.isEmpty)
+        #expect(command.toolTip?.contains(expectedMessage) == true)
+        controller.close()
+    }
 }
 
 @Test @MainActor

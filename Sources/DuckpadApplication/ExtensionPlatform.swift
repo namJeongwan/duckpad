@@ -222,6 +222,25 @@ public final class ExtensionWorkspaceUseCase {
                     break
                 }
             }
+            guard !malformedOwners.contains(package.manifest.id) else { continue }
+            var boundCommands: Set<ExtensionCommandID> = []
+            var declaredKeys: Set<String> = []
+            for binding in package.manifest.contributes.keybindings {
+                let normalizedKey = binding.key
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                guard localCommands.contains(binding.command),
+                      !normalizedKey.isEmpty,
+                      normalizedKey == binding.key.lowercased(),
+                      boundCommands.insert(binding.command).inserted,
+                      declaredKeys.insert(normalizedKey).inserted else {
+                    discoveryFailures[package.manifest.id.rawValue] = .malformedManifest(
+                        "duplicate, unowned, or non-canonical keybinding"
+                    )
+                    malformedOwners.insert(package.manifest.id)
+                    break
+                }
+            }
         }
         for owner in malformedOwners { resolved.removeValue(forKey: owner) }
         var commandOwners: [ExtensionCommandID: [ExtensionID]] = [:]

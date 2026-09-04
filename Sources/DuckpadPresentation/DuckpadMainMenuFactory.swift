@@ -283,13 +283,131 @@ public enum DuckpadMainMenuFactory {
         let extensionsMenu = NSMenu(title: "Extensions")
         add("Manage Extensions…", #selector(DuckpadWindowController.performShowExtensions(_:)), "", target, modifiers: [], to: extensionsMenu)
         if !target.extensionCommands.isEmpty { extensionsMenu.addItem(.separator()) }
+        var occupiedShortcuts = shortcutIdentities(in: mainMenu)
         for command in target.extensionCommands {
             let item = extensionsMenu.addItem(withTitle: command.title, action: #selector(DuckpadWindowController.performExtensionCommand(_:)), keyEquivalent: "")
+            item.keyEquivalentModifierMask = []
             item.target = target; item.representedObject = command.id.rawValue
+            var accessibilityValue = "No keyboard shortcut"
+            if let declaration = target.extensionKeybinding(for: command.id) {
+                if let shortcut = ExtensionShortcut(declaration) {
+                    if occupiedShortcuts.insert(shortcut.identity).inserted {
+                        item.keyEquivalent = shortcut.keyEquivalent
+                        item.keyEquivalentModifierMask = shortcut.modifiers
+                        accessibilityValue = "Keyboard shortcut \(shortcut.accessibilityLabel)"
+                    } else {
+                        item.toolTip = "Shortcut unavailable because \(declaration) conflicts with another command."
+                        accessibilityValue = "Shortcut \(declaration) unavailable because it conflicts with another command"
+                    }
+                } else {
+                    item.toolTip = "Shortcut unavailable because \(declaration) is not a supported macOS key combination."
+                    accessibilityValue = "Shortcut \(declaration) unavailable because it is invalid"
+                }
+            }
             item.setAccessibilityLabel("Extension command: \(command.title)")
+            item.setAccessibilityValue(accessibilityValue)
         }
         extensionsItem.submenu = extensionsMenu
         return mainMenu
+    }
+
+    private struct ShortcutIdentity: Hashable {
+        let key: String
+        let modifiers: NSEvent.ModifierFlags.RawValue
+    }
+
+    /// Strict, deterministic subset of the extension manifest key grammar.
+    /// Plain typing shortcuts are rejected; an extension must include Command,
+    /// Control, or Option and can never silently steal ordinary editor input.
+    private struct ExtensionShortcut {
+        let keyEquivalent: String
+        let modifiers: NSEvent.ModifierFlags
+        let accessibilityLabel: String
+
+        var identity: ShortcutIdentity {
+            ShortcutIdentity(
+                key: keyEquivalent.lowercased(),
+                modifiers: modifiers.intersection([.command, .control, .option, .shift]).rawValue
+            )
+        }
+
+        init?(_ declaration: String) {
+            let tokens = declaration.split(separator: "+", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            guard tokens.count >= 2, tokens.allSatisfy({ !$0.isEmpty }) else { return nil }
+
+            var modifiers: NSEvent.ModifierFlags = []
+            var modifierNames: [String] = []
+            var keyToken: String?
+            for token in tokens {
+                let parsed: (NSEvent.ModifierFlags, String)? = switch token {
+                case "cmd", "command": (.command, "Command")
+                case "ctrl", "control": (.control, "Control")
+                case "opt", "option", "alt": (.option, "Option")
+                case "shift": (.shift, "Shift")
+                default: nil
+                }
+                if let parsed {
+                    guard !modifiers.contains(parsed.0) else { return nil }
+                    modifiers.insert(parsed.0)
+                    modifierNames.append(parsed.1)
+                } else {
+                    guard keyToken == nil else { return nil }
+                    keyToken = token
+                }
+            }
+            guard modifiers.contains(.command) || modifiers.contains(.control) || modifiers.contains(.option),
+                  let keyToken,
+                  let key = Self.key(for: keyToken)
+            else { return nil }
+            self.keyEquivalent = key.value
+            self.modifiers = modifiers
+            self.accessibilityLabel = (modifierNames + [key.label]).joined(separator: "-")
+        }
+
+        private static func key(for token: String) -> (value: String, label: String)? {
+            if token.count == 1,
+               let scalar = token.unicodeScalars.first,
+               scalar.isASCII,
+               (0x21...0x7E).contains(scalar.value) {
+                return (token, token.uppercased())
+            }
+            switch token {
+            case "space": return (" ", "Space")
+            case "tab": return ("\t", "Tab")
+            case "return", "enter": return ("\r", "Return")
+            case "escape", "esc": return ("\u{1b}", "Escape")
+            case "up": return (String(UnicodeScalar(NSUpArrowFunctionKey)!), "Up Arrow")
+            case "down": return (String(UnicodeScalar(NSDownArrowFunctionKey)!), "Down Arrow")
+            case "left": return (String(UnicodeScalar(NSLeftArrowFunctionKey)!), "Left Arrow")
+            case "right": return (String(UnicodeScalar(NSRightArrowFunctionKey)!), "Right Arrow")
+            default:
+                guard token.first == "f",
+                      let number = Int(token.dropFirst()),
+                      (1...20).contains(number),
+                      let scalar = UnicodeScalar(NSF1FunctionKey + number - 1)
+                else { return nil }
+                return (String(scalar), "F\(number)")
+            }
+        }
+    }
+
+    private static func shortcutIdentities(in menu: NSMenu) -> Set<ShortcutIdentity> {
+        var result: Set<ShortcutIdentity> = []
+        func visit(_ current: NSMenu) {
+            for item in current.items {
+                if !item.keyEquivalent.isEmpty {
+                    result.insert(ShortcutIdentity(
+                        key: item.keyEquivalent.lowercased(),
+                        modifiers: item.keyEquivalentModifierMask
+                            .intersection([.command, .control, .option, .shift]).rawValue
+                    ))
+                }
+                if let submenu = item.submenu { visit(submenu) }
+            }
+        }
+        visit(menu)
+        return result
     }
 
     private static func makeOpenRecentItem(

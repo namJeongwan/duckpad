@@ -578,21 +578,41 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public var extensionCommands: [ExtensionCommandContribution] {
-        extensionState.items.filter { item in
-            guard item.enabled, item.issue == nil else { return false }
-            let grants = item.granted
-            return item.manifest.contributes.commands.contains { command in
+        var commands: [ExtensionCommandContribution] = []
+        for item in extensionState.items where item.enabled && item.issue == nil {
+            for command in item.manifest.contributes.commands {
                 let scope: ExtensionCapabilityScope = command.inputScope == .selection ? .selection : .activeDocument
-                return grants.contains(.init(id: .documentsRead, scope: scope)) &&
-                    grants.contains(.init(id: .documentsWrite, scope: scope))
+                let read = ExtensionCapabilityRequest(id: .documentsRead, scope: scope)
+                let write = ExtensionCapabilityRequest(id: .documentsWrite, scope: scope)
+                if item.granted.contains(read), item.granted.contains(write) {
+                    commands.append(command)
+                }
             }
-        }.flatMap { item in
-            item.manifest.contributes.commands.filter { command in
-                let scope: ExtensionCapabilityScope = command.inputScope == .selection ? .selection : .activeDocument
-                return item.granted.contains(.init(id: .documentsRead, scope: scope)) &&
-                    item.granted.contains(.init(id: .documentsWrite, scope: scope))
-            }
-        }.sorted { $0.title < $1.title }
+        }
+        return commands.sorted { lhs, rhs in
+            lhs.title == rhs.title
+                ? lhs.id.rawValue < rhs.id.rawValue
+                : lhs.title < rhs.title
+        }
+    }
+
+    /// Returns the enabled package's declared shortcut for an authorized
+    /// command. The native menu remains the final shortcut authority because
+    /// it can reject malformed values and collisions with core commands.
+    public func extensionKeybinding(for commandID: ExtensionCommandID) -> String? {
+        extensionState.items.lazy.compactMap { item -> String? in
+            guard item.enabled, item.issue == nil,
+                  let command = item.manifest.contributes.commands.first(where: { $0.id == commandID })
+            else { return nil }
+            let scope: ExtensionCapabilityScope = command.inputScope == .selection ? .selection : .activeDocument
+            let read = ExtensionCapabilityRequest(id: .documentsRead, scope: scope)
+            let write = ExtensionCapabilityRequest(id: .documentsWrite, scope: scope)
+            guard item.granted.contains(read), item.granted.contains(write)
+            else { return nil }
+            return item.manifest.contributes.keybindings.first(where: {
+                $0.command == commandID
+            })?.key
+        }.first
     }
 
     @objc public func performShowExtensions(_ sender: Any?) {

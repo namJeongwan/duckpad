@@ -83,6 +83,7 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 69 | [Phase 28 independent code review](reviews/2026-09-04-phase-28-performance-budgets-code-review.md) | **Content approved — 0 findings** | 최초 direct-only 100 MiB 측정, unbounded warm launch, bookmark/system-recents 격리 4 Major를 end-to-end pipeline/watchdog/temp authority로 닫았다. |
 | 70 | [Phase 29 frozen parity release evidence](33-parity-release-evidence.md) | **In progress — reviewer onboarding** | 94개 feature와 G1–G10을 exact release candidate 증거에 연결하기 전에 parent-pinned 독립 parity reviewer 역할을 별도 선행 candidate로 등록한다. |
 | 71 | [Phase 29A tab responsiveness and scratch UI](34-tab-responsiveness-and-scratch-ui.md) | **Implemented; review pending** | 탭 제목 축약 제거, 긴 제목의 가로 overflow, 500-tab O(1) 활성 표시 갱신, 즉시 선택 반영, hover affordance와 기본 Workspace UI 제거를 기록한다. |
+| 72 | [Phase 29B parity gap assessment and extension shortcuts](35-parity-gap-assessment.md) | **Implementation assessment in progress** | 94개 feature를 보수적으로 전수 분류하고 manifest 단축키를 native menu에 실제 연결하되 core 충돌·잘못된 선언은 접근 가능한 진단과 함께 fail closed 처리한다. |
 
 상태 정의:
 

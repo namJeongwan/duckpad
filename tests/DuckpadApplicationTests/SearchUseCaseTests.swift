@@ -26,11 +26,19 @@ private func matches(_ text: String, _ query: SearchQuery, restrictTo: SearchUTF
     #expect(emoji.allSatisfy { $0.range.length == 4 })
 }
 
-@Test func extendedEscapesIncludeNULNewlineTabAndBackslash() throws {
+@Test func extendedEscapesMatchFixedWidthNotepadSemantics() throws {
     #expect(try SearchPatternCodec.decodeExtended("A\\0B\\nC\\r\\t\\\\") == Data([65, 0, 66, 10, 67, 13, 9, 92]))
-    #expect(throws: SearchFailure.invalidExtendedEscape(offset: 0)) { try SearchPatternCodec.decodeExtended("\\x") }
+    #expect(String(decoding: try SearchPatternCodec.decodeExtended(
+        "\\b01000001\\o101\\d065\\x41\\uD55C\\uD83E\\uDD86"
+    ), as: UTF8.self) == "AAAA한🦆")
+    #expect(String(decoding: try SearchPatternCodec.decodeExtended("\\xZ1\\q\\"), as: UTF8.self) == "\\xZ1\\q\\")
+    #expect(throws: SearchFailure.invalidExtendedEscape(offset: 0)) {
+        try SearchPatternCodec.decodeExtended("\\uD83E")
+    }
     let found = try matches("A\0B\nC", SearchQuery(pattern: "\\0B", options: SearchOptions(mode: .extended)))
     #expect(found.map(\.range) == [SearchUTF8Range(location: 1, length: 2)])
+    let unicode = try matches("앞 한🦆 뒤", SearchQuery(pattern: "\\uD55C\\uD83E\\uDD86", options: SearchOptions(mode: .extended)))
+    #expect(unicode.map(\.range) == [SearchUTF8Range(location: 4, length: 7)])
 }
 
 @Test func regexCapturesLookaheadDotAllAndReplacement() throws {

@@ -150,7 +150,13 @@ private final class ExtensionEditorFake: ExtensionEditorPort {
     }
 }
 
-private func extensionPackage(trust: LoadedExtensionPackage.TrustSource = .userImported, digest: String = String(repeating: "a", count: 64), version: SemanticVersion = .init(major: 1, minor: 0, patch: 0), inputScope: ExtensionCommandContribution.InputScope = .selection) -> LoadedExtensionPackage {
+private func extensionPackage(
+    trust: LoadedExtensionPackage.TrustSource = .userImported,
+    digest: String = String(repeating: "a", count: 64),
+    version: SemanticVersion = .init(major: 1, minor: 0, patch: 0),
+    inputScope: ExtensionCommandContribution.InputScope = .selection,
+    keybindings: [ExtensionKeybindingContribution] = []
+) -> LoadedExtensionPackage {
     let id = ExtensionID(rawValue: "com.example.tools")
     let capabilityScope: ExtensionCapabilityScope = inputScope == .selection ? .selection : .activeDocument
     let capabilities = [
@@ -161,12 +167,46 @@ private func extensionPackage(trust: LoadedExtensionPackage.TrustSource = .userI
         manifest: ExtensionManifest(id: id, name: "Example Tools", version: version,
             api: .init(minimum: .init(major: 1, minor: 0, patch: 0), maximumExclusive: .init(major: 2, minor: 0, patch: 0)),
             publisher: .init(id: "com.example", keyID: "one"), runtime: .init(kind: "wasm-core", module: "module.wasm", abi: "duckpad-wasm-1"),
-            capabilities: capabilities, contributes: .init(commands: [
-                .init(id: .init(rawValue: "com.example.tools.sort"), title: "Sort", operation: 7, inputScope: inputScope)
-            ])),
+            capabilities: capabilities, contributes: .init(
+                commands: [
+                    .init(id: .init(rawValue: "com.example.tools.sort"), title: "Sort", operation: 7, inputScope: inputScope)
+                ],
+                keybindings: keybindings
+            )),
         module: Data([0]), packageDigest: digest, publisherFingerprint: String(repeating: "b", count: 64),
         signatureDigest: String(repeating: "c", count: 64), capabilitySchemaDigest: String(repeating: "d", count: 64), trustSource: trust
     )
+}
+
+@Test @MainActor
+func duplicateOrNonCanonicalExtensionKeybindingsRejectThePackage() async {
+    let command = ExtensionCommandID(rawValue: "com.example.tools.sort")
+    for bindings in [
+        [
+            ExtensionKeybindingContribution(command: command, key: "cmd+k"),
+            ExtensionKeybindingContribution(command: command, key: "cmd+l"),
+        ],
+        [ExtensionKeybindingContribution(command: command, key: " cmd+k ")],
+    ] {
+        let package = extensionPackage(keybindings: bindings)
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        _ = await workspace.start()
+        let editor = ExtensionEditorFake(workspace.snapshot().activeBuffer!, text: "")
+        let service = ExtensionWorkspaceUseCase(
+            loader: ExtensionLoaderFake([package]),
+            grants: ExtensionPolicyFake(),
+            transport: ExtensionTransportFake(),
+            workspace: workspace,
+            editor: editor,
+            allowsUserExtensions: true
+        )
+
+        await service.refresh()
+
+        #expect(service.state().items.isEmpty)
+        #expect(service.state().discoveryFailures[package.manifest.id.rawValue] ==
+            .malformedManifest("duplicate, unowned, or non-canonical keybinding"))
+    }
 }
 
 @Test @MainActor
