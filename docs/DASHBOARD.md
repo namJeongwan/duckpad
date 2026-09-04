@@ -13,6 +13,17 @@ Last updated: 2026-09-04 (Asia/Seoul)
 
 | Item | Status | Evidence / next gate |
 | --- | --- | --- |
+| Phase 31 fold-state design | Chat design approved | Pane-specific Scintilla state; no parser, background service, or dependency |
+| Written Phase 31 specification | Independently reviewed; awaiting user approval | `docs/superpowers/specs/2026-09-04-fold-state-recovery-design.md`; 0 Critical / 0 Important / 0 Minor |
+| Fold recovery implementation | Not started | Starts only after written-spec approval and an executable TDD plan |
+| Keyboard and VoiceOver controls | Designed | Native View submenu, conflict-free shortcuts, menu accessibility, Command Palette discovery |
+| Phase 31 validation and review | Pending | Debug/Release, recovery/menu/AppKit, smoke, performance, independent review |
+| Phase 31 commit and push | Pending | Exact reviewed candidate only; target `feature/fold-state-recovery` |
+
+## Recently delivered
+
+| Item | Status | Evidence |
+| --- | --- | --- |
 | Lightweight smart editing design | Complete | Native Scintilla insertion notifications; no parser, LSP, or new dependency |
 | Direct-input delimiter pairing | Complete | `{`, `[`, and `(` close atomically; one undo and one recovery revision |
 | JSON and Python smart newline | Complete | Current-line indentation, configured tabs/spaces, and aligned JSON closer |
@@ -37,6 +48,9 @@ interception and will be reconsidered only with explicit IME and undo proof.
 
 ## Current validation notes
 
+- Phase 31 has an approved chat design and an independently reviewed written
+  specification awaiting user approval. Production code and tests have not
+  started.
 - Debug and Release builds pass.
 - Debug and Release `LanguageEditorAdapterTests` pass.
 - Debug and Release split-pane smart-pair regression passes.
@@ -60,8 +74,8 @@ interception and will be reconsidered only with explicit IME and undo proof.
 
 ## Prioritized roadmap
 
-1. Lightweight language-aware smart editing.
-2. Fold-state recovery and keyboard/VoiceOver folding controls.
+1. Lightweight language-aware smart editing. **Delivered.**
+2. Fold-state recovery and keyboard/VoiceOver folding controls. **Design review.**
 3. Block comments and further language-aware indentation commands.
 4. Importable, validated user language definitions without native code loading.
 5. Lightweight API completion/call-tip provider contract.
