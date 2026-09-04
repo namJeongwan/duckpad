@@ -54,6 +54,8 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @interface DPScintillaEditorView : NSView
 @property(nonatomic, copy, nullable) void (^onEdit)(DPScintillaEdit *edit);
 @property(nonatomic, copy, nullable) void (^onError)(NSError *error);
+@property(nonatomic, copy, nullable) void (^onFoldStateChange)(void);
+@property(nonatomic, copy, nullable) void (^onFoldRecoveryProgress)(void);
 @property(nonatomic, readonly, nullable) NSError *lastMutationError;
 @property(nonatomic, readonly) uint64_t revision;
 @property(nonatomic, readonly, copy) NSData *contentUTF8;
@@ -101,6 +103,9 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, readonly) NSUInteger lineCount;
 @property(nonatomic, readonly) NSUInteger caretLine;
 @property(nonatomic, readonly) NSUInteger caretColumn;
+@property(nonatomic, readonly) BOOL canCollapseCurrentFold;
+@property(nonatomic, readonly) BOOL canExpandCurrentFold;
+@property(nonatomic, readonly) BOOL hasContractedFolds;
 
 - (BOOL)loadUTF8:(NSData *)content
          revision:(uint64_t)revision
@@ -171,6 +176,15 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (NSInteger)foldLevelAtLine:(NSUInteger)line;
 - (BOOL)isFoldExpandedAtLine:(NSUInteger)line;
 - (void)toggleFoldAtLine:(NSUInteger)line;
+- (NSArray<NSNumber *> *)contractedFoldHeaderLinesWithMaximumCount:(NSUInteger)maximumCount
+    NS_SWIFT_NAME(contractedFoldHeaderLines(maximumCount:));
+- (NSArray<NSNumber *> *)restoreContractedFoldHeaderLines:(NSArray<NSNumber *> *)lines
+    NS_SWIFT_NAME(restoreContractedFoldHeaderLines(_:));
+- (BOOL)isLineVisibleAtLine:(NSUInteger)line NS_SWIFT_NAME(isLineVisible(at:));
+- (BOOL)collapseCurrentFold;
+- (BOOL)expandCurrentFold;
+- (BOOL)collapseAllFolds;
+- (BOOL)expandAllFolds;
 - (void)updateBraceHighlight;
 - (BOOL)toggleLineCommentsWithPrefixUTF8:(NSData *)prefix;
 - (BOOL)showCompletionItems:(NSArray<NSString *> *)items

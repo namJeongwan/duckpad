@@ -41,3 +41,7 @@ are not compiled. Duckpad carries two narrow Cocoa integration patches:
    the Duckpad-owned bridge to keep smart editing out of IME transactions.
 
 The four packaged cursor PNGs are byte-identical copies from `cocoa/res`.
+
+Fold-state capture, restore, commands, and recovery-progress callbacks are
+implemented only in Duckpad-owned `bridge/` code. No byte from the official
+Scintilla 5.6.6 archive was modified for that façade.

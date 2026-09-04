@@ -16,6 +16,7 @@ static NSURL *DPScintillaResourceDirectory;
 static constexpr int DPBookmarkMarker = 20;
 static constexpr int DPBookmarkMask = 1 << DPBookmarkMarker;
 static constexpr NSInteger DPSmartIndentScanLimit = 4096;
+static constexpr NSUInteger DPMaximumSynchronousStyleBytes = 262144;
 
 static int DPEOLModeForUTF8(NSData *content) {
     const auto *bytes = static_cast<const unsigned char *>(content.bytes);
@@ -121,6 +122,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     NSInteger _pendingSmartCaretPosition;
     NSInteger _pendingSmartInsertionEnd;
     int _pendingSmartCharacter;
+    BOOL _foldRecoveryProgressPending;
+    BOOL _foldRecoveryProgressScheduled;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -177,6 +180,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (void)invalidate {
     self.onEdit = nil;
     self.onError = nil;
+    self.onFoldStateChange = nil;
+    self.onFoldRecoveryProgress = nil;
+    _foldRecoveryProgressPending = NO;
     _pendingSmartCaretPosition = -1;
     _pendingSmartInsertionEnd = -1;
     _pendingSmartCharacter = 0;
@@ -340,6 +346,16 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_REPLACETARGET
                  wParam:(uptr_t)replacement.length
                  lParam:(sptr_t)replacementBytes];
+    if (_foldingEnabled) {
+        const NSInteger changedLine = [_scintilla message:SCI_LINEFROMPOSITION
+                                                    wParam:(uptr_t)range.location];
+        const NSInteger lineStart = [_scintilla message:SCI_POSITIONFROMLINE
+                                                  wParam:(uptr_t)changedLine];
+        const NSInteger nextLineStart = changedLine + 1 < (NSInteger)self.lineCount
+            ? [_scintilla message:SCI_POSITIONFROMLINE wParam:(uptr_t)(changedLine + 1)]
+            : (NSInteger)self.documentByteLength;
+        [_scintilla message:SCI_COLOURISE wParam:(uptr_t)lineStart lParam:nextLineStart];
+    }
     _suppressEdit = NO;
     _revision = resultingRevision;
     return YES;
@@ -857,6 +873,12 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                      wParam:reinterpret_cast<uptr_t>("fold")
                      lParam:reinterpret_cast<sptr_t>(effectiveFolding ? "1" : "0")];
     [_scintilla message:SCI_SETMARGINWIDTHN wParam:1 lParam:effectiveFolding ? 12 : 0];
+    [_scintilla message:SCI_SETAUTOMATICFOLD
+                 wParam:effectiveFolding ? SC_AUTOMATICFOLD_CHANGE : SC_AUTOMATICFOLD_NONE];
+    if (!effectiveFolding) {
+        [_scintilla message:SCI_FOLDALL wParam:SC_FOLDACTION_EXPAND];
+        _foldRecoveryProgressPending = NO;
+    }
     if (!_braceMatchingEnabled) [self updateBraceHighlight];
     for (NSUInteger index = 0; index < 16; index += 1) {
         [_scintilla message:SCI_SETKEYWORDS wParam:index lParam:reinterpret_cast<sptr_t>("")];
@@ -869,7 +891,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [self applyPalette:_palette];
     [_scintilla message:SCI_SETIDLESTYLING wParam:SC_IDLESTYLING_AFTERVISIBLE];
     if (!overBudget) {
-        const NSUInteger styleEnd = MIN(self.documentByteLength, 262144);
+        const NSUInteger styleEnd = MIN(self.documentByteLength, DPMaximumSynchronousStyleBytes);
         [_scintilla message:SCI_COLOURISE wParam:0 lParam:styleEnd];
         _synchronouslyStyledByteCount += styleEnd;
     }
@@ -965,7 +987,142 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 - (BOOL)isFoldExpandedAtLine:(NSUInteger)line { return [_scintilla message:SCI_GETFOLDEXPANDED wParam:line] != 0; }
 
-- (void)toggleFoldAtLine:(NSUInteger)line { [_scintilla message:SCI_TOGGLEFOLD wParam:line]; }
+- (NSInteger)foldHeaderForLine:(NSInteger)line {
+    const NSInteger lineCount = [_scintilla message:SCI_GETLINECOUNT];
+    if (!_foldingEnabled || line < 0 || line >= lineCount) return -1;
+    const NSInteger level = [_scintilla message:SCI_GETFOLDLEVEL wParam:(uptr_t)line];
+    if ((level & SC_FOLDLEVELHEADERFLAG) != 0) return line;
+    return [_scintilla message:SCI_GETFOLDPARENT wParam:(uptr_t)line];
+}
+
+- (NSInteger)currentFoldHeader {
+    const NSInteger position = [_scintilla message:SCI_GETCURRENTPOS];
+    const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:(uptr_t)position];
+    return [self foldHeaderForLine:line];
+}
+
+- (NSArray<NSNumber *> *)contractedFoldHeaderLinesWithMaximumCount:(NSUInteger)maximumCount {
+    NSMutableArray<NSNumber *> *lines = [NSMutableArray array];
+    NSInteger line = [_scintilla message:SCI_CONTRACTEDFOLDNEXT wParam:0];
+    while (line >= 0 && lines.count < maximumCount) {
+        [lines addObject:@(line)];
+        line = [_scintilla message:SCI_CONTRACTEDFOLDNEXT wParam:(uptr_t)(line + 1)];
+    }
+    return lines;
+}
+
+- (BOOL)isLineVisibleAtLine:(NSUInteger)line {
+    if (line >= (NSUInteger)[_scintilla message:SCI_GETLINECOUNT]) return NO;
+    return [_scintilla message:SCI_GETLINEVISIBLE wParam:line] != 0;
+}
+
+- (BOOL)hasContractedFolds {
+    return _foldingEnabled && [_scintilla message:SCI_CONTRACTEDFOLDNEXT wParam:0] >= 0;
+}
+
+- (BOOL)canCollapseCurrentFold {
+    const NSInteger header = [self currentFoldHeader];
+    return header >= 0 && [_scintilla message:SCI_GETFOLDEXPANDED wParam:(uptr_t)header] != 0;
+}
+
+- (BOOL)canExpandCurrentFold {
+    const NSInteger header = [self currentFoldHeader];
+    return header >= 0 && [_scintilla message:SCI_GETFOLDEXPANDED wParam:(uptr_t)header] == 0;
+}
+
+- (BOOL)setFoldHeader:(NSInteger)header expanded:(BOOL)expanded publishChange:(BOOL)publishChange {
+    if (!_foldingEnabled || header < 0) return NO;
+    const BOOL wasExpanded = [_scintilla message:SCI_GETFOLDEXPANDED wParam:(uptr_t)header] != 0;
+    if (wasExpanded == expanded) return NO;
+    [_scintilla message:SCI_FOLDLINE
+                 wParam:(uptr_t)header
+                 lParam:expanded ? SC_FOLDACTION_EXPAND : SC_FOLDACTION_CONTRACT];
+    const BOOL isExpanded = [_scintilla message:SCI_GETFOLDEXPANDED wParam:(uptr_t)header] != 0;
+    if (isExpanded == wasExpanded) return NO;
+    if (publishChange && self.onFoldStateChange) self.onFoldStateChange();
+    return YES;
+}
+
+- (void)toggleFoldAtLine:(NSUInteger)line {
+    const NSInteger header = [self foldHeaderForLine:(NSInteger)line];
+    if (header < 0) return;
+    const BOOL expanded = [_scintilla message:SCI_GETFOLDEXPANDED wParam:(uptr_t)header] != 0;
+    [self setFoldHeader:header expanded:!expanded publishChange:YES];
+}
+
+- (BOOL)collapseCurrentFold {
+    return [self setFoldHeader:[self currentFoldHeader] expanded:NO publishChange:YES];
+}
+
+- (BOOL)expandCurrentFold {
+    return [self setFoldHeader:[self currentFoldHeader] expanded:YES publishChange:YES];
+}
+
+- (BOOL)collapseAllFolds {
+    if (!_foldingEnabled) return NO;
+    NSArray<NSNumber *> *before = [self contractedFoldHeaderLinesWithMaximumCount:NSUIntegerMax];
+    [_scintilla message:SCI_FOLDALL wParam:SC_FOLDACTION_CONTRACT_EVERY_LEVEL];
+    NSArray<NSNumber *> *after = [self contractedFoldHeaderLinesWithMaximumCount:NSUIntegerMax];
+    if ([before isEqualToArray:after]) return NO;
+    if (self.onFoldStateChange) self.onFoldStateChange();
+    return YES;
+}
+
+- (BOOL)expandAllFolds {
+    if (!self.hasContractedFolds) return NO;
+    [_scintilla message:SCI_FOLDALL wParam:SC_FOLDACTION_EXPAND];
+    if (self.onFoldStateChange) self.onFoldStateChange();
+    return YES;
+}
+
+- (NSArray<NSNumber *> *)restoreContractedFoldHeaderLines:(NSArray<NSNumber *> *)lines {
+    if (!_foldingEnabled || lines.count == 0) {
+        _foldRecoveryProgressPending = NO;
+        return @[];
+    }
+    const NSUInteger styleEnd = MIN(self.documentByteLength, DPMaximumSynchronousStyleBytes);
+    if ((NSUInteger)[_scintilla message:SCI_GETENDSTYLED] < styleEnd) {
+        [_scintilla message:SCI_COLOURISE wParam:0 lParam:styleEnd];
+        _synchronouslyStyledByteCount += styleEnd;
+    }
+    const NSInteger endStyled = [_scintilla message:SCI_GETENDSTYLED];
+    const NSInteger lineCount = [_scintilla message:SCI_GETLINECOUNT];
+    NSMutableArray<NSNumber *> *pending = [NSMutableArray array];
+    NSMutableSet<NSNumber *> *seen = [NSMutableSet set];
+    for (NSNumber *number in lines) {
+        const long long candidate = number.longLongValue;
+        if (candidate < 0 || candidate >= lineCount) continue;
+        NSNumber *canonical = @(candidate);
+        if ([seen containsObject:canonical]) continue;
+        [seen addObject:canonical];
+        const NSInteger line = (NSInteger)candidate;
+        const NSInteger lineEnd = [_scintilla message:SCI_GETLINEENDPOSITION wParam:(uptr_t)line];
+        if (lineEnd > endStyled) {
+            [pending addObject:canonical];
+            continue;
+        }
+        const NSInteger level = [_scintilla message:SCI_GETFOLDLEVEL wParam:(uptr_t)line];
+        if ((level & SC_FOLDLEVELHEADERFLAG) == 0) continue;
+        [self setFoldHeader:line expanded:NO publishChange:NO];
+    }
+    _foldRecoveryProgressPending = pending.count > 0;
+    return pending;
+}
+
+- (void)scheduleFoldRecoveryProgress {
+    if (!_foldRecoveryProgressPending || _foldRecoveryProgressScheduled
+        || self.onFoldRecoveryProgress == nil) return;
+    _foldRecoveryProgressScheduled = YES;
+    __weak DPScintillaEditorView *weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        DPScintillaEditorView *strongSelf = weakSelf;
+        if (strongSelf == nil) return;
+        strongSelf->_foldRecoveryProgressScheduled = NO;
+        if (!strongSelf->_foldRecoveryProgressPending) return;
+        void (^progress)(void) = strongSelf.onFoldRecoveryProgress;
+        if (progress) progress();
+    });
+}
 
 - (void)updateBraceHighlight {
     if (!_braceMatchingEnabled) {
@@ -1170,7 +1327,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (void)notification:(SCNotification *)notification {
     if (notification->nmhdr.code == SCN_MARGINCLICK && notification->margin == 1) {
         const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:notification->position];
-        [_scintilla message:SCI_TOGGLEFOLD wParam:line];
+        [self toggleFoldAtLine:(NSUInteger)line];
         return;
     }
     if (notification->nmhdr.code == SCN_CHARADDED) {
@@ -1179,6 +1336,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     }
     if (notification->nmhdr.code == SCN_UPDATEUI) {
         [self updateBraceHighlight];
+        [self scheduleFoldRecoveryProgress];
     }
     if (_suppressEdit || notification->nmhdr.code != SCN_MODIFIED) return;
     const int flags = notification->modificationType;
