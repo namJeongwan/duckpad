@@ -366,6 +366,24 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                       view.style(atUTF8Position: 0) == 5 else {
                     preconditionFailure("Swift Lexilla styling smoke failed")
                 }
+                let functionHeaderUTF8 = view.documentByteLength
+                view.insertCommittedText("func foldedDuck() {\n    let value = 1\n}\n")
+                view.setPrimarySelectionUTF8Range(
+                    NSRange(location: Int(functionHeaderUTF8), length: 0)
+                )
+                for _ in 0..<2_000 where !editor.canCollapseCurrentFold {
+                    await Task.yield()
+                }
+                let foldingBytes = view.contentUTF8
+                let foldingRevision = view.revision
+                guard editor.collapseCurrentFold(),
+                      view.contractedFoldHeaderLines(maximumCount: 10).map(\.intValue) == [1],
+                      editor.expandCurrentFold(),
+                      view.contractedFoldHeaderLines(maximumCount: 10).isEmpty,
+                      view.contentUTF8 == foldingBytes,
+                      view.revision == foldingRevision else {
+                    preconditionFailure("Swift folding smoke failed or mutated document state")
+                }
                 let revision = view.revision
                 languageUseCase.applyTheme(.dark)
                 guard view.revision == revision else { preconditionFailure("theme mutated text revision") }
@@ -373,7 +391,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 guard editor.activeLanguageID.rawValue == "python", view.lexerName == "python" else {
                     preconditionFailure("Python lexer switch smoke failed")
                 }
-                print("Duckpad language smoke ready: Lexilla 5.5.3 Swift/Python + dark palette")
+                print("Duckpad language smoke ready: Lexilla 5.5.3 Swift/Python + folding + dark palette")
                 fflush(stdout)
                 Darwin._exit(0)
             }

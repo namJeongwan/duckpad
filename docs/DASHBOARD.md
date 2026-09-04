@@ -15,9 +15,9 @@ Last updated: 2026-09-04 (Asia/Seoul)
 | --- | --- | --- |
 | Phase 31 fold-state design | Chat design approved | Pane-specific Scintilla state; no parser, background service, or dependency |
 | Written Phase 31 specification | User approved | `docs/superpowers/specs/2026-09-04-fold-state-recovery-design.md`; independent review 0 Critical / 0 Important / 0 Minor |
-| Fold recovery implementation | Plan approved; implementation next | `docs/superpowers/plans/2026-09-04-fold-state-recovery.md`; plan review 0 Critical / 0 Important / 0 Minor |
-| Keyboard and VoiceOver controls | Designed | Native View submenu, conflict-free shortcuts, menu accessibility, Command Palette discovery |
-| Phase 31 validation and review | Pending | Debug/Release, recovery/menu/AppKit, smoke, performance, independent review |
+| Fold recovery implementation | Task 3 complete | Independent pane recovery, native focus ownership, accepted-edit invalidation, and terminal teardown reviewed clean |
+| Keyboard and VoiceOver controls | Task 4 complete | Native View submenu, conflict-free shortcuts, menu accessibility, Command Palette secondary-pane routing reviewed clean |
+| Phase 31 validation and review | Functional gates complete; review pending | Six Release budgets, focused Debug/Release suites, builds, and production folding smoke pass; monolithic baseline blockers reproduced at Phase 30 parent |
 | Phase 31 commit and push | Pending | Exact reviewed candidate only; target `feature/fold-state-recovery` |
 
 ## Recently delivered
@@ -49,33 +49,46 @@ interception and will be reconsidered only with explicit IME and undo proof.
 ## Current validation notes
 
 - Phase 31's independently reviewed written specification was approved by the
-  user. The executable TDD plan passed independent review; production code and
-  tests have not started.
-- Debug and Release builds pass.
-- Debug and Release `LanguageEditorAdapterTests` pass.
-- Debug and Release split-pane smart-pair regression passes.
+  user. The executable TDD plan passed independent review. Tasks 1 and 2 are
+  complete in `/Users/namjeongwan/app/duckpad/.worktrees/fold-state-recovery`;
+  the typed folding façade passed Debug/Release tests and independent review
+  after hardening recovery input bounds and numeric validation. Task 3 passed
+  its post-commit review after adding pane-specific pending recovery, native
+  focus routing, accepted-edit invalidation, terminal teardown, and reentrant
+  lifecycle protection. Task 4 delivered the native menu, palette, and
+  VoiceOver path; selector validation tests were strengthened with mutation
+  proof. Task 5 completed its functional gates; final independent review,
+  candidate commit, audit, and branch push remain pending.
+- Debug and Release builds pass. Debug and Release focused suites pass for
+  `FoldRecoveryStateTests` (7 tests), `FoldingEditorAdapterTests` (30 tests),
+  `FoldingPresentationTests` (4 tests), and all 21 individually enumerated
+  `LanguageEditorAdapterTests`. The aggregate language command exits 0 but
+  stops its console stream at the IME test, so it is not the sole proof.
 - The Release production language smoke exits 0 after exercising real Lexilla
-  switching and Scintilla editing.
-- The frozen Release performance gate passes all five budgets: warm launch
-  387.936 ms, typing p95 0.015958 ms, 100 MiB open 1005.766292 ms, 200-tab
-  reflow p95 0.0015 ms, and folder search 288.5145 ms.
-- Initial independent review findings for split stale state, CR/CRLF, bounded
+  Swift highlighting, Collapse/Expand Current with `[1] -> []` capture while
+  preserving UTF-8 bytes and revision, Python switching, and the dark palette.
+- The frozen Release performance gate passes all six budgets on a Mac16,7:
+  warm launch 407.517 ms, typing p95 0.016958 ms, 100 MiB open 1046.987333 ms,
+  200-tab reflow p95 0.001583 ms, folder search 277.940125 ms, and exact
+  10,000-header contract/capture/shared-pane restore 129.29475 ms against its
+  250 ms maximum.
+- Phase 30 smart-editing review findings for split stale state, CR/CRLF, bounded
   paste inspection, IME source tracking, invalid lexer rollback, and validation
   wording are remediated. Final independent re-review approved the exact
   candidate with 0 Critical, 0 Important, and 0 Minor findings.
-- Repository-wide `swift test` reproducibly exits with `signal 11` while
-  multiple existing AppKit suites run concurrently. When isolated,
-  `ScintillaBridgeTests` reaches the existing
-  `activationCommittedBeforeReplaceReservationRejectsStaleTargetWithoutMutation`
-  failure. Focused Phase 30 runs do not reproduce either failure, but the new
-  process-global AppKit event test's contribution to the monolithic crash has
-  not been excluded. Both remain visible review inputs and are not reported as
-  passing.
+- Repository-wide `swift test` and `swift test -c release` each exit 1 because
+  the SwiftPM testing helper receives `signal 11` while process-global AppKit
+  suites run concurrently. The same commands at Phase 30 parent `0e511bf`
+  reproduce the same signal in Debug and Release. The concurrent
+  `bundledSamplePreservesFinalAndMixedEOLAndUTF8ThroughRealHost` timeout seen in
+  the Phase 31 Release run also reproduces at that parent in Debug. These are
+  baseline blockers, not Phase 31 passes; the focused fold/language suites are
+  the attributable green evidence.
 
 ## Prioritized roadmap
 
 1. Lightweight language-aware smart editing. **Delivered.**
-2. Fold-state recovery and keyboard/VoiceOver folding controls. **Design review.**
+2. Fold-state recovery and keyboard/VoiceOver folding controls. **Functional validation complete; final review and push pending.**
 3. Block comments and further language-aware indentation commands.
 4. Importable, validated user language definitions without native code loading.
 5. Lightweight API completion/call-tip provider contract.

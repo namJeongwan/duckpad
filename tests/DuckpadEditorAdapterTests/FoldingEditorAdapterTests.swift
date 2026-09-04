@@ -377,6 +377,88 @@ struct FoldingEditorAdapterTests {
     }
 
     @Test @MainActor
+    func adapterFoldCommandsPublishNoEditsAndPreserveCleanAndDirtyWorkspaceTabs() async throws {
+        let source = "int main() {\n  if (true) {\n    return 1;\n  }\n}\n"
+        for initiallyDirty in [false, true] {
+            for command in 0..<4 {
+                let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+                #expect(await workspace.start() == .saved)
+                let buffer = try #require(workspace.snapshot().activeBuffer)
+                let adapter = ScintillaEditorAdapter()
+                let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+                adapter.install(.init(
+                    bufferID: buffer.bufferID,
+                    revision: buffer.revision,
+                    text: source
+                ))
+                adapter.display(buffer)
+                #expect(adapter.applyLanguage(cppFoldConfiguration))
+                let view = try #require(adapter.activeScintillaView)
+
+                var editorEditPublications = 0
+                let bindingEditHandler = adapter.onEdit
+                adapter.onEdit = { edit in
+                    editorEditPublications += 1
+                    return bindingEditHandler?(edit)
+                        ?? .rejected(currentRevision: edit.expectedRevision)
+                }
+                var workspaceEditPublications = 0
+                workspace.onChange = { change in
+                    if case .bufferEdited = change.kind {
+                        workspaceEditPublications += 1
+                    }
+                }
+
+                if initiallyDirty {
+                    view.setPrimarySelectionUTF8Range(NSRange(
+                        location: source.utf8.count,
+                        length: 0
+                    ))
+                    view.insertCommittedText("// dirty")
+                    #expect(editorEditPublications > 0)
+                    #expect(workspaceEditPublications == editorEditPublications)
+                    editorEditPublications = 0
+                    workspaceEditPublications = 0
+                }
+
+                view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+                if command == 1 || command == 3 {
+                    view.toggleFold(atLine: 0)
+                    #expect(
+                        view.contractedFoldHeaderLines(maximumCount: 10).map(\.intValue) == [0]
+                    )
+                }
+                let before = try #require(
+                    workspace.snapshot().tabs.first(where: { $0.isActive })
+                )
+                #expect(before.isDirty == initiallyDirty)
+                let beforeNativeRevision = view.revision
+
+                let changed: Bool
+                switch command {
+                case 0: changed = adapter.collapseCurrentFold()
+                case 1: changed = adapter.expandCurrentFold()
+                case 2: changed = adapter.collapseAllFolds()
+                default: changed = adapter.expandAllFolds()
+                }
+
+                let after = try #require(
+                    workspace.snapshot().tabs.first(where: { $0.isActive })
+                )
+                #expect(changed, "adapter fold command index \(command) was a no-op")
+                #expect(after.isDirty == before.isDirty)
+                #expect(after.buffer.revision == before.buffer.revision)
+                #expect(view.revision == beforeNativeRevision)
+                #expect(editorEditPublications == 0)
+                #expect(workspaceEditPublications == 0)
+                await workspace.waitForPendingPersistence()
+                adapter.invalidate()
+                _ = binding
+            }
+        }
+    }
+
+    @Test @MainActor
     func plainTextAndLargeFileDisableEveryFoldQueryAndCommand() throws {
         for (maximumStyleBytes, lexer, folding) in [
             (UInt(2_000_000), "null", false),

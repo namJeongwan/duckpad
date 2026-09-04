@@ -47,6 +47,27 @@ Theme changes update styles, brace feedback, fold markers, and redraw existing v
 
 Toggle Line Comment operates on all nonblank lines intersecting the primary selection. If all are commented it removes the marker; otherwise it inserts the marker after existing indentation. It preserves blank lines, CRLF, and UTF-8 byte boundaries, scans only selected-line indentation/prefix bytes, and wraps the edits in one native undo group. Each native edit still advances workspace revision and recovery journal state.
 
+## Folding controls and recovery
+
+Fold state is pane-local even though split Scintilla views share document text.
+Recovery persists a bounded canonical list of at most 10,000 contracted header
+lines for each pane, retries deep headers after idle styling, and never treats a
+fold operation as a document edit. Accepted text mutations discard stale
+pending folds for both panes; rejected mutations restore the authoritative
+document and its fold state.
+
+The native View > Folding submenu exposes Collapse Current Block (`⌥⌘[`),
+Expand Current Block (`⌥⌘]`), Collapse All, and Expand All. Explicit VoiceOver
+labels describe each action, the recursive Command Palette discovers the same
+items, validation follows the focused pane's typed folding capabilities, and a
+successful palette action restores focus to its initiating pane.
+
+The feature reuses Lexilla fold levels and Scintilla fold commands. Plain Text
+and documents above `maximumStyleBytes` remain editable but expand every fold
+and disable every folding query/command. Applying a nonexistent lexer fails
+without replacing the active language or losing existing fold capability and
+state.
+
 ## Verification
 
 Phase 7 focused tests cover the 78-entry packaged registry, the exact 20-language `keywordComplete` set, and runtime resolution of every distinct lexer; filename/shebang/XML/BOM/case/extensionless precedence; `.m/.fs/.r` collisions; unavailable manual IDs; legacy recovery decoding; manual override/Auto/Save As; malformed packaging degradation; exact C++/Python/Rust keyword/number/string/comment style IDs at UTF-8 offsets; fold/brace/indent configuration including UTF-8 matched and bad-brace positions; theme invariants; 50 MiB null-lexer/fold/brace-off zero-synchronous-style fallback; and multiline CRLF/Korean comment toggle with a single undo and recovery propagation.
@@ -62,6 +83,28 @@ Final validation on 2026-09-03:
 - `git diff --check` — **PASS**; staged paths and gitlinks are empty; root README is absent; `notepad-plus-plus/` remains root-ignored and uninspected.
 
 The only compiler diagnostics in fresh/x86 builds are four deprecation warnings inside the separately pinned upstream Scintilla 5.6.6 Cocoa implementation. They do not come from the new Lexilla or Duckpad bridge code.
+
+Phase 31 validation on 2026-09-04:
+
+- Debug and Release builds passed.
+- Debug and Release focused suites passed for bounded fold recovery (7 tests),
+  real bridge/adapter recovery (30 tests), native presentation controls (4
+  tests), and all 21 individually enumerated language adapter tests. The
+  aggregate language filter's exit-0 console stream still stops at the IME
+  test, so the individual one-test summaries provide the complete proof.
+- The production Release language smoke passed real Swift styling, Collapse and
+  Expand Current with `[1] -> []` capture and unchanged UTF-8 bytes/revision,
+  then retained the Python lexer assertion and dark-theme revision invariant.
+- The frozen schema-1 Release gate reported exactly six passing measurements:
+  warm launch 407.517 ms, typing p95 0.016958 ms, 100 MiB open 1046.987333 ms,
+  200-tab reflow p95 0.001583 ms, folder search 277.940125 ms, and exact
+  10,000-header contract/capture/shared-pane restore 129.29475 ms (maximum 250
+  ms).
+- The monolithic Debug and Release suites are not claimed as passes: each
+  exited 1 after the SwiftPM testing helper received signal 11. Both signals
+  reproduce with the same commands at Phase 30 parent `0e511bf`; the concurrent
+  extension-host timeout observed in the Phase 31 Release run also reproduces
+  there in Debug.
 
 ## Agent Work Log
 

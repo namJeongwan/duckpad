@@ -83,6 +83,33 @@ journal. Accepted keystrokes append only the inserted/deleted delta; they never
 read or decode the full document. Full snapshots occur only on explicit
 snapshot/save, activation, initial load, and rejection recovery.
 
+## Fold-state recovery boundary
+
+Phase 31 keeps folding inside the existing Scintilla/Lexilla boundary. The
+Duckpad-owned bridge exposes typed capability queries, current/all commands,
+bounded contracted-header capture, restore, and coalesced post-idle recovery
+progress. It uses Scintilla's fold levels and `SCI_CONTRACTEDFOLDNEXT`; it does
+not add a parser, language server, background worker, or dependency. Automatic
+fold-change handling remains enabled so editing away a header cannot strand
+hidden descendants, without expanding the modification event mask.
+
+Each shared-document pane owns its own canonical `FoldRecoveryState`: sorted,
+unique, nonnegative, and capped at 10,000 header lines. The adapter tracks
+pending idle-style recovery by native view identity, captures native contracted
+headers union pending headers, and restores primary and secondary state
+independently. Accepted text mutations invalidate both panes' stale pending fold
+state; rejected mutations retain and reapply the authoritative recovery state.
+Plain Text and documents above the language style budget stay editable with all
+folds expanded and folding commands disabled. Failed lexer application retains
+the prior language, capabilities, and fold state.
+
+Gutter, menu, keyboard, Command Palette, and recovery operations share the same
+typed façade. Changed user operations publish one fold-state callback; no-ops
+and restore publish none. Tests and the production smoke verify that these
+operations preserve UTF-8 bytes, revision, dirty state, full selection, Undo,
+and Redo. Terminal adapter teardown clears native callbacks and pending view
+identities.
+
 ## Production composition and tests
 
 [`DuckpadMain.swift`](../../Sources/DuckpadApp/DuckpadMain.swift) constructs
@@ -141,3 +168,4 @@ Phase 2 slices.
 | 2026-09-02 | Re-ran acquisition into a new temporary destination. | Archive digest matched; 105 upstream paths matched; only the one recorded cursor lookup patch differs byte-for-byte in the repository. |
 | 2026-09-02 | Built both supported architecture targets and launched the development executable. | arm64 run pass; x86_64 cross-link pass; Intel runtime not claimed. |
 | 2026-09-02 | `/root/philosophy_parity` addressed review evidence P2-01..P2-03 without changing the review verdict. | Added character-boundary preflight, pre-mutation revision-exhaustion read-only/error behavior, inserted/deleted payloads, snapshot/notification instrumentation, and a bounded accepted-delta journal. 46/46 debug, release, and fresh tests pass; 1/10/50 MB cases record zero snapshots and one-byte incremental work. |
+| 2026-09-04 | Phase 31 fold-state recovery and controls | Typed Scintilla folding, pane-specific bounded recovery, native menu/VoiceOver/Command Palette routing, Debug/Release focused validation, and production Swift folding smoke pass. The six-budget Release gate measured exact 10,000-header contract/capture/shared-pane restore at 129.29475 ms (250 ms maximum). Monolithic Debug/Release signal 11 was reproduced at Phase 30 parent `0e511bf` and is not reported as passing. |

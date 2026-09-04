@@ -85,6 +85,7 @@ private enum DuckpadPerformanceBenchmark {
         "open_100mb",
         "reflow_200_tabs_p95",
         "folder_search_p95",
+        "fold_recovery_10000",
     ]
 
     @MainActor
@@ -99,12 +100,14 @@ private enum DuckpadPerformanceBenchmark {
             let largeOpen = try await measureLargeOpen()
             let tabReflow = measureTabReflow()
             let folderSearch = try await measureFolderSearch()
+            let foldRecovery = try measureFoldRecovery10K()
             let values = [
                 "warm_launch_ready": warmLaunch,
                 "typing_latency_p95": typing,
                 "open_100mb": largeOpen,
                 "reflow_200_tabs_p95": tabReflow,
                 "folder_search_p95": folderSearch,
+                "fold_recovery_10000": foldRecovery,
             ]
             let measurements = budgets.metrics.map { budget in
                 let measured = values[budget.id]!
@@ -303,6 +306,89 @@ private enum DuckpadPerformanceBenchmark {
             }
         }
         return samples.max() ?? .infinity
+    }
+
+    @MainActor
+    private static func measureFoldRecovery10K() throws -> Double {
+        let headerCount = FoldRecoveryState.maximumContractedHeaderCount
+        var source = "namespace duckpad_benchmark {\n"
+        source.reserveCapacity(240_000)
+        for index in 0..<(headerCount - 1) {
+            source += "void fold_\(index)() {\n}\n"
+        }
+        source += "}\n"
+        let expectedHeaderLines = [0] + (0..<(headerCount - 1)).map { 1 + $0 * 2 }
+
+        ScintillaEditorAdapter.prepareResources()
+        let frame = NSRect(x: 0, y: 0, width: 900, height: 600)
+        let splitView = NSSplitView(frame: frame)
+        splitView.isVertical = true
+        let primary = DPScintillaEditorView(frame: frame)
+        let secondary = DPScintillaEditorView(frame: frame)
+        let window = NSWindow(
+            contentRect: frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = splitView
+        splitView.addArrangedSubview(primary)
+        splitView.addArrangedSubview(secondary)
+        window.orderOut(nil)
+        defer {
+            primary.onFoldStateChange = nil
+            primary.onFoldRecoveryProgress = nil
+            secondary.onFoldStateChange = nil
+            secondary.onFoldRecoveryProgress = nil
+            window.orderOut(nil)
+        }
+
+        try primary.loadUTF8(Data(source.utf8), revision: 0)
+        secondary.shareDocument(with: primary)
+        secondary.synchronizeRevision(primary.revision)
+        for view in [primary, secondary] {
+            guard view.applyLexerNamed(
+                "cpp",
+                keywords: ["namespace", "void"],
+                tabWidth: 4,
+                useTabs: false,
+                folding: true,
+                braceMatching: true,
+                maximumStyleBytes: 2_000_000
+            ) else {
+                throw BenchmarkFailure.invariant("10,000-fold benchmark could not apply C++ folding")
+            }
+        }
+
+        let start = ContinuousClock.now
+        guard primary.collapseAllFolds() else {
+            throw BenchmarkFailure.invariant("10,000-fold benchmark could not contract its fixture")
+        }
+        let nativeCapture = primary
+            .contractedFoldHeaderLines(maximumCount: UInt(headerCount + 1))
+            .map(\.intValue)
+        let captured = FoldRecoveryState(contractedHeaderLines: nativeCapture)
+        guard nativeCapture == expectedHeaderLines,
+              captured.contractedHeaderLines == nativeCapture else {
+            throw BenchmarkFailure.invariant("10,000-fold benchmark did not capture exactly 10,000 canonical headers")
+        }
+        let pending = secondary.restoreContractedFoldHeaderLines(
+            captured.contractedHeaderLines.map { NSNumber(value: $0) }
+        )
+        let restored = secondary
+            .contractedFoldHeaderLines(maximumCount: UInt(headerCount + 1))
+            .map(\.intValue)
+        let measured = milliseconds(start.duration(to: ContinuousClock.now))
+        guard pending.isEmpty, restored == captured.contractedHeaderLines else {
+            throw BenchmarkFailure.invariant("10,000-fold benchmark did not restore the complete captured state")
+        }
+
+        guard primary.expandAllFolds(),
+              primary.contractedFoldHeaderLines(maximumCount: 1).isEmpty,
+              secondary.contractedFoldHeaderLines(maximumCount: UInt(headerCount + 1)).map(\.intValue) == restored else {
+            throw BenchmarkFailure.invariant("shared-document fold panes did not remain independent")
+        }
+        return measured
     }
 
     private static func percentile95(_ values: [Double]) -> Double {
