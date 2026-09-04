@@ -230,6 +230,17 @@ materialization, the single replacement, and post-command selection. The
 existing smart-input notification handler owns closer dedent and its bounded
 pending state.
 
+Shared Scintilla documents retain the existing single-publisher rule: the
+primary view is the document transaction publisher, while the focused primary
+or secondary view is the selection and pending-input owner. `shareDocument`
+records the publisher relationship. Every aggregate operation asks the primary
+publisher to suppress its component notifications, mutates the shared document,
+installs the result selection on the initiating view, and publishes exactly one
+aggregate edit through the primary callback. The adapter records the exact
+initiating view when closer-dedent pending state opens, so a rejected closer
+cancels and closes that view's pending Undo group before recovery. Secondary
+views never enable a second document-edit publisher.
+
 `ScintillaEditorAdapter` derives block-comment capability from the successfully
 applied language configuration and converts the native edits into the existing
 `EditorEditOutcome`. It does not read the selected payload or implement a
@@ -248,22 +259,28 @@ existing recursive shortcut-collision and Command Palette infrastructure.
 1. Successful language application stores the active definition's literal pair
    in `EditorLanguageConfiguration.comments`.
 2. Menu, shortcut, or Command Palette invokes `LanguageWorkspaceUseCase`.
-3. The adapter invokes the focused pane with the pair from its last successfully
-   applied configuration.
-4. The bridge suppresses the replacement's component notifications and
-   publishes one aggregate incremental edit.
+3. The adapter passes the focused selection owner and the pair from its last
+   successfully applied configuration to the primary transaction publisher.
+4. The publisher suppresses its replacement component notifications, mutates
+   the shared document, updates the initiating selection, and publishes one
+   aggregate incremental edit through the sole primary callback.
 5. The existing incremental edit callback updates workspace revision, dirty state,
    recovery journal, and the shared secondary document.
 6. The controller restores focus only after a successful command.
 
 ### Closer dedent
 
-1. Scintilla reports a direct single-character insert check.
-2. The bridge verifies the bounded indentation-only prefix and reserves two
-   forward plus three worst-case Undo revisions before opening an Undo group.
-3. Scintilla inserts the literal closer through its normal path.
-4. Character-added handling reduces indentation by one configured level and
-   closes the group.
+1. Scintilla reports a direct single-character insert check to the initiating
+   primary or secondary view.
+2. That selection owner verifies the bounded indentation-only prefix, reserves
+   two forward plus three worst-case Undo revisions, and asks the primary
+   document publisher to suppress shared component notifications before opening
+   an Undo group.
+3. Scintilla inserts the literal closer; the primary publisher emits its one
+   aggregate insertion edit.
+4. If accepted, character-added handling asks the same publisher to emit the
+   aggregate indentation replacement, then closes the initiating Undo group.
+   Rejection synchronously cancels that exact initiating pending state first.
 5. Existing edit callbacks accept or reject each mutation using the degradation
    contract above; recovery always restores authoritative bytes.
 
