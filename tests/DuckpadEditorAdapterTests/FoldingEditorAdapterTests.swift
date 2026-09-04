@@ -202,6 +202,49 @@ struct FoldingEditorAdapterTests {
     }
 
     @Test @MainActor
+    func restoreRejectsOversizedInputBeforeApplyingAnyFold() throws {
+        let (window, view) = try hostedCPPView("int main() {\n  return 0;\n}\n")
+        defer { cleanUp(window, view) }
+        var changes = 0
+        view.onFoldStateChange = { changes += 1 }
+        let oversized = Array(repeating: NSNumber(value: 0), count: 10_001)
+
+        let pending = view.restoreContractedFoldHeaderLines(oversized)
+
+        #expect(pending.isEmpty)
+        #expect(view.contractedFoldHeaderLines(maximumCount: 10).isEmpty)
+        #expect(changes == 0)
+    }
+
+    @Test @MainActor
+    func restoreRejectsFractionalNonFiniteAndOverflowingNumbers() throws {
+        let invalidValues: [(String, NSNumber)] = [
+            ("fractional", NSNumber(value: 0.5)),
+            ("NaN", NSNumber(value: Double.nan)),
+            ("positive infinity", NSNumber(value: Double.infinity)),
+            ("negative infinity", NSNumber(value: -Double.infinity)),
+            ("positive NSInteger overflow", NSDecimalNumber(string: "18446744073709551616")),
+            ("negative NSInteger overflow", NSDecimalNumber(string: "-18446744073709551616")),
+        ]
+
+        for (label, number) in invalidValues {
+            let (window, view) = try hostedCPPView("int main() {\n  return 0;\n}\n")
+            defer { cleanUp(window, view) }
+            var changes = 0
+            view.onFoldStateChange = { changes += 1 }
+
+            let pending = view.restoreContractedFoldHeaderLines([number])
+
+            #expect(pending.isEmpty, "\(label) remained pending")
+            #expect(
+                view.contractedFoldHeaderLines(maximumCount: 10).isEmpty,
+                "\(label) was converted to a valid fold header"
+            )
+            #expect(changes == 0, "\(label) published a fold-state change")
+        }
+    }
+
+    @Test @MainActor
     func foldCommandsPreserveFullSelectionDirtyRevisionAndUndoRedo() throws {
         let source = "int main() {\n  if (true) {\n    return 1;\n  }\n}"
         for command in 0..<4 {

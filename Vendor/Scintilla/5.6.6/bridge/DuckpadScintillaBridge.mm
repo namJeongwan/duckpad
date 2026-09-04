@@ -5,6 +5,7 @@
 #include <limits>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <string>
 #include <utility>
 #include <vector>
@@ -17,6 +18,22 @@ static constexpr int DPBookmarkMarker = 20;
 static constexpr int DPBookmarkMask = 1 << DPBookmarkMarker;
 static constexpr NSInteger DPSmartIndentScanLimit = 4096;
 static constexpr NSUInteger DPMaximumSynchronousStyleBytes = 262144;
+static constexpr NSUInteger DPMaximumFoldRecoveryHeaderCount = 10000;
+
+static BOOL DPIntegerFromNumber(NSNumber *number, NSInteger *value) {
+    if (![number isKindOfClass:[NSNumber class]] || !std::isfinite(number.doubleValue)) return NO;
+    NSDecimal decimal = number.decimalValue;
+    if (NSDecimalIsNotANumber(&decimal)) return NO;
+    NSDecimal integral;
+    NSDecimalRound(&integral, &decimal, 0, NSRoundDown);
+    if (NSDecimalCompare(&decimal, &integral) != NSOrderedSame) return NO;
+    NSDecimal minimum = @(NSIntegerMin).decimalValue;
+    NSDecimal maximum = @(NSIntegerMax).decimalValue;
+    if (NSDecimalCompare(&decimal, &minimum) == NSOrderedAscending
+        || NSDecimalCompare(&decimal, &maximum) == NSOrderedDescending) return NO;
+    *value = number.integerValue;
+    return YES;
+}
 
 static int DPEOLModeForUTF8(NSData *content) {
     const auto *bytes = static_cast<const unsigned char *>(content.bytes);
@@ -1076,7 +1093,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (NSArray<NSNumber *> *)restoreContractedFoldHeaderLines:(NSArray<NSNumber *> *)lines {
-    if (!_foldingEnabled || lines.count == 0) {
+    if (!_foldingEnabled || lines.count == 0
+        || lines.count > DPMaximumFoldRecoveryHeaderCount) {
         _foldRecoveryProgressPending = NO;
         return @[];
     }
@@ -1090,12 +1108,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     NSMutableArray<NSNumber *> *pending = [NSMutableArray array];
     NSMutableSet<NSNumber *> *seen = [NSMutableSet set];
     for (NSNumber *number in lines) {
-        const long long candidate = number.longLongValue;
+        NSInteger candidate;
+        if (!DPIntegerFromNumber(number, &candidate)) continue;
         if (candidate < 0 || candidate >= lineCount) continue;
         NSNumber *canonical = @(candidate);
         if ([seen containsObject:canonical]) continue;
         [seen addObject:canonical];
-        const NSInteger line = (NSInteger)candidate;
+        const NSInteger line = candidate;
         const NSInteger lineEnd = [_scintilla message:SCI_GETLINEENDPOSITION wParam:(uptr_t)line];
         if (lineEnd > endStyled) {
             [pending addObject:canonical];
