@@ -28,6 +28,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private var settingsUseCase: AppSettingsUseCase!
     private var pendingFinderOpenRequests: [[URL]] = []
     private var runtimeIsReady = false
+    private var systemRecentDocumentReadCount = 0
 
     private struct WindowRuntime {
         let controller: DuckpadWindowController
@@ -70,7 +71,9 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 URL(fileURLWithPath: $0, isDirectory: true)
             } ?? LocalRecoveryStore.defaultRoot()
         }
-        let bookmarkArchive = securityScopeSmokeNamespace.map {
+        let bookmarkArchive = environment["DUCKPAD_DOCUMENT_BOOKMARKS_FILE"].map {
+            URL(fileURLWithPath: $0, isDirectory: false)
+        } ?? securityScopeSmokeNamespace.map {
             recoveryBase.deletingLastPathComponent()
                 .appendingPathComponent("\($0)-document-bookmarks.json", isDirectory: false)
         } ?? LocalTextFileStore.defaultBookmarkArchiveURL()
@@ -121,7 +124,15 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         drainPendingFinderOpenRequests()
         restoreAdditionalWindows()
 
-        if let expectedPath = environment["DUCKPAD_SECURITY_SCOPE_SMOKE_WRITE"] {
+        if environment["DUCKPAD_PERFORMANCE_LAUNCH_SMOKE"] == "1" {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                precondition(systemRecentDocumentReadCount == 0, "performance launch read system recent documents")
+                print("DUCKPAD_PERF_READY=1 RECENTS=0")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
+        } else if let expectedPath = environment["DUCKPAD_SECURITY_SCOPE_SMOKE_WRITE"] {
             Task { @MainActor in
                 await controller.waitForStartup()
                 let expected = URL(fileURLWithPath: expectedPath).standardizedFileURL.path
@@ -800,10 +811,17 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     }
 
     private func installMainMenu(target: DuckpadWindowController) {
+        let recentDocumentURLs: [URL]
+        if environment["DUCKPAD_PERFORMANCE_LAUNCH_SMOKE"] == "1" {
+            recentDocumentURLs = []
+        } else {
+            systemRecentDocumentReadCount += 1
+            recentDocumentURLs = NSDocumentController.shared.recentDocumentURLs
+        }
         let menu = DuckpadMainMenuFactory.make(
             target: target,
             applicationTarget: self,
-            recentDocumentURLs: NSDocumentController.shared.recentDocumentURLs
+            recentDocumentURLs: recentDocumentURLs
         )
         NSApplication.shared.mainMenu = menu
         target.applicationMainMenuDidChange(menu)

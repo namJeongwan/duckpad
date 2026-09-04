@@ -14,6 +14,7 @@ let package = Package(
         .executable(name: "DuckpadApp", targets: ["DuckpadApp"]),
         .executable(name: "DuckpadPluginHost", targets: ["DuckpadPluginHost"]),
         .executable(name: "DuckpadPluginRuntime", targets: ["DuckpadPluginRuntime"]),
+        .executable(name: "DuckpadPerformanceBenchmark", targets: ["DuckpadPerformanceBenchmark"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "6.2.4"),
@@ -208,6 +209,19 @@ let package = Package(
             dependencies: [
                 "DuckpadApplication", "DuckpadPluginRuntimeCore", "DuckpadPluginSupport", "DuckpadWAMRBridge",
             ]
+        ),
+        .executableTarget(
+            name: "DuckpadPerformanceBenchmark",
+            dependencies: [
+                "DuckpadApplication",
+                "DuckpadDomain",
+                "DuckpadEditorAdapter",
+                "DuckpadInfrastructure",
+                "DuckpadPresentation",
+                "DuckpadScintillaBridge",
+            ],
+            path: "Benchmarks/DuckpadPerformanceBenchmark",
+            resources: [.copy("performance-budgets.v1.json")]
         ),
         .testTarget(
             name: "DuckpadDomainTests",

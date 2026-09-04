@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "metrics": [
+    {
+      "id": "warm_launch_ready",
+      "unit": "milliseconds",
+      "maximum": 750.0,
+      "aggregation": "maximum_of_5_after_1_priming_launch"
+    },
+    {
+      "id": "typing_latency_p95",
+      "unit": "milliseconds",
+      "maximum": 0.5,
+      "aggregation": "p95_of_300_single_byte_commits"
+    },
+    {
+      "id": "open_100mb",
+      "unit": "milliseconds",
+      "maximum": 1500.0,
+      "aggregation": "single_complete_open_of_100mib_80byte_lines"
+    },
+    {
+      "id": "reflow_200_tabs_p95",
+      "unit": "milliseconds",
+      "maximum": 0.05,
+      "aggregation": "p95_of_500_reflows"
+    },
+    {
+      "id": "folder_search_p95",
+      "unit": "milliseconds",
+      "maximum": 750.0,
+      "aggregation": "maximum_of_3_searches_over_2000_files_16mb"
+    }
+  ]
+}

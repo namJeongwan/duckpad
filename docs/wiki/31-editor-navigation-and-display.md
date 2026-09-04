@@ -1,6 +1,6 @@
 # Phase 27 — Editor navigation and display controls
 
-Status: **Content approved; exact receipt pending**
+Status: **Approved, committed, audited, and pushed to `origin/main`**
 
 ## User-facing result
 
@@ -77,5 +77,8 @@ remain outside this change.
   menu commands and shortcuts.
 - **Verification:** Debug/Release 353/353 by module and isolated Presentation
   helpers, fresh native bundle verification, and LaunchServices tab smoke.
-- **Next gate:** independent exact-candidate review, signed receipt, verified
-  local commit, post-commit audit, and push to `origin/main`.
+- **Delivery:** exact candidate
+  `322189fa019d86b31475210d6f78ab30677e67fbb1af85398e15b594057f6343`
+  received independent approval with 0 findings and receipt SHA-256
+  `659ea6b64029bbbe7961dcb33837bd39608143fafb52c21331ff40f01712365f`;
+  audited commit `20855687cb4138a609cca24f528ab41d4c4167f6` was pushed to `origin/main`.

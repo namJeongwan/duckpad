@@ -77,8 +77,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 63 | [Phase 25B independent code review](reviews/2026-09-03-phase-25b-native-document-lifecycle-code-review.md) | **Approved — 0 findings** | Fresh panel/identity Save Copy retry까지 P25B-01~03을 모두 닫았다. receipt SHA-256은 `30bc1be63d4dc8d6377160e6225f70364bcdaa41a59d68d5f3110f0ceacbe1e5`다. |
 | 64 | [Phase 26 macOS distribution and sandboxed XPC](30-macos-distribution.md) | **Approved, committed and pushed** | Universal `.app`, Finder document declarations, sandbox/bookmark lifecycle와 embedded XPC runtime을 commit `9a4c856`로 exact receipt/audit 후 `origin/main`에 반영했다. |
 | 65 | [Phase 26 independent code review](reviews/2026-09-03-phase-26-macos-distribution-code-review.md) | **Content approved — 0 findings** | 최초 4 Major의 XPC remote teardown, sandbox document scope/bookmark lifecycle, WAMR semantic-patch reproduction, exclusive artifact publication 결함을 remediation 후 독립 재검증해 모두 닫았다. |
-| 66 | [Phase 27 editor navigation and display controls](31-editor-navigation-and-display.md) | **Content approved; exact receipt pending** | `Control-G` 줄·열 이동, UTF-8 offset 이동, 표준 zoom, 공백/EOL 표시와 pane별 recovery 상태를 기록한다. |
+| 66 | [Phase 27 editor navigation and display controls](31-editor-navigation-and-display.md) | **Approved, committed and pushed** | `Control-G` 줄·열 이동, UTF-8 offset 이동, 표준 zoom, 공백/EOL 표시와 pane별 recovery 상태를 commit `2085568`로 exact receipt/audit 후 `origin/main`에 반영했다. |
 | 67 | [Phase 27 independent code review](reviews/2026-09-04-phase-27-editor-navigation-display-code-review.md) | **Content approved — 0 findings** | 최초 split-pane navigation responder Major를 opaque pane context와 exact-focus 복구로 닫고 Unicode/recovery/menu 경계를 최종 0 Blocker/Major/Minor로 승인했다. |
+| 68 | [Phase 28 native performance budgets](32-performance-budgets.md) | **Content approved; exact receipt pending** | Release warm launch, typing p95, 100 MiB open, 200-tab reflow와 2,000-file folder search의 동결 budget 및 JSON gate를 기록한다. |
+| 69 | [Phase 28 independent code review](reviews/2026-09-04-phase-28-performance-budgets-code-review.md) | **Content approved — 0 findings** | 최초 direct-only 100 MiB 측정, unbounded warm launch, bookmark/system-recents 격리 4 Major를 end-to-end pipeline/watchdog/temp authority로 닫았다. |
 
 상태 정의:
 
@@ -134,6 +136,21 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-04 — Phase 28 independent content review
+
+- **Agent/role:** `/root/phase1_code_review`, independent reviewer; Phase 28 구현에는 참여하지 않았다.
+- **Scope/closure:** exact staged benchmark/budget/Package/app-hook/runner/docs를 검토했다. direct-only 100 MiB open, 무기한 warm launch, 기본 bookmark archive와 system recents 참조 4 Major를 재현했고 complete file-open pipeline, exact-child watchdog, temp bookmark authority와 empty-recents branch로 모두 닫았다.
+- **Independent validation:** final candidate recomputation/cached diff/shell syntax PASS; full Release runner 5/5 PASS (warm 498.210 ms, typing 0.019666 ms, open 946.953917 ms, reflow 0.001709 ms, folder 262.211584 ms); exit 1/2와 watchdog exit 124/reap probes PASS.
+- **Verdict/boundary:** **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** Seven-path product/work-doc path digest `b4f56b16aab26885e0e3db102f0fc720ed7e7ea67274d71dd6169fbcdd25b3e3`, path+byte digest `738fd08546e15079fa46531a2d7b745a49c3de1c320ddc26c1a7894ee8d8eddc`. Review/index 반영 뒤 exact refreeze/receipt가 필요하며 doc04/vendor script/README/ignored Notepad++와 product/stage/commit/push는 불변이다.
+
+### 2026-09-04 — Phase 28 native performance budgets
+
+- **Agent/role:** `/root`, direct builder; no new implementation agent was used.
+- **Implementation:** native packaged warm-launch probe, release benchmark executable, versioned five-metric budget schema와 isolated runner를 추가했다.
+- **Gate:** warm startup, typing p95, exact 100 MiB Scintilla load, 200-tab layout p95, descriptor-relative 2,000-file folder search가 하나의 nonzero-on-failure JSON report로 검증된다.
+- **Validation:** reference Mac Release 실측은 warm 394.334 ms, typing p95 0.014375 ms, full 100 MiB open 920.378542 ms, 200-tab p95 0.001625 ms, folder search 256.327375 ms로 5/5 PASS했다.
+- **Boundary:** benchmark executable은 배포 app에 포함되지 않는다. macros/README/ignored Notepad++/user-owned doc04/vendor script는 제외·보존했다. 독립 review·exact receipt는 pending이다.
 
 ### 2026-09-04 — Phase 27 independent content review
 
