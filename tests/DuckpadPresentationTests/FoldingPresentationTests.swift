@@ -69,10 +69,24 @@ struct FoldingPresentationTests {
             fixture.adapter.setOnlyEnabled(capability)
             let item = NSMenuItem(title: capability.title, action: selector, keyEquivalent: "")
             #expect(fixture.controller.validateMenuItem(item), "\(capability) should be enabled")
-
-            fixture.adapter.setOnlyEnabled(nil)
-            #expect(!fixture.controller.validateMenuItem(item), "\(capability) should be disabled")
         }
+
+        for (selector, capability) in cases where capability != .collapseAll {
+            fixture.adapter.setSupportedButUnavailable(capability)
+            let item = NSMenuItem(title: capability.title, action: selector, keyEquivalent: "")
+            #expect(
+                !fixture.controller.validateMenuItem(item),
+                "\(capability) should be disabled when its capability is unavailable"
+            )
+        }
+
+        fixture.adapter.setOnlyEnabled(nil)
+        let collapseAll = NSMenuItem(
+            title: FoldingCapability.collapseAll.title,
+            action: #selector(DuckpadWindowController.performCollapseAllFolds(_:)),
+            keyEquivalent: ""
+        )
+        #expect(!fixture.controller.validateMenuItem(collapseAll))
 
         fixture.adapter.supportsFolding = false
         fixture.adapter.canCollapseCurrentFold = true
@@ -261,6 +275,19 @@ struct FoldingPresentationTests {
             canCollapseCurrentFold = capability == .collapseCurrent
             canExpandCurrentFold = capability == .expandCurrent
             hasCollapsedFolds = capability == .expandAll
+        }
+
+        func setSupportedButUnavailable(_ capability: FoldingCapability) {
+            supportsFolding = true
+            canCollapseCurrentFold = true
+            canExpandCurrentFold = true
+            hasCollapsedFolds = true
+            switch capability {
+            case .collapseCurrent: canCollapseCurrentFold = false
+            case .expandCurrent: canExpandCurrentFold = false
+            case .expandAll: hasCollapsedFolds = false
+            case .collapseAll: break
+            }
         }
 
         func resetInvocations() {
