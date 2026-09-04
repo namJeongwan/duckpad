@@ -21,6 +21,36 @@ struct LanguageEditorAdapterTests {
         return (window, view)
     }
 
+    @MainActor
+    private func sendKeyEvent(
+        characters: String,
+        charactersIgnoringModifiers: String,
+        modifierFlags: NSEvent.ModifierFlags = [],
+        keyCode: UInt16,
+        to window: NSWindow
+    ) throws {
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifierFlags,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: charactersIgnoringModifiers,
+            isARepeat: false,
+            keyCode: keyCode
+        ))
+        NSApplication.shared.postEvent(event, atStart: true)
+        let queuedEvent = try #require(NSApplication.shared.nextEvent(
+            matching: .keyDown,
+            until: Date(timeIntervalSinceNow: 0.1),
+            inMode: .default,
+            dequeue: true
+        ))
+        NSApplication.shared.sendEvent(queuedEvent)
+    }
+
     @Test @MainActor
     func everyBundledLexerResolvesInVendoredLexilla() throws {
         let registry = try LanguageManifestLoader().loadBundled()
@@ -95,6 +125,358 @@ struct LanguageEditorAdapterTests {
         view.updateBraceHighlight()
         #expect(view.highlightedBraceUTF8Position == -1)
         #expect(view.matchingBraceUTF8Position == -1)
+    }
+
+    @Test @MainActor
+    func typingOpeningBraceInJSONAutoClosesAndUndoRemovesThePair() throws {
+        let (_, view) = hostedView()
+        try view.loadUTF8(Data(), revision: 0)
+        #expect(view.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+
+        view.insertCommittedText("{")
+
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{}")
+        #expect(view.caretUTF8Position == 1)
+        view.undo()
+        #expect(view.contentUTF8.isEmpty)
+    }
+
+    @Test @MainActor
+    func plainTextAndPasteDoNotTriggerSmartPairing() throws {
+        let (_, plainTextView) = hostedView()
+        try plainTextView.loadUTF8(Data(), revision: 0)
+        #expect(plainTextView.applyLexerNamed(
+            "null",
+            keywords: [],
+            tabWidth: 4,
+            useTabs: false,
+            folding: false,
+            braceMatching: false,
+            maximumStyleBytes: 1_000_000
+        ))
+        plainTextView.insertCommittedText("{")
+        #expect(String(decoding: plainTextView.contentUTF8, as: UTF8.self) == "{")
+
+        let (_, jsonView) = hostedView()
+        try jsonView.loadUTF8(Data(), revision: 0)
+        #expect(jsonView.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("{", forType: .string)
+        jsonView.paste()
+        #expect(String(decoding: jsonView.contentUTF8, as: UTF8.self) == "{")
+
+        try jsonView.loadUTF8(Data(), revision: 1)
+        let largePaste = String(repeating: "{", count: 4 * 1_024 * 1_024)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(largePaste, forType: .string)
+        jsonView.paste()
+        #expect(jsonView.documentByteLength == largePaste.utf8.count)
+        #expect(jsonView.contentPrefixUTF8(withMaximumLength: 4) == Data("{{{{".utf8))
+    }
+
+    @Test @MainActor
+    func smartEditingPreservesCRLFAndCRLineEndings() throws {
+        for (source, expected, caret) in [
+            ("{\r\n}", "{\r\n  \r\n}", 5),
+            ("{\r}", "{\r  \r}", 4),
+        ] {
+            let (window, view) = hostedView()
+            try view.loadUTF8(Data(source.utf8), revision: 0)
+            #expect(view.applyLexerNamed(
+                "json",
+                keywords: [],
+                tabWidth: 2,
+                useTabs: false,
+                folding: true,
+                braceMatching: true,
+                maximumStyleBytes: 1_000_000
+            ))
+            view.setPrimarySelectionUTF8Range(NSRange(location: 1, length: 0))
+            window.makeKeyAndOrderFront(nil)
+            view.focusEditor()
+
+            try sendKeyEvent(
+                characters: "\r",
+                charactersIgnoringModifiers: "\r",
+                keyCode: 36,
+                to: window
+            )
+
+            #expect(String(decoding: view.contentUTF8, as: UTF8.self) == expected)
+            #expect(view.caretUTF8Position == caret)
+            window.orderOut(nil)
+        }
+    }
+
+    @Test @MainActor
+    func IMECompositionDoesNotTriggerSmartPairing() throws {
+        let (window, view) = hostedView()
+        try view.loadUTF8(Data(), revision: 0)
+        #expect(view.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        window.makeKeyAndOrderFront(nil)
+        view.focusEditor()
+        try sendKeyEvent(
+            characters: "{",
+            charactersIgnoringModifiers: "[",
+            modifierFlags: [.shift],
+            keyCode: 33,
+            to: window
+        )
+        try view.loadUTF8(Data(), revision: 1)
+
+        view.setMarkedText(
+            "{",
+            selectedRange: NSRange(location: 1, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{")
+        #expect(view.hasMarkedText())
+        view.setMarkedText(
+            "[",
+            selectedRange: NSRange(location: 1, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "[")
+
+        let textInputClient = try #require(window.firstResponder as? NSTextInputClient)
+        textInputClient.insertText(
+            "{",
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{")
+        #expect(!view.hasMarkedText())
+    }
+
+    @Test @MainActor
+    func failedLexerChangePreservesThePreviousSmartEditingConfiguration() throws {
+        let (_, view) = hostedView()
+        try view.loadUTF8(Data(), revision: 0)
+        #expect(view.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+
+        #expect(!view.applyLexerNamed(
+            "not-a-real-lexer",
+            keywords: [],
+            tabWidth: 8,
+            useTabs: true,
+            folding: false,
+            braceMatching: false,
+            maximumStyleBytes: 1_000_000
+        ))
+        #expect(view.configuredBraceMatchingEnabled)
+        view.insertCommittedText("{")
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{}")
+    }
+
+    @Test @MainActor
+    func pressingReturnBetweenJSONBracesCreatesAnIndentedLineAndAlignsTheCloser() throws {
+        let (_, view) = hostedView()
+        try view.loadUTF8(Data(), revision: 0)
+        #expect(view.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        view.insertCommittedText("{")
+
+        view.insertCommittedText("\n")
+
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{\n  \n}")
+        #expect(view.caretUTF8Position == 4)
+        view.undo()
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{}")
+    }
+
+    @Test @MainActor
+    func pressingReturnAfterJSONMemberKeepsSiblingIndentAndDedentsTheCloser() throws {
+        let (_, view) = hostedView()
+        let source = "{\n  \"a\": \"b\",}"
+        try view.loadUTF8(Data(source.utf8), revision: 4)
+        #expect(view.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count - 1, length: 0))
+
+        view.insertCommittedText("\n")
+
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{\n  \"a\": \"b\",\n  \n}")
+        #expect(view.caretUTF8Position == source.utf8.count + 2)
+    }
+
+    @Test @MainActor
+    func pressingReturnAfterPythonColonUsesTheConfiguredIndentWidth() throws {
+        let (_, view) = hostedView()
+        let source = "def duck():"
+        try view.loadUTF8(Data(source.utf8), revision: 2)
+        #expect(view.applyLexerNamed(
+            "python",
+            keywords: ["def"],
+            tabWidth: 4,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+
+        view.insertCommittedText("\n")
+
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "def duck():\n    ")
+        #expect(view.caretUTF8Position == source.utf8.count + 5)
+        view.undo()
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == source)
+    }
+
+    @Test @MainActor
+    func smartIndentBoundsOnlyWhitespaceInspectionOnLongLines() throws {
+        let longMinifiedSource = String(repeating: "x", count: 4_097) + "{"
+        let (_, longMinifiedView) = hostedView()
+        try longMinifiedView.loadUTF8(Data(longMinifiedSource.utf8), revision: 0)
+        #expect(longMinifiedView.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        longMinifiedView.setPrimarySelectionUTF8Range(NSRange(
+            location: longMinifiedSource.utf8.count,
+            length: 0
+        ))
+        longMinifiedView.insertCommittedText("\n")
+        #expect(String(decoding: longMinifiedView.contentUTF8, as: UTF8.self).hasSuffix("{\n  "))
+
+        for (whitespaceCount, expectedSuffix) in [
+            (4_096, " \n  "),
+            (4_097, " \n"),
+        ] {
+            let source = "{" + String(repeating: " ", count: whitespaceCount)
+            let (_, view) = hostedView()
+            try view.loadUTF8(Data(source.utf8), revision: 0)
+            #expect(view.applyLexerNamed(
+                "json",
+                keywords: [],
+                tabWidth: 2,
+                useTabs: false,
+                folding: true,
+                braceMatching: true,
+                maximumStyleBytes: 1_000_000
+            ))
+            view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+
+            view.insertCommittedText("\n")
+
+            #expect(String(decoding: view.contentUTF8, as: UTF8.self).hasSuffix(expectedSuffix))
+        }
+    }
+
+    @Test @MainActor
+    func autoClosedPairAdvancesWorkspaceRecoveryAsOneNativeEdit() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        adapter.display(EditorBufferDescriptor(bufferID: bufferID, revision: 0))
+        #expect(adapter.applyLanguage(EditorLanguageConfiguration(
+            languageID: LanguageID(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 2),
+            folding: true,
+            braceMatching: true
+        )))
+        let view = try #require(adapter.activeScintillaView)
+
+        view.insertCommittedText("{")
+
+        let paired = try #require(adapter.recoverySnapshot(for: bufferID))
+        #expect(String(decoding: paired.utf8, as: UTF8.self) == "{}")
+        #expect(paired.revision == 1)
+        view.undo()
+        let undone = try #require(adapter.recoverySnapshot(for: bufferID))
+        #expect(undone.utf8.isEmpty)
+        #expect(undone.revision == 2)
+    }
+
+    @Test @MainActor
+    func appKitKeyEventUsesSmartEditingThroughTheScintillaFirstResponder() throws {
+        let (window, view) = hostedView()
+        try view.loadUTF8(Data(), revision: 0)
+        #expect(view.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        window.makeKeyAndOrderFront(nil)
+        view.focusEditor()
+        try sendKeyEvent(
+            characters: "{",
+            charactersIgnoringModifiers: "[",
+            modifierFlags: [.shift],
+            keyCode: 33,
+            to: window
+        )
+
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{}")
+        #expect(view.caretUTF8Position == 1)
+
+        try sendKeyEvent(
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            keyCode: 36,
+            to: window
+        )
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{\n  \n}")
+        #expect(view.caretUTF8Position == 4)
+
+        try view.loadUTF8(Data("{".utf8), revision: 7)
+        #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{")
     }
 
     @Test @MainActor

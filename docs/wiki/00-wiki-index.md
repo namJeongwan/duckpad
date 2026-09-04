@@ -85,6 +85,7 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 71 | [Phase 29A tab responsiveness and scratch UI](34-tab-responsiveness-and-scratch-ui.md) | **Approved, committed and pushed** | 탭 제목 축약 제거, 긴 제목의 가로 overflow, 500-tab O(1) 활성 표시 갱신, 즉시 선택 반영, hover affordance와 기본 Workspace UI 제거를 기록한다. commit `804a1c4`. |
 | 72 | [Phase 29B parity gap assessment and extension shortcuts](35-parity-gap-assessment.md) | **Approved, committed and pushed** | 94개 feature를 보수적으로 전수 분류하고 manifest 단축키를 native menu에 연결하며 Extended 검색 escape를 확장했다. commit `f33c4e8`. |
 | 73 | [Phase 29C document dropdown and immediate tab interaction](36-document-dropdown-and-close-latency.md) | **Implemented; review pending** | 명시적인 전체 문서 dropdown, plus 제거, overlay scrollbar와 강한 hover, 새 문서 focus, optimistic durable close와 collection 단위 갱신을 기록한다. |
+| 74 | [Phase 30 lightweight smart editing](37-lightweight-smart-editing.md) | **Content approved; commit and push pending** | Scintilla의 native insertion contract로 `{[(` 자동 닫기, JSON/Python Enter 들여쓰기, 단일 undo/recovery revision과 Plain Text·paste·IME 비개입 경계를 기록한다. 최종 독립 re-review는 0 Critical / 0 Important / 0 Minor로 승인했다. |
 
 상태 정의:
 

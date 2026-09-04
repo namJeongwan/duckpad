@@ -27,8 +27,7 @@
 #import "ScintillaView.h"
 #import "ScintillaCocoa.h"
 
-// Duckpad SwiftPM resource bridge. This is the only local upstream-source
-// patch; provenance and rationale are recorded in PROVENANCE.md.
+// Duckpad's local upstream-source patches are documented in PROVENANCE.md.
 extern NSString *DPScintillaResourcePath(NSString *name);
 
 #if !__has_feature(objc_arc)
@@ -545,6 +544,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * First removes the replacementRange.
  */
 - (void) insertText: (id) aString replacementRange: (NSRange) replacementRange {
+	const BOOL wasComposing = mMarkedTextRange.location != NSNotFound;
 	if ((mMarkedTextRange.location != NSNotFound) && (replacementRange.location != NSNotFound)) {
 		NSLog(@"Trying to insertText when there is both a marked range and a replacement range");
 	}
@@ -576,7 +576,13 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	else if ([aString isKindOfClass: [NSAttributedString class]])
 		newText = (NSString *) [aString string];
 
+	id delegate = mOwner.delegate;
+	if ([delegate respondsToSelector: @selector(scintillaWillInsertTextFromSource:)])
+		[delegate scintillaWillInsertTextFromSource: wasComposing
+			? SCITextInputSourceIMECommit : SCITextInputSourceDirect];
 	mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
+	if ([delegate respondsToSelector: @selector(scintillaDidInsertText)])
+		[delegate scintillaDidInsertText];
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -669,7 +675,12 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		NSRange posRangeCurrent = mOwner.backend->PositionsFromCharacters(NSMakeRange(replacementRange.location, 0));
 		// Note: Scintilla internally works almost always with bytes instead chars, so we need to take
 		//       this into account when determining selection ranges and such.
+		id delegate = mOwner.delegate;
+		if ([delegate respondsToSelector: @selector(scintillaWillInsertTextFromSource:)])
+			[delegate scintillaWillInsertTextFromSource: SCITextInputSourceTentative];
 		ptrdiff_t lengthInserted = mOwner.backend->InsertText(newText, CharacterSource::TentativeInput);
+		if ([delegate respondsToSelector: @selector(scintillaDidInsertText)])
+			[delegate scintillaDidInsertText];
 		posRangeCurrent.length = lengthInserted;
 		mMarkedTextRange = mOwner.backend->CharactersFromPositions(posRangeCurrent);
 		// Mark the just inserted text. Keep the marked range for later reset.

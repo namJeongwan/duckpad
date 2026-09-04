@@ -15,6 +15,19 @@ NSErrorDomain const DPScintillaErrorDomain = @"app.duckpad.scintilla";
 static NSURL *DPScintillaResourceDirectory;
 static constexpr int DPBookmarkMarker = 20;
 static constexpr int DPBookmarkMask = 1 << DPBookmarkMarker;
+static constexpr NSInteger DPSmartIndentScanLimit = 4096;
+
+static int DPEOLModeForUTF8(NSData *content) {
+    const auto *bytes = static_cast<const unsigned char *>(content.bytes);
+    for (NSUInteger index = 0; index < content.length; index += 1) {
+        if (bytes[index] == '\r') {
+            return index + 1 < content.length && bytes[index + 1] == '\n'
+                ? SC_EOL_CRLF : SC_EOL_CR;
+        }
+        if (bytes[index] == '\n') return SC_EOL_LF;
+    }
+    return SC_EOL_LF;
+}
 
 void DPScintillaConfigureResourceDirectory(NSURL *directoryURL) {
     DPScintillaResourceDirectory = [directoryURL copy];
@@ -101,6 +114,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     NSInteger _matchingBraceUTF8Position;
     NSInteger _badBraceUTF8Position;
     NSUInteger _completionItemCount;
+    BOOL _publishesDocumentEdits;
+    BOOL _smartEditingEnabled;
+    BOOL _textInputSourceKnown;
+    BOOL _directInputInsertion;
+    NSInteger _pendingSmartCaretPosition;
+    NSInteger _pendingSmartInsertionEnd;
+    int _pendingSmartCharacter;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -122,6 +142,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         _highlightedBraceUTF8Position = -1;
         _matchingBraceUTF8Position = -1;
         _badBraceUTF8Position = -1;
+        _publishesDocumentEdits = YES;
+        _pendingSmartCaretPosition = -1;
+        _pendingSmartInsertionEnd = -1;
         [_scintilla message:SCI_SETMARGINTYPEN wParam:0 lParam:SC_MARGIN_NUMBER];
         [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:40];
         [_scintilla message:SCI_SETMARGINTYPEN wParam:1 lParam:SC_MARGIN_SYMBOL];
@@ -154,6 +177,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (void)invalidate {
     self.onEdit = nil;
     self.onError = nil;
+    _pendingSmartCaretPosition = -1;
+    _pendingSmartInsertionEnd = -1;
+    _pendingSmartCharacter = 0;
     _scintilla.delegate = nil;
     [_scintilla removeFromSuperview];
     _scintilla = nil;
@@ -219,7 +245,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         return [self fail:DPScintillaErrorInvalidUTF8 description:@"Content is not valid UTF-8" error:error];
     }
     _suppressEdit = YES;
+    _pendingSmartCaretPosition = -1;
+    _pendingSmartInsertionEnd = -1;
+    _pendingSmartCharacter = 0;
     [_scintilla setEditable:YES];
+    [_scintilla message:SCI_SETEOLMODE wParam:DPEOLModeForUTF8(content)];
     [_scintilla message:SCI_CLEARALL];
     if (content.length > 0) {
         [_scintilla message:SCI_ADDTEXT
@@ -550,6 +580,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_MARKERDELETEALL wParam:DPBookmarkMarker];
 }
 
+- (void)updateModificationEventMask {
+    uptr_t mask = _publishesDocumentEdits
+        ? SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT : 0;
+    if (_smartEditingEnabled) mask |= SC_MOD_INSERTCHECK;
+    [_scintilla message:SCI_SETMODEVENTMASK wParam:mask];
+}
+
 - (void)shareDocumentWithView:(DPScintillaEditorView *)source {
     if (source == nil || source == self) return;
     const sptr_t document = [source->_scintilla message:SCI_GETDOCPOINTER];
@@ -557,7 +594,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     // The primary view remains the sole document-modification observer. A
     // shared document notifies every attached Scintilla view, so enabling this
     // mask here would publish each edit twice to Application.
-    [_scintilla message:SCI_SETMODEVENTMASK wParam:0];
+    _publishesDocumentEdits = NO;
+    [self updateModificationEventMask];
     [self synchronizeRevision:source.revision];
 }
 
@@ -617,7 +655,21 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)insertCommittedText:(NSString *)text {
     if (![self preflightUserMutation]) return;
+    _textInputSourceKnown = YES;
+    _directInputInsertion = YES;
     [[_scintilla content] insertText:text];
+    _directInputInsertion = NO;
+    _textInputSourceKnown = NO;
+}
+
+- (void)scintillaWillInsertTextFromSource:(SCITextInputSource)source {
+    _textInputSourceKnown = YES;
+    _directInputInsertion = source == SCITextInputSourceDirect;
+}
+
+- (void)scintillaDidInsertText {
+    _directInputInsertion = NO;
+    _textInputSourceKnown = NO;
 }
 - (void)setMarkedText:(NSString *)text selectedRange:(NSRange)selectedRange replacementRange:(NSRange)replacementRange {
     if (![self preflightUserMutation]) return;
@@ -766,10 +818,17 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _languageConfigurationCount += 1;
     _maximumStyleBytes = maximumStyleBytes;
     const BOOL overBudget = self.documentByteLength > maximumStyleBytes;
-    _braceMatchingEnabled = braceMatching && !overBudget;
+    const BOOL nextBraceMatchingEnabled = braceMatching && !overBudget;
     NSString *effectiveName = overBudget ? @"null" : lexerName;
     Scintilla::ILexer5 *lexer = CreateLexer(effectiveName.UTF8String);
     if (lexer == nullptr) return NO;
+    _pendingSmartCaretPosition = -1;
+    _pendingSmartInsertionEnd = -1;
+    _pendingSmartCharacter = 0;
+    _braceMatchingEnabled = nextBraceMatchingEnabled;
+    _smartEditingEnabled = _braceMatchingEnabled
+        && ![effectiveName isEqualToString:@"null"];
+    [self updateModificationEventMask];
     _semanticStyleRoles.clear();
     const int namedStyles = lexer->NamedStyles();
     for (int style = 0; style < namedStyles; style += 1) {
@@ -995,10 +1054,127 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     return YES;
 }
 
+- (void)handleSmartCharacterAdded:(SCNotification *)notification {
+    if (_pendingSmartCaretPosition < 0) return;
+    const NSInteger caret = [_scintilla message:SCI_GETCURRENTPOS];
+    if (notification->characterSource == SC_CHARACTERSOURCE_DIRECT_INPUT
+        && notification->ch == _pendingSmartCharacter
+        && caret == _pendingSmartInsertionEnd) {
+        [_scintilla message:SCI_SETEMPTYSELECTION wParam:(uptr_t)_pendingSmartCaretPosition];
+    }
+    _pendingSmartCaretPosition = -1;
+    _pendingSmartInsertionEnd = -1;
+    _pendingSmartCharacter = 0;
+}
+
+- (void)handleSmartInsertionCheck:(SCNotification *)notification {
+    _pendingSmartCaretPosition = -1;
+    _pendingSmartInsertionEnd = -1;
+    _pendingSmartCharacter = 0;
+    if (!_smartEditingEnabled || [[_scintilla content] hasMarkedText]
+        || notification->length <= 0 || notification->text == nullptr) return;
+    if (notification->length > 2) return;
+    const std::string inserted(notification->text, static_cast<size_t>(notification->length));
+    const BOOL isNewline = inserted == "\n" || inserted == "\r" || inserted == "\r\n";
+    const int opening = inserted.size() == 1 ? static_cast<unsigned char>(inserted[0]) : 0;
+    const char *pair = nullptr;
+    switch (opening) {
+    case '{': pair = "{}"; break;
+    case '[': pair = "[]"; break;
+    case '(': pair = "()"; break;
+    default: break;
+    }
+    BOOL isDirectInput = _textInputSourceKnown && _directInputInsertion;
+    if (!_textInputSourceKnown && self.window.firstResponder == [_scintilla content]) {
+        NSEvent *event = NSApp.currentEvent;
+        const NSEventModifierFlags modifiers = event.modifierFlags
+            & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption);
+        NSString *characters = event.characters;
+        isDirectInput = event.type == NSEventTypeKeyDown
+            && modifiers == 0
+            && ((pair != nullptr && [characters isEqualToString:[NSString stringWithFormat:@"%c", opening]])
+                || (isNewline && ([characters isEqualToString:@"\r"] || [characters isEqualToString:@"\n"])));
+    }
+    if (!isDirectInput) return;
+    if (pair != nullptr) {
+        [_scintilla message:SCI_CHANGEINSERTION
+                     wParam:2
+                     lParam:reinterpret_cast<sptr_t>(pair)];
+        _pendingSmartCaretPosition = notification->position + 1;
+        _pendingSmartInsertionEnd = notification->position + 2;
+        _pendingSmartCharacter = opening;
+        return;
+    }
+    if (!isNewline) return;
+
+    const NSInteger position = notification->position;
+    const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:(uptr_t)position];
+    const NSInteger lineStart = [_scintilla message:SCI_POSITIONFROMLINE wParam:(uptr_t)line];
+    std::string baseIndent;
+    for (NSInteger cursor = lineStart; cursor < position; cursor += 1) {
+        const int character = static_cast<int>([_scintilla message:SCI_GETCHARAT wParam:(uptr_t)cursor]);
+        if (character != ' ' && character != '\t') break;
+        if (baseIndent.size() >= static_cast<size_t>(DPSmartIndentScanLimit)) return;
+        baseIndent.push_back(static_cast<char>(character));
+    }
+    NSInteger previous = position - 1;
+    NSInteger trailingWhitespaceLength = 0;
+    while (previous >= lineStart) {
+        const int character = static_cast<int>([_scintilla message:SCI_GETCHARAT wParam:(uptr_t)previous]);
+        if (character != ' ' && character != '\t') break;
+        if (trailingWhitespaceLength >= DPSmartIndentScanLimit) return;
+        previous -= 1;
+        trailingWhitespaceLength += 1;
+    }
+    const int previousCharacter = previous >= lineStart
+        ? static_cast<int>([_scintilla message:SCI_GETCHARAT wParam:(uptr_t)previous]) : 0;
+    const int nextCharacter = static_cast<int>([_scintilla message:SCI_GETCHARAT wParam:(uptr_t)position]);
+    const BOOL previousIsOpener = previousCharacter == '{'
+        || previousCharacter == '[' || previousCharacter == '(';
+    const BOOL previousStartsBlock = previousIsOpener
+        || (previousCharacter == ':' && [_lexerName isEqualToString:@"python"]);
+    const BOOL beforeCloser = nextCharacter == '}'
+        || nextCharacter == ']' || nextCharacter == ')';
+    const NSUInteger tabWidth = static_cast<NSUInteger>(MAX(
+        1, [_scintilla message:SCI_GETTABWIDTH]
+    ));
+    const BOOL useTabs = [_scintilla message:SCI_GETUSETABS] != 0;
+    const std::string indentUnit = useTabs ? "\t" : std::string(tabWidth, ' ');
+    std::string innerIndent = baseIndent;
+    if (previousStartsBlock) innerIndent += indentUnit;
+    std::string closerIndent = baseIndent;
+    if (!previousIsOpener && !closerIndent.empty()) {
+        if (closerIndent.back() == '\t') {
+            closerIndent.pop_back();
+        } else {
+            NSUInteger removed = 0;
+            while (!closerIndent.empty() && closerIndent.back() == ' ' && removed < tabWidth) {
+                closerIndent.pop_back();
+                removed += 1;
+            }
+        }
+    }
+    std::string replacement = inserted + innerIndent;
+    const NSInteger desiredCaret = position + static_cast<NSInteger>(replacement.size());
+    if (beforeCloser) replacement += inserted + closerIndent;
+    [_scintilla message:SCI_CHANGEINSERTION
+                 wParam:(uptr_t)replacement.size()
+                 lParam:reinterpret_cast<sptr_t>(replacement.c_str())];
+    if (beforeCloser) {
+        _pendingSmartCaretPosition = desiredCaret;
+        _pendingSmartInsertionEnd = position + static_cast<NSInteger>(replacement.size());
+        _pendingSmartCharacter = static_cast<unsigned char>(inserted.front());
+    }
+}
+
 - (void)notification:(SCNotification *)notification {
     if (notification->nmhdr.code == SCN_MARGINCLICK && notification->margin == 1) {
         const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:notification->position];
         [_scintilla message:SCI_TOGGLEFOLD wParam:line];
+        return;
+    }
+    if (notification->nmhdr.code == SCN_CHARADDED) {
+        [self handleSmartCharacterAdded:notification];
         return;
     }
     if (notification->nmhdr.code == SCN_UPDATEUI) {
@@ -1006,6 +1182,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     }
     if (_suppressEdit || notification->nmhdr.code != SCN_MODIFIED) return;
     const int flags = notification->modificationType;
+    if ((flags & SC_MOD_INSERTCHECK) != 0) {
+        [self handleSmartInsertionCheck:notification];
+        return;
+    }
     const BOOL inserted = (flags & SC_MOD_INSERTTEXT) != 0;
     const BOOL deleted = (flags & SC_MOD_DELETETEXT) != 0;
     if (!inserted && !deleted) return;

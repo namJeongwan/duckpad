@@ -769,6 +769,91 @@ struct ScintillaBridgeTests {
     }
 
     @Test @MainActor
+    func smartPairingKeepsCaretInTheSplitPaneThatReceivedInput() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 2),
+            folding: true,
+            braceMatching: true
+        )))
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+
+        secondary.insertCommittedText("{")
+
+        #expect(String(decoding: primary.contentUTF8, as: UTF8.self) == "{}")
+        #expect(String(decoding: secondary.contentUTF8, as: UTF8.self) == "{}")
+        #expect(secondary.caretUTF8Position == 1)
+    }
+
+    @Test @MainActor
+    func disablingSmartEditingClearsPendingCaretStateInEverySplitPane() throws {
+        _ = NSApplication.shared
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 2),
+            folding: true,
+            braceMatching: true
+        )))
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = adapter.view
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        secondary.focusEditor()
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.shift],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "{",
+            charactersIgnoringModifiers: "[",
+            isARepeat: false,
+            keyCode: 33
+        ))
+        NSApplication.shared.postEvent(event, atStart: true)
+        let queuedEvent = try #require(NSApplication.shared.nextEvent(
+            matching: .keyDown,
+            until: Date(timeIntervalSinceNow: 0.1),
+            inMode: .default,
+            dequeue: true
+        ))
+        NSApplication.shared.sendEvent(queuedEvent)
+        #expect(secondary.caretUTF8Position == 1)
+
+        #expect(adapter.applyLanguage(.init(
+            languageID: .plainText,
+            lexerName: "null",
+            indentation: .init(width: 4),
+            folding: false,
+            braceMatching: false
+        )))
+        primary.setPrimarySelectionUTF8Range(NSRange(location: 1, length: 0))
+        primary.insertCommittedText("{")
+
+        #expect(String(decoding: primary.contentUTF8, as: UTF8.self) == "{{}")
+        #expect(primary.caretUTF8Position == 2)
+    }
+
+    @Test @MainActor
     func closeSplitInvalidatesAndEvictsSecondaryNativeView() throws {
         let adapter = ScintillaEditorAdapter()
         let bufferID = BufferID()
