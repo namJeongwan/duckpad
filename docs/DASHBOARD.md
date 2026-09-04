@@ -20,7 +20,7 @@ Last updated: 2026-09-04 (Asia/Seoul)
 | Focused validation | Complete | Debug/Release language suite, split-pane regression, builds, and production language smoke pass |
 | Repository-wide validation | Known baseline blockers | Monolithic run exits with AppKit `signal 11`; isolated Scintilla suite also has one unrelated replace-reservation failure |
 | Independent code review | Approved | Final re-review: 0 Critical / 0 Important / 0 Minor |
-| Commit and remote branch push | Pending | Allowed only after review findings are closed |
+| Commit and remote branch push | Complete | `3c718ef` audited and pushed to `origin/feature/smart-editing` |
 
 Deferred from this slice: quote pairing, selection surround, closer skip-over,
 and standalone closing-delimiter reindent. Those behaviors require broader key

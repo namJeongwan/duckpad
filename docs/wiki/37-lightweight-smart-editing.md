@@ -1,6 +1,6 @@
 # Phase 30 — Lightweight smart editing
 
-Status: **Content approved; commit and push pending**
+Status: **Approved, committed and pushed**
 
 ## Outcome
 
@@ -94,3 +94,10 @@ gates, the production language smoke, and all five frozen performance budgets
 pass after remediation. Final independent re-review approved the exact
 candidate for commit and push with 0 Critical, 0 Important, and 0 Minor
 findings.
+
+## Delivery evidence
+
+Commit `3c718efb1291229d8deb5d61c64de5186398e394` was created through the
+verified local commit wrapper, passed post-commit audit, and was pushed to
+`origin/feature/smart-editing`. Its canonical review receipt SHA-256 is
+`2249e4e041175d1dd2b27a390fbb6eac46d725e0a498b180f466b8842cc3b0c2`.
