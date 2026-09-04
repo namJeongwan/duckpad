@@ -22,7 +22,7 @@ private final class AccessibleTabView: NSView {
         if let trackingArea { removeTrackingArea(trackingArea) }
         let area = NSTrackingArea(
             rect: .zero,
-            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited],
+            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited],
             owner: self,
             userInfo: nil
         )
@@ -105,6 +105,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         closeButton.isBordered = false
         closeButton.imageScaling = .scaleProportionallyDown
         closeButton.contentTintColor = .secondaryLabelColor
+        closeButton.wantsLayer = true
+        closeButton.layer?.cornerRadius = 5
         closeButton.target = self
         closeButton.action = #selector(closePressed)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
@@ -125,8 +127,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
             closeButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 4),
             closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
             closeButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 16),
-            closeButton.heightAnchor.constraint(equalToConstant: 16),
+            closeButton.widthAnchor.constraint(equalToConstant: 20),
+            closeButton.heightAnchor.constraint(equalToConstant: 20),
         ])
     }
 
@@ -193,17 +195,25 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     private func updateVisualState() {
         guard isViewLoaded else { return }
         let active = configuredTab?.isActive == true || isSelected
-        titleLabel.textColor = active ? .labelColor : .secondaryLabelColor
+        titleLabel.textColor = active || isHovered ? .labelColor : .secondaryLabelColor
         if active {
-            view.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.96).cgColor
-            view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.72).cgColor
+            view.layer?.backgroundColor = (isHovered
+                ? NSColor.controlAccentColor.withAlphaComponent(0.18)
+                : NSColor.controlBackgroundColor.withAlphaComponent(0.96)).cgColor
+            view.layer?.borderColor = (isHovered
+                ? NSColor.controlAccentColor.withAlphaComponent(0.65)
+                : NSColor.separatorColor.withAlphaComponent(0.72)).cgColor
         } else if isHovered {
-            view.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.10).cgColor
-            view.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.36).cgColor
+            view.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.17).cgColor
+            view.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.62).cgColor
         } else {
             view.layer?.backgroundColor = NSColor.clear.cgColor
             view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.24).cgColor
         }
+        closeButton.contentTintColor = isHovered ? .controlAccentColor : .secondaryLabelColor
+        closeButton.layer?.backgroundColor = isHovered
+            ? NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+            : NSColor.clear.cgColor
         activeIndicator.isHidden = !active
     }
 
@@ -307,7 +317,6 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
     public var onActivate: ((TabID) -> Void)?
     public var onClose: ((TabID) -> Void)?
-    public var onAdd: (() -> Void)?
     public var onMove: ((TabID, Int) -> Void)?
     public var onContextAction: ((TabID, TabContextAction) -> Void)?
     public var viewportPolicy = TabStripViewportPolicy() {
@@ -318,11 +327,6 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     let hostedScrollView = TabOverflowScrollView()
     let flowLayout = MultilineTabCollectionLayout()
     let documentSwitcher = DocumentSwitcherButton(frame: .zero)
-    private let addButton = NSButton(
-        image: NSImage(systemSymbolName: "plus", accessibilityDescription: "New Scratch Tab") ?? NSImage(),
-        target: nil,
-        action: nil
-    )
     private var tabs: [TabSnapshot] = []
     private var heightConstraint: NSLayoutConstraint!
     private var measuredContentWidth: CGFloat = 1
@@ -360,26 +364,20 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedScrollView.autohidesScrollers = true
         hostedScrollView.hasVerticalScroller = true
         hostedScrollView.hasHorizontalScroller = true
+        hostedScrollView.scrollerStyle = .overlay
+        hostedScrollView.verticalScrollElasticity = .none
+        hostedScrollView.horizontalScrollElasticity = .none
+        hostedScrollView.scrollerInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 2)
         hostedScrollView.borderType = .noBorder
         hostedScrollView.translatesAutoresizingMaskIntoConstraints = false
         hostedScrollView.setAccessibilityIdentifier("duckpad.tab.overflow")
         hostedScrollView.setAccessibilityLabel("Multiline tab rows")
 
-        addButton.target = self
-        addButton.action = #selector(addPressed)
-        addButton.bezelStyle = .inline
-        addButton.isBordered = false
-        addButton.contentTintColor = .secondaryLabelColor
-        addButton.toolTip = "New Scratch Tab"
-        addButton.setAccessibilityIdentifier("duckpad.tab.add")
-        addButton.setAccessibilityLabel("New Scratch Tab")
-        addButton.translatesAutoresizingMaskIntoConstraints = false
         documentSwitcher.onActivate = { [weak self] id in
             guard self?.interactionsEnabled == true else { return }
             self?.onActivate?(id)
         }
         addSubview(hostedScrollView)
-        addSubview(addButton)
         addSubview(documentSwitcher)
         heightConstraint = heightAnchor.constraint(equalToConstant: 34)
         NSLayoutConstraint.activate([
@@ -387,14 +385,10 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             hostedScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             hostedScrollView.topAnchor.constraint(equalTo: topAnchor),
             hostedScrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            hostedScrollView.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: -2),
-            addButton.trailingAnchor.constraint(equalTo: documentSwitcher.leadingAnchor, constant: -1),
-            addButton.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            addButton.widthAnchor.constraint(equalToConstant: 26),
-            addButton.heightAnchor.constraint(equalToConstant: 24),
-            documentSwitcher.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
-            documentSwitcher.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            documentSwitcher.widthAnchor.constraint(equalToConstant: 44),
+            hostedScrollView.trailingAnchor.constraint(equalTo: documentSwitcher.leadingAnchor, constant: -6),
+            documentSwitcher.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            documentSwitcher.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            documentSwitcher.widthAnchor.constraint(equalToConstant: 128),
             documentSwitcher.heightAnchor.constraint(equalToConstant: 24),
         ])
         flowLayout.onContentSizeChange = { [weak self] size in
@@ -489,7 +483,39 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             isSynchronizingSelection = false
             updateMetrics.itemReloads += affected.count
             scrollSelectedTabVisible()
-        default:
+        case .tabInserted:
+            apply(tabs: change.snapshot.tabs)
+        case .tabRemovalPending(let index):
+            if tabs.count == change.snapshot.tabs.count + 1, tabs.indices.contains(index) {
+                // Shrink the custom layout cache before the collection view
+                // observes the smaller data source, avoiding stale attributes
+                // for the old final index during AppKit's delete transaction.
+                flowLayout.itemWidths = change.snapshot.tabs.map(tabWidth)
+                tabs = change.snapshot.tabs
+                activeIndex = tabs.firstIndex(where: \.isActive)
+                hostedCollectionView.deleteItems(at: [IndexPath(item: index, section: 0)])
+                synchronizeSelection()
+                scrollSelectedTabVisible()
+            } else if tabs.map(\.id) == change.snapshot.tabs.map(\.id) {
+                tabs = change.snapshot.tabs
+                activeIndex = tabs.firstIndex(where: \.isActive)
+                synchronizeSelection()
+                refreshVisibleItems()
+            } else {
+                apply(tabs: change.snapshot.tabs)
+            }
+        case .tabRemoved:
+            guard tabs.map(\.id) == change.snapshot.tabs.map(\.id) else {
+                apply(tabs: change.snapshot.tabs)
+                return
+            }
+            tabs = change.snapshot.tabs
+            activeIndex = tabs.firstIndex(where: \.isActive)
+            synchronizeSelection()
+            refreshVisibleItems()
+        case .tabsReordered:
+            apply(tabs: change.snapshot.tabs)
+        case .reset:
             apply(tabs: change.snapshot.tabs)
         }
     }
@@ -497,7 +523,6 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     public func setInteractionsEnabled(_ isEnabled: Bool) {
         interactionsEnabled = isEnabled
         hostedCollectionView.isSelectable = isEnabled
-        addButton.isEnabled = isEnabled
         documentSwitcher.setInteractionsEnabled(isEnabled)
     }
 
@@ -510,7 +535,6 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedCollectionView.collectionViewLayout = nil
         onActivate = nil
         onClose = nil
-        onAdd = nil
         onMove = nil
         onContextAction = nil
         documentSwitcher.onActivate = nil
@@ -651,7 +675,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         let documentSize = NSSize(width: width, height: height)
         let widthChanged = hostedCollectionView.frame.width != width
         hostedCollectionView.setRequiredDocumentSize(documentSize)
-        hostedScrollView.autohidesScrollers = !horizontallyOverflows
+        hostedScrollView.autohidesScrollers = true
         hostedScrollView.requiresHorizontalScroller = horizontallyOverflows
         if widthChanged { flowLayout.invalidateLayout() }
     }
@@ -711,11 +735,6 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
                 row: flowLayout.row(forItemAt: path.item) ?? 0
             )
         }
-    }
-
-    @objc private func addPressed() {
-        guard interactionsEnabled else { return }
-        onAdd?()
     }
 
     private func tabWidth(_ tab: TabSnapshot) -> CGFloat {

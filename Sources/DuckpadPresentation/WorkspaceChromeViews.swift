@@ -57,12 +57,13 @@ final class DocumentSwitcherButton: NSButton {
         super.init(frame: frameRect)
         target = self
         action = #selector(showDocuments)
-        bezelStyle = .inline
-        isBordered = false
-        image = NSImage(systemSymbolName: "list.bullet.rectangle", accessibilityDescription: "Open Documents")
-        imagePosition = .imageLeading
+        bezelStyle = .roundRect
+        controlSize = .small
+        isBordered = true
+        image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Show All Documents")
+        imagePosition = .imageTrailing
         imageScaling = .scaleProportionallyDown
-        font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        font = .systemFont(ofSize: 11, weight: .medium)
         contentTintColor = .secondaryLabelColor
         toolTip = "Open Documents"
         setAccessibilityIdentifier("duckpad.tab.documents")
@@ -139,7 +140,7 @@ final class DocumentSwitcherButton: NSButton {
     }
 
     private func updateButtonLabel() {
-        title = tabs.isEmpty ? "" : "\(tabs.count)"
+        title = tabs.isEmpty ? "Documents" : "Documents (\(tabs.count))"
         toolTip = tabs.isEmpty ? "No Open Documents" : "Open Documents (\(tabs.count))"
         setAccessibilityValue(tabs.isEmpty ? "No open documents" : "\(tabs.count) open documents")
     }

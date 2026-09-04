@@ -543,7 +543,7 @@ struct AppKitHostedTests {
     }
 
     #expect(strip.documentSwitcher.tabs.count == 3)
-    #expect(strip.documentSwitcher.title == "3")
+    #expect(strip.documentSwitcher.title == "Documents (3)")
     #expect(strip.documentSwitcher.tabs.map(\.isActive) == [false, true, false])
     #expect(strip.documentSwitcher.tabs[2].isDirty)
 
@@ -1354,7 +1354,10 @@ struct AppKitHostedTests {
     let item = try! #require(menuItem("Close Other Tabs", in: DuckpadMainMenuFactory.make(target: controller)))
     #expect(controller.validateMenuItem(item))
     controller.performCloseOtherTabs(item)
-    for _ in 0..<1_000 where workspace.snapshot().tabs.count != 1 { await Task.yield() }
+    for _ in 0..<1_000 where workspace.snapshot().tabs.count != 1
+        || workspace.recentlyClosedTabCount != 2 {
+        await Task.yield()
+    }
 
     #expect(workspace.snapshot().tabs.map(\.id) == [active])
     #expect(workspace.recentlyClosedTabCount == 2)
@@ -1406,6 +1409,7 @@ struct AppKitHostedTests {
     #expect(snapshot.tabs.count == 2)
     #expect(snapshot.tabs.first(where: \.isActive)?.id != original)
     #expect(snapshot.tabs.first(where: \.isActive)?.title == "new 2")
+    #expect(controller.window?.firstResponder === controller.editor.textView)
 }
 
 @Test @MainActor func layoutCacheIsSinglePassOOneLookupAndInvalidatesForEngineChanges() {
@@ -1692,7 +1696,10 @@ struct AppKitHostedTests {
     ))
 
     item.view.updateTrackingAreas()
-    #expect(item.view.trackingAreas.contains { $0.options.contains(.inVisibleRect) })
+    #expect(item.view.trackingAreas.contains {
+        $0.options.contains(.inVisibleRect) && $0.options.contains(.activeAlways)
+    })
+    #expect(close.frame.width >= 20)
     #expect(close.isHidden)
     item.view.mouseEntered(with: event)
     #expect(!close.isHidden)
@@ -1700,6 +1707,67 @@ struct AppKitHostedTests {
     item.view.mouseExited(with: event)
     #expect(close.isHidden)
     #expect(item.view.layer?.backgroundColor == before)
+}
+
+@Test @MainActor func tabChromeUsesExplicitDocumentDropdownWithoutNewButton() {
+    let tabs = makeTabs(count: 64, activeIndex: 40)
+    let (window, _, strip) = hostStrip(width: 900, height: 620, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    #expect(strip.documentSwitcher.title == "Documents (64)")
+    #expect(strip.documentSwitcher.imagePosition == .imageTrailing)
+    #expect(strip.documentSwitcher.accessibilityLabel() == "Open Documents")
+    #expect(descendantButtons(of: strip).contains {
+        $0.accessibilityIdentifier() == "duckpad.tab.add"
+    } == false)
+    #expect(strip.hostedScrollView.scrollerStyle == .overlay)
+    #expect(strip.hostedScrollView.autohidesScrollers)
+    #expect(strip.hostedScrollView.verticalScrollElasticity == .none)
+    #expect(strip.hostedScrollView.horizontalScrollElasticity == .none)
+}
+
+@Test @MainActor func pendingTabCloseDeletesOneCollectionItemWithoutFullReload() {
+    let original = makeTabs(count: 64, activeIndex: 40)
+    let (window, _, strip) = hostStrip(width: 900, height: 620, tabs: original)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let removedIndex = 25
+    var remaining = original
+    let removed = remaining.remove(at: removedIndex)
+    let snapshot = WorkspaceSnapshot(
+        sessionID: SessionID(),
+        tabs: remaining,
+        activeBuffer: remaining.first(where: \.isActive)?.buffer,
+        persistence: .pending,
+        startup: .ready
+    )
+    let before = strip.updateMetrics
+
+    let elapsed = ContinuousClock().measure {
+        strip.apply(change: WorkspaceChange(
+            snapshot: snapshot,
+            kind: .tabRemovalPending(index: removedIndex)
+        ))
+    }
+
+    #expect(strip.hostedCollectionView.numberOfItems(inSection: 0) == 63)
+    #expect(strip.updateMetrics.fullReloads == before.fullReloads)
+    #expect(strip.documentSwitcher.title == "Documents (63)")
+    #expect(elapsed < .milliseconds(250))
+
+    strip.apply(change: WorkspaceChange(
+        snapshot: snapshot,
+        kind: .tabRemoved(index: removedIndex, retiredBufferID: removed.buffer.bufferID)
+    ))
+    #expect(strip.hostedCollectionView.numberOfItems(inSection: 0) == 63)
+    #expect(strip.updateMetrics.fullReloads == before.fullReloads)
 }
 
 @Test @MainActor func textViewAdapterOwnsLiveTextAndEmitsIncrementalRevisionCheckedEdit() async {

@@ -95,6 +95,9 @@ public enum WorkspaceChangeKind: Equatable, Sendable {
     case activeTabChanged(previousIndex: Int?, currentIndex: Int)
     case tabUpdated(index: Int)
     case bufferEdited(index: Int)
+    /// Optimistic visual removal before durability. The editor buffer remains
+    /// alive until the matching `tabRemoved` commit event.
+    case tabRemovalPending(index: Int)
     case tabRemoved(index: Int, retiredBufferID: BufferID)
     case tabsReordered(fromIndex: Int, toIndex: Int)
     case persistence
@@ -533,11 +536,18 @@ public final class ScratchWorkspaceUseCase {
             )
         }
 
+        let original = session
         var candidate = session
         do {
             _ = try candidate.close(tabID: tabID, discardingDirty: buffer.isDirty && decision == .discard)
             let replacementCreated = candidate.tabs.isEmpty
             if replacementCreated { candidate.addUntitled() }
+            // Publish the lightweight tab transition immediately. The editor
+            // keeps the removed buffer alive until the durable commit event,
+            // so a failed save can restore the exact original snapshot.
+            session = candidate
+            persistenceState = .pending
+            publish(.tabRemovalPending(index: removedIndex))
             switch await save(candidate) {
             case .saved:
                 if let closeRecoveryCommitter {
@@ -546,12 +556,18 @@ public final class ScratchWorkspaceUseCase {
                         break
                     case .failed(let error):
                         let failure = PersistenceFailure(operation: .save, cause: error)
+                        session = original
                         persistenceState = .failed(failure)
-                        publishFailure(failure, retry: .close(tabID, decision, expectedRevision: expectedRevision))
+                        publish(
+                            .reset,
+                            failure: PersistenceFailureEvent(
+                                failure: failure,
+                                retry: .close(tabID, decision, expectedRevision: expectedRevision)
+                            )
+                        )
                         return .persistenceFailed(failure)
                     }
                 }
-                session = candidate
                 if let restorable {
                     recentlyClosedTabs.append(RecentlyClosedTab(
                         id: restorable.id,
@@ -569,8 +585,15 @@ public final class ScratchWorkspaceUseCase {
                 publish(.tabRemoved(index: removedIndex, retiredBufferID: buffer.id))
                 return .closed(activeTabID: candidate.activeTabID!, replacementCreated: replacementCreated, persistence: .saved)
             case .failed(let failure):
+                session = original
                 persistenceState = .failed(failure)
-                publishFailure(failure, retry: .close(tabID, decision, expectedRevision: expectedRevision))
+                publish(
+                    .reset,
+                    failure: PersistenceFailureEvent(
+                        failure: failure,
+                        retry: .close(tabID, decision, expectedRevision: expectedRevision)
+                    )
+                )
                 return .persistenceFailed(failure)
             }
         } catch let error as SessionError { return .rejected(error) }

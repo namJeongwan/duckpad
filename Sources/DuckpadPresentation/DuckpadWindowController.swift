@@ -353,7 +353,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             token: accessibilityToken
         )
         editorBinding = EditorBindingUseCase(workspace: workspace, editor: activeEditor)
-        tabStrip.onAdd = { [weak self] in self?.performAdd() }
         tabStrip.onActivate = { [weak self] id in self?.performActivate(id) }
         tabStrip.onClose = { [weak self] id in self?.performClose(id) }
         tabStrip.onMove = { [weak self] id, index in self?.performMove(id, to: index) }
@@ -692,7 +691,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             defer { self.pendingNewScratchTasks.removeValue(forKey: token) }
             guard !self.terminationReviewInProgress,
                   self.workspace.snapshot().startup == .ready else { return }
-            _ = await self.workspace.addScratch()
+            if case .applied = await self.workspace.addScratch() {
+                self.activeEditor.focus()
+            }
         }
         pendingNewScratchTasks[token] = task
     }
@@ -715,7 +716,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard workspaceInteractionsAreActionable else { return }
         Task { @MainActor [weak self] in
             guard let self, self.workspaceInteractionsAreActionable else { return }
-            _ = await self.workspace.activate(tabID: id)
+            if case .applied = await self.workspace.activate(tabID: id) {
+                self.activeEditor.focus()
+            }
         }
     }
 
@@ -2313,7 +2316,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func shouldRefreshLanguage(for change: WorkspaceChange) -> Bool {
         switch change.kind {
-        case .reset, .tabInserted, .activeTabChanged, .tabRemoved:
+        case .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabRemoved:
             return true
         case .tabUpdated(let index):
             return change.snapshot.tabs.indices.contains(index) && change.snapshot.tabs[index].isActive
@@ -2324,7 +2327,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func shouldInvalidateDocumentIntelligence(for change: WorkspaceChange) -> Bool {
         switch change.kind {
-        case .bufferEdited, .reset, .tabInserted, .activeTabChanged, .tabRemoved:
+        case .bufferEdited, .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabRemoved:
             return true
         case .tabUpdated(let index):
             return change.snapshot.tabs.indices.contains(index) && change.snapshot.tabs[index].isActive
@@ -2335,7 +2338,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func shouldCancelCompletion(for change: WorkspaceChange) -> Bool {
         switch change.kind {
-        case .reset, .tabInserted, .activeTabChanged, .tabRemoved:
+        case .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabRemoved:
             return true
         case .bufferEdited, .tabUpdated, .persistence, .tabsReordered:
             return false
@@ -2377,6 +2380,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
         )
         await fileUseCase?.releaseSecurityScopedAccessForClosedDocuments()
+        if case .completed = outcome { activeEditor.focus() }
         if case .failed(let failure) = outcome { presentCloseFailure(failure) }
     }
 

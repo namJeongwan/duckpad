@@ -5,12 +5,30 @@ import Testing
 
 private actor RecoveryMetadataStore: SessionStore {
     private var stored: StoredSession?
+    private var failure: SessionStoreError?
+    private var blockNextCommit = false
+    private var commitEntered = false
+    private var releaseCommit = false
     func loadSession() async throws(SessionStoreError) -> StoredSession? { stored }
     func commitSession(_ session: ScratchSession, generation: PersistenceGeneration) async throws(SessionStoreError) -> SessionCommitResult {
+        if blockNextCommit {
+            blockNextCommit = false
+            commitEntered = true
+            while !releaseCommit { await Task.yield() }
+        }
+        if let failure { throw failure }
         if let stored, stored.generation >= generation { return .superseded(durableGeneration: stored.generation) }
         stored = StoredSession(session: session, generation: generation)
         return .committed
     }
+    func armBlockedFailure(_ failure: SessionStoreError) {
+        self.failure = failure
+        blockNextCommit = true
+        commitEntered = false
+        releaseCommit = false
+    }
+    func waitUntilCommitEntered() async { while !commitEntered { await Task.yield() } }
+    func releaseBlockedCommit() { releaseCommit = true }
 }
 
 private actor RecoveryStoreFake: RecoveryStore {
@@ -99,9 +117,10 @@ private final class RecoveryEditorFake: EditorPort {
 
 @MainActor
 private func recoveryHarness(
-    store: RecoveryStoreFake
+    store: RecoveryStoreFake,
+    metadataStore: RecoveryMetadataStore = RecoveryMetadataStore()
 ) -> (ScratchWorkspaceUseCase, RecoveryEditorFake, EditorBindingUseCase, SessionRecoveryUseCase) {
-    let workspace = ScratchWorkspaceUseCase(store: RecoveryMetadataStore())
+    let workspace = ScratchWorkspaceUseCase(store: metadataStore)
     let editor = RecoveryEditorFake()
     let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
     let recovery = SessionRecoveryUseCase(workspace: workspace, editor: editor, store: store, debounce: .milliseconds(20))
@@ -111,6 +130,47 @@ private func recoveryHarness(
     }
     binding.render(workspace.snapshot())
     return (workspace, editor, binding, recovery)
+}
+
+@Test @MainActor func pendingAutosaveCannotArchiveProvisionalCloseBeforePrimaryRollback() async throws {
+    let recoveryStore = RecoveryStoreFake()
+    let metadataStore = RecoveryMetadataStore()
+    let (workspace, _, _, recovery) = recoveryHarness(
+        store: recoveryStore,
+        metadataStore: metadataStore
+    )
+    #expect(await recovery.start() == .saved)
+    await recovery.waitForPendingAutosave()
+    let original = try #require(workspace.snapshot().tabs.first)
+
+    // Model a debounce that was already armed before close began. The primary
+    // session write then blocks and fails, leaving a crash-sized window in
+    // which recovery must still contain the original tab.
+    recovery.editorViewStateDidChange()
+    await metadataStore.armBlockedFailure(.unavailable("primary disk full"))
+    var pendingSnapshot: WorkspaceSnapshot?
+    workspace.onChange = { change in
+        if case .tabRemovalPending = change.kind { pendingSnapshot = change.snapshot }
+        recovery.workspaceDidChange(change)
+    }
+    let close = Task { await workspace.close(tabID: original.id) }
+    await metadataStore.waitUntilCommitEntered()
+    try await Task.sleep(for: .milliseconds(40))
+
+    #expect(pendingSnapshot?.tabs.contains(where: { $0.id == original.id }) == false)
+    #expect(workspace.recoverySession().tabs.contains(where: { $0.id == original.id }) == false)
+    #expect((await recoveryStore.latest())?.archive.session.tabs.contains(where: { $0.id == original.id }) == true)
+
+    await metadataStore.releaseBlockedCommit()
+    guard case .persistenceFailed = await close.value else {
+        Issue.record("blocked primary close should roll back")
+        return
+    }
+    await recovery.waitForPendingAutosave()
+
+    let (relaunched, _, _, relaunchRecovery) = recoveryHarness(store: recoveryStore)
+    #expect(await relaunchRecovery.start() == .saved)
+    #expect(relaunched.snapshot().tabs.contains(where: { $0.id == original.id }))
 }
 
 private func recoveredFileBinding() -> FileBinding {

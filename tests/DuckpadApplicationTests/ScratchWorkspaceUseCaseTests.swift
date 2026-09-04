@@ -69,6 +69,7 @@ private actor AdversarialStore: SessionStore {
     private var session: ScratchSession?
     private var durableGeneration = PersistenceGeneration(rawValue: 0)
     private var shouldBlockNextCommit = false
+    private var blockedFailure: SessionStoreError?
     private var blockedCommitEntered = false
     private var releaseBlockedCommit = false
     private var concurrentCommits = 0
@@ -87,6 +88,10 @@ private actor AdversarialStore: SessionStore {
             while !releaseBlockedCommit { await Task.yield() }
         }
         defer { concurrentCommits -= 1 }
+        if let failure = blockedFailure {
+            blockedFailure = nil
+            throw failure
+        }
         guard generation > durableGeneration else { return .superseded(durableGeneration: durableGeneration) }
         self.session = session
         durableGeneration = generation
@@ -97,6 +102,11 @@ private actor AdversarialStore: SessionStore {
         shouldBlockNextCommit = true
         releaseBlockedCommit = false
         blockedCommitEntered = false
+    }
+
+    func armBlockingFailure(_ failure: SessionStoreError) {
+        armBlockingCommit()
+        blockedFailure = failure
     }
 
     func waitUntilCommitEntered() async {
@@ -202,28 +212,125 @@ private final class EditorFake: EditorPort {
     #expect(await store.storedSession()?.tabs.count == 1)
 }
 
-@Test @MainActor func finalTabCloseCreatesReplacementThenPersistsAndPublishesOnce() async {
+@Test @MainActor func finalTabCloseCreatesReplacementAndPublishesBeforeRetirement() async {
     let store = StoreSpy()
     let useCase = ScratchWorkspaceUseCase(store: store)
     _ = await useCase.start()
-    let oldTab = useCase.snapshot().tabs[0].id
+    let oldTab = useCase.snapshot().tabs[0]
     let saveCountBeforeClose = await store.saveCount
     var published: [WorkspaceChange] = []
     useCase.onChange = { published.append($0) }
 
-    let outcome = await useCase.close(tabID: oldTab)
+    let outcome = await useCase.close(tabID: oldTab.id)
 
     guard case .closed(let active, let replacementCreated, .saved) = outcome else {
         Issue.record("expected successful replacement close, got \(outcome)")
         return
     }
     #expect(replacementCreated)
-    #expect(active != oldTab)
+    #expect(active != oldTab.id)
     #expect(useCase.snapshot().tabs.map(\.id) == [active])
     #expect(await store.storedSession()?.tabs.map(\.id) == [active])
     #expect(await store.saveCount == saveCountBeforeClose + 1)
-    #expect(published.count == 1)
+    #expect(published.count == 2)
     #expect(published[0].snapshot.tabs.map(\.id) == [active])
+    #expect(published[0].kind == .tabRemovalPending(index: 0))
+    #expect(published[1].kind == .tabRemoved(
+        index: 0,
+        retiredBufferID: oldTab.buffer.bufferID
+    ))
+}
+
+@Test @MainActor func cleanCloseUpdatesVisibleSnapshotBeforeDurableStoreCompletes() async {
+    let store = AdversarialStore()
+    let useCase = ScratchWorkspaceUseCase(store: store)
+    _ = await useCase.start()
+    _ = await useCase.addScratch()
+    let closing = useCase.snapshot().tabs[0]
+    await store.armBlockingCommit()
+
+    var pendingRemoval: WorkspaceChange?
+    useCase.onChange = { change in
+        if change.kind == .tabRemovalPending(index: 0) {
+            pendingRemoval = change
+        }
+    }
+    let close = Task { await useCase.close(tabID: closing.id) }
+    await store.waitUntilCommitEntered()
+
+    #expect(pendingRemoval?.snapshot.tabs.contains(where: { $0.id == closing.id }) == false)
+    #expect(useCase.snapshot().tabs.contains(where: { $0.id == closing.id }) == false)
+
+    await store.releaseCommit()
+    guard case .closed = await close.value else {
+        Issue.record("close should commit after its optimistic publication")
+        return
+    }
+}
+
+@Test @MainActor func blockedCloseKeepsVisibleSaveAndCloseAuthorityAlignedThroughCommit() async throws {
+    let store = AdversarialStore()
+    let useCase = ScratchWorkspaceUseCase(store: store)
+    _ = await useCase.start()
+    let closing = try #require(useCase.snapshot().tabs.first)
+    _ = await useCase.addScratch()
+    let visibleAfterClose = try #require(useCase.snapshot().tabs.last)
+    _ = await useCase.activate(tabID: closing.id)
+    await store.armBlockingCommit()
+
+    var pending: WorkspaceSnapshot?
+    useCase.onChange = { change in
+        if case .tabRemovalPending = change.kind { pending = change.snapshot }
+    }
+    let firstClose = Task { await useCase.close(tabID: closing.id) }
+    await store.waitUntilCommitEntered()
+
+    #expect(pending?.tabs.first(where: \.isActive)?.id == visibleAfterClose.id)
+    #expect(useCase.snapshot().tabs.first(where: \.isActive)?.id == visibleAfterClose.id)
+    #expect(useCase.activeFileContext()?.tabID == visibleAfterClose.id)
+    let routedClose = Task { await useCase.close(tabID: visibleAfterClose.id) }
+
+    await store.releaseCommit()
+    guard case .closed = await firstClose.value else {
+        Issue.record("first close should commit")
+        return
+    }
+    guard case .closed = await routedClose.value else {
+        Issue.record("queued close must target the tab that was visible")
+        return
+    }
+    #expect(!useCase.snapshot().tabs.contains(where: { $0.id == closing.id }))
+    #expect(!useCase.snapshot().tabs.contains(where: { $0.id == visibleAfterClose.id }))
+}
+
+@Test @MainActor func blockedCloseKeepsVisibleSaveAndCloseAuthorityAlignedThroughRollback() async throws {
+    let store = AdversarialStore()
+    let useCase = ScratchWorkspaceUseCase(store: store)
+    _ = await useCase.start()
+    let hiddenDuringPending = try #require(useCase.snapshot().tabs.first)
+    _ = await useCase.addScratch()
+    let visibleDuringPending = try #require(useCase.snapshot().tabs.last)
+    _ = await useCase.activate(tabID: hiddenDuringPending.id)
+    await store.armBlockingFailure(.unavailable("primary disk full"))
+
+    let firstClose = Task { await useCase.close(tabID: hiddenDuringPending.id) }
+    await store.waitUntilCommitEntered()
+
+    #expect(useCase.snapshot().tabs.first(where: \.isActive)?.id == visibleDuringPending.id)
+    #expect(useCase.activeFileContext()?.tabID == visibleDuringPending.id)
+    let routedClose = Task { await useCase.close(tabID: visibleDuringPending.id) }
+
+    await store.releaseCommit()
+    guard case .persistenceFailed = await firstClose.value else {
+        Issue.record("first close should roll back")
+        return
+    }
+    guard case .closed = await routedClose.value else {
+        Issue.record("queued close must retain its visible stable target after rollback")
+        return
+    }
+    #expect(useCase.snapshot().tabs.contains(where: { $0.id == hiddenDuringPending.id }))
+    #expect(!useCase.snapshot().tabs.contains(where: { $0.id == visibleDuringPending.id }))
 }
 
 @Test @MainActor func dirtyCloseRequiresExplicitDiscardAndCancelRetainsLiveReference() async {
@@ -607,9 +714,13 @@ private final class EditorFake: EditorPort {
     }
     #expect(failure.operation == .save)
     #expect(useCase.snapshot().tabs.map(\.id) == [originalTab])
-    #expect(published.count == 1)
-    #expect(published[0].snapshot.tabs.map(\.id) == [originalTab])
-    #expect(published[0].snapshot.persistence == .failed(failure))
+    #expect(published.count == 2)
+    #expect(published[0].kind == .tabRemovalPending(index: 0))
+    #expect(published[0].snapshot.tabs.map(\.id) != [originalTab])
+    #expect(published[0].snapshot.persistence == .pending)
+    #expect(published[1].kind == .reset)
+    #expect(published[1].snapshot.tabs.map(\.id) == [originalTab])
+    #expect(published[1].snapshot.persistence == .failed(failure))
 }
 
 @Test @MainActor func delayedRestoreDisablesInputAndCannotOverwriteAcceptedTyping() async {
