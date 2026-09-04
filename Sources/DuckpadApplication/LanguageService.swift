@@ -289,6 +289,7 @@ public final class LanguageWorkspaceUseCase {
             languageID: definition.id,
             lexerName: definition.lexerName,
             keywords: definition.keywordLists,
+            comments: definition.capabilities.comments,
             indentation: definition.capabilities.indentation,
             folding: definition.capabilities.supportsFolding,
             braceMatching: definition.capabilities.supportsBraceMatching,
@@ -339,6 +340,11 @@ public final class LanguageWorkspaceUseCase {
         guard case .ready(let detection, _) = state,
               let prefix = registry[detection.languageID]?.capabilities.comments.line else { return nil }
         return editor?.toggleLineComment(prefix: prefix)
+    }
+
+    public func toggleBlockComment() -> EditorEditOutcome? {
+        guard case .ready = state, let editor, editor.canToggleBlockComment else { return nil }
+        return editor.toggleBlockComment()
     }
 
     @discardableResult

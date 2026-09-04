@@ -88,3 +88,47 @@ import Testing
         _ = try LanguageManifestLoader().load(malformed)
     }
 }
+
+@Test func blockCommentManifestRejectsInvalidDelimiterPairs() {
+    let fixtures: [(name: String, blockComment: [String])] = [
+        ("empty pair", []),
+        ("one delimiter", ["/*"]),
+        ("three delimiters", ["/*", "*/", "//"]),
+        ("empty start", ["", "*/"]),
+        ("empty end", ["/*", ""]),
+        ("65-byte start", [String(repeating: "/", count: 65), "*/"]),
+        ("65-byte end", ["/*", String(repeating: "/", count: 65)]),
+    ]
+
+    for fixture in fixtures {
+        #expect(throws: LanguageManifestError.self, "\(fixture.name)") {
+            _ = try LanguageManifestLoader().load(manifestData(blockComment: fixture.blockComment))
+        }
+    }
+}
+
+@Test func bundledBlockCommentPairsAreNonemptyAndBounded() throws {
+    let registry = try LanguageManifestLoader().loadBundled()
+    let pairs = registry.definitions.compactMap { definition -> (String, String)? in
+        guard let start = definition.capabilities.comments.blockStart,
+              let end = definition.capabilities.comments.blockEnd else { return nil }
+        return (start, end)
+    }
+
+    #expect(!pairs.isEmpty)
+    #expect(pairs.allSatisfy { (1...64).contains($0.0.utf8.count) && (1...64).contains($0.1.utf8.count) })
+}
+
+private func manifestData(blockComment: [String]) -> Data {
+    let languages = (0..<60).map { index -> [String: Any] in
+        var language: [String: Any] = [
+            "id": index == 0 ? "text" : "language-\(index)",
+            "name": index == 0 ? "Plain Text" : "Language \(index)",
+            "group": "Test",
+            "lexer": "null",
+        ]
+        if index == 0 { language["blockComment"] = blockComment }
+        return language
+    }
+    return try! JSONSerialization.data(withJSONObject: ["version": 1, "languages": languages])
+}

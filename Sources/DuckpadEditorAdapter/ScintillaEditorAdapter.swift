@@ -594,6 +594,8 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         return languageConfigurations[id]?.languageID ?? .plainText
     }
 
+    public var canToggleBlockComment: Bool { false }
+
     public var isLanguageStylingFallback: Bool {
         activeScintillaView?.languageStylingFallback ?? false
     }
@@ -703,6 +705,10 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             return .rejected(currentRevision: self.activeBuffer?.revision ?? oldRevision)
         }
         return .accepted(newRevision: revision)
+    }
+
+    public func toggleBlockComment() -> EditorEditOutcome {
+        .rejected(currentRevision: activeBuffer?.revision ?? 0)
     }
 
     public func activeSelectionUTF8Range() -> SearchUTF8Range? {

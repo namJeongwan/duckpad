@@ -249,6 +249,7 @@ public struct EditorLanguageConfiguration: Equatable, Sendable {
     public let languageID: LanguageID
     public let lexerName: String
     public let keywords: [String]
+    public let comments: LanguageCommentSyntax
     public let indentation: LanguageIndentation
     public let folding: Bool
     public let braceMatching: Bool
@@ -258,6 +259,7 @@ public struct EditorLanguageConfiguration: Equatable, Sendable {
         languageID: LanguageID,
         lexerName: String,
         keywords: [String] = [],
+        comments: LanguageCommentSyntax = .init(),
         indentation: LanguageIndentation,
         folding: Bool,
         braceMatching: Bool,
@@ -266,6 +268,7 @@ public struct EditorLanguageConfiguration: Equatable, Sendable {
         self.languageID = languageID
         self.lexerName = lexerName
         self.keywords = keywords
+        self.comments = comments
         self.indentation = indentation
         self.folding = folding
         self.braceMatching = braceMatching
@@ -283,6 +286,8 @@ public protocol LanguageEditorPort: EditorPort {
     @discardableResult func applyLanguage(_ configuration: EditorLanguageConfiguration) -> Bool
     func applyTheme(_ palette: EditorThemePalette)
     func toggleLineComment(prefix: String) -> EditorEditOutcome
+    var canToggleBlockComment: Bool { get }
+    func toggleBlockComment() -> EditorEditOutcome
 }
 
 public extension EditorPort {

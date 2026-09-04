@@ -68,9 +68,12 @@ public struct LanguageManifestLoader: Sendable {
                 throw LanguageManifestError.invalid("version 1 and at least 60 languages are required")
             }
             let definitions = try manifest.languages.map { entry -> LanguageDefinition in
+                let validBlockComment = entry.blockComment.map {
+                    $0.count == 2 && $0.allSatisfy { (1...64).contains($0.utf8.count) }
+                } ?? true
                 guard !entry.id.isEmpty, !entry.name.isEmpty, !entry.lexer.isEmpty,
                       (1...16).contains(entry.tabWidth),
-                      entry.blockComment == nil || entry.blockComment?.count == 2,
+                      validBlockComment,
                       entry.keywords.count <= 16,
                       entry.keywords.allSatisfy({ $0.utf8.count <= 32_768 }) else {
                     throw LanguageManifestError.invalid("invalid entry \(entry.id)")

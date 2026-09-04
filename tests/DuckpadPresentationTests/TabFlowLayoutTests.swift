@@ -154,6 +154,7 @@ private final class HostedLanguageEditorFake: LanguageEditorPort, DocumentIntell
     var configurations: [EditorLanguageConfiguration] = []
     private(set) var themes: [EditorThemePalette] = []
     private(set) var mutationCount = 0
+    var canToggleBlockComment: Bool { false }
     private var activeBuffer: EditorBufferDescriptor?
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
     private(set) var presentedCompletionItems: [String] = []
@@ -194,6 +195,9 @@ private final class HostedLanguageEditorFake: LanguageEditorPort, DocumentIntell
     func toggleLineComment(prefix: String) -> EditorEditOutcome {
         mutationCount += 1
         return .rejected(currentRevision: activeBuffer?.revision ?? 0)
+    }
+    func toggleBlockComment() -> EditorEditOutcome {
+        .rejected(currentRevision: activeBuffer?.revision ?? 0)
     }
     func captureDocumentIntelligence(maximumBytes: Int) -> DocumentIntelligenceCapture? {
         guard let activeBuffer, let snapshot = snapshots[activeBuffer.bufferID] else { return nil }
