@@ -15,10 +15,10 @@ Last updated: 2026-09-04 (Asia/Seoul)
 | --- | --- | --- |
 | Phase 31 fold-state design | Chat design approved | Pane-specific Scintilla state; no parser, background service, or dependency |
 | Written Phase 31 specification | User approved | `docs/superpowers/specs/2026-09-04-fold-state-recovery-design.md`; independent review 0 Critical / 0 Important / 0 Minor |
-| Fold recovery implementation | Task 3 complete | Independent pane recovery, native focus ownership, accepted-edit invalidation, and terminal teardown reviewed clean |
-| Keyboard and VoiceOver controls | Task 4 complete | Native View submenu, conflict-free shortcuts, menu accessibility, Command Palette secondary-pane routing reviewed clean |
-| Phase 31 validation and review | Functional gates complete; review pending | Six Release budgets, focused Debug/Release suites, builds, and production folding smoke pass; monolithic baseline blockers reproduced at Phase 30 parent |
-| Phase 31 commit and push | Pending | Exact reviewed candidate only; target `feature/fold-state-recovery` |
+| Fold recovery implementation | Delivered | Independent pane recovery, native focus ownership, accepted-edit invalidation, and terminal teardown reviewed clean |
+| Keyboard and VoiceOver controls | Delivered | Native View submenu, conflict-free shortcuts, menu accessibility, Command Palette secondary-pane routing reviewed clean |
+| Phase 31 validation and review | Complete | Final independent review 0 Critical / 0 Important / 0 Minor; six Release budgets, focused Debug/Release suites, builds, and production folding smoke pass |
+| Phase 31 commit and push | Complete | Audited delivery commit `7eada54` pushed and remote-verified on `feature/fold-state-recovery`; this dashboard is the reviewed closeout follow-up |
 
 ## Recently delivered
 
@@ -57,8 +57,10 @@ interception and will be reconsidered only with explicit IME and undo proof.
   focus routing, accepted-edit invalidation, terminal teardown, and reentrant
   lifecycle protection. Task 4 delivered the native menu, palette, and
   VoiceOver path; selector validation tests were strengthened with mutation
-  proof. Task 5 completed its functional gates; final independent review,
-  candidate commit, audit, and branch push remain pending.
+  proof. Task 5 completed its functional gates and passed final independent
+  review with 0 Critical, 0 Important, and 0 Minor findings. The audited
+  delivery commit `7eada54` was pushed and verified against the remote branch;
+  this dashboard update closes the delivery record.
 - Debug and Release builds pass. Debug and Release focused suites pass for
   `FoldRecoveryStateTests` (7 tests), `FoldingEditorAdapterTests` (30 tests),
   `FoldingPresentationTests` (4 tests), and all 21 individually enumerated
@@ -88,7 +90,7 @@ interception and will be reconsidered only with explicit IME and undo proof.
 ## Prioritized roadmap
 
 1. Lightweight language-aware smart editing. **Delivered.**
-2. Fold-state recovery and keyboard/VoiceOver folding controls. **Functional validation complete; final review and push pending.**
+2. Fold-state recovery and keyboard/VoiceOver folding controls. **Delivered.**
 3. Block comments and further language-aware indentation commands.
 4. Importable, validated user language definitions without native code loading.
 5. Lightweight API completion/call-tip provider contract.
