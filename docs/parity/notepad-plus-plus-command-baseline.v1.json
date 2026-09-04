@@ -2891,7 +2891,7 @@
   },
   "review_policy": {
     "reviewer_registry_path": "reviewer-identities.v1.json",
-    "reviewer_registry_sha256": "11a02a452b525a9081d754be6cd143f39d8dee6dd41a59ca88299c4ee4fa6b3d",
+    "reviewer_registry_sha256": "3ff48f2864c7a595e290996a6601c8452e4904ac4dfc53c9d94cd31c790214ac",
     "reviewer_trust_model": "preprovisioned-local-v1",
     "reviewer_onboarding": "parent-pinned-two-step",
     "approval_registry_source": {

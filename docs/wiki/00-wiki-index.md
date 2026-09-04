@@ -79,8 +79,9 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 65 | [Phase 26 independent code review](reviews/2026-09-03-phase-26-macos-distribution-code-review.md) | **Content approved — 0 findings** | 최초 4 Major의 XPC remote teardown, sandbox document scope/bookmark lifecycle, WAMR semantic-patch reproduction, exclusive artifact publication 결함을 remediation 후 독립 재검증해 모두 닫았다. |
 | 66 | [Phase 27 editor navigation and display controls](31-editor-navigation-and-display.md) | **Approved, committed and pushed** | `Control-G` 줄·열 이동, UTF-8 offset 이동, 표준 zoom, 공백/EOL 표시와 pane별 recovery 상태를 commit `2085568`로 exact receipt/audit 후 `origin/main`에 반영했다. |
 | 67 | [Phase 27 independent code review](reviews/2026-09-04-phase-27-editor-navigation-display-code-review.md) | **Content approved — 0 findings** | 최초 split-pane navigation responder Major를 opaque pane context와 exact-focus 복구로 닫고 Unicode/recovery/menu 경계를 최종 0 Blocker/Major/Minor로 승인했다. |
-| 68 | [Phase 28 native performance budgets](32-performance-budgets.md) | **Content approved; exact receipt pending** | Release warm launch, typing p95, 100 MiB open, 200-tab reflow와 2,000-file folder search의 동결 budget 및 JSON gate를 기록한다. |
+| 68 | [Phase 28 native performance budgets](32-performance-budgets.md) | **Approved, committed and pushed** | Release warm launch, typing p95, 100 MiB open, 200-tab reflow와 2,000-file folder search의 동결 budget 및 JSON gate를 commit `9389f46`으로 `origin/main`에 반영했다. |
 | 69 | [Phase 28 independent code review](reviews/2026-09-04-phase-28-performance-budgets-code-review.md) | **Content approved — 0 findings** | 최초 direct-only 100 MiB 측정, unbounded warm launch, bookmark/system-recents 격리 4 Major를 end-to-end pipeline/watchdog/temp authority로 닫았다. |
+| 70 | [Phase 29 frozen parity release evidence](33-parity-release-evidence.md) | **In progress — reviewer onboarding** | 94개 feature와 G1–G10을 exact release candidate 증거에 연결하기 전에 parent-pinned 독립 parity reviewer 역할을 별도 선행 candidate로 등록한다. |
 
 상태 정의:
 
