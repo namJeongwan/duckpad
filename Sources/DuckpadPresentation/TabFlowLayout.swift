@@ -17,12 +17,20 @@ public struct TabFlowLayoutResult: Equatable, Sendable {
     public let frames: [CGRect]
     public let rowIndices: [Int]
     public let rowCount: Int
+    public let contentWidth: CGFloat
     public let contentHeight: CGFloat
 
-    public init(frames: [CGRect], rowIndices: [Int], rowCount: Int, contentHeight: CGFloat) {
+    public init(
+        frames: [CGRect],
+        rowIndices: [Int],
+        rowCount: Int,
+        contentWidth: CGFloat,
+        contentHeight: CGFloat
+    ) {
         self.frames = frames
         self.rowIndices = rowIndices
         self.rowCount = rowCount
+        self.contentWidth = contentWidth
         self.contentHeight = contentHeight
     }
 }
@@ -41,7 +49,7 @@ public struct TabFlowLayoutEngine: Sendable {
         verticalSpacing: CGFloat = 2,
         insets: NSEdgeInsets = NSEdgeInsets(top: 3, left: 6, bottom: 3, right: 6),
         minimumItemWidth: CGFloat = 88,
-        maximumItemWidth: CGFloat = 210
+        maximumItemWidth: CGFloat = .greatestFiniteMagnitude
     ) {
         self.rowHeight = rowHeight
         self.horizontalSpacing = horizontalSpacing
@@ -57,6 +65,7 @@ public struct TabFlowLayoutEngine: Sendable {
                 frames: [],
                 rowIndices: [],
                 rowCount: 0,
+                contentWidth: max(0, containerWidth),
                 contentHeight: insets.top + insets.bottom
             )
         }
@@ -66,21 +75,25 @@ public struct TabFlowLayoutEngine: Sendable {
         var frames: [CGRect] = []
         var rowIndices: [Int] = []
         var row = 0
+        var maximumFrameX: CGFloat = 0
         for proposedWidth in itemWidths {
-            let width = min(max(proposedWidth, minimumItemWidth), min(maximumItemWidth, usableWidth))
+            let width = min(max(proposedWidth, minimumItemWidth), maximumItemWidth)
             if x > insets.left, x + width > insets.left + usableWidth {
                 x = insets.left
                 y += rowHeight + verticalSpacing
                 row += 1
             }
-            frames.append(CGRect(x: x, y: y, width: width, height: rowHeight))
+            let frame = CGRect(x: x, y: y, width: width, height: rowHeight)
+            frames.append(frame)
             rowIndices.append(row)
+            maximumFrameX = max(maximumFrameX, frame.maxX)
             x += width + horizontalSpacing
         }
         return TabFlowLayoutResult(
             frames: frames,
             rowIndices: rowIndices,
             rowCount: row + 1,
+            contentWidth: max(containerWidth, maximumFrameX + insets.right),
             contentHeight: y + rowHeight + insets.bottom
         )
     }
@@ -135,7 +148,13 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
             invalidateLayout()
         }
     }
-    public var onContentHeightChange: ((CGFloat) -> Void)?
+    public var onContentSizeChange: ((NSSize) -> Void)?
+    public var viewportWidth: CGFloat = 0 {
+        didSet {
+            guard viewportWidth != oldValue else { return }
+            invalidateLayout()
+        }
+    }
 
     private var attributes: [NSCollectionViewLayoutAttributes] = []
     private var rowIndices: [Int] = []
@@ -153,9 +172,9 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
     public override func prepare() {
         super.prepare()
         guard let collectionView else { return }
-        let width = collectionView.bounds.width
+        let width = viewportWidth > 0 ? viewportWidth : collectionView.bounds.width
         guard preparedWidthsVersion != widthsVersion || preparedWidth != width else { return }
-        let result = engine.layout(itemWidths: itemWidths, containerWidth: collectionView.bounds.width)
+        let result = engine.layout(itemWidths: itemWidths, containerWidth: width)
         attributes = result.frames.enumerated().map { index, frame in
             let item = NSCollectionViewLayoutAttributes(forItemWith: IndexPath(item: index, section: 0))
             item.frame = frame
@@ -167,10 +186,10 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         preparedWidthsVersion = widthsVersion
         preparedWidth = width
         layoutGeneration &+= 1
-        let newSize = NSSize(width: collectionView.bounds.width, height: result.contentHeight)
+        let newSize = NSSize(width: result.contentWidth, height: result.contentHeight)
         if calculatedSize != newSize {
             calculatedSize = newSize
-            onContentHeightChange?(result.contentHeight)
+            onContentSizeChange?(newSize)
         }
     }
 

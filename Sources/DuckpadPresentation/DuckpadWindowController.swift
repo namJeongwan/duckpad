@@ -94,12 +94,28 @@ private final class FileDropView: NSView {
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        fileURLs(from: sender).isEmpty ? [] : .copy
+        let content = partition(fileURLs(from: sender))
+        return (onFiles != nil && !content.files.isEmpty)
+            || (onFolders != nil && !content.folders.isEmpty) ? .copy : []
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         let urls = fileURLs(from: sender)
         guard !urls.isEmpty else { return false }
+        let content = partition(urls)
+        var handled = false
+        if let onFiles, !content.files.isEmpty {
+            onFiles(content.files)
+            handled = true
+        }
+        if let onFolders, !content.folders.isEmpty {
+            onFolders(content.folders)
+            handled = true
+        }
+        return handled
+    }
+
+    private func partition(_ urls: [URL]) -> (files: [URL], folders: [URL]) {
         var files: [URL] = []
         var folders: [URL] = []
         for url in urls {
@@ -110,9 +126,7 @@ private final class FileDropView: NSView {
                 files.append(url)
             }
         }
-        if !files.isEmpty { onFiles?(files) }
-        if !folders.isEmpty { onFolders?(folders) }
-        return true
+        return (files, folders)
     }
 
     private func fileURLs(from sender: any NSDraggingInfo) -> [URL] {
@@ -2077,10 +2091,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         dropView.onFiles = { [weak self] urls in
             self?.openExternalURLs(urls)
         }
-        dropView.onFolders = { [weak self] urls in
-            guard let self else { return }
-            for url in urls { self.routeAddWorkspaceRoot(url) }
-        }
         dropView.onEffectiveAppearanceChange = { [weak self] in
             self?.refreshAppearance()
         }
@@ -2091,7 +2101,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceContentSplit.isVertical = true
         workspaceContentSplit.dividerStyle = .thin
         workspaceContentSplit.translatesAutoresizingMaskIntoConstraints = false
-        workspaceContentSplit.addArrangedSubview(workspaceSidebar)
         workspaceContentSplit.addArrangedSubview(editorHostView)
         workspaceSidebar.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
         let preferredSidebarWidth = workspaceSidebar.widthAnchor.constraint(equalToConstant: 220)

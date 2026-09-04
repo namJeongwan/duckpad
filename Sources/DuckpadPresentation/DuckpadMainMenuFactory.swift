@@ -45,22 +45,6 @@ public enum DuckpadMainMenuFactory {
             applicationTarget: applicationTarget,
             urls: recentDocumentURLs
         ))
-        add(
-            "Add Folder to Workspace…",
-            #selector(DuckpadWindowController.performAddWorkspaceFolder(_:)),
-            "o",
-            target,
-            modifiers: [.command, .control],
-            to: fileMenu
-        )
-        add(
-            "Remove Folder from Workspace",
-            #selector(DuckpadWindowController.performRemoveWorkspaceFolder(_:)),
-            "",
-            target,
-            modifiers: [],
-            to: fileMenu
-        )
         fileMenu.addItem(.separator())
         add("Save", #selector(DuckpadWindowController.performSaveFile(_:)), "s", target, to: fileMenu)
         add("Save As…", #selector(DuckpadWindowController.performSaveFileAs(_:)), "s", target, modifiers: [.command, .shift], to: fileMenu)
@@ -161,14 +145,6 @@ public enum DuckpadMainMenuFactory {
             "o",
             target,
             modifiers: [.command, .option],
-            to: viewMenu
-        )
-        add(
-            "Workspace Sidebar",
-            #selector(DuckpadWindowController.performToggleWorkspaceSidebar(_:)),
-            "e",
-            target,
-            modifiers: [.command, .shift],
             to: viewMenu
         )
         viewMenu.addItem(.separator())

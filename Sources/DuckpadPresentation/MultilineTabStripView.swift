@@ -21,8 +21,8 @@ private final class AccessibleTabView: NSView {
         super.updateTrackingAreas()
         if let trackingArea { removeTrackingArea(trackingArea) }
         let area = NSTrackingArea(
-            rect: bounds,
-            options: [.activeInKeyWindow, .mouseEnteredAndExited],
+            rect: .zero,
+            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited],
             owner: self,
             userInfo: nil
         )
@@ -62,7 +62,17 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     var onClose: (() -> Void)?
     var onContextAction: ((TabContextAction) -> Void)?
     private var configuredTab: TabSnapshot?
+    private var configuredIndex: Int?
+    private var configuredRow: Int?
     private var isHovered = false
+
+    override var isSelected: Bool {
+        didSet {
+            guard isSelected != oldValue else { return }
+            updateVisualState()
+            updateCloseVisibility()
+        }
+    }
 
     override func loadView() {
         let tabView = AccessibleTabView()
@@ -71,6 +81,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         tabView.menuProvider = { [weak self] in self?.makeContextMenu() }
         tabView.onHoverChanged = { [weak self] hovered in
             self?.isHovered = hovered
+            self?.updateVisualState()
             self?.updateCloseVisibility()
         }
         view = tabView
@@ -78,7 +89,10 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         view.layer?.cornerRadius = 5
         view.layer?.borderWidth = 1
         view.layer?.addSublayer(activeIndicator)
-        titleLabel.lineBreakMode = .byTruncatingMiddle
+        titleLabel.lineBreakMode = .byClipping
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.cell?.truncatesLastVisibleLine = false
+        titleLabel.cell?.usesSingleLineMode = true
         titleLabel.font = .systemFont(ofSize: 12, weight: .regular)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         dirtyLabel.font = .systemFont(ofSize: 8, weight: .semibold)
@@ -122,21 +136,21 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     }
 
     func configure(tab: TabSnapshot, index: Int, row: Int) {
+        guard configuredTab != tab || configuredIndex != index || configuredRow != row else {
+            updateVisualState()
+            updateCloseVisibility()
+            return
+        }
         configuredTab = tab
+        configuredIndex = index
+        configuredRow = row
         titleLabel.stringValue = tab.title
         dirtyLabel.isHidden = !tab.isDirty
         pinImage.isHidden = !tab.isPinned
         titleLabel.toolTip = tab.fullPath ?? tab.title
         view.toolTip = tab.fullPath ?? tab.title
-        titleLabel.textColor = tab.isActive ? .labelColor : .secondaryLabelColor
-        view.layer?.backgroundColor = (tab.isActive
-            ? NSColor.controlBackgroundColor.withAlphaComponent(0.94)
-            : NSColor.clear).cgColor
-        view.layer?.borderColor = (tab.isActive
-            ? NSColor.separatorColor.withAlphaComponent(0.70)
-            : NSColor.separatorColor.withAlphaComponent(0.24)).cgColor
         activeIndicator.backgroundColor = NSColor.controlAccentColor.cgColor
-        activeIndicator.isHidden = !tab.isActive
+        updateVisualState()
         updateCloseVisibility()
 
         let stableID = tab.id.rawValue.uuidString.lowercased()
@@ -173,7 +187,37 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     }
 
     private func updateCloseVisibility() {
-        closeButton.isHidden = !(configuredTab?.isActive == true || isHovered)
+        closeButton.isHidden = !(configuredTab?.isActive == true || isSelected || isHovered)
+    }
+
+    private func updateVisualState() {
+        guard isViewLoaded else { return }
+        let active = configuredTab?.isActive == true || isSelected
+        titleLabel.textColor = active ? .labelColor : .secondaryLabelColor
+        if active {
+            view.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.96).cgColor
+            view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.72).cgColor
+        } else if isHovered {
+            view.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.10).cgColor
+            view.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.36).cgColor
+        } else {
+            view.layer?.backgroundColor = NSColor.clear.cgColor
+            view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.24).cgColor
+        }
+        activeIndicator.isHidden = !active
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        configuredTab = nil
+        configuredIndex = nil
+        configuredRow = nil
+        isHovered = false
+        onActivate = nil
+        onClose = nil
+        onContextAction = nil
+        updateVisualState()
+        updateCloseVisibility()
     }
 
     private func makeContextMenu() -> NSMenu? {
@@ -221,6 +265,40 @@ private final class DuckpadTabItem: NSCollectionViewItem {
 }
 
 @MainActor
+final class TabDocumentCollectionView: NSCollectionView {
+    private var requiredDocumentSize = NSSize(width: 1, height: 1)
+
+    func setRequiredDocumentSize(_ size: NSSize) {
+        requiredDocumentSize = size
+        if frame.size != size { super.setFrameSize(size) }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(NSSize(
+            width: max(newSize.width, requiredDocumentSize.width),
+            height: max(newSize.height, requiredDocumentSize.height)
+        ))
+    }
+}
+
+@MainActor
+final class TabOverflowScrollView: NSScrollView {
+    var requiresHorizontalScroller = false {
+        didSet { synchronizeHorizontalScroller() }
+    }
+
+    override func layout() {
+        super.layout()
+        synchronizeHorizontalScroller()
+    }
+
+    private func synchronizeHorizontalScroller() {
+        guard hasHorizontalScroller != requiresHorizontalScroller else { return }
+        hasHorizontalScroller = requiresHorizontalScroller
+    }
+}
+
+@MainActor
 public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NSCollectionViewDelegate {
     private static let tabPasteboardType = NSPasteboard.PasteboardType("com.duckpad.tab-id")
     public struct UpdateMetrics: Equatable {
@@ -236,8 +314,8 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         didSet { updateViewportHeight() }
     }
 
-    let hostedCollectionView = NSCollectionView()
-    let hostedScrollView = NSScrollView()
+    let hostedCollectionView = TabDocumentCollectionView()
+    let hostedScrollView = TabOverflowScrollView()
     let flowLayout = MultilineTabCollectionLayout()
     let documentSwitcher = DocumentSwitcherButton(frame: .zero)
     private let addButton = NSButton(
@@ -247,6 +325,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     )
     private var tabs: [TabSnapshot] = []
     private var heightConstraint: NSLayoutConstraint!
+    private var measuredContentWidth: CGFloat = 1
     private var measuredContentHeight: CGFloat = 34
     private let bottomSeparator = CALayer()
     private var isSynchronizingSelection = false
@@ -274,13 +353,13 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             forItemWithIdentifier: DuckpadTabItem.identifier
         )
         hostedCollectionView.frame = NSRect(x: 0, y: 0, width: 1, height: 34)
-        hostedCollectionView.autoresizingMask = [.width]
+        hostedCollectionView.autoresizingMask = []
 
         hostedScrollView.documentView = hostedCollectionView
         hostedScrollView.drawsBackground = false
-        hostedScrollView.hasVerticalScroller = true
-        hostedScrollView.hasHorizontalScroller = false
         hostedScrollView.autohidesScrollers = true
+        hostedScrollView.hasVerticalScroller = true
+        hostedScrollView.hasHorizontalScroller = true
         hostedScrollView.borderType = .noBorder
         hostedScrollView.translatesAutoresizingMaskIntoConstraints = false
         hostedScrollView.setAccessibilityIdentifier("duckpad.tab.overflow")
@@ -318,9 +397,10 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             documentSwitcher.widthAnchor.constraint(equalToConstant: 44),
             documentSwitcher.heightAnchor.constraint(equalToConstant: 24),
         ])
-        flowLayout.onContentHeightChange = { [weak self] height in
+        flowLayout.onContentSizeChange = { [weak self] size in
             guard let self else { return }
-            measuredContentHeight = height
+            measuredContentWidth = size.width
+            measuredContentHeight = size.height
             updateDocumentFrame()
             updateViewportHeight()
             refreshVisibleItems()
@@ -336,6 +416,8 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         let thickness = 1 / scale
         bottomSeparator.frame = NSRect(x: 0, y: 0, width: bounds.width, height: thickness)
+        flowLayout.viewportWidth = max(1, hostedScrollView.contentSize.width)
+        hostedCollectionView.layoutSubtreeIfNeeded()
         updateDocumentFrame()
         updateViewportHeight()
         refreshVisibleItems()
@@ -385,6 +467,28 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             }
             hostedCollectionView.reloadItems(at: [IndexPath(item: index, section: 0)])
             updateMetrics.itemReloads += 1
+        case .activeTabChanged(let previousIndex, let currentIndex):
+            let affected = [previousIndex, currentIndex]
+                .compactMap { $0 }
+                .reduce(into: [Int]()) { indices, index in
+                    if !indices.contains(index) { indices.append(index) }
+                }
+            guard tabs.count == change.snapshot.tabs.count,
+                  !affected.isEmpty,
+                  affected.allSatisfy({ tabs.indices.contains($0) }) else {
+                apply(tabs: change.snapshot.tabs)
+                return
+            }
+            for index in affected { tabs[index] = change.snapshot.tabs[index] }
+            activeIndex = currentIndex
+            isSynchronizingSelection = true
+            hostedCollectionView.reloadItems(
+                at: Set(affected.map { IndexPath(item: $0, section: 0) })
+            )
+            hostedCollectionView.selectionIndexPaths = [IndexPath(item: currentIndex, section: 0)]
+            isSynchronizingSelection = false
+            updateMetrics.itemReloads += affected.count
+            scrollSelectedTabVisible()
         default:
             apply(tabs: change.snapshot.tabs)
         }
@@ -399,7 +503,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
 
     func tearDownHostedViews() {
         documentSwitcher.documentPanel.dismiss()
-        flowLayout.onContentHeightChange = nil
+        flowLayout.onContentSizeChange = nil
         hostedCollectionView.dataSource = nil
         hostedCollectionView.delegate = nil
         hostedScrollView.documentView = nil
@@ -540,13 +644,16 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     private func updateDocumentFrame() {
-        let width = max(1, hostedScrollView.contentSize.width)
+        let viewportWidth = max(1, hostedScrollView.contentSize.width)
+        let width = max(viewportWidth, measuredContentWidth)
         let height = max(measuredContentHeight, hostedScrollView.contentSize.height)
-        if hostedCollectionView.frame.size != NSSize(width: width, height: height) {
-            let widthChanged = hostedCollectionView.frame.width != width
-            hostedCollectionView.setFrameSize(NSSize(width: width, height: height))
-            if widthChanged { flowLayout.invalidateLayout() }
-        }
+        let horizontallyOverflows = width > viewportWidth
+        let documentSize = NSSize(width: width, height: height)
+        let widthChanged = hostedCollectionView.frame.width != width
+        hostedCollectionView.setRequiredDocumentSize(documentSize)
+        hostedScrollView.autohidesScrollers = !horizontallyOverflows
+        hostedScrollView.requiresHorizontalScroller = horizontallyOverflows
+        if widthChanged { flowLayout.invalidateLayout() }
     }
 
     private func updateViewportHeight() {
@@ -559,13 +666,23 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     private func scrollSelectedTabVisible() {
-        guard let index = tabs.firstIndex(where: \.isActive),
+        guard let index = activeIndex,
+              tabs.indices.contains(index),
               let attributes = flowLayout.layoutAttributesForItem(
                 at: IndexPath(item: index, section: 0)
               ) else {
             return
         }
-        hostedCollectionView.scroll(attributes.frame.origin)
+        let clipView = hostedScrollView.contentView
+        let visible = clipView.bounds
+        let horizontallyIntersects = attributes.frame.maxX > visible.minX
+            && attributes.frame.minX < visible.maxX
+        if !horizontallyIntersects {
+            let maximumX = max(0, hostedCollectionView.bounds.maxX - visible.width)
+            let targetX = min(max(0, attributes.frame.minX), maximumX)
+            clipView.scroll(to: NSPoint(x: targetX, y: visible.minY))
+            hostedScrollView.reflectScrolledClipView(clipView)
+        }
         hostedCollectionView.scrollToItems(
             at: [IndexPath(item: index, section: 0)],
             scrollPosition: .centeredVertically
@@ -605,7 +722,10 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         let width = (tab.title as NSString).size(
             withAttributes: [.font: NSFont.systemFont(ofSize: 12)]
         ).width
-        return width + (tab.isPinned ? 58 : 46)
+        // Fixed signal/close slots consume 57 pt. Keeping them reserved avoids
+        // hover-induced title movement; the extra breathing room prevents any
+        // filename abbreviation at normal display scales.
+        return ceil(width) + 63
     }
 
     public override func viewDidChangeEffectiveAppearance() {

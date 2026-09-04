@@ -346,12 +346,42 @@ public final class ScratchWorkspaceUseCase {
     }
 
     private func activateLocked(tabID: TabID) async -> WorkspaceActionOutcome {
+        let original = session
         var candidate = session
         let previous = candidate.tabs.firstIndex { $0.id == candidate.activeTabID }
         do {
             try candidate.activate(tabID: tabID)
             let current = candidate.tabs.firstIndex { $0.id == tabID }!
-            return await persistMutation(candidate, kind: .activeTabChanged(previousIndex: previous, currentIndex: current), retry: .activate(tabID))
+            guard previous != current else { return .applied(.saved) }
+
+            // Activation is a reversible view-state mutation. Publish it before
+            // waiting for the durable session write so tab selection and editor
+            // binding respond in the same main-run-loop turn as the click.
+            session = candidate
+            persistenceState = .pending
+            publish(.activeTabChanged(previousIndex: previous, currentIndex: current))
+
+            switch await save(candidate) {
+            case .saved:
+                persistenceState = .saved
+                publish(.persistence)
+                return .applied(.saved)
+            case .failed(let failure):
+                session = original
+                persistenceState = .failed(failure)
+                if let previous {
+                    publish(
+                        .activeTabChanged(previousIndex: current, currentIndex: previous),
+                        failure: PersistenceFailureEvent(failure: failure, retry: .activate(tabID))
+                    )
+                } else {
+                    publish(
+                        .reset,
+                        failure: PersistenceFailureEvent(failure: failure, retry: .activate(tabID))
+                    )
+                }
+                return .persistenceFailed(failure)
+            }
         } catch let error as SessionError { return .rejected(error) }
         catch { preconditionFailure("ScratchSession only throws SessionError") }
     }

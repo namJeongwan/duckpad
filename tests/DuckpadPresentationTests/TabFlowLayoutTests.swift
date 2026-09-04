@@ -289,6 +289,12 @@ private func descendantButtons(of view: NSView) -> [NSButton] {
 }
 
 @MainActor
+private func descendantTextFields(of view: NSView) -> [NSTextField] {
+    let direct = view.subviews.compactMap { $0 as? NSTextField }
+    return direct + view.subviews.flatMap(descendantTextFields)
+}
+
+@MainActor
 private func menuItem(_ title: String, in menu: NSMenu) -> NSMenuItem? {
     for item in menu.items {
         if item.title == title { return item }
@@ -334,11 +340,21 @@ private func flattenedMenuItems(in menu: NSMenu) -> [NSMenuItem] {
     }
 }
 
-@Test func itemWidthsAreClampedEvenAtNarrowBoundary() {
+@Test func explicitWidthBoundsDoNotForceTitlesDownToTheViewportWidth() {
     let engine = TabFlowLayoutEngine(minimumItemWidth: 90, maximumItemWidth: 180)
     let result = engine.layout(itemWidths: [20, 500], containerWidth: 95)
-    #expect(result.frames.map(\.width) == [90, 90])
+    #expect(result.frames.map(\.width) == [90, 180])
+    #expect(result.contentWidth >= 186)
     #expect(result.rowCount == 2)
+}
+
+@Test func defaultLayoutPreservesTheFullProposedTabWidth() {
+    let engine = TabFlowLayoutEngine()
+    let result = engine.layout(itemWidths: [640], containerWidth: 240)
+
+    #expect(result.frames.first?.width == 640)
+    #expect(result.contentWidth >= 646)
+    #expect(result.rowCount == 1)
 }
 
 @Test @MainActor func visibleAttributeQueriesInspectOnlyIntersectingRowsAtScale() {
@@ -1083,27 +1099,16 @@ struct AppKitHostedTests {
     let workspaceSidebar = menuItem("Workspace Sidebar", in: menu)
     let documentSymbols = menuItem("Document Symbols…", in: menu)
     let addWorkspaceFolder = menuItem("Add Folder to Workspace…", in: menu)
-    #expect(workspaceSidebar?.action == #selector(DuckpadWindowController.performToggleWorkspaceSidebar(_:)))
-    #expect(workspaceSidebar?.keyEquivalent == "e")
-    #expect(workspaceSidebar?.keyEquivalentModifierMask == [.command, .shift])
-    #expect(addWorkspaceFolder?.action == #selector(DuckpadWindowController.performAddWorkspaceFolder(_:)))
-    #expect(addWorkspaceFolder?.keyEquivalent == "o")
-    #expect(addWorkspaceFolder?.keyEquivalentModifierMask == [.command, .control])
+    let removeWorkspaceFolder = menuItem("Remove Folder from Workspace", in: menu)
+    #expect(workspaceSidebar == nil)
+    #expect(addWorkspaceFolder == nil)
+    #expect(removeWorkspaceFolder == nil)
+    #expect(controller.workspaceSidebarSmokeState().isVisible == false)
+    #expect(controller.workspaceSidebarSmokeState().arrangedPaneCount == 1)
     #expect(documentSymbols?.action == #selector(DuckpadWindowController.performShowDocumentSymbols(_:)))
     #expect(documentSymbols?.keyEquivalent == "o")
     #expect(documentSymbols?.keyEquivalentModifierMask == [.command, .option])
     if let documentSymbols { #expect(!controller.validateMenuItem(documentSymbols)) }
-    if let workspaceSidebar {
-        #expect(controller.validateMenuItem(workspaceSidebar))
-        #expect(workspaceSidebar.state == .on)
-        #expect(controller.workspaceSidebarSmokeState().arrangedPaneCount == 2)
-        controller.performToggleWorkspaceSidebar(workspaceSidebar)
-        #expect(controller.validateMenuItem(workspaceSidebar))
-        #expect(workspaceSidebar.state == .off)
-        #expect(controller.workspaceSidebarSmokeState().arrangedPaneCount == 1)
-        controller.performToggleWorkspaceSidebar(workspaceSidebar)
-        #expect(controller.workspaceSidebarSmokeState().arrangedPaneCount == 2)
-    }
     #expect(wordWrap?.action == #selector(DuckpadWindowController.performToggleWordWrap(_:)))
     #expect(wrapSymbols?.action == #selector(DuckpadWindowController.performToggleWrapMarker(_:)))
     #expect(whitespace?.action == #selector(DuckpadWindowController.performToggleWhitespace(_:)))
@@ -1577,6 +1582,126 @@ struct AppKitHostedTests {
     #expect(closed == tabs[0].id)
 }
 
+@Test @MainActor func tabTitlesNeverUseEllipsisAndLongNamesRemainScrollable() throws {
+    let longTitle = "release-notes-" + String(repeating: "complete-name-", count: 30) + ".txt"
+    let tab = TabSnapshot(
+        id: TabID(),
+        title: longTitle,
+        isActive: true,
+        isDirty: false,
+        isPinned: false,
+        buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+    )
+    let (window, _, strip) = hostStrip(width: 260, height: 200, tabs: [tab])
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    let path = IndexPath(item: 0, section: 0)
+    let item = try #require(strip.hostedCollectionView.item(at: path))
+    let title = try #require(descendantTextFields(of: item.view).first { $0.stringValue == longTitle })
+    let frame = try #require(strip.flowLayout.layoutAttributesForItem(at: path)?.frame)
+
+    #expect(title.lineBreakMode == .byClipping)
+    #expect(title.cell?.truncatesLastVisibleLine == false)
+    #expect(frame.width > strip.hostedScrollView.contentSize.width)
+    #expect(strip.flowLayout.collectionViewContentSize.width >= frame.maxX)
+}
+
+@Test @MainActor func liveWindowKeepsLongTitleDocumentWidthAndHorizontalScrolling() throws {
+    let longTitle = "release-notes-" + String(repeating: "complete-name-", count: 30) + ".txt"
+    let longTab = TabSnapshot(
+        id: TabID(), title: longTitle, isActive: true, isDirty: false, isPinned: false,
+        buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+    )
+    let normalTab = TabSnapshot(
+        id: TabID(), title: "notes.txt", isActive: false, isDirty: false, isPinned: false,
+        buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+    )
+    let (window, root, strip) = hostStrip(width: 260, height: 200, tabs: [longTab, normalTab])
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    window.orderFront(nil)
+    root.layoutSubtreeIfNeeded()
+    strip.layoutSubtreeIfNeeded()
+    strip.hostedScrollView.layoutSubtreeIfNeeded()
+    strip.hostedCollectionView.layoutSubtreeIfNeeded()
+
+    let clipView = strip.hostedScrollView.contentView
+    let layoutWidth = strip.flowLayout.collectionViewContentSize.width
+    #expect(strip.hostedCollectionView.frame.width >= layoutWidth)
+    #expect(strip.hostedScrollView.requiresHorizontalScroller)
+
+    strip.hostedCollectionView.scroll(NSPoint(x: 300, y: 0))
+    strip.hostedScrollView.reflectScrolledClipView(clipView)
+    #expect(clipView.bounds.minX > 0)
+
+    let changed = [
+        TabSnapshot(
+            id: longTab.id, title: longTab.title, isActive: false,
+            isDirty: false, isPinned: false, buffer: longTab.buffer
+        ),
+        TabSnapshot(
+            id: normalTab.id, title: normalTab.title, isActive: true,
+            isDirty: false, isPinned: false, buffer: normalTab.buffer
+        ),
+    ]
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(), tabs: changed, activeBuffer: normalTab.buffer,
+            persistence: .pending, startup: .ready
+        ),
+        kind: .activeTabChanged(previousIndex: 0, currentIndex: 1)
+    ))
+
+    #expect(clipView.bounds.minX < 10)
+    #expect(strip.selectedTabIsVisible)
+}
+
+@Test @MainActor func inactiveTabHoverUpdatesOnlyItsLocalAffordances() throws {
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 500, height: 200, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let path = IndexPath(item: 1, section: 0)
+    let item = try #require(strip.hostedCollectionView.item(at: path))
+    let stableID = tabs[1].id.rawValue.uuidString.lowercased()
+    let close = try #require(descendantButtons(of: item.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+    let before = item.view.layer?.backgroundColor
+    let event = try #require(NSEvent.mouseEvent(
+        with: .mouseMoved,
+        location: .zero,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: window.windowNumber,
+        context: nil,
+        eventNumber: 0,
+        clickCount: 0,
+        pressure: 0
+    ))
+
+    item.view.updateTrackingAreas()
+    #expect(item.view.trackingAreas.contains { $0.options.contains(.inVisibleRect) })
+    #expect(close.isHidden)
+    item.view.mouseEntered(with: event)
+    #expect(!close.isHidden)
+    #expect(item.view.layer?.backgroundColor != before)
+    item.view.mouseExited(with: event)
+    #expect(close.isHidden)
+    #expect(item.view.layer?.backgroundColor == before)
+}
+
 @Test @MainActor func textViewAdapterOwnsLiveTextAndEmitsIncrementalRevisionCheckedEdit() async {
     let store = PresentationStore()
     let workspace = ScratchWorkspaceUseCase(store: store)
@@ -1908,6 +2033,71 @@ struct AppKitHostedTests {
     #expect(strip.updateMetrics.itemReloads == before.itemReloads + 1)
     #expect(strip.documentSwitcher.updateMetrics.incrementalItemInspections == 1)
     #expect(elapsed < .milliseconds(250))
+}
+
+@Test @MainActor func activeTabChangeReloadsOnlyPreviousAndCurrentItems() {
+    let tabs = makeTabs(count: 500, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 700, height: 400, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    var changed = tabs
+    changed[0] = TabSnapshot(
+        id: changed[0].id, title: changed[0].title, isActive: false,
+        isDirty: changed[0].isDirty, isPinned: changed[0].isPinned,
+        buffer: changed[0].buffer
+    )
+    changed[249] = TabSnapshot(
+        id: changed[249].id, title: changed[249].title, isActive: true,
+        isDirty: changed[249].isDirty, isPinned: changed[249].isPinned,
+        buffer: changed[249].buffer
+    )
+    let before = strip.updateMetrics
+    let started = ContinuousClock.now
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(), tabs: changed, activeBuffer: changed[249].buffer,
+            persistence: .pending, startup: .ready
+        ),
+        kind: .activeTabChanged(previousIndex: 0, currentIndex: 249)
+    ))
+    let elapsed = started.duration(to: .now)
+
+    #expect(strip.updateMetrics.fullReloads == before.fullReloads)
+    #expect(strip.updateMetrics.itemReloads == before.itemReloads + 2)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 249, section: 0)])
+    #expect(strip.selectedTabIsVisible)
+    #expect(elapsed < .milliseconds(50))
+}
+
+@Test @MainActor func blockedActivationPublishesTheSelectedTabBeforeDiskCommitCompletes() async {
+    var session = ScratchSession()
+    for _ in 0..<50 { session.addUntitled() }
+    let store = PresentationStore(session: session)
+    let workspace = ScratchWorkspaceUseCase(store: store)
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    let targetIndex = 24
+    let target = workspace.snapshot().tabs[targetIndex].id
+    let before = controller.tabStrip.updateMetrics
+    await store.armBlockingCommit()
+
+    let activation = Task { await workspace.activate(tabID: target) }
+    await store.waitUntilCommitEntered()
+
+    #expect(workspace.snapshot().tabs[targetIndex].isActive)
+    #expect(controller.tabStrip.hostedCollectionView.selectionIndexPaths == [
+        IndexPath(item: targetIndex, section: 0),
+    ])
+    #expect(controller.tabStrip.updateMetrics.fullReloads == before.fullReloads)
+    #expect(controller.tabStrip.updateMetrics.itemReloads == before.itemReloads + 2)
+
+    await store.releaseCommit()
+    #expect(await activation.value == .applied(.saved))
 }
 
 @Test @MainActor func controllerSurfacesEveryPersistenceFailureOnceWithRetry() async {
