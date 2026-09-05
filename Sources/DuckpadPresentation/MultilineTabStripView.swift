@@ -20,18 +20,37 @@ private final class AccessibleTabView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let trackingArea { removeTrackingArea(trackingArea) }
+        let pointerIsInside: Bool
+        if let window, !isHiddenOrHasHiddenAncestor {
+            let localLocation = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            pointerIsInside = bounds.contains(localLocation) && visibleRect.contains(localLocation)
+        } else {
+            pointerIsInside = false
+        }
+        var options: NSTrackingArea.Options = [
+            .activeAlways,
+            .inVisibleRect,
+            .mouseEnteredAndExited,
+        ]
+        if pointerIsInside { options.insert(.assumeInside) }
         let area = NSTrackingArea(
             rect: .zero,
-            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited],
+            options: options,
             owner: self,
             userInfo: nil
         )
         addTrackingArea(area)
         trackingArea = area
+        onHoverChanged?(pointerIsInside)
     }
 
-    override func mouseEntered(with event: NSEvent) { onHoverChanged?(true) }
-    override func mouseExited(with event: NSEvent) { onHoverChanged?(false) }
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChanged?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverChanged?(false)
+    }
 
     override func otherMouseDown(with event: NSEvent) {
         if event.buttonNumber == 2 { onMiddleClick?() }
@@ -61,10 +80,12 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     var onActivate: (() -> Void)?
     var onClose: (() -> Void)?
     var onContextAction: ((TabContextAction) -> Void)?
+    var onHoverChanged: ((TabID, Bool) -> Void)?
     private var configuredTab: TabSnapshot?
     private var configuredIndex: Int?
     private var configuredRow: Int?
     private var isHovered = false
+    var configuredTabID: TabID? { configuredTab?.id }
 
     override var isSelected: Bool {
         didSet {
@@ -80,9 +101,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         tabView.onMiddleClick = { [weak self] in self?.onClose?() }
         tabView.menuProvider = { [weak self] in self?.makeContextMenu() }
         tabView.onHoverChanged = { [weak self] hovered in
-            self?.isHovered = hovered
-            self?.updateVisualState()
-            self?.updateCloseVisibility()
+            guard let self, let tabID = configuredTab?.id else { return }
+            onHoverChanged?(tabID, hovered)
         }
         view = tabView
         view.wantsLayer = true
@@ -137,7 +157,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         activeIndicator.frame = NSRect(x: 7, y: 0, width: max(0, view.bounds.width - 14), height: 2)
     }
 
-    func configure(tab: TabSnapshot, index: Int, row: Int) {
+    func configure(tab: TabSnapshot, index: Int, row: Int, isHovered: Bool) {
+        self.isHovered = isHovered
         guard configuredTab != tab || configuredIndex != index || configuredRow != row else {
             updateVisualState()
             updateCloseVisibility()
@@ -219,6 +240,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        if let tabID = configuredTab?.id { onHoverChanged?(tabID, false) }
         configuredTab = nil
         configuredIndex = nil
         configuredRow = nil
@@ -226,6 +248,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         onActivate = nil
         onClose = nil
         onContextAction = nil
+        onHoverChanged = nil
         updateVisualState()
         updateCloseVisibility()
     }
@@ -334,6 +357,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     private let bottomSeparator = CALayer()
     private var isSynchronizingSelection = false
     private var activeIndex: Int?
+    private var hoveredTabID: TabID?
     public private(set) var updateMetrics = UpdateMetrics()
     public private(set) var interactionsEnabled = true
 
@@ -347,6 +371,8 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedCollectionView.dataSource = self
         hostedCollectionView.delegate = self
         hostedCollectionView.isSelectable = true
+        hostedCollectionView.allowsMultipleSelection = false
+        hostedCollectionView.allowsEmptySelection = false
         hostedCollectionView.backgroundColors = [.clear]
         hostedCollectionView.registerForDraggedTypes([Self.tabPasteboardType])
         hostedCollectionView.setDraggingSourceOperationMask(.move, forLocal: true)
@@ -418,6 +444,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     public func apply(tabs: [TabSnapshot]) {
+        hoveredTabID = nil
         self.tabs = tabs
         activeIndex = tabs.firstIndex(where: \.isActive)
         documentSwitcher.apply(tabs: tabs)
@@ -490,6 +517,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
                 // Shrink the custom layout cache before the collection view
                 // observes the smaller data source, avoiding stale attributes
                 // for the old final index during AppKit's delete transaction.
+                if hoveredTabID == tabs[index].id { hoveredTabID = nil }
                 flowLayout.itemWidths = change.snapshot.tabs.map(tabWidth)
                 tabs = change.snapshot.tabs
                 activeIndex = tabs.firstIndex(where: \.isActive)
@@ -527,6 +555,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     func tearDownHostedViews() {
+        hoveredTabID = nil
         documentSwitcher.documentPanel.dismiss()
         flowLayout.onContentSizeChange = nil
         hostedCollectionView.dataSource = nil
@@ -577,7 +606,12 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         }
         let tab = tabs[indexPath.item]
         let row = flowLayout.row(forItemAt: indexPath.item) ?? 0
-        tabItem.configure(tab: tab, index: indexPath.item, row: row)
+        tabItem.configure(
+            tab: tab,
+            index: indexPath.item,
+            row: row,
+            isHovered: hoveredTabID == tab.id
+        )
         tabItem.onActivate = { [weak self] in
             guard self?.interactionsEnabled == true else { return }
             self?.onActivate?(tab.id)
@@ -590,7 +624,22 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             guard self?.interactionsEnabled == true else { return }
             self?.onContextAction?(tab.id, action)
         }
+        tabItem.onHoverChanged = { [weak self] tabID, isHovered in
+            self?.updateHoveredTab(isHovered, tabID: tabID)
+        }
         return tabItem
+    }
+
+    public func collectionView(
+        _ collectionView: NSCollectionView,
+        didEndDisplaying item: NSCollectionViewItem,
+        forRepresentedObjectAt indexPath: IndexPath
+    ) {
+        guard let item = item as? DuckpadTabItem,
+              hoveredTabID == item.configuredTabID else {
+            return
+        }
+        hoveredTabID = nil
     }
 
     public func collectionView(
@@ -732,9 +781,19 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             item.configure(
                 tab: tabs[path.item],
                 index: path.item,
-                row: flowLayout.row(forItemAt: path.item) ?? 0
+                row: flowLayout.row(forItemAt: path.item) ?? 0,
+                isHovered: hoveredTabID == tabs[path.item].id
             )
         }
+    }
+
+    private func updateHoveredTab(_ isHovered: Bool, tabID: TabID) {
+        let nextHoveredTabID = isHovered
+            ? tabID
+            : (hoveredTabID == tabID ? nil : hoveredTabID)
+        guard hoveredTabID != nextHoveredTabID else { return }
+        hoveredTabID = nextHoveredTabID
+        refreshVisibleItems()
     }
 
     private func tabWidth(_ tab: TabSnapshot) -> CGFloat {

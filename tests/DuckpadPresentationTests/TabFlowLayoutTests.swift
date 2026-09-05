@@ -126,6 +126,25 @@ private final class WeakBox<Value: AnyObject> {
 }
 
 @MainActor
+private final class PointerLocationWindow: NSWindow {
+    var pointerLocation = NSPoint.zero
+
+    override var mouseLocationOutsideOfEventStream: NSPoint { pointerLocation }
+}
+
+@MainActor
+private func makePointerLocationWindow(width: CGFloat, height: CGFloat) -> PointerLocationWindow {
+    let window = PointerLocationWindow(
+        contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.pointerLocation = NSPoint(x: -1_000, y: -1_000)
+    return window
+}
+
+@MainActor
 private final class ApplicationMenuTargetSpy: NSObject, DuckpadApplicationCommandTarget {
     private(set) var settingsRequests = 0
     private(set) var openedRecentURLs: [URL] = []
@@ -264,10 +283,11 @@ private func makeTabs(count: Int, activeIndex: Int, dirtyIndex: Int? = nil) -> [
 private func hostStrip(
     width: CGFloat,
     height: CGFloat,
-    tabs: [TabSnapshot]
+    tabs: [TabSnapshot],
+    window providedWindow: NSWindow? = nil
 ) -> (NSWindow, NSView, MultilineTabStripView) {
     _ = NSApplication.shared
-    let window = NSWindow(
+    let window = providedWindow ?? NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: width, height: height),
         styleMask: [.titled, .resizable],
         backing: .buffered,
@@ -300,6 +320,24 @@ private func descendantButtons(of view: NSView) -> [NSButton] {
 private func descendantTextFields(of view: NSView) -> [NSTextField] {
     let direct = view.subviews.compactMap { $0 as? NSTextField }
     return direct + view.subviews.flatMap(descendantTextFields)
+}
+
+@MainActor
+private func mouseMovementEvent(
+    for window: NSWindow,
+    location: NSPoint = .zero
+) throws -> NSEvent {
+    try #require(NSEvent.mouseEvent(
+        with: .mouseMoved,
+        location: location,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: window.windowNumber,
+        context: nil,
+        eventNumber: 0,
+        clickCount: 0,
+        pressure: 0
+    ))
 }
 
 @MainActor
@@ -1840,7 +1878,13 @@ func everyCoreShortcutIdentityIsUnique() {
 
 @Test @MainActor func inactiveTabHoverUpdatesOnlyItsLocalAffordances() throws {
     let tabs = makeTabs(count: 2, activeIndex: 0)
-    let (window, _, strip) = hostStrip(width: 500, height: 200, tabs: tabs)
+    let pointerWindow = makePointerLocationWindow(width: 500, height: 200)
+    let (window, _, strip) = hostStrip(
+        width: 500,
+        height: 200,
+        tabs: tabs,
+        window: pointerWindow
+    )
     defer {
         strip.tearDownHostedViews()
         window.contentView = nil
@@ -1853,17 +1897,7 @@ func everyCoreShortcutIdentityIsUnique() {
         $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
     })
     let before = item.view.layer?.backgroundColor
-    let event = try #require(NSEvent.mouseEvent(
-        with: .mouseMoved,
-        location: .zero,
-        modifierFlags: [],
-        timestamp: 0,
-        windowNumber: window.windowNumber,
-        context: nil,
-        eventNumber: 0,
-        clickCount: 0,
-        pressure: 0
-    ))
+    let event = try mouseMovementEvent(for: window)
 
     item.view.updateTrackingAreas()
     #expect(item.view.trackingAreas.contains {
@@ -1877,6 +1911,206 @@ func everyCoreShortcutIdentityIsUnique() {
     item.view.mouseExited(with: event)
     #expect(close.isHidden)
     #expect(item.view.layer?.backgroundColor == before)
+}
+
+@Test @MainActor func sequentialTabEntersKeepOnlyNewestHoverAndSingleSelection() throws {
+    let tabs = makeTabs(count: 3, activeIndex: 0)
+    let pointerWindow = makePointerLocationWindow(width: 600, height: 200)
+    let (window, _, strip) = hostStrip(
+        width: 600,
+        height: 200,
+        tabs: tabs,
+        window: pointerWindow
+    )
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let firstPath = IndexPath(item: 1, section: 0)
+    let secondPath = IndexPath(item: 2, section: 0)
+    let firstItem = try #require(strip.hostedCollectionView.item(at: firstPath))
+    let secondItem = try #require(strip.hostedCollectionView.item(at: secondPath))
+    let firstID = tabs[1].id.rawValue.uuidString.lowercased()
+    let secondID = tabs[2].id.rawValue.uuidString.lowercased()
+    let firstClose = try #require(descendantButtons(of: firstItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(firstID)"
+    })
+    let secondClose = try #require(descendantButtons(of: secondItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(secondID)"
+    })
+    let firstRestingBackground = firstItem.view.layer?.backgroundColor
+    let secondRestingBackground = secondItem.view.layer?.backgroundColor
+    let event = try mouseMovementEvent(for: window)
+
+    #expect(!strip.hostedCollectionView.allowsMultipleSelection)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+
+    firstItem.view.mouseEntered(with: event)
+    #expect(!firstClose.isHidden)
+    #expect(firstItem.view.layer?.backgroundColor != firstRestingBackground)
+
+    secondItem.view.mouseEntered(with: event)
+    #expect(firstClose.isHidden)
+    #expect(firstItem.view.layer?.backgroundColor == firstRestingBackground)
+    #expect(!secondClose.isHidden)
+    #expect(secondItem.view.layer?.backgroundColor != secondRestingBackground)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+
+    firstItem.view.mouseExited(with: event)
+    #expect(!secondClose.isHidden)
+    secondItem.view.mouseExited(with: event)
+    #expect(secondClose.isHidden)
+    #expect(secondItem.view.layer?.backgroundColor == secondRestingBackground)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+}
+
+@Test @MainActor func trackingAreaRefreshUsesCurrentPointerAndVisibleBounds() throws {
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let pointerWindow = makePointerLocationWindow(width: 500, height: 200)
+    let (window, _, strip) = hostStrip(
+        width: 500,
+        height: 200,
+        tabs: tabs,
+        window: pointerWindow
+    )
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let item = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 1, section: 0)))
+    let stableID = tabs[1].id.rawValue.uuidString.lowercased()
+    let close = try #require(descendantButtons(of: item.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+    let restingBackground = item.view.layer?.backgroundColor
+    let pointerLocation = item.view.convert(
+        NSPoint(x: item.view.bounds.midX, y: item.view.bounds.midY),
+        to: nil
+    )
+    pointerWindow.pointerLocation = pointerLocation
+    let event = try mouseMovementEvent(for: window, location: pointerLocation)
+
+    item.view.updateTrackingAreas()
+    item.view.mouseEntered(with: event)
+    #expect(!close.isHidden)
+
+    item.view.updateTrackingAreas()
+    #expect(!close.isHidden)
+    #expect(item.view.layer?.backgroundColor != restingBackground)
+
+    pointerWindow.pointerLocation = item.view.convert(
+        NSPoint(x: item.view.bounds.maxX + 20, y: item.view.bounds.midY),
+        to: nil
+    )
+    item.view.updateTrackingAreas()
+    #expect(close.isHidden)
+    #expect(item.view.layer?.backgroundColor == restingBackground)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+}
+
+@Test @MainActor func reloadAndRemovalCannotRestoreStaleTabHover() throws {
+    let tabs = makeTabs(count: 3, activeIndex: 0)
+    let pointerWindow = makePointerLocationWindow(width: 600, height: 200)
+    let (window, _, strip) = hostStrip(
+        width: 600,
+        height: 200,
+        tabs: tabs,
+        window: pointerWindow
+    )
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let hoveredPath = IndexPath(item: 1, section: 0)
+    let stableID = tabs[1].id.rawValue.uuidString.lowercased()
+    let event = try mouseMovementEvent(for: window)
+
+    var hoveredItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
+    hoveredItem.view.mouseEntered(with: event)
+    strip.apply(tabs: tabs)
+
+    hoveredItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
+    var hoveredClose = try #require(descendantButtons(of: hoveredItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+    #expect(hoveredClose.isHidden)
+
+    hoveredItem.view.mouseEntered(with: event)
+    #expect(!hoveredClose.isHidden)
+    var remaining = tabs
+    remaining.remove(at: hoveredPath.item)
+    let pendingSnapshot = WorkspaceSnapshot(
+        sessionID: SessionID(),
+        tabs: remaining,
+        activeBuffer: remaining[0].buffer,
+        persistence: .pending,
+        startup: .ready
+    )
+    strip.apply(change: WorkspaceChange(
+        snapshot: pendingSnapshot,
+        kind: .tabRemovalPending(index: hoveredPath.item)
+    ))
+
+    strip.apply(tabs: tabs)
+    hoveredItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
+    hoveredClose = try #require(descendantButtons(of: hoveredItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+    #expect(hoveredClose.isHidden)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+}
+
+@Test @MainActor func offscreenReuseCannotRestoreStaleTabHover() async throws {
+    let tabs = makeTabs(count: 500, activeIndex: 0)
+    let pointerWindow = makePointerLocationWindow(width: 300, height: 320)
+    let (window, _, strip) = hostStrip(
+        width: 300,
+        height: 320,
+        tabs: tabs,
+        window: pointerWindow
+    )
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let hoveredPath = IndexPath(item: 1, section: 0)
+    let lastPath = IndexPath(item: tabs.count - 1, section: 0)
+    let hoveredItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
+    let stableID = tabs[1].id.rawValue.uuidString.lowercased()
+    let close = try #require(descendantButtons(of: hoveredItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+    let pointerLocation = hoveredItem.view.convert(
+        NSPoint(x: hoveredItem.view.bounds.midX, y: hoveredItem.view.bounds.midY),
+        to: nil
+    )
+    let event = try mouseMovementEvent(for: window, location: pointerLocation)
+
+    hoveredItem.view.mouseEntered(with: event)
+    #expect(!close.isHidden)
+
+    strip.hostedCollectionView.scrollToItems(at: [lastPath], scrollPosition: .centeredVertically)
+    for _ in 0..<20 where strip.hostedCollectionView.item(at: hoveredPath) != nil {
+        strip.hostedCollectionView.layoutSubtreeIfNeeded()
+        await Task.yield()
+    }
+    #expect(strip.hostedCollectionView.item(at: hoveredPath) == nil)
+
+    strip.hostedCollectionView.scrollToItems(at: [hoveredPath], scrollPosition: .centeredVertically)
+    for _ in 0..<20 where strip.hostedCollectionView.item(at: hoveredPath) == nil {
+        strip.hostedCollectionView.layoutSubtreeIfNeeded()
+        await Task.yield()
+    }
+    let redisplayedItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
+    let redisplayedClose = try #require(descendantButtons(of: redisplayedItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+    #expect(redisplayedClose.isHidden)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
 }
 
 @Test @MainActor func tabChromeUsesExplicitDocumentDropdownWithoutNewButton() {
