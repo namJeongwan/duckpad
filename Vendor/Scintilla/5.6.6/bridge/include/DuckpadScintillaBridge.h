@@ -64,6 +64,7 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, copy, nullable) void (^onFocus)(void);
 @property(nonatomic, copy, nullable) void (^onFoldStateChange)(void);
 @property(nonatomic, copy, nullable) void (^onFoldRecoveryProgress)(void);
+@property(nonatomic, copy, nullable) void (^onSmartIndentationStateChange)(BOOL isPending);
 @property(nonatomic, readonly, nullable) NSError *lastMutationError;
 @property(nonatomic, readonly) uint64_t revision;
 @property(nonatomic, readonly, copy) NSData *contentUTF8;
@@ -149,6 +150,7 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (BOOL)goToUTF8Offset:(NSUInteger)offset;
 - (void)shareDocumentWithView:(DPScintillaEditorView *)source;
 - (void)synchronizeRevision:(uint64_t)revision;
+- (void)cancelPendingSmartIndentation;
 /// Disconnects native callbacks and document watchers before a pane is discarded.
 - (void)invalidate;
 - (BOOL)addSelectionUTF8Range:(NSRange)range;

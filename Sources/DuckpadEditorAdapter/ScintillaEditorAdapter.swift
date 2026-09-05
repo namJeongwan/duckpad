@@ -60,6 +60,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private var documentIntelligenceContextIDs: [ObjectIdentifier: DocumentIntelligenceContextID] = [:]
     private var navigationContextIDs: [ObjectIdentifier: EditorNavigationContextID] = [:]
     private var pendingFoldRecoveryByView: [ObjectIdentifier: FoldRecoveryState] = [:]
+    private var pendingSmartIndentationViewIDs: [BufferID: ObjectIdentifier] = [:]
     private var lastFocusedViewID: ObjectIdentifier?
     private let splitView = NSSplitView(frame: .zero)
     private let primaryHost = NSView(frame: .zero)
@@ -250,26 +251,32 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         languageConfigurations.removeValue(forKey: bufferID)
         pendingRecoveryBuffers.remove(bufferID)
         revisionExhaustedBuffers.remove(bufferID)
-        let retiredView = bufferViews.removeValue(forKey: bufferID)
+        let retiredView = bufferViews[bufferID]
+        retiredView?.cancelPendingSmartIndentation()
         if let retiredView {
             discardViewIdentity(retiredView)
         }
+        bufferViews.removeValue(forKey: bufferID)
         retiredView?.onEdit = nil
         retiredView?.onError = nil
         retiredView?.onFocus = nil
         retiredView?.onFoldStateChange = nil
         retiredView?.onFoldRecoveryProgress = nil
+        retiredView?.onSmartIndentationStateChange = nil
         retiredView?.removeFromSuperview()
         retiredView?.invalidate()
-        let retiredSecondary = secondaryBufferViews.removeValue(forKey: bufferID)
+        let retiredSecondary = secondaryBufferViews[bufferID]
+        retiredSecondary?.cancelPendingSmartIndentation()
         if let retiredSecondary {
             discardViewIdentity(retiredSecondary)
         }
+        secondaryBufferViews.removeValue(forKey: bufferID)
         retiredSecondary?.onEdit = nil
         retiredSecondary?.onError = nil
         retiredSecondary?.onFocus = nil
         retiredSecondary?.onFoldStateChange = nil
         retiredSecondary?.onFoldRecoveryProgress = nil
+        retiredSecondary?.onSmartIndentationStateChange = nil
         retiredSecondary?.removeFromSuperview()
         retiredSecondary?.invalidate()
         guard activeBuffer?.bufferID == bufferID else { return }
@@ -284,11 +291,13 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         lifecycleGeneration &+= 1
         let editorViews = Array(bufferViews.values) + Array(secondaryBufferViews.values)
         for editorView in editorViews {
+            editorView.cancelPendingSmartIndentation()
             editorView.onEdit = nil
             editorView.onError = nil
             editorView.onFocus = nil
             editorView.onFoldStateChange = nil
             editorView.onFoldRecoveryProgress = nil
+            editorView.onSmartIndentationStateChange = nil
             discardViewIdentity(editorView)
             editorView.removeFromSuperview()
             editorView.invalidate()
@@ -296,6 +305,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         bufferViews.removeAll()
         secondaryBufferViews.removeAll()
         pendingFoldRecoveryByView.removeAll()
+        pendingSmartIndentationViewIDs.removeAll()
         documentIntelligenceContextIDs.removeAll()
         navigationContextIDs.removeAll()
         lastFocusedViewID = nil
@@ -933,9 +943,11 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     private func receive(_ bridgeEdit: DPScintillaEdit, bufferID: BufferID) {
+        let pendingSmartCloser = isPendingSmartCloser(bridgeEdit, bufferID: bufferID)
         guard !isInvalidated, !isRecovering, let activeBuffer, activeBuffer.bufferID == bufferID,
               bridgeEdit.baseRevision == activeBuffer.revision,
               let replacement = String(data: bridgeEdit.replacementUTF8, encoding: .utf8) else {
+            if pendingSmartCloser { cancelPendingSmartIndentation(for: bufferID) }
             scheduleRecovery(bufferID: bufferID)
             return
         }
@@ -963,6 +975,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             appendRecovery(edit, resultingRevision: newRevision)
             discardPendingFoldRecovery(bufferID: activeBuffer.bufferID)
         case .accepted, .rejected:
+            if pendingSmartCloser { cancelPendingSmartIndentation(for: bufferID) }
             scheduleRecovery(bufferID: bufferID)
         }
     }
@@ -1100,10 +1113,47 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
                   self.isLive(editorView, for: bufferID) else { return }
             self.retryPendingFoldRecovery(in: editorView)
         }
+        editorView.onSmartIndentationStateChange = { [weak self, weak editorView] isPending in
+            guard let self, let editorView,
+                  self.isLive(editorView, for: bufferID) else { return }
+            let identifier = ObjectIdentifier(editorView)
+            if isPending {
+                self.pendingSmartIndentationViewIDs[bufferID] = identifier
+            } else if self.pendingSmartIndentationViewIDs[bufferID] == identifier {
+                self.pendingSmartIndentationViewIDs.removeValue(forKey: bufferID)
+            }
+        }
     }
 
     private func isLive(_ editorView: DPScintillaEditorView, for bufferID: BufferID) -> Bool {
         bufferViews[bufferID] === editorView || secondaryBufferViews[bufferID] === editorView
+    }
+
+    private func pendingSmartIndentationView(for bufferID: BufferID) -> DPScintillaEditorView? {
+        guard let identifier = pendingSmartIndentationViewIDs[bufferID] else { return nil }
+        if let primary = bufferViews[bufferID], ObjectIdentifier(primary) == identifier {
+            return primary
+        }
+        if let secondary = secondaryBufferViews[bufferID], ObjectIdentifier(secondary) == identifier {
+            return secondary
+        }
+        pendingSmartIndentationViewIDs.removeValue(forKey: bufferID)
+        return nil
+    }
+
+    private func isPendingSmartCloser(_ edit: DPScintillaEdit, bufferID: BufferID) -> Bool {
+        guard pendingSmartIndentationView(for: bufferID) != nil,
+              edit.range.length == 0,
+              edit.replacementUTF8.count == 1,
+              let byte = edit.replacementUTF8.first else {
+            return false
+        }
+        return byte == 0x7D || byte == 0x5D || byte == 0x29
+    }
+
+    private func cancelPendingSmartIndentation(for bufferID: BufferID) {
+        guard let editorView = pendingSmartIndentationView(for: bufferID) else { return }
+        editorView.cancelPendingSmartIndentation()
     }
 
     private func discardViewIdentity(_ editorView: DPScintillaEditorView) {
@@ -1111,6 +1161,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         documentIntelligenceContextIDs.removeValue(forKey: identifier)
         navigationContextIDs.removeValue(forKey: identifier)
         pendingFoldRecoveryByView.removeValue(forKey: identifier)
+        pendingSmartIndentationViewIDs = pendingSmartIndentationViewIDs.filter { $0.value != identifier }
         if lastFocusedViewID == identifier { lastFocusedViewID = nil }
     }
 
@@ -1219,6 +1270,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
 
     private func hideSplit(focusPrimary: Bool) {
         let releasedSecondary = secondaryActiveView
+        releasedSecondary?.cancelPendingSmartIndentation()
         if let releasedSecondary {
             discardViewIdentity(releasedSecondary)
         }
@@ -1227,6 +1279,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         releasedSecondary?.onFocus = nil
         releasedSecondary?.onFoldStateChange = nil
         releasedSecondary?.onFoldRecoveryProgress = nil
+        releasedSecondary?.onSmartIndentationStateChange = nil
         releasedSecondary?.removeFromSuperview()
         if let bufferID = activeBuffer?.bufferID,
            let releasedSecondary,
@@ -1447,6 +1500,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     private func load(_ snapshot: EditorTextSnapshot, into editorView: DPScintillaEditorView) {
+        cancelPendingSmartIndentation(for: snapshot.bufferID)
         isRecovering = true
         defer { isRecovering = false }
         try? editorView.loadUTF8(Data(snapshot.text.utf8), revision: snapshot.revision)

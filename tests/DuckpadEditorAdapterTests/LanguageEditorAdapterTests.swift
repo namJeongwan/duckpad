@@ -7,6 +7,14 @@ import DuckpadScintillaBridge
 import Foundation
 import Testing
 
+private typealias ScintillaMessageInvocation = @convention(c) (
+    AnyObject,
+    Selector,
+    UInt32,
+    UInt,
+    Int
+) -> Int
+
 @Suite(.serialized)
 struct LanguageEditorAdapterTests {
     @MainActor
@@ -49,6 +57,66 @@ struct LanguageEditorAdapterTests {
             dequeue: true
         ))
         NSApplication.shared.sendEvent(queuedEvent)
+    }
+
+    @MainActor
+    private func waitForRevision(
+        _ view: DPScintillaEditorView,
+        _ expectedRevision: UInt64
+    ) async throws {
+        for _ in 0..<100 {
+            try await Task.sleep(for: .milliseconds(5))
+            if view.revision == expectedRevision { return }
+        }
+    }
+
+    @MainActor
+    private func applying(_ edit: EditorIncrementalEdit, to bytes: Data) -> Data? {
+        guard edit.range.location >= 0,
+              edit.range.length >= 0,
+              edit.range.location <= bytes.count,
+              edit.range.length <= bytes.count - edit.range.location else {
+            return nil
+        }
+        var result = bytes
+        result.replaceSubrange(
+            edit.range.location..<(edit.range.location + edit.range.length),
+            with: Data(edit.replacement.utf8)
+        )
+        return result
+    }
+
+    @MainActor
+    private func sendTestingScintillaMessage(
+        _ message: UInt32,
+        wParam: UInt = 0,
+        lParam: Int = 0,
+        to view: DPScintillaEditorView
+    ) throws -> Int {
+        // `DPScintillaEditorView` deliberately hides Scintilla messages. These
+        // test-only values come from the vendored 5.6.6 `Scintilla.h` and let
+        // the integration test construct selection states AppKit cannot create.
+        let rawView = try #require(view.value(forKey: "scintilla") as? NSObject)
+        let selector = NSSelectorFromString("message:wParam:lParam:")
+        let implementation = try #require(rawView.method(for: selector))
+        let invoke = unsafeBitCast(implementation, to: ScintillaMessageInvocation.self)
+        return invoke(rawView, selector, message, wParam, lParam)
+    }
+
+    @MainActor
+    private func configureTestingSelectionTopology(
+        _ view: DPScintillaEditorView,
+        shape: DPScintillaSelectionShape,
+        caretVirtualSpace: UInt = 0,
+        anchorVirtualSpace: UInt = 0
+    ) throws {
+        // SCI_SETSELECTIONMODE=2422, SCI_SETVIRTUALSPACEOPTIONS=2596,
+        // SCI_SETSELECTIONNCARETVIRTUALSPACE=2580, and
+        // SCI_SETSELECTIONNANCHORVIRTUALSPACE=2582 in Scintilla 5.6.6.
+        _ = try sendTestingScintillaMessage(2422, wParam: UInt(shape.rawValue), to: view)
+        _ = try sendTestingScintillaMessage(2596, wParam: 2, to: view) // SCVS_USERACCESSIBLE
+        _ = try sendTestingScintillaMessage(2580, lParam: Int(caretVirtualSpace), to: view)
+        _ = try sendTestingScintillaMessage(2582, lParam: Int(anchorVirtualSpace), to: view)
     }
 
     @Test @MainActor
@@ -412,6 +480,908 @@ struct LanguageEditorAdapterTests {
 
             #expect(String(decoding: view.contentUTF8, as: UTF8.self).hasSuffix(expectedSuffix))
         }
+    }
+
+    @Test @MainActor
+    func directClosingDelimiterDedentsOneConfiguredLevel() throws {
+        let cases: [(prefix: String, closer: String, tabWidth: UInt, useTabs: Bool, expected: String)] = [
+            ("  ", "}", 2, false, "}"),
+            ("    ", "]", 4, false, "]"),
+            ("\t", ")", 4, true, ")"),
+        ]
+
+        for fixture in cases {
+            let (_, view) = hostedView()
+            try view.loadUTF8(Data(fixture.prefix.utf8), revision: 0)
+            #expect(view.applyLexerNamed(
+                "json",
+                keywords: [],
+                tabWidth: fixture.tabWidth,
+                useTabs: fixture.useTabs,
+                folding: true,
+                braceMatching: true,
+                maximumStyleBytes: 1_000_000
+            ))
+            view.setPrimarySelectionUTF8Range(NSRange(location: fixture.prefix.utf8.count, length: 0))
+
+            view.insertCommittedText(fixture.closer)
+
+            #expect(view.contentUTF8 == Data(fixture.expected.utf8))
+            #expect(view.caretUTF8Position == fixture.expected.utf8.count)
+            #expect(view.revision == 2)
+        }
+    }
+
+    @Test @MainActor
+    func mixedIndentationDedentsToExactTabStopColumn() throws {
+        let cases: [(prefix: String, useTabs: Bool, expected: String)] = [
+            ("\t  ", false, "  }"),
+            ("\t  ", true, "\t}"),
+            (" \t", false, "}"),
+            (" \t", true, "}"),
+        ]
+
+        for fixture in cases {
+            let (_, view) = hostedView()
+            try view.loadUTF8(Data(fixture.prefix.utf8), revision: 0)
+            #expect(view.applyLexerNamed(
+                "json",
+                keywords: [],
+                tabWidth: 2,
+                useTabs: fixture.useTabs,
+                folding: true,
+                braceMatching: true,
+                maximumStyleBytes: 1_000_000
+            ))
+            view.setPrimarySelectionUTF8Range(NSRange(location: fixture.prefix.utf8.count, length: 0))
+
+            view.insertCommittedText("}")
+
+            #expect(view.contentUTF8 == Data(fixture.expected.utf8))
+            #expect(view.caretUTF8Position == fixture.expected.utf8.count)
+            #expect(view.revision == 2)
+        }
+    }
+
+    @Test @MainActor
+    func shortIndentationDedentsToZero() throws {
+        let (_, view) = hostedView()
+        try view.loadUTF8(Data("  ".utf8), revision: 0)
+        #expect(view.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 4,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        view.setPrimarySelectionUTF8Range(NSRange(location: 2, length: 0))
+
+        view.insertCommittedText("}")
+
+        #expect(view.contentUTF8 == Data("}".utf8))
+        #expect(view.caretUTF8Position == 1)
+        #expect(view.revision == 2)
+    }
+
+    @Test @MainActor
+    func closerDedentPublishesTwoForwardEditsAndOneUndoRestoresBoth() throws {
+        let source = "      "
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let view = try #require(adapter.activeScintillaView)
+        view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        var edits: [EditorIncrementalEdit] = []
+        adapter.onEdit = { edit in
+            edits.append(edit)
+            return .accepted(newRevision: edit.expectedRevision + 1)
+        }
+        view.resetInstrumentation()
+
+        view.insertCommittedText("}")
+
+        #expect(edits.count == 2)
+        #expect(edits.map(\.expectedRevision) == [0, 1])
+        if edits.count == 2 {
+            #expect(edits[0].range == .init(location: source.utf8.count, length: 0))
+            #expect(edits[0].replacement == "}")
+            #expect(edits[1].range == .init(location: 0, length: source.utf8.count))
+            #expect(edits[1].replacement == "  ")
+        }
+        #expect(view.incrementalNotificationCount == 2)
+        #expect(view.contentUTF8 == Data("  }".utf8))
+        #expect(view.revision == 2)
+
+        view.undo()
+
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(adapter.recoverySnapshot(for: bufferID)?.utf8 == Data(source.utf8))
+        #expect(view.revision > 2)
+        #expect(edits.dropFirst(2).allSatisfy { $0.expectedRevision >= 2 })
+    }
+
+    @Test @MainActor
+    func repeatedCloserDedentsRetainInitiatingViewTracking() async throws {
+        _ = NSApplication.shared
+        let source = "    "
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = adapter.view
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        var callbacks = 0
+        adapter.onEdit = { edit in
+            callbacks += 1
+            return .accepted(newRevision: edit.expectedRevision + 1)
+        }
+
+        primary.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        primary.focusEditor()
+        primary.insertCommittedText("}")
+        #expect(primary.contentUTF8 == Data("}".utf8))
+        #expect(callbacks == 2)
+
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        primary.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        primary.focusEditor()
+        callbacks = 0
+        adapter.onEdit = { .rejected(currentRevision: $0.expectedRevision) }
+        primary.insertCommittedText("}")
+        try await waitForRevision(primary, 0)
+        #expect(primary.contentUTF8 == Data(source.utf8))
+        #expect(secondary.contentUTF8 == Data(source.utf8))
+        #expect(callbacks == 0)
+
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        secondary.focusEditor()
+        callbacks = 0
+        adapter.onEdit = { edit in
+            callbacks += 1
+            return .accepted(newRevision: edit.expectedRevision + 1)
+        }
+        secondary.insertCommittedText("}")
+        #expect(primary.contentUTF8 == Data("}".utf8))
+        #expect(secondary.contentUTF8 == Data("}".utf8))
+        #expect(callbacks == 2)
+
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        secondary.focusEditor()
+        callbacks = 0
+        adapter.onEdit = { .rejected(currentRevision: $0.expectedRevision) }
+        secondary.insertCommittedText("}")
+        try await waitForRevision(primary, 0)
+        #expect(primary.contentUTF8 == Data(source.utf8))
+        #expect(secondary.contentUTF8 == Data(source.utf8))
+        #expect(callbacks == 0)
+    }
+
+    @Test @MainActor
+    func closerDedentRedoRestoresBothAndUsesExistingComponentAuthority() throws {
+        let source = "      "
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let view = try #require(adapter.activeScintillaView)
+        view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        var edits: [EditorIncrementalEdit] = []
+        adapter.onEdit = { edit in
+            edits.append(edit)
+            return .accepted(newRevision: edit.expectedRevision + 1)
+        }
+
+        view.insertCommittedText("}")
+        view.undo()
+        let revisionAfterUndo = view.revision
+        #expect(view.contentUTF8 == Data(source.utf8))
+
+        view.redo()
+
+        #expect(view.contentUTF8 == Data("  }".utf8))
+        #expect(adapter.recoverySnapshot(for: bufferID)?.utf8 == Data("  }".utf8))
+        #expect(view.revision > revisionAfterUndo)
+        #expect(edits.count >= 6)
+        #expect(edits.enumerated().allSatisfy { $0.element.expectedRevision == UInt64($0.offset) })
+    }
+
+    @Test @MainActor
+    func rejectedCloserCancelsPendingIndentationAndRecoversPreInputAuthority() async throws {
+        let source = "    "
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let view = try #require(adapter.activeScintillaView)
+        view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        var edits: [EditorIncrementalEdit] = []
+        adapter.onEdit = { edit in
+            edits.append(edit)
+            return .rejected(currentRevision: edit.expectedRevision)
+        }
+
+        view.insertCommittedText("}")
+        try await waitForRevision(view, 0)
+
+        #expect(edits.count == 1)
+        #expect(edits.first?.replacement == "}")
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(adapter.recoverySnapshot(for: bufferID)?.utf8 == Data(source.utf8))
+        #expect(!view.canUndo)
+    }
+
+    @Test @MainActor
+    func rejectedIndentationReplacementKeepsAcceptedCloserAuthority() async throws {
+        let source = "    "
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let view = try #require(adapter.activeScintillaView)
+        view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        var edits: [EditorIncrementalEdit] = []
+        adapter.onEdit = { edit in
+            edits.append(edit)
+            return edits.count == 1
+                ? .accepted(newRevision: edit.expectedRevision + 1)
+                : .rejected(currentRevision: edit.expectedRevision)
+        }
+
+        view.insertCommittedText("}")
+        try await waitForRevision(view, 1)
+
+        #expect(edits.count == 2)
+        #expect(edits.map(\.replacement) == ["}", ""])
+        #expect(view.contentUTF8 == Data((source + "}").utf8))
+        #expect(adapter.recoverySnapshot(for: bufferID)?.utf8 == Data((source + "}").utf8))
+        #expect(!view.canUndo)
+    }
+
+    @Test @MainActor
+    func secondaryCloserDedentUsesPrimaryPublisherAndCancelsTheInitiatorOnRejection() async throws {
+        _ = NSApplication.shared
+        let source = "      "
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = adapter.view
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        secondary.focusEditor()
+        primary.resetInstrumentation()
+        secondary.resetInstrumentation()
+        var callbacks = 0
+        adapter.onEdit = { edit in
+            callbacks += 1
+            return .accepted(newRevision: edit.expectedRevision + 1)
+        }
+
+        secondary.insertCommittedText("}")
+
+        #expect(callbacks == 2)
+        #expect(primary.incrementalNotificationCount == 2)
+        #expect(secondary.incrementalNotificationCount == 0)
+        #expect(primary.revision == 2)
+        #expect(secondary.revision == 2)
+        #expect(primary.contentUTF8 == Data("  }".utf8))
+        #expect(secondary.contentUTF8 == Data("  }".utf8))
+        #expect(secondary.caretUTF8Position == 3)
+
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        secondary.focusEditor()
+        primary.resetInstrumentation()
+        secondary.resetInstrumentation()
+        callbacks = 0
+        adapter.onEdit = { edit in
+            callbacks += 1
+            return .rejected(currentRevision: edit.expectedRevision)
+        }
+
+        secondary.insertCommittedText("}")
+        try await waitForRevision(primary, 0)
+
+        #expect(callbacks == 1)
+        #expect(primary.incrementalNotificationCount == 1)
+        #expect(secondary.incrementalNotificationCount == 0)
+        #expect(primary.contentUTF8 == Data(source.utf8))
+        #expect(secondary.contentUTF8 == Data(source.utf8))
+        #expect(primary.revision == 0)
+        #expect(secondary.revision == 0)
+        #expect(!primary.canUndo)
+    }
+
+    @Test @MainActor
+    func closerDedentRequiresFiveRevisionBudget() throws {
+        let source = "  "
+        let acceptedSource = "\t  "
+        let acceptedRevision = UInt64.max - 5
+        let (_, accepted) = hostedView()
+        try accepted.loadUTF8(Data(acceptedSource.utf8), revision: acceptedRevision)
+        #expect(accepted.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 4,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        accepted.setPrimarySelectionUTF8Range(NSRange(location: acceptedSource.utf8.count, length: 0))
+        let originalCaret = accepted.caretUTF8Position
+        let originalAnchor = accepted.anchorUTF8Position
+        var edits: [DPScintillaEdit] = []
+        accepted.onEdit = { edits.append($0) }
+
+        accepted.insertCommittedText("}")
+
+        #expect(accepted.contentUTF8 == Data("  }".utf8))
+        #expect(accepted.revision == UInt64.max - 3)
+        #expect(accepted.caretUTF8Position == 3)
+        #expect(accepted.anchorUTF8Position == 3)
+        #expect(accepted.canUndo)
+        #expect(edits.count == 2)
+        #expect(edits[0].origin == .user)
+        #expect(edits[0].range == NSRange(location: acceptedSource.utf8.count, length: 0))
+        #expect(edits[0].replacementUTF8 == Data("}".utf8))
+        #expect(edits[1].origin == .user)
+        #expect(edits[1].range == NSRange(location: 0, length: acceptedSource.utf8.count))
+        #expect(edits[1].replacementUTF8 == Data("  ".utf8))
+        accepted.undo()
+        #expect(accepted.contentUTF8 == Data(acceptedSource.utf8))
+        #expect(accepted.caretUTF8Position == originalCaret)
+        #expect(accepted.anchorUTF8Position == originalAnchor)
+        #expect(accepted.revision == UInt64.max)
+        #expect(edits.count == 5)
+        #expect(edits.dropFirst(2).allSatisfy { $0.origin == .undo })
+
+        for revision in (UInt64.max - 4)...(UInt64.max - 1) {
+            let (_, view) = hostedView()
+            try view.loadUTF8(Data(source.utf8), revision: revision)
+            #expect(view.applyLexerNamed(
+                "json",
+                keywords: [],
+                tabWidth: 2,
+                useTabs: false,
+                folding: true,
+                braceMatching: true,
+                maximumStyleBytes: 1_000_000
+            ))
+            view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+
+            view.insertCommittedText("}")
+
+            #expect(view.contentUTF8 == Data("  }".utf8))
+            #expect(view.revision == revision + 1)
+        }
+
+        let (_, exhausted) = hostedView()
+        try exhausted.loadUTF8(Data(source.utf8), revision: .max)
+        #expect(exhausted.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        exhausted.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        exhausted.insertCommittedText("}")
+        #expect(exhausted.contentUTF8 == Data(source.utf8))
+        #expect(exhausted.revision == .max)
+    }
+
+    @Test @MainActor
+    func closerDedentAcceptsExact4096ByteWhitespacePrefix() throws {
+        let source = String(repeating: " ", count: 4_096)
+        let expected = String(repeating: " ", count: 4_094) + "}"
+        let (_, view) = hostedView()
+        try view.loadUTF8(Data(source.utf8), revision: 0)
+        #expect(view.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        var edits: [DPScintillaEdit] = []
+        view.onEdit = { edits.append($0) }
+
+        view.insertCommittedText("}")
+
+        #expect(view.contentUTF8 == Data(expected.utf8))
+        #expect(view.caretUTF8Position == expected.utf8.count)
+        #expect(view.anchorUTF8Position == expected.utf8.count)
+        #expect(view.revision == 2)
+        #expect(view.incrementalNotificationCount == 2)
+        #expect(edits.count == 2)
+        #expect(edits.map(\.replacementUTF8) == [
+            Data("}".utf8),
+            Data(String(repeating: " ", count: 4_094).utf8),
+        ])
+
+        view.undo()
+
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(view.caretUTF8Position == source.utf8.count)
+        #expect(view.anchorUTF8Position == source.utf8.count)
+    }
+
+    @Test @MainActor
+    func undoRedoRejectionRecoversEachAcceptedComponentPrefix() async throws {
+        let source = "      "
+
+        @MainActor
+        func makeAdapter() throws -> (ScintillaEditorAdapter, BufferID, DPScintillaEditorView) {
+            let adapter = ScintillaEditorAdapter()
+            let bufferID = BufferID()
+            adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+            adapter.display(.init(bufferID: bufferID, revision: 0))
+            #expect(adapter.applyLanguage(.init(
+                languageID: .init(rawValue: "json"),
+                lexerName: "json",
+                indentation: .init(width: 4),
+                folding: true,
+                braceMatching: true
+            )))
+            let view = try #require(adapter.activeScintillaView)
+            view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+            return (adapter, bufferID, view)
+        }
+
+        let (baselineAdapter, _, baselineView) = try makeAdapter()
+        var baselineEdits: [EditorIncrementalEdit] = []
+        baselineAdapter.onEdit = { edit in
+            baselineEdits.append(edit)
+            return .accepted(newRevision: edit.expectedRevision + 1)
+        }
+        baselineView.insertCommittedText("}")
+        baselineView.undo()
+        let undoComponentCount = baselineEdits.count - 2
+        #expect(undoComponentCount > 0)
+        baselineView.redo()
+        let redoComponentCount = baselineEdits.count - 2 - undoComponentCount
+        #expect(redoComponentCount > 0)
+
+        for rejectedIndex in 0..<undoComponentCount {
+            let (adapter, bufferID, view) = try makeAdapter()
+            var accepted: [EditorIncrementalEdit] = []
+            var undoStarted = false
+            var undoComponent = 0
+            adapter.onEdit = { edit in
+                if undoStarted {
+                    defer { undoComponent += 1 }
+                    if undoComponent == rejectedIndex {
+                        return .rejected(currentRevision: edit.expectedRevision)
+                    }
+                }
+                accepted.append(edit)
+                return .accepted(newRevision: edit.expectedRevision + 1)
+            }
+
+            view.insertCommittedText("}")
+            undoStarted = true
+            view.undo()
+
+            var expected = Data(source.utf8)
+            for acceptedEdit in accepted {
+                expected = try #require(applying(acceptedEdit, to: expected))
+            }
+            try await waitForRevision(view, UInt64(accepted.count))
+            #expect(view.contentUTF8 == expected)
+            #expect(adapter.recoverySnapshot(for: bufferID)?.utf8 == expected)
+        }
+
+        for rejectedIndex in 0..<redoComponentCount {
+            let (adapter, bufferID, view) = try makeAdapter()
+            var accepted: [EditorIncrementalEdit] = []
+            var redoStarted = false
+            var redoComponent = 0
+            adapter.onEdit = { edit in
+                if redoStarted {
+                    defer { redoComponent += 1 }
+                    if redoComponent == rejectedIndex {
+                        return .rejected(currentRevision: edit.expectedRevision)
+                    }
+                }
+                accepted.append(edit)
+                return .accepted(newRevision: edit.expectedRevision + 1)
+            }
+
+            view.insertCommittedText("}")
+            view.undo()
+            redoStarted = true
+            view.redo()
+
+            var expected = Data(source.utf8)
+            for acceptedEdit in accepted {
+                expected = try #require(applying(acceptedEdit, to: expected))
+            }
+            try await waitForRevision(view, UInt64(accepted.count))
+            #expect(view.contentUTF8 == expected)
+            #expect(adapter.recoverySnapshot(for: bufferID)?.utf8 == expected)
+        }
+    }
+
+    @Test @MainActor
+    func closerDedentExcludesPasteIMEProgrammaticMultiCharacterAndNonWhitespaceLines() throws {
+        let source = "  "
+
+        @MainActor
+        func configuredView(_ text: String = source) throws -> (NSWindow, DPScintillaEditorView) {
+            let hosted = hostedView()
+            try hosted.1.loadUTF8(Data(text.utf8), revision: 0)
+            #expect(hosted.1.applyLexerNamed(
+                "json",
+                keywords: [],
+                tabWidth: 2,
+                useTabs: false,
+                folding: true,
+                braceMatching: true,
+                maximumStyleBytes: 1_000_000
+            ))
+            hosted.1.setPrimarySelectionUTF8Range(NSRange(location: text.utf8.count, length: 0))
+            return hosted
+        }
+
+        @MainActor
+        func assertFollowingEditUndoesWithoutGrouping(
+            in view: DPScintillaEditorView,
+            preserving literalText: String
+        ) {
+            view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+            view.insertCommittedText("x")
+            #expect(view.contentUTF8 == Data(("x" + literalText).utf8))
+            #expect(view.canUndo)
+            view.undo()
+            #expect(view.contentUTF8 == Data(literalText.utf8))
+        }
+
+        let (_, pasted) = try configuredView()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("}", forType: .string)
+        pasted.paste()
+        #expect(pasted.contentUTF8 == Data("  }".utf8))
+        #expect(pasted.revision == 1)
+        assertFollowingEditUndoesWithoutGrouping(in: pasted, preserving: "  }")
+
+        let (imeWindow, ime) = try configuredView()
+        imeWindow.makeKeyAndOrderFront(nil)
+        defer { imeWindow.orderOut(nil) }
+        ime.focusEditor()
+        ime.setMarkedText(
+            "}",
+            selectedRange: NSRange(location: 1, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        let textInputClient = try #require(imeWindow.firstResponder as? NSTextInputClient)
+        textInputClient.insertText("}", replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(ime.contentUTF8 == Data("  }".utf8))
+        #expect(ime.revision == 3)
+        ime.unmarkText()
+        assertFollowingEditUndoesWithoutGrouping(in: ime, preserving: "  }")
+
+        let (_, programmatic) = try configuredView()
+        try programmatic.replaceUTF8Range(
+            NSRange(location: source.utf8.count, length: 0),
+            withReplacement: Data("}".utf8),
+            expectedRevision: 0,
+            resultingRevision: 1
+        )
+        #expect(programmatic.contentUTF8 == Data("  }".utf8))
+        #expect(programmatic.revision == 1)
+        assertFollowingEditUndoesWithoutGrouping(in: programmatic, preserving: "  }")
+
+        let (_, multipleCharacters) = try configuredView()
+        multipleCharacters.insertCommittedText("}}")
+        #expect(multipleCharacters.contentUTF8 == Data("  }}".utf8))
+        #expect(multipleCharacters.revision == 2)
+        assertFollowingEditUndoesWithoutGrouping(in: multipleCharacters, preserving: "  }}")
+
+        let (_, nonWhitespace) = try configuredView("  value")
+        nonWhitespace.insertCommittedText("}")
+        #expect(nonWhitespace.contentUTF8 == Data("  value}".utf8))
+        #expect(nonWhitespace.revision == 1)
+        assertFollowingEditUndoesWithoutGrouping(in: nonWhitespace, preserving: "  value}")
+
+        let (_, zeroIndentation) = try configuredView("")
+        zeroIndentation.insertCommittedText("}")
+        #expect(zeroIndentation.contentUTF8 == Data("}".utf8))
+        #expect(zeroIndentation.revision == 1)
+        assertFollowingEditUndoesWithoutGrouping(in: zeroIndentation, preserving: "}")
+
+        let (multipleWindow, multipleSelection) = try configuredView("  \n  ")
+        multipleSelection.setPrimarySelectionUTF8Range(NSRange(location: 2, length: 0))
+        #expect(multipleSelection.addSelectionUTF8Range(NSRange(location: 5, length: 0)))
+        multipleWindow.makeKeyAndOrderFront(nil)
+        multipleSelection.focusEditor()
+        try sendKeyEvent(
+            characters: "}",
+            charactersIgnoringModifiers: "]",
+            modifierFlags: [.shift],
+            keyCode: 30,
+            to: multipleWindow
+        )
+        #expect(multipleSelection.contentUTF8 == Data("  \n  }".utf8))
+        #expect(multipleSelection.revision == 1)
+        assertFollowingEditUndoesWithoutGrouping(
+            in: multipleSelection,
+            preserving: "  \n  }"
+        )
+        multipleWindow.orderOut(nil)
+
+        let (_, rectangularSelection) = try configuredView()
+        try configureTestingSelectionTopology(
+            rectangularSelection,
+            shape: .rectangle
+        )
+        #expect(try sendTestingScintillaMessage(2423, to: rectangularSelection) == 1)
+        rectangularSelection.resetInstrumentation()
+        rectangularSelection.insertCommittedText("}")
+        #expect(rectangularSelection.contentUTF8 == Data("  }".utf8))
+        #expect(rectangularSelection.revision == 1)
+        #expect(rectangularSelection.incrementalNotificationCount == 1)
+        try configureTestingSelectionTopology(rectangularSelection, shape: .stream)
+        assertFollowingEditUndoesWithoutGrouping(
+            in: rectangularSelection,
+            preserving: "  }"
+        )
+
+        let (_, virtualSelection) = try configuredView()
+        try configureTestingSelectionTopology(
+            virtualSelection,
+            shape: .stream,
+            caretVirtualSpace: 1,
+            anchorVirtualSpace: 1
+        )
+        #expect(try sendTestingScintillaMessage(2581, to: virtualSelection) == 1)
+        #expect(try sendTestingScintillaMessage(2583, to: virtualSelection) == 1)
+        virtualSelection.resetInstrumentation()
+        virtualSelection.insertCommittedText("}")
+        // A rejected preflight preserves Scintilla's normal virtual-space
+        // materialization: one space plus the literal closer, never two
+        // aggregate smart-dedent edits.
+        #expect(virtualSelection.contentUTF8 == Data("   }".utf8))
+        #expect(virtualSelection.revision == 3)
+        #expect(virtualSelection.incrementalNotificationCount == 3)
+        _ = try sendTestingScintillaMessage(2556, wParam: 0, to: virtualSelection)
+        #expect(try sendTestingScintillaMessage(2581, to: virtualSelection) == 0)
+        #expect(try sendTestingScintillaMessage(2583, to: virtualSelection) == 0)
+        assertFollowingEditUndoesWithoutGrouping(
+            in: virtualSelection,
+            preserving: "   }"
+        )
+
+        let longPrefix = String(repeating: " ", count: 4_097)
+        let (_, longWhitespace) = try configuredView(longPrefix)
+        longWhitespace.resetInstrumentation()
+        longWhitespace.insertCommittedText("}")
+        #expect(longWhitespace.snapshotReadCount == 0)
+        #expect(longWhitespace.contentUTF8 == Data((longPrefix + "}").utf8))
+        #expect(longWhitespace.revision == 1)
+        #expect(longWhitespace.incrementalNotificationCount == 1)
+        assertFollowingEditUndoesWithoutGrouping(
+            in: longWhitespace,
+            preserving: longPrefix + "}"
+        )
+    }
+
+    @Test @MainActor
+    func explicitIndentUsesTwoAndFourSpaceLanguageWidths() throws {
+        for width in [2, 4] {
+            let source = "line"
+            let adapter = ScintillaEditorAdapter()
+            let bufferID = BufferID()
+            adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+            adapter.display(.init(bufferID: bufferID, revision: 0))
+            #expect(adapter.applyLanguage(.init(
+                languageID: .init(rawValue: "json"),
+                lexerName: "json",
+                indentation: .init(width: width),
+                folding: true,
+                braceMatching: true
+            )))
+            let view = try #require(adapter.activeScintillaView)
+            view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+            adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+
+            adapter.perform(.indent)
+
+            #expect(view.contentUTF8 == Data((String(repeating: " ", count: width) + source).utf8))
+            #expect(view.revision == 1)
+        }
+    }
+
+    @Test @MainActor
+    func explicitIndentUsesTabsForMakefileConfiguration() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: "target:"))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "makefile"),
+            lexerName: "makefile",
+            indentation: .init(width: 4, useTabs: true),
+            folding: true,
+            braceMatching: true
+        )))
+        let view = try #require(adapter.activeScintillaView)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+
+        adapter.perform(.indent)
+
+        #expect(view.contentUTF8 == Data("\ttarget:".utf8))
+        #expect(view.revision == 1)
+    }
+
+    @Test @MainActor
+    func explicitMultilineIndentAndOutdentPreserveSelectionAndGroupUndo() throws {
+        let source = "a\nb\nc"
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 2),
+            folding: true,
+            braceMatching: true
+        )))
+        let view = try #require(adapter.activeScintillaView)
+        view.restoreCaretUTF8Position(
+            0,
+            anchorPosition: UInt(source.utf8.count),
+            firstVisibleLine: 0,
+            horizontalScrollOffset: 0,
+            wordWrapEnabled: true
+        )
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+
+        adapter.perform(.indent)
+
+        let indented = "  a\n  b\n  c"
+        #expect(view.contentUTF8 == Data(indented.utf8))
+        #expect(view.caretUTF8Position == 0)
+        #expect(view.anchorUTF8Position == indented.utf8.count)
+        let revisionAfterIndent = view.revision
+        view.undo()
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(view.caretUTF8Position == 0)
+        #expect(view.anchorUTF8Position == source.utf8.count)
+
+        view.redo()
+        #expect(view.contentUTF8 == Data(indented.utf8))
+        adapter.perform(.unindent)
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(view.caretUTF8Position == 0)
+        #expect(view.anchorUTF8Position == source.utf8.count)
+        #expect(view.revision > revisionAfterIndent)
+    }
+
+    @Test @MainActor
+    func explicitOutdentHandlesMixedLeadingWhitespace() throws {
+        let source = " \tfirst\n\t  second"
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let view = try #require(adapter.activeScintillaView)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: source.utf8.count))
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+
+        adapter.perform(.unindent)
+
+        #expect(view.contentUTF8 == Data("first\n  second".utf8))
+        #expect(view.revision == 3)
+    }
+
+    @Test @MainActor
+    func explicitIndentAdvancesDirtyAndRecoveryForEveryNativeEdit() async throws {
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        #expect(await workspace.start() == .saved)
+        let adapter = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: adapter)
+        let buffer = try #require(workspace.snapshot().activeBuffer)
+        let source = "one\ntwo"
+        adapter.install(.init(bufferID: buffer.bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: buffer.bufferID, revision: 0))
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 2),
+            folding: true,
+            braceMatching: true
+        )))
+        let view = try #require(adapter.activeScintillaView)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: source.utf8.count))
+        let appendCount = adapter.recoveryJournalAppendCount
+
+        adapter.perform(.indent)
+
+        let expected = "  one\n  two"
+        #expect(view.contentUTF8 == Data(expected.utf8))
+        #expect(workspace.snapshot().activeBuffer?.revision == 2)
+        #expect(workspace.snapshot().tabs.first?.isDirty == true)
+        #expect(adapter.recoveryJournalAppendCount == appendCount + 2)
+        #expect(adapter.recoverySnapshot(for: buffer.bufferID)?.utf8 == Data(expected.utf8))
+        _ = binding
     }
 
     @Test @MainActor

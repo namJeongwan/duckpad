@@ -46,6 +46,7 @@ Fold-state capture, restore, commands, and recovery-progress callbacks are
 implemented only in Duckpad-owned `bridge/` code. No byte from the official
 Scintilla 5.6.6 archive was modified for that façade.
 
-Phase 32 block-comment selection validation, aggregate edit publication, and
-shared-document publisher routing likewise modify only Duckpad-owned files
-under `bridge/`; no upstream Scintilla or Lexilla source file changed.
+Phase 32 block-comment selection validation, aggregate edit publication,
+shared-document publisher routing, and direct-closing-delimiter indentation
+likewise modify only Duckpad-owned files under `bridge/`; no upstream Scintilla
+or Lexilla source file changed.

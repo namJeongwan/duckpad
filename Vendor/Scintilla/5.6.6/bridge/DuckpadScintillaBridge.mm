@@ -20,6 +20,7 @@ static constexpr NSInteger DPSmartIndentScanLimit = 4096;
 static constexpr NSUInteger DPMaximumSynchronousStyleBytes = 262144;
 static constexpr NSUInteger DPMaximumFoldRecoveryHeaderCount = 10000;
 static constexpr uint64_t DPBlockCommentRequiredRevisionBudget = 3;
+static constexpr uint64_t DPSmartCloserRequiredRevisionBudget = 5;
 
 typedef NSData * _Nullable (^DPScintillaAggregateReplacementBuilder)(NSData *deletedUTF8);
 
@@ -76,6 +77,29 @@ static BOOL DPScintillaBytesMatch(ScintillaView *scintilla, NSUInteger position,
     return YES;
 }
 
+static BOOL DPIsClosingDelimiter(int character) {
+    return character == '}' || character == ']' || character == ')';
+}
+
+static NSUInteger DPIndentationColumns(const std::string &prefix, NSUInteger tabWidth) {
+    NSUInteger columns = 0;
+    for (const unsigned char character : prefix) {
+        if (character == '\t') {
+            columns += tabWidth - (columns % tabWidth);
+        } else {
+            columns += 1;
+        }
+    }
+    return columns;
+}
+
+static std::string DPCanonicalIndentation(NSUInteger columns, NSUInteger tabWidth, BOOL useTabs) {
+    if (!useTabs) return std::string(columns, ' ');
+    std::string result(columns / tabWidth, '\t');
+    result.append(columns % tabWidth, ' ');
+    return result;
+}
+
 void DPScintillaConfigureResourceDirectory(NSURL *directoryURL) {
     DPScintillaResourceDirectory = [directoryURL copy];
 }
@@ -121,6 +145,11 @@ NSString *DPScintillaResourcePath(NSString *name) {
                  resultingAnchorUTF8:(NSUInteger)anchor
                   resultingCaretUTF8:(NSUInteger)caret
               replacementBuilder:(DPScintillaAggregateReplacementBuilder)replacementBuilder;
+- (BOOL)prepareClosingDelimiterDedent:(SCNotification *)notification;
+- (BOOL)publishPendingSmartCloser;
+- (void)finishPendingSmartIndentation;
+- (void)captureDirectInputPreflightState;
+- (void)clearDirectInputPreflightState;
 @end
 
 @interface SCIContentView (DuckpadStandardEditing)
@@ -171,9 +200,26 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     BOOL _smartEditingEnabled;
     BOOL _textInputSourceKnown;
     BOOL _directInputInsertion;
+    BOOL _directInputByteLengthKnown;
+    NSUInteger _directInputByteLength;
+    BOOL _directInputSelectionEligible;
+    __weak DPScintillaEditorView *_directInputInitiator;
     NSInteger _pendingSmartCaretPosition;
     NSInteger _pendingSmartInsertionEnd;
     int _pendingSmartCharacter;
+    NSInteger _pendingSmartIndentationInsertionPosition;
+    NSRange _pendingSmartIndentationRange;
+    NSData *_pendingSmartIndentationOriginalUTF8;
+    NSData *_pendingSmartIndentationReplacementUTF8;
+    NSInteger _pendingSmartIndentationExpectedPostInsertCaret;
+    int _pendingSmartIndentationCloser;
+    uint64_t _pendingSmartIndentationBaseRevision;
+    BOOL _pendingSmartIndentationUndoGroupOpen;
+    __weak DPScintillaEditorView *_pendingSmartIndentationPublisher;
+    BOOL _pendingSmartIndentationPublisherWasSuppressingEdit;
+    BOOL _pendingSmartIndentationCharacterAdded;
+    NSUInteger _pendingSmartIndentationSuppressedNativeComponentCount;
+    BOOL _pendingSmartIndentationApplyingReplacement;
     BOOL _foldRecoveryProgressPending;
     BOOL _foldRecoveryProgressScheduled;
     NSUInteger _focusEventGeneration;
@@ -203,6 +249,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         _publishesDocumentEdits = YES;
         _pendingSmartCaretPosition = -1;
         _pendingSmartInsertionEnd = -1;
+        _pendingSmartIndentationInsertionPosition = -1;
+        _pendingSmartIndentationExpectedPostInsertCaret = -1;
         [_scintilla message:SCI_SETMARGINTYPEN wParam:0 lParam:SC_MARGIN_NUMBER];
         [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:40];
         [_scintilla message:SCI_SETMARGINTYPEN wParam:1 lParam:SC_MARGIN_SYMBOL];
@@ -229,15 +277,28 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)dealloc {
+    [self cancelPendingSmartIndentation];
+    DPScintillaEditorView *publisher = _documentPublisher;
+    if (publisher != nil && publisher->_directInputInitiator == self) {
+        publisher->_directInputInitiator = nil;
+    }
+    self.onSmartIndentationStateChange = nil;
     _scintilla.delegate = nil;
 }
 
 - (void)invalidate {
+    [self cancelPendingSmartIndentation];
+    DPScintillaEditorView *publisher = _documentPublisher;
+    if (publisher != nil && publisher->_directInputInitiator == self) {
+        publisher->_directInputInitiator = nil;
+    }
+    _directInputInitiator = nil;
     self.onEdit = nil;
     self.onError = nil;
     self.onFocus = nil;
     self.onFoldStateChange = nil;
     self.onFoldRecoveryProgress = nil;
+    self.onSmartIndentationStateChange = nil;
     _foldRecoveryProgressPending = NO;
     _documentPublisher = nil;
     _pendingSmartCaretPosition = -1;
@@ -307,6 +368,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     if ([[NSString alloc] initWithData:content encoding:NSUTF8StringEncoding] == nil) {
         return [self fail:DPScintillaErrorInvalidUTF8 description:@"Content is not valid UTF-8" error:error];
     }
+    [self cancelPendingSmartIndentation];
     _suppressEdit = YES;
     _pendingSmartCaretPosition = -1;
     _pendingSmartInsertionEnd = -1;
@@ -731,7 +793,16 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     if (![self preflightUserMutation]) return;
     _textInputSourceKnown = YES;
     _directInputInsertion = YES;
+    _directInputByteLengthKnown = YES;
+    _directInputByteLength = [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+    [self captureDirectInputPreflightState];
+    DPScintillaEditorView *publisher = _documentPublisher;
+    if (publisher != nil) publisher->_directInputInitiator = self;
     [[_scintilla content] insertText:text];
+    if (publisher != nil && publisher->_directInputInitiator == self) {
+        publisher->_directInputInitiator = nil;
+    }
+    [self clearDirectInputPreflightState];
     _directInputInsertion = NO;
     _textInputSourceKnown = NO;
 }
@@ -739,11 +810,49 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (void)scintillaWillInsertTextFromSource:(SCITextInputSource)source {
     _textInputSourceKnown = YES;
     _directInputInsertion = source == SCITextInputSourceDirect;
+    if (!_directInputByteLengthKnown && _directInputInsertion) {
+        NSEvent *event = NSApp.currentEvent;
+        if (event.type == NSEventTypeKeyDown && event.characters != nil) {
+            _directInputByteLengthKnown = YES;
+            _directInputByteLength = [event.characters
+                lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+        }
+    }
+    [self captureDirectInputPreflightState];
+    if (_directInputInsertion && _documentPublisher != nil) {
+        _documentPublisher->_directInputInitiator = self;
+    }
 }
 
 - (void)scintillaDidInsertText {
+    DPScintillaEditorView *publisher = _documentPublisher;
+    if (publisher != nil && publisher->_directInputInitiator == self) {
+        publisher->_directInputInitiator = nil;
+    }
+    [self clearDirectInputPreflightState];
     _directInputInsertion = NO;
     _textInputSourceKnown = NO;
+}
+
+- (void)captureDirectInputPreflightState {
+    const sptr_t selectionCount = [_scintilla message:SCI_GETSELECTIONS];
+    const sptr_t caretVirtualSpace = [_scintilla
+        message:SCI_GETSELECTIONNCARETVIRTUALSPACE wParam:0];
+    const sptr_t anchorVirtualSpace = [_scintilla
+        message:SCI_GETSELECTIONNANCHORVIRTUALSPACE wParam:0];
+    const sptr_t anchor = [_scintilla message:SCI_GETANCHOR];
+    const sptr_t caret = [_scintilla message:SCI_GETCURRENTPOS];
+    _directInputSelectionEligible = selectionCount == 1
+        && caretVirtualSpace == 0 && anchorVirtualSpace == 0
+        && anchor == caret
+        && DPSelectionShapeFromScintilla([_scintilla message:SCI_GETSELECTIONMODE])
+            == DPScintillaSelectionShapeStream;
+}
+
+- (void)clearDirectInputPreflightState {
+    _directInputByteLengthKnown = NO;
+    _directInputByteLength = 0;
+    _directInputSelectionEligible = NO;
 }
 - (void)setMarkedText:(NSString *)text selectedRange:(NSRange)selectedRange replacementRange:(NSRange)replacementRange {
     if (![self preflightUserMutation]) return;
@@ -908,6 +1017,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     NSString *effectiveName = overBudget ? @"null" : lexerName;
     Scintilla::ILexer5 *lexer = CreateLexer(effectiveName.UTF8String);
     if (lexer == nullptr) return NO;
+    [self cancelPendingSmartIndentation];
     _pendingSmartCaretPosition = -1;
     _pendingSmartInsertionEnd = -1;
     _pendingSmartCharacter = 0;
@@ -1536,7 +1646,219 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     }];
 }
 
+- (void)finishPendingSmartIndentation {
+    const BOOL hasPending = _pendingSmartIndentationInsertionPosition >= 0
+        || _pendingSmartIndentationUndoGroupOpen;
+    if (!hasPending) return;
+    DPScintillaEditorView *publisher = _pendingSmartIndentationPublisher;
+    if (_pendingSmartIndentationUndoGroupOpen && _scintilla != nil) {
+        [_scintilla message:SCI_ENDUNDOACTION];
+    }
+    if (publisher != nil) {
+        publisher->_suppressEdit = _pendingSmartIndentationPublisherWasSuppressingEdit;
+    }
+    _pendingSmartIndentationInsertionPosition = -1;
+    _pendingSmartIndentationRange = NSMakeRange(0, 0);
+    _pendingSmartIndentationOriginalUTF8 = nil;
+    _pendingSmartIndentationReplacementUTF8 = nil;
+    _pendingSmartIndentationExpectedPostInsertCaret = -1;
+    _pendingSmartIndentationCloser = 0;
+    _pendingSmartIndentationBaseRevision = 0;
+    _pendingSmartIndentationUndoGroupOpen = NO;
+    _pendingSmartIndentationPublisher = nil;
+    _pendingSmartIndentationPublisherWasSuppressingEdit = NO;
+    _pendingSmartIndentationCharacterAdded = NO;
+    _pendingSmartIndentationSuppressedNativeComponentCount = 0;
+    _pendingSmartIndentationApplyingReplacement = NO;
+    if (self.onSmartIndentationStateChange) self.onSmartIndentationStateChange(NO);
+}
+
+- (void)cancelPendingSmartIndentation {
+    [self finishPendingSmartIndentation];
+}
+
+- (BOOL)prepareClosingDelimiterDedent:(SCNotification *)notification {
+    if (!_smartEditingEnabled || !_textInputSourceKnown || !_directInputInsertion
+        || !_directInputByteLengthKnown || _directInputByteLength != 1
+        || !_directInputSelectionEligible || [[_scintilla content] hasMarkedText]
+        || notification->text == nullptr || notification->length != 1) {
+        return NO;
+    }
+    const int closer = static_cast<unsigned char>(notification->text[0]);
+    if (!DPIsClosingDelimiter(closer)) return NO;
+
+    DPScintillaEditorView *publisher = _documentPublisher ?: self;
+    if (publisher == nil || _scintilla == nil || publisher->_scintilla == nil
+        || !self.isInputEnabled || !publisher.isInputEnabled
+        || publisher->_revision != _revision
+        || publisher->_revision > UINT64_MAX - DPSmartCloserRequiredRevisionBudget
+        || [_scintilla message:SCI_GETDOCPOINTER]
+            != [publisher->_scintilla message:SCI_GETDOCPOINTER]) {
+        return NO;
+    }
+
+    const sptr_t selectionCount = [_scintilla message:SCI_GETSELECTIONS];
+    const sptr_t caretVirtualSpace = [_scintilla
+        message:SCI_GETSELECTIONNCARETVIRTUALSPACE wParam:0];
+    const sptr_t anchorVirtualSpace = [_scintilla
+        message:SCI_GETSELECTIONNANCHORVIRTUALSPACE wParam:0];
+    const NSInteger anchor = [_scintilla message:SCI_GETANCHOR];
+    const NSInteger caret = [_scintilla message:SCI_GETCURRENTPOS];
+    if (selectionCount != 1 || caretVirtualSpace != 0 || anchorVirtualSpace != 0
+        || anchor != caret
+        || DPSelectionShapeFromScintilla([_scintilla message:SCI_GETSELECTIONMODE])
+            != DPScintillaSelectionShapeStream) {
+        return NO;
+    }
+
+    const NSInteger insertionPosition = notification->position;
+    if (insertionPosition < 0 || insertionPosition != caret
+        || insertionPosition == NSIntegerMax) {
+        return NO;
+    }
+    const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION
+                                        wParam:(uptr_t)insertionPosition];
+    const NSInteger lineStart = [_scintilla message:SCI_POSITIONFROMLINE wParam:(uptr_t)line];
+    if (lineStart < 0 || lineStart > insertionPosition) return NO;
+    const NSUInteger prefixLength = static_cast<NSUInteger>(insertionPosition - lineStart);
+    if (prefixLength == 0 || prefixLength > DPSmartIndentScanLimit) return NO;
+
+    std::string original;
+    original.reserve(prefixLength);
+    for (NSUInteger index = 0; index < prefixLength; index += 1) {
+        const int character = static_cast<int>([_scintilla message:SCI_GETCHARAT
+                                                        wParam:(uptr_t)(lineStart + (NSInteger)index)]);
+        if (character != ' ' && character != '\t') return NO;
+        original.push_back(static_cast<char>(character));
+    }
+
+    const NSUInteger tabWidth = static_cast<NSUInteger>(MAX(1, [_scintilla message:SCI_GETTABWIDTH]));
+    const NSUInteger currentColumns = DPIndentationColumns(original, tabWidth);
+    if (currentColumns == 0) return NO;
+    const NSUInteger targetColumns = currentColumns > tabWidth ? currentColumns - tabWidth : 0;
+    if (targetColumns >= currentColumns) return NO;
+    const std::string replacement = DPCanonicalIndentation(
+        targetColumns,
+        tabWidth,
+        [_scintilla message:SCI_GETUSETABS] != 0
+    );
+    if (replacement == original) return NO;
+
+    _pendingSmartIndentationInsertionPosition = insertionPosition;
+    _pendingSmartIndentationRange = NSMakeRange((NSUInteger)lineStart, prefixLength);
+    _pendingSmartIndentationOriginalUTF8 = [NSData dataWithBytes:original.data() length:original.size()];
+    _pendingSmartIndentationReplacementUTF8 = [NSData dataWithBytes:replacement.data() length:replacement.size()];
+    _pendingSmartIndentationExpectedPostInsertCaret = insertionPosition + 1;
+    _pendingSmartIndentationCloser = closer;
+    _pendingSmartIndentationBaseRevision = publisher->_revision;
+    _pendingSmartIndentationUndoGroupOpen = YES;
+    _pendingSmartIndentationPublisher = publisher;
+    _pendingSmartIndentationPublisherWasSuppressingEdit = publisher->_suppressEdit;
+    _pendingSmartIndentationCharacterAdded = NO;
+    _pendingSmartIndentationSuppressedNativeComponentCount = 1;
+    _pendingSmartIndentationApplyingReplacement = NO;
+    publisher->_suppressEdit = YES;
+    [_scintilla message:SCI_BEGINUNDOACTION];
+    if (self.onSmartIndentationStateChange) self.onSmartIndentationStateChange(YES);
+    return YES;
+}
+
+- (BOOL)publishPendingSmartCloser {
+    DPScintillaEditorView *publisher = _pendingSmartIndentationPublisher;
+    const NSInteger position = _pendingSmartIndentationInsertionPosition;
+    if (publisher == nil || publisher->_scintilla == nil || position < 0
+        || _pendingSmartIndentationCloser == 0
+        || publisher->_revision != _pendingSmartIndentationBaseRevision
+        || _revision != _pendingSmartIndentationBaseRevision
+        || [_scintilla message:SCI_GETCHARAT wParam:(uptr_t)position]
+            != _pendingSmartIndentationCloser
+        || publisher->_incrementalNotificationCount == NSUIntegerMax
+        || publisher->_incrementalPayloadByteCount == NSUIntegerMax) {
+        return NO;
+    }
+    const uint64_t baseRevision = publisher->_revision;
+    if (baseRevision == UINT64_MAX) return NO;
+    const unsigned char closer = static_cast<unsigned char>(_pendingSmartIndentationCloser);
+    NSData *inserted = [NSData dataWithBytes:&closer length:1];
+    publisher->_revision = baseRevision + 1;
+    if (publisher->_revision == UINT64_MAX) [publisher->_scintilla setEditable:NO];
+    publisher->_incrementalNotificationCount += 1;
+    publisher->_incrementalPayloadByteCount += inserted.length;
+    DPScintillaEdit *edit = [[DPScintillaEdit alloc] initWithRange:NSMakeRange((NSUInteger)position, 0)
+                                                      insertedUTF8:inserted
+                                                       deletedUTF8:[NSData data]
+                                                      baseRevision:baseRevision
+                                                 resultingRevision:publisher->_revision
+                                                            origin:DPScintillaEditOriginUser];
+    if (publisher.onEdit) publisher.onEdit(edit);
+    return YES;
+}
+
 - (void)handleSmartCharacterAdded:(SCNotification *)notification {
+    DPScintillaEditorView *directInputInitiator = _directInputInitiator;
+    if (directInputInitiator != nil && directInputInitiator != self
+        && directInputInitiator->_pendingSmartIndentationInsertionPosition >= 0) {
+        [directInputInitiator handleSmartCharacterAdded:notification];
+        return;
+    }
+    if (_pendingSmartIndentationInsertionPosition >= 0) {
+        DPScintillaEditorView *publisher = _pendingSmartIndentationPublisher;
+        const NSInteger caret = [_scintilla message:SCI_GETCURRENTPOS];
+        const uint64_t expectedCloserRevision = _pendingSmartIndentationBaseRevision + 1;
+        if (publisher == nil
+            || notification->characterSource != SC_CHARACTERSOURCE_DIRECT_INPUT
+            || notification->ch != _pendingSmartIndentationCloser
+            || caret != _pendingSmartIndentationExpectedPostInsertCaret
+            || [_scintilla message:SCI_GETCHARAT
+                         wParam:(uptr_t)_pendingSmartIndentationInsertionPosition]
+                != _pendingSmartIndentationCloser
+            || ![self publishPendingSmartCloser]) {
+            [self cancelPendingSmartIndentation];
+            return;
+        }
+        if (_pendingSmartIndentationInsertionPosition < 0) return;
+        if (publisher->_revision != expectedCloserRevision
+            || _revision != expectedCloserRevision
+            || _pendingSmartIndentationOriginalUTF8 == nil
+            || _pendingSmartIndentationReplacementUTF8 == nil) {
+            [self cancelPendingSmartIndentation];
+            return;
+        }
+        const NSRange range = _pendingSmartIndentationRange;
+        NSData *original = _pendingSmartIndentationOriginalUTF8;
+        NSData *replacement = _pendingSmartIndentationReplacementUTF8;
+        if (range.location > NSUIntegerMax - replacement.length - 1) {
+            [self cancelPendingSmartIndentation];
+            return;
+        }
+        const NSUInteger resultingCaret = range.location + replacement.length + 1;
+        const NSUInteger replacementComponentCount = replacement.length > 0 ? 2 : 1;
+        if (_pendingSmartIndentationSuppressedNativeComponentCount
+            > NSUIntegerMax - replacementComponentCount) {
+            [self cancelPendingSmartIndentation];
+            return;
+        }
+        _pendingSmartIndentationSuppressedNativeComponentCount += replacementComponentCount;
+        _pendingSmartIndentationApplyingReplacement = YES;
+        const BOOL replaced = [publisher applyAggregateUserEditInRange:range
+                                                        selectionOwner:self
+                                                  resultingAnchorUTF8:resultingCaret
+                                                   resultingCaretUTF8:resultingCaret
+                                               replacementBuilder:^NSData * _Nullable(NSData *deletedUTF8) {
+            return [deletedUTF8 isEqualToData:original] ? replacement : nil;
+        }];
+        _pendingSmartIndentationApplyingReplacement = NO;
+        if (!replaced) {
+            _pendingSmartIndentationSuppressedNativeComponentCount -= replacementComponentCount;
+        }
+        if (_pendingSmartIndentationInsertionPosition >= 0) {
+            _pendingSmartIndentationCharacterAdded = YES;
+            if (_pendingSmartIndentationSuppressedNativeComponentCount == 0) {
+                [self finishPendingSmartIndentation];
+            }
+        }
+        return;
+    }
     if (_pendingSmartCaretPosition < 0) return;
     const NSInteger caret = [_scintilla message:SCI_GETCURRENTPOS];
     if (notification->characterSource == SC_CHARACTERSOURCE_DIRECT_INPUT
@@ -1550,9 +1872,30 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)handleSmartInsertionCheck:(SCNotification *)notification {
+    if (_pendingSmartIndentationInsertionPosition >= 0
+        && _pendingSmartIndentationPublisher != nil
+        && _pendingSmartIndentationPublisher->_suppressEdit) {
+        return;
+    }
+    const BOOL isSingleClosingDelimiter = notification->text != nullptr
+        && notification->length == 1
+        && DPIsClosingDelimiter(static_cast<unsigned char>(notification->text[0]));
+    if (isSingleClosingDelimiter
+        && _pendingSmartIndentationInsertionPosition == notification->position
+        && _pendingSmartIndentationCloser == static_cast<unsigned char>(notification->text[0])) {
+        return;
+    }
+    [self cancelPendingSmartIndentation];
     _pendingSmartCaretPosition = -1;
     _pendingSmartInsertionEnd = -1;
     _pendingSmartCharacter = 0;
+    DPScintillaEditorView *directInputInitiator = _directInputInitiator;
+    if (isSingleClosingDelimiter && directInputInitiator != nil
+        && directInputInitiator != self) {
+        [directInputInitiator cancelPendingSmartIndentation];
+        if ([directInputInitiator prepareClosingDelimiterDedent:notification]) return;
+    }
+    if ([self prepareClosingDelimiterDedent:notification]) return;
     if (!_smartEditingEnabled || [[_scintilla content] hasMarkedText]
         || notification->length <= 0 || notification->text == nullptr) return;
     if (notification->length > 2) return;
@@ -1667,8 +2010,40 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [self updateBraceHighlight];
         [self scheduleFoldRecoveryProgress];
     }
-    if (_suppressEdit || notification->nmhdr.code != SCN_MODIFIED) return;
+    if (notification->nmhdr.code != SCN_MODIFIED) return;
     const int flags = notification->modificationType;
+    if (_suppressEdit) {
+        const BOOL isSingleInsertedCharacter = (flags & SC_MOD_INSERTTEXT) != 0
+            && notification->text != nullptr && notification->length == 1;
+        const int insertedCharacter = isSingleInsertedCharacter
+            ? static_cast<unsigned char>(notification->text[0]) : 0;
+        DPScintillaEditorView *pendingOwner = _directInputInitiator ?: self;
+        const BOOL matchesCloser = isSingleInsertedCharacter
+            && pendingOwner != nil
+            && notification->position == pendingOwner->_pendingSmartIndentationInsertionPosition
+            && insertedCharacter == pendingOwner->_pendingSmartIndentationCloser;
+        const BOOL matchesIndentationDeletion = pendingOwner != nil
+            && (flags & SC_MOD_DELETETEXT) != 0
+            && notification->position == (NSInteger)pendingOwner->_pendingSmartIndentationRange.location
+            && notification->length
+                == (NSInteger)pendingOwner->_pendingSmartIndentationOriginalUTF8.length;
+        const BOOL matchesIndentationInsertion = pendingOwner != nil
+            && (flags & SC_MOD_INSERTTEXT) != 0
+            && pendingOwner->_pendingSmartIndentationReplacementUTF8.length > 0
+            && notification->position == (NSInteger)pendingOwner->_pendingSmartIndentationRange.location
+            && notification->length
+                == (NSInteger)pendingOwner->_pendingSmartIndentationReplacementUTF8.length;
+        if ((matchesCloser || matchesIndentationDeletion || matchesIndentationInsertion)
+            && pendingOwner->_pendingSmartIndentationSuppressedNativeComponentCount > 0) {
+            pendingOwner->_pendingSmartIndentationSuppressedNativeComponentCount -= 1;
+            if (pendingOwner->_pendingSmartIndentationCharacterAdded
+                && !pendingOwner->_pendingSmartIndentationApplyingReplacement
+                && pendingOwner->_pendingSmartIndentationSuppressedNativeComponentCount == 0) {
+                [pendingOwner finishPendingSmartIndentation];
+            }
+        }
+        return;
+    }
     if ((flags & SC_MOD_INSERTCHECK) != 0) {
         [self handleSmartInsertionCheck:notification];
         return;
