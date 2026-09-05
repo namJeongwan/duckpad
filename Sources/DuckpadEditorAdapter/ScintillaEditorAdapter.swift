@@ -1118,6 +1118,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
                   self.isLive(editorView, for: bufferID) else { return }
             let identifier = ObjectIdentifier(editorView)
             if isPending {
+                self.storeViewState(bufferID: bufferID)
                 self.pendingSmartIndentationViewIDs[bufferID] = identifier
             } else if self.pendingSmartIndentationViewIDs[bufferID] == identifier {
                 self.pendingSmartIndentationViewIDs.removeValue(forKey: bufferID)

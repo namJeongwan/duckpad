@@ -752,6 +752,36 @@ struct LanguageEditorAdapterTests {
     }
 
     @Test @MainActor
+    func rejectedCloserRecoveryRestoresThePrimaryPreInputCaret() async throws {
+        let source = "prefix\n    "
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let view = try #require(adapter.activeScintillaView)
+        let preInputOffset = source.utf8.count
+        view.setPrimarySelectionUTF8Range(NSRange(location: preInputOffset, length: 0))
+        adapter.onEdit = { .rejected(currentRevision: $0.expectedRevision) }
+
+        view.insertCommittedText("}")
+        try await waitForRevision(view, 0)
+
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(view.revision == 0)
+        #expect(!view.canUndo)
+        #expect(view.selectionCount == 1)
+        #expect(view.caretUTF8Position == preInputOffset)
+        #expect(view.anchorUTF8Position == preInputOffset)
+    }
+
+    @Test @MainActor
     func rejectedIndentationReplacementKeepsAcceptedCloserAuthority() async throws {
         let source = "    "
         let adapter = ScintillaEditorAdapter()
@@ -783,6 +813,65 @@ struct LanguageEditorAdapterTests {
         #expect(view.contentUTF8 == Data((source + "}").utf8))
         #expect(adapter.recoverySnapshot(for: bufferID)?.utf8 == Data((source + "}").utf8))
         #expect(!view.canUndo)
+        #expect(view.caretUTF8Position == source.utf8.count + 1)
+        #expect(view.anchorUTF8Position == source.utf8.count + 1)
+    }
+
+    @Test @MainActor
+    func rejectedSecondaryCloserRecoveryPreservesFocusedAndPeerSelections() async throws {
+        _ = NSApplication.shared
+        let source = "prefix\n    "
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.install(.init(bufferID: bufferID, revision: 0, text: source))
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 4),
+            folding: true,
+            braceMatching: true
+        )))
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = adapter.view
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        primary.restoreCaretUTF8Position(
+            2,
+            anchorPosition: 5,
+            firstVisibleLine: 0,
+            horizontalScrollOffset: 0,
+            wordWrapEnabled: true
+        )
+        let preInputOffset = source.utf8.count
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: preInputOffset, length: 0))
+        secondary.focusEditor()
+        #expect(adapter.activeScintillaView === secondary)
+        adapter.onEdit = { .rejected(currentRevision: $0.expectedRevision) }
+
+        secondary.insertCommittedText("}")
+        try await waitForRevision(primary, 0)
+
+        #expect(primary.contentUTF8 == Data(source.utf8))
+        #expect(secondary.contentUTF8 == Data(source.utf8))
+        #expect(primary.revision == 0)
+        #expect(secondary.revision == 0)
+        #expect(!primary.canUndo)
+        #expect(!secondary.canUndo)
+        #expect(primary.selectionCount == 1)
+        #expect(primary.caretUTF8Position == 2)
+        #expect(primary.anchorUTF8Position == 5)
+        #expect(secondary.selectionCount == 1)
+        #expect(secondary.caretUTF8Position == preInputOffset)
+        #expect(secondary.anchorUTF8Position == preInputOffset)
+        #expect(adapter.activeScintillaView === secondary)
     }
 
     @Test @MainActor
