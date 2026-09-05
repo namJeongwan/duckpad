@@ -19,7 +19,7 @@ Last updated: 2026-09-05 (Asia/Seoul)
 | Native command surface | Implemented | Accessible Edit menu and Command Palette expose unique `⌥⌘/`; extension shortcut collisions fail closed |
 | Tab hover selection-look regression | Fixed | Strip-owned single-hover state clears stale tracking/reuse state; Debug and Release `TabFlowLayoutTests` pass 66/66 after independent review |
 | Phase 32 validation | Complete with baseline blocker | Debug/Release builds and focused gates, six Release budgets, 1 MiB stress, and real AppKit smoke pass; monolithic signal 11 reproduces at parent `4510f3a` |
-| Phase 32 final review and push | Pending | Controller must independently review the complete `4510f3a..HEAD` range plus this exact Task 5 delta before commit or push |
+| Phase 32 final review and push | Delivered | Final independent review reached 0 Critical / 0 Important / 0 Minor; audited delivery commit `c438a760` was pushed and remote-verified on `feature/block-comment-indentation`; this row is the reviewed closeout follow-up |
 
 ## Recently delivered
 
@@ -49,19 +49,20 @@ interception and will be reconsidered only with explicit IME and undo proof.
 
 ## Current validation notes
 
-- Phase 32 implementation Tasks 1–4 and the user-reported stale tab-hover fix
-  completed independent task reviews with 0 Critical, 0 Important, and 0 Minor
-  findings. Task 5's smoke/documentation delta and the complete commit range
-  still require the mandatory final independent review; no delivery push is
-  claimed yet.
+- Phase 32 implementation Tasks 1–5, the user-reported stale tab-hover fix, and
+  the rejected-closer selection-recovery remediation completed independent
+  reviews with 0 Critical, 0 Important, and 0 Minor findings. Audited delivery
+  commit `c438a760` was pushed to `feature/block-comment-indentation` and its
+  full SHA `c438a760d99768f997ed960cff8d6e4427166041` matched the remote branch.
 - The first final-range candidate was rejected with one Important finding:
   rejected direct-closer recovery restored bytes/revision but could restore a
   stale selection. Remediation `2aa8754` snapshots primary and split-pane view
   state when pending direct input opens. RED captured primary `11/11`, reverse
   `2/5`, and focused-secondary `11/11`, each incorrectly restored as `0/0`;
   the fix passes the new/strengthened recovery set 3/3, related lifecycle set
-  9/9, and Language split gate 56/56 in both Debug and Release. Final re-review
-  remains pending.
+  9/9, and Language split gate 56/56 in both Debug and Release. The repeated
+  final-range review then passed 0 Critical / 0 Important / 0 Minor before the
+  audited delivery commit was pushed.
 - Debug and Release builds exit 0. The requested focused Debug and Release
   filters all exit 0: `LanguageManifestTests`, `LanguageWorkspaceUseCaseTests`,
   `LanguageEditorAdapterTests`, `ScintillaEditorAdapterTests`,
@@ -132,7 +133,7 @@ interception and will be reconsidered only with explicit IME and undo proof.
 
 1. Lightweight language-aware smart editing. **Delivered.**
 2. Fold-state recovery and keyboard/VoiceOver folding controls. **Delivered.**
-3. Block comments and further language-aware indentation commands. **Implemented; push pending.**
+3. Block comments and further language-aware indentation commands. **Delivered.**
 4. Importable, validated user language definitions without native code loading.
 5. Lightweight API completion/call-tip provider contract.
 6. Remaining high-value document UX and file-integrity gaps.
