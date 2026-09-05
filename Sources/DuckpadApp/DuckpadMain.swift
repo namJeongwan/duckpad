@@ -387,11 +387,70 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 let revision = view.revision
                 languageUseCase.applyTheme(.dark)
                 guard view.revision == revision else { preconditionFailure("theme mutated text revision") }
+
+                let blockPayload = "한글🦆\r\n두 번째 줄🙂"
+                view.setPrimarySelectionUTF8Range(
+                    NSRange(location: Int(view.documentByteLength), length: 0)
+                )
+                let blockPrefix = view.contentUTF8
+                let blockStart = Int(view.documentByteLength)
+                view.insertCommittedText(blockPayload)
+                let unwrappedBlockDocument = blockPrefix + Data(blockPayload.utf8)
+                guard view.contentUTF8 == unwrappedBlockDocument else {
+                    preconditionFailure("UTF-8/CRLF block-comment smoke setup failed")
+                }
+                view.setPrimarySelectionUTF8Range(
+                    NSRange(location: blockStart, length: blockPayload.utf8.count)
+                )
+                let blockRevision = view.revision
+                guard case .accepted(let wrappedRevision) = languageUseCase.toggleBlockComment(),
+                      wrappedRevision == blockRevision + 1,
+                      view.revision == wrappedRevision else {
+                    preconditionFailure("block-comment smoke did not publish one accepted revision")
+                }
+                let wrappedBlockDocument = blockPrefix + Data(("/*" + blockPayload + "*/").utf8)
+                guard view.contentUTF8 == wrappedBlockDocument else {
+                    preconditionFailure("block-comment smoke did not preserve exact UTF-8/CRLF bytes")
+                }
+                view.undo()
+                guard view.contentUTF8 == unwrappedBlockDocument else {
+                    preconditionFailure("block-comment smoke Undo did not restore exact source")
+                }
+                view.redo()
+                guard view.contentUTF8 == wrappedBlockDocument else {
+                    preconditionFailure("block-comment smoke Redo did not restore exact wrapped source")
+                }
+
+                _ = await languageUseCase.setOverride(.manual(LanguageID(rawValue: "json")))
+                guard editor.activeLanguageID.rawValue == "json", view.lexerName == "json" else {
+                    preconditionFailure("JSON lexer switch smoke failed")
+                }
+                view.setPrimarySelectionUTF8Range(
+                    NSRange(location: Int(view.documentByteLength), length: 0)
+                )
+                let closerPrefix = "\r\n    "
+                view.insertCommittedText(closerPrefix)
+                let beforeCloser = wrappedBlockDocument + Data(closerPrefix.utf8)
+                guard view.contentUTF8 == beforeCloser else {
+                    preconditionFailure("closing-delimiter smoke setup failed")
+                }
+                let closerRevision = view.revision
+                view.insertCommittedText("}")
+                let afterCloser = wrappedBlockDocument + Data("\r\n}".utf8)
+                guard view.contentUTF8 == afterCloser,
+                      view.revision == closerRevision + 2 else {
+                    preconditionFailure("direct JSON closer did not dedent one configured level")
+                }
+                view.undo()
+                guard view.contentUTF8 == beforeCloser else {
+                    preconditionFailure("one Undo did not restore the closer and indentation")
+                }
+
                 _ = await languageUseCase.setOverride(.manual(LanguageID(rawValue: "python")))
                 guard editor.activeLanguageID.rawValue == "python", view.lexerName == "python" else {
                     preconditionFailure("Python lexer switch smoke failed")
                 }
-                print("Duckpad language smoke ready: Lexilla 5.5.3 Swift/Python + folding + dark palette")
+                print("Duckpad language smoke ready: Lexilla 5.5.3 Swift/JSON/Python + folding + block comments + closer dedent + dark palette")
                 fflush(stdout)
                 Darwin._exit(0)
             }

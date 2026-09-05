@@ -1,6 +1,6 @@
 # Duckpad Delivery Dashboard
 
-Last updated: 2026-09-04 (Asia/Seoul)
+Last updated: 2026-09-05 (Asia/Seoul)
 
 ## Product direction
 
@@ -13,12 +13,13 @@ Last updated: 2026-09-04 (Asia/Seoul)
 
 | Item | Status | Evidence / next gate |
 | --- | --- | --- |
-| Phase 31 fold-state design | Chat design approved | Pane-specific Scintilla state; no parser, background service, or dependency |
-| Written Phase 31 specification | User approved | `docs/superpowers/specs/2026-09-04-fold-state-recovery-design.md`; independent review 0 Critical / 0 Important / 0 Minor |
-| Fold recovery implementation | Delivered | Independent pane recovery, native focus ownership, accepted-edit invalidation, and terminal teardown reviewed clean |
-| Keyboard and VoiceOver controls | Delivered | Native View submenu, conflict-free shortcuts, menu accessibility, Command Palette secondary-pane routing reviewed clean |
-| Phase 31 validation and review | Complete | Final independent review 0 Critical / 0 Important / 0 Minor; six Release budgets, focused Debug/Release suites, builds, and production folding smoke pass |
-| Phase 31 commit and push | Complete | Audited delivery commit `7eada54` pushed and remote-verified on `feature/fold-state-recovery`; this dashboard is the reviewed closeout follow-up |
+| Phase 32 block-comment/indent design | User approved | Literal manifest capability, one stream selection, bounded direct-closer dedent; no parser, background service, or dependency |
+| Block-comment implementation | Implemented | UTF-8/CRLF literal wrap/unwrap, one aggregate authority revision, split focus, rejection recovery, and Undo/Redo reviewed clean at its task checkpoint |
+| Closing-delimiter and explicit indentation | Implemented | Direct `}`, `]`, `)` dedent is bounded to 4,096 bytes and requires five revision slots; rejected-input recovery snapshots both panes' input-time caret/anchor; 2/4-space and Makefile-tab indent/outdent proofs pass |
+| Native command surface | Implemented | Accessible Edit menu and Command Palette expose unique `⌥⌘/`; extension shortcut collisions fail closed |
+| Tab hover selection-look regression | Fixed | Strip-owned single-hover state clears stale tracking/reuse state; Debug and Release `TabFlowLayoutTests` pass 66/66 after independent review |
+| Phase 32 validation | Complete with baseline blocker | Debug/Release builds and focused gates, six Release budgets, 1 MiB stress, and real AppKit smoke pass; monolithic signal 11 reproduces at parent `4510f3a` |
+| Phase 32 final review and push | Pending | Controller must independently review the complete `4510f3a..HEAD` range plus this exact Task 5 delta before commit or push |
 
 ## Recently delivered
 
@@ -48,6 +49,46 @@ interception and will be reconsidered only with explicit IME and undo proof.
 
 ## Current validation notes
 
+- Phase 32 implementation Tasks 1–4 and the user-reported stale tab-hover fix
+  completed independent task reviews with 0 Critical, 0 Important, and 0 Minor
+  findings. Task 5's smoke/documentation delta and the complete commit range
+  still require the mandatory final independent review; no delivery push is
+  claimed yet.
+- The first final-range candidate was rejected with one Important finding:
+  rejected direct-closer recovery restored bytes/revision but could restore a
+  stale selection. Remediation `2aa8754` snapshots primary and split-pane view
+  state when pending direct input opens. RED captured primary `11/11`, reverse
+  `2/5`, and focused-secondary `11/11`, each incorrectly restored as `0/0`;
+  the fix passes the new/strengthened recovery set 3/3, related lifecycle set
+  9/9, and Language split gate 56/56 in both Debug and Release. Final re-review
+  remains pending.
+- Debug and Release builds exit 0. The requested focused Debug and Release
+  filters all exit 0: `LanguageManifestTests`, `LanguageWorkspaceUseCaseTests`,
+  `LanguageEditorAdapterTests`, `ScintillaEditorAdapterTests`,
+  `TabFlowLayoutTests`, `ExtensionPresentationTests`, and
+  `CommandPalettePresentationTests`. Counted summaries are 8/8 manifest, 8/8
+  workspace, 66/66 tab flow, 5/5 extension, and 7/7 palette in both
+  configurations. The two large adapter filters retain their known truncated
+  console stream, so the independently reviewed explicit Phase 32 batches
+  (15/15 block comments and the original 18/18 closer/indent tests in Debug and
+  Release) remain their complete named proof. The final-review remediation adds
+  a separate 3/3 selection-recovery proof; it is not folded into the original
+  18/18 count.
+- The Release production language smoke exits 0 after real Swift highlighting
+  and folding, a UTF-8/CRLF block toggle with exactly one accepted revision and
+  exact Undo/Redo, JSON direct-closer one-level dedent with one grouped Undo,
+  Python switching, and the dark palette.
+- The frozen Release performance gate passes exactly six budgets on a Mac16,7:
+  warm launch 289.016 ms, typing p95 0.017792 ms, 100 MiB open 902.360833 ms,
+  200-tab reflow p95 0.001875 ms, folder search 263.726791 ms, and 10,000-header
+  fold recovery 114.223042 ms. The separate Release 1 MiB block-comment stress
+  passes its 250 ms assertion and completes in 0.154 seconds.
+- Current `swift test` and `swift test -c release` each exit 1 with SwiftPM
+  testing-helper `unexpected signal code 11` after 5.03 and 5.10 seconds. The
+  exact commands at design parent `4510f3a` reproduce the same signal and exit
+  after 58.61 and 217.42 seconds respectively. No extension-host timeout or new
+  Phase 32 assertion failure appeared in these runs; the signal remains a
+  process-global AppKit baseline blocker, not a monolithic pass.
 - Phase 31's independently reviewed written specification was approved by the
   user. The executable TDD plan passed independent review. Tasks 1 and 2 are
   complete in `/Users/namjeongwan/app/duckpad/.worktrees/fold-state-recovery`;
@@ -91,7 +132,7 @@ interception and will be reconsidered only with explicit IME and undo proof.
 
 1. Lightweight language-aware smart editing. **Delivered.**
 2. Fold-state recovery and keyboard/VoiceOver folding controls. **Delivered.**
-3. Block comments and further language-aware indentation commands.
+3. Block comments and further language-aware indentation commands. **Implemented; push pending.**
 4. Importable, validated user language definitions without native code loading.
 5. Lightweight API completion/call-tip provider contract.
 6. Remaining high-value document UX and file-integrity gaps.

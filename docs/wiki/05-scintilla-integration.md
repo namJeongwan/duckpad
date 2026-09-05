@@ -110,6 +110,44 @@ operations preserve UTF-8 bytes, revision, dirty state, full selection, Undo,
 and Redo. Terminal adapter teardown clears native callbacks and pending view
 identities.
 
+## Block comments and indentation boundary
+
+Phase 32 keeps language-aware editing inside the existing narrow bridge. A
+successfully applied `EditorLanguageConfiguration.comments` value is the sole
+block-comment authority. The manifest accepts a block pair only when it has
+exactly two nonempty delimiters and each is at most 64 UTF-8 bytes. The native
+command treats both delimiters literally and accepts exactly one stream
+selection with no virtual space; multiple, rectangular, line, thin, and virtual
+selections are no-ops.
+
+The focused primary or secondary view owns selection, while the primary view
+remains the only shared-document publisher. A block toggle performs one target
+replacement and publishes one aggregate edit/revision after suppressing the
+native component notifications. UTF-8/CRLF bytes, selection direction,
+rejection recovery, dirty state, and exact Undo/Redo are preserved. The Edit
+menu and Command Palette expose the same accessible Toggle Block Comment action
+at `⌥⌘/`; core shortcut identity wins over colliding extension declarations.
+
+Direct keyboard input of `}`, `]`, or `)` dedents one configured indentation
+level only when the current-line prefix is indentation-only. Inspection is
+capped at 4,096 bytes. Paste, IME composition/commit, programmatic mutation,
+multi-character input, non-stream or virtual selection, a non-whitespace
+prefix, and over-bound lines retain literal input without auto-dedent. The
+bridge reserves five revision slots: two forward aggregate edits plus three
+worst-case grouped-Undo components. If fewer remain, only the existing literal
+closer path runs. The initiating view owns pending input and teardown, while the
+primary publisher remains authoritative; rejected components recover exactly
+the accepted prefix. Pending direct input snapshots both primary and split-pane
+view states before native insertion, so a rejected closer restores the
+input-time caret and anchor in the initiating pane and preserves the peer
+pane's independent selection.
+
+Explicit Indent Line(s) and Unindent Line(s) continue to use Scintilla's native
+Tab/Backtab commands. Phase 32 tests prove the applied two-space, four-space,
+and Makefile tab configurations for single/multiline selections, mixed leading
+whitespace, grouped Undo, and revision/recovery publication. No parser, LSP,
+background worker, editing framework, or dependency was added.
+
 ## Production composition and tests
 
 [`DuckpadMain.swift`](../../Sources/DuckpadApp/DuckpadMain.swift) constructs
@@ -159,6 +197,39 @@ non-blocking follow-up work. Lexilla, syntax styling, exhaustive VoiceOver/manua
 candidate-window validation, and packaged signed `.app` distribution are later
 Phase 2 slices.
 
+Phase 32 validation on 2026-09-05:
+
+- Debug and Release builds exit 0. Every requested focused Debug and Release
+  filter exits 0. Counted summaries are 8/8 manifest, 8/8 workspace, 66/66 tab
+  flow, 5/5 extension, and 7/7 Command Palette tests in both configurations.
+  The aggregate language/Scintilla filters retain the known console truncation;
+  complete independently reviewed named batches pass 15/15 block-comment and
+  the original 18/18 closer/indent tests in both Debug and Release. Final-review
+  remediation adds a separate 3/3 rejected-selection recovery proof rather than
+  changing the original 18/18 count; related lifecycle tests pass 9/9 and the
+  Language split gate passes 56/56 in both configurations.
+- The first final-range candidate exposed one Important recovery gap: bytes and
+  revision were authoritative after a rejected closer, but view state could be
+  stale. RED observed primary caret/anchor `11/11`, reverse selection `2/5`, and
+  focused-secondary `11/11`, each incorrectly restoring as `0/0`. Remediation
+  `2aa8754` snapshots both panes when pending direct input opens; the 3/3, 9/9,
+  and 56/56 gates above are green. Final re-review and push remain pending.
+- The real Release AppKit language smoke exits 0 after exact UTF-8/CRLF Swift
+  block wrap, one accepted aggregate revision, exact Undo/Redo, JSON one-level
+  direct-closer dedent with one grouped Undo, and the retained highlighting,
+  folding, Python-switch, palette, text, and revision checks.
+- The frozen schema-1 performance runner reports exactly six passes on Mac16,7:
+  warm launch 289.016 ms, typing p95 0.017792 ms, 100 MiB open 902.360833 ms,
+  200-tab reflow p95 0.001875 ms, folder search 263.726791 ms, and 10,000-header
+  fold recovery 114.223042 ms. The focused Release 1 MiB block toggle passes
+  its 250 ms internal assertion; the complete test reports 0.154 seconds.
+- Monolithic `swift test` and `swift test -c release` are not passes: both exit
+  1 with SwiftPM testing-helper `unexpected signal code 11` after 5.03 and 5.10
+  seconds. Isolated checkouts of parent `4510f3a` reproduce the same signal with
+  the exact commands after 58.61 and 217.42 seconds. No extension-host timeout
+  or new Phase 32 assertion failure appeared, so this remains the known
+  process-global AppKit baseline blocker.
+
 ## Agent Work Log
 
 | Date | Agent/work | Evidence |
@@ -169,3 +240,4 @@ Phase 2 slices.
 | 2026-09-02 | Built both supported architecture targets and launched the development executable. | arm64 run pass; x86_64 cross-link pass; Intel runtime not claimed. |
 | 2026-09-02 | `/root/philosophy_parity` addressed review evidence P2-01..P2-03 without changing the review verdict. | Added character-boundary preflight, pre-mutation revision-exhaustion read-only/error behavior, inserted/deleted payloads, snapshot/notification instrumentation, and a bounded accepted-delta journal. 46/46 debug, release, and fresh tests pass; 1/10/50 MB cases record zero snapshots and one-byte incremental work. |
 | 2026-09-04 | Phase 31 fold-state recovery and controls | Typed Scintilla folding, pane-specific bounded recovery, native menu/VoiceOver/Command Palette routing, Debug/Release focused validation, and production Swift folding smoke pass. The six-budget Release gate measured exact 10,000-header contract/capture/shared-pane restore at 129.29475 ms (250 ms maximum). Monolithic Debug/Release signal 11 was reproduced at Phase 30 parent `0e511bf` and is not reported as passing. |
+| 2026-09-05 | Phase 32 block comments, indentation, and hover correction | Literal single-stream block toggle, bounded five-revision direct-closer dedent, input-time two-pane selection recovery, configured native indent/outdent proof, accessible `⌥⌘/`, and strip-owned single-hover state. Focused Debug/Release gates, six performance budgets, 1 MiB stress, and real AppKit smoke pass; monolithic signal 11 reproduces at parent `4510f3a`. Final re-review and push remain pending. |

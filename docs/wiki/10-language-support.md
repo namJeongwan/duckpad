@@ -2,9 +2,9 @@
 
 ## Status and scope
 
-Phase 7 adds a language-service foundation and production Lexilla syntax styling without reading or copying the ignored Notepad++ reference repository. It is an implementation candidate, not an approved parity claim. The delivered slice includes deterministic detection, per-document manual override, a broad bundled registry, real Lexilla lexers, light/dark/high-contrast-aware palettes, line numbers, fold margin, brace feedback, indentation settings/guides, and a loss-safe line-comment command.
+Phase 7 adds a language-service foundation and production Lexilla syntax styling without reading or copying the ignored Notepad++ reference repository. It is not a Notepad++ parity claim. Implemented slices now include deterministic detection, per-document manual override, a broad bundled registry, real Lexilla lexers, light/dark/high-contrast-aware palettes, line numbers, fold margin and recovery, brace feedback, indentation settings/guides, loss-safe line and block comment commands, direct closing-delimiter dedent, and explicit configured indent/outdent.
 
-Block-comment commands, newline auto-indent, explicit indent/outdent commands, code completion, symbol navigation, LSP, user-defined languages, and Notepad++ language-menu exact ordering remain deferred.
+Quote pairing, selection surround, closer skip-over, LSP, importable user-defined languages, and Notepad++ language-menu exact ordering remain deferred. Lightweight current-document completion and symbols are separate bounded features, not an IDE-scale language server.
 
 ## Official source and reproducibility
 
@@ -24,8 +24,8 @@ The official archive contains historical trailing and indentation whitespace. Ro
 - `DuckpadApplication/LanguageService.swift` validates the registry, implements precedence and ambiguity handling, owns per-buffer effective-configuration caching, applies overrides, and exposes comment/theme operations without AppKit. A style-budget eligibility bit is part of the cache so crossing the threshold reconfigures while ordinary edits do not.
 - `DuckpadInfrastructure/Resources/Languages.json` is the versioned bundled registry; `LanguageManifestLoader` strictly validates it and requires at least 60 entries plus a Plain Text/null-lexer fallback. Missing/corrupt packaging returns a typed error. Production keeps an editable Plain Text fallback but surfaces a degraded status rather than claiming the broad registry loaded.
 - `DuckpadLexilla` compiles the official C++17 lexer runtime. The internal Objective-C++ Scintilla bridge creates lexers and maps `ILexer5` style names/tags/descriptions into semantic palette roles. No raw Scintilla message, pointer, `ILexer`, or C++ type crosses the Swift editor port.
-- `LanguageEditorPort` exposes only bounded detection-prefix reads, lexer resolution/configuration, theme, style-budget state, and line-comment intent. `ScintillaEditorAdapter` retains the effective language per live buffer, preserving independent text/undo/view state.
-- Presentation provides a grouped Language menu with Auto, Plain Text, every bundled language, `⌘/` line comment, and a `⇧⌘P` command-palette hook. A nonblocking accessible status label shows the effective language, large-file styling pause, or degraded registry error.
+- `LanguageEditorPort` exposes bounded detection-prefix reads, lexer resolution/configuration, theme, style-budget state, line-comment intent, and a no-argument block-comment command/capability. `ScintillaEditorAdapter` retains only the last successfully applied comment pair per live buffer, preserving independent text/undo/view state.
+- Presentation provides a grouped Language menu with Auto, Plain Text, every bundled language, and `⌘/` line comment. The native Edit menu and `⇧⌘P` Command Palette expose accessible Toggle Block Comment at `⌥⌘/`; the core shortcut fails closed over a colliding extension declaration. A nonblocking accessible status label shows the effective language, large-file styling pause, or degraded registry error.
 
 ## Detection contract
 
@@ -46,6 +46,33 @@ On a lexer switch the bridge sets the lexer and keyword lists, rebuilds semantic
 Theme changes update styles, brace feedback, fold markers, and redraw existing views without reading or changing text, revision, undo, recovery, or file-conflict metadata. Font family/size remains editor-owned and independent of semantic colors. Fold markers use distinct plus/minus/connector glyphs. Brace matching is disabled and cleared for definitions without that capability.
 
 Toggle Line Comment operates on all nonblank lines intersecting the primary selection. If all are commented it removes the marker; otherwise it inserts the marker after existing indentation. It preserves blank lines, CRLF, and UTF-8 byte boundaries, scans only selected-line indentation/prefix bytes, and wraps the edits in one native undo group. Each native edit still advances workspace revision and recovery journal state.
+
+Toggle Block Comment uses the literal pair from the successfully applied
+manifest definition; the loader requires exactly two nonempty delimiters of at
+most 64 UTF-8 bytes each. It accepts one stream selection with zero virtual
+space and treats every other topology as a no-op. The focused pane supplies the
+selection, but the primary shared-document view is the sole publisher. One
+target replacement produces one aggregate edit/revision, while exact UTF-8,
+CRLF, direction, rejection recovery, dirty state, and native Undo/Redo remain
+authoritative. Literal syntax means nested delimiter text is never parsed.
+
+A directly typed `}`, `]`, or `)` dedents one configured level when the current
+line before the caret contains indentation only. The scan is bounded to 4,096
+bytes and reserves five revision slots for two forward aggregate edits plus
+three worst-case grouped-Undo components. With less capacity, or for paste,
+IME, programmatic/multi-character input, non-stream/virtual selections,
+non-whitespace prefixes, and longer lines, the closer remains literal without
+auto-dedent. Rejected Undo/Redo components recover exactly the accepted prefix,
+and initiating-view teardown cannot strand the pending group. Opening pending
+direct input snapshots both pane states before native insertion, so rejected
+closer recovery restores the initiating pane's input-time caret/anchor while
+preserving the peer pane's independent selection.
+
+Indent Line(s) and Unindent Line(s) continue through Scintilla Tab/Backtab.
+Tests prove the applied two-space, four-space, and Makefile tab policies across
+single/multiline selections, mixed leading whitespace, one native Undo group,
+and exact selection/revision/dirty/recovery publication. No parser, LSP,
+background worker, generic editing framework, or new dependency is involved.
 
 ## Folding controls and recovery
 
@@ -105,6 +132,45 @@ Phase 31 validation on 2026-09-04:
   reproduce with the same commands at Phase 30 parent `0e511bf`; the concurrent
   extension-host timeout observed in the Phase 31 Release run also reproduces
   there in Debug.
+
+Phase 32 validation on 2026-09-05:
+
+- Debug and Release builds exit 0. All requested focused filters exit 0 in both
+  configurations. Counted summaries are `LanguageManifestTests` 8/8,
+  `LanguageWorkspaceUseCaseTests` 8/8, `TabFlowLayoutTests` 66/66,
+  `ExtensionPresentationTests` 5/5, and `CommandPalettePresentationTests` 7/7.
+  The aggregate language/Scintilla console stream retains its known cutoff;
+  independently reviewed named batches pass 15/15 block-comment and the
+  original 18/18 closer/indent tests in both configurations. A separate
+  final-review remediation set passes 3/3 rejected-selection recovery tests,
+  related lifecycle tests pass 9/9, and the Language split gate passes 56/56 in
+  Debug and Release; these counts are not folded into the original 18/18.
+- The first final-range candidate was rejected because rejected direct-closer
+  recovery could restore a stale caret/selection despite correct bytes and
+  revision. RED observed primary `11/11`, reverse `2/5`, and focused-secondary
+  `11/11`, each incorrectly restoring as `0/0`. Remediation `2aa8754` snapshots
+  both input-time view states and passes the 3/3, 9/9, and 56/56 gates above.
+  Final re-review and push remain pending.
+- The Release production AppKit language smoke exits 0 and retains Swift/Python
+  highlighting, folding, dark-palette, text, and revision checks while adding
+  exact UTF-8/CRLF Swift block wrap with one accepted revision and Undo/Redo,
+  plus JSON direct-closer one-level dedent with one grouped Undo.
+- The frozen Release performance runner keeps exactly six green budgets on
+  Mac16,7: warm launch 289.016 ms, typing p95 0.017792 ms, 100 MiB open
+  902.360833 ms, 200-tab reflow p95 0.001875 ms, folder search 263.726791 ms,
+  and 10,000-header fold recovery 114.223042 ms. The focused Release 1 MiB
+  block-comment test completes in 0.154 seconds and passes its internal 250 ms
+  limit.
+- `swift test` and `swift test -c release` each exit 1 with SwiftPM
+  testing-helper signal 11 after 5.03 and 5.10 seconds. The exact commands in an
+  isolated parent-`4510f3a` worktree reproduce the same signal after 58.61 and
+  217.42 seconds. No extension-host timeout or new Phase 32 assertion failure
+  appeared; these runs are baseline-blocker evidence, not monolithic passes.
+- The user-reported multiple-selection-looking tab state was stale item-local
+  hover, not authoritative multi-selection. A strip-owned single-hover value,
+  current-window pointer reconciliation, and reuse/removal cleanup fix it;
+  Debug and Release `TabFlowLayoutTests` pass 66/66. Direct GUI reproduction was
+  unavailable because the Mac session remained locked.
 
 ## Agent Work Log
 
