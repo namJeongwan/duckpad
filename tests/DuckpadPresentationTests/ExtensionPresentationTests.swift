@@ -179,6 +179,7 @@ func extensionShortcutsFailClosedOnCoreCollisionOrMalformedDeclaration() async t
     _ = NSApplication.shared
     for (declaration, expectedMessage) in [
         ("cmd+option+s", "conflicts with another command"),
+        ("cmd+option+/", "conflicts with another command"),
         ("shift+k", "not a supported macOS key combination"),
         ("cmd+cmd+k", "not a supported macOS key combination"),
         ("cmd+\u{7f}", "not a supported macOS key combination"),

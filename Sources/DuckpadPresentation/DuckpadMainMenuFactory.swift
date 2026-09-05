@@ -93,6 +93,15 @@ public enum DuckpadMainMenuFactory {
         editMenu.addItem(.separator())
         add("Indent Line(s)", #selector(DuckpadWindowController.performIndent(_:)), "", target, modifiers: [], to: editMenu)
         add("Unindent Line(s)", #selector(DuckpadWindowController.performUnindent(_:)), "", target, modifiers: [], to: editMenu)
+        add(
+            "Toggle Block Comment",
+            #selector(DuckpadWindowController.performToggleBlockComment(_:)),
+            "/",
+            target,
+            modifiers: [.command, .option],
+            accessibilityLabel: "Toggle block comment",
+            to: editMenu
+        )
         add("Make Uppercase", #selector(DuckpadWindowController.performUppercase(_:)), "", target, modifiers: [], to: editMenu)
         add("Make Lowercase", #selector(DuckpadWindowController.performLowercase(_:)), "", target, modifiers: [], to: editMenu)
         add("Trim Trailing Whitespace", #selector(DuckpadWindowController.performTrimTrailingWhitespace(_:)), "", target, modifiers: [], to: editMenu)

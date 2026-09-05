@@ -154,7 +154,10 @@ private final class HostedLanguageEditorFake: LanguageEditorPort, DocumentIntell
     var configurations: [EditorLanguageConfiguration] = []
     private(set) var themes: [EditorThemePalette] = []
     private(set) var mutationCount = 0
-    var canToggleBlockComment: Bool { false }
+    var canToggleBlockComment = false
+    var blockCommentOutcome: EditorEditOutcome = .rejected(currentRevision: 0)
+    private(set) var blockCommentInvocationCount = 0
+    private(set) var focusCount = 0
     private var activeBuffer: EditorBufferDescriptor?
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
     private(set) var presentedCompletionItems: [String] = []
@@ -184,7 +187,7 @@ private final class HostedLanguageEditorFake: LanguageEditorPort, DocumentIntell
     func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? { snapshots[bufferID] }
     func retire(bufferID: BufferID) { snapshots.removeValue(forKey: bufferID) }
     func setInputEnabled(_ isEnabled: Bool) {}
-    func focus() {}
+    func focus() { focusCount += 1 }
     func detectionPrefix(maximumBytes: Int) -> Data { Data(prefix.prefix(maximumBytes)) }
     func supportsLexer(named name: String) -> Bool { supportedLexers.contains(name) }
     func applyLanguage(_ configuration: EditorLanguageConfiguration) -> Bool {
@@ -197,7 +200,8 @@ private final class HostedLanguageEditorFake: LanguageEditorPort, DocumentIntell
         return .rejected(currentRevision: activeBuffer?.revision ?? 0)
     }
     func toggleBlockComment() -> EditorEditOutcome {
-        .rejected(currentRevision: activeBuffer?.revision ?? 0)
+        blockCommentInvocationCount += 1
+        return blockCommentOutcome
     }
     func captureDocumentIntelligence(maximumBytes: Int) -> DocumentIntelligenceCapture? {
         guard let activeBuffer, let snapshot = snapshots[activeBuffer.bufferID] else { return nil }
@@ -310,6 +314,31 @@ private func menuItem(_ title: String, in menu: NSMenu) -> NSMenuItem? {
 @MainActor
 private func flattenedMenuItems(in menu: NSMenu) -> [NSMenuItem] {
     menu.items + menu.items.compactMap(\.submenu).flatMap(flattenedMenuItems)
+}
+
+private func blockCommentLanguageRegistry() throws -> LanguageRegistry {
+    try LanguageRegistry(definitions: [
+        LanguageDefinition(
+            id: .plainText,
+            displayName: "Plain Text",
+            group: "Text",
+            lexerName: "null",
+            supportTier: .plain
+        ),
+        LanguageDefinition(
+            id: LanguageID(rawValue: "c"),
+            displayName: "C",
+            group: "C Family",
+            lexerName: "cpp",
+            supportTier: .keywordComplete,
+            contentSignatures: ["#include"],
+            capabilities: .init(comments: .init(
+                line: "//",
+                blockStart: "/*",
+                blockEnd: "*/"
+            ))
+        ),
+    ])
 }
 
 @Test func tabsWrapAcrossRowsWhilePreservingOrder() {
@@ -837,6 +866,149 @@ struct AppKitHostedTests {
     #expect((activeItem?.view.accessibilityValue() as? String)?.contains("selected") == true)
 }
 
+@Test @MainActor
+func blockCommentMenuIsAccessibleUniqueAndPaletteDiscoverable() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = ["null", "cpp"]
+    editor.prefix = Data("#include <stdio.h>".utf8)
+    editor.canToggleBlockComment = true
+    let service = LanguageWorkspaceUseCase(
+        registry: try blockCommentLanguageRegistry(),
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+
+    let menu = DuckpadMainMenuFactory.make(target: controller)
+    let editMenu = try #require(
+        menu.items.compactMap(\.submenu).first(where: { $0.title == "Edit" })
+    )
+    let blockItems = editMenu.items.filter { $0.title == "Toggle Block Comment" }
+    let blockComment = try #require(blockItems.first)
+    #expect(blockItems.count == 1)
+    #expect(flattenedMenuItems(in: menu).filter { $0.title == "Toggle Block Comment" }.count == 1)
+    #expect(blockComment.action == NSSelectorFromString("performToggleBlockComment:"))
+    #expect(blockComment.keyEquivalent == "/")
+    #expect(blockComment.keyEquivalentModifierMask == [.command, .option])
+    #expect(blockComment.accessibilityLabel() == "Toggle block comment")
+
+    let paletteCommands = CommandPaletteRegistry.commands(
+        in: menu,
+        excludingAction: #selector(DuckpadWindowController.performShowCommandPalette(_:))
+    )
+    let paletteCommand = try #require(
+        paletteCommands.first(where: { $0.title == "Toggle Block Comment" })
+    )
+    #expect(paletteCommand.item === blockComment)
+    #expect(paletteCommand.isEnabled)
+}
+
+@Test @MainActor
+func blockCommentValidationRequiresReadyWorkspaceAndEditorCapability() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = ["null", "cpp"]
+    editor.prefix = Data("#include <stdio.h>".utf8)
+    let service = LanguageWorkspaceUseCase(
+        registry: try blockCommentLanguageRegistry(),
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    let blockComment = try #require(menuItem(
+        "Toggle Block Comment",
+        in: DuckpadMainMenuFactory.make(target: controller)
+    ))
+
+    editor.canToggleBlockComment = true
+    #expect(!controller.validateMenuItem(blockComment))
+    controller.start()
+    await controller.waitForStartup()
+    editor.canToggleBlockComment = false
+    #expect(!controller.validateMenuItem(blockComment))
+    editor.canToggleBlockComment = true
+    #expect(controller.validateMenuItem(blockComment))
+    #expect(editor.blockCommentInvocationCount == 0)
+}
+
+@Test @MainActor
+func blockCommentCommandFocusesEditorOnlyAfterAcceptedMutation() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = ["null", "cpp"]
+    editor.prefix = Data("#include <stdio.h>".utf8)
+    editor.canToggleBlockComment = true
+    let service = LanguageWorkspaceUseCase(
+        registry: try blockCommentLanguageRegistry(),
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    let blockComment = try #require(menuItem(
+        "Toggle Block Comment",
+        in: DuckpadMainMenuFactory.make(target: controller)
+    ))
+    let action = try #require(blockComment.action)
+
+    editor.blockCommentOutcome = .rejected(currentRevision: 0)
+    #expect(NSApplication.shared.sendAction(action, to: controller, from: blockComment))
+    #expect(editor.blockCommentInvocationCount == 1)
+    #expect(editor.focusCount == 0)
+
+    editor.blockCommentOutcome = .accepted(newRevision: 1)
+    #expect(NSApplication.shared.sendAction(action, to: controller, from: blockComment))
+    #expect(editor.blockCommentInvocationCount == 2)
+    #expect(editor.focusCount == 1)
+}
+
+@Test @MainActor
+func everyCoreShortcutIdentityIsUnique() {
+    _ = NSApplication.shared
+    let controller = DuckpadWindowController(
+        workspace: ScratchWorkspaceUseCase(store: PresentationStore()),
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    let menu = DuckpadMainMenuFactory.make(target: controller)
+    let identities = flattenedMenuItems(in: menu).compactMap { item -> String? in
+        guard !item.keyEquivalent.isEmpty else { return nil }
+        let modifiers = item.keyEquivalentModifierMask
+            .intersection([.command, .control, .option, .shift])
+        return "\(modifiers.rawValue):\(item.keyEquivalent.lowercased())"
+    }
+
+    #expect(Set(identities).count == identities.count)
+}
+
 @Test @MainActor func mainMenuPublishesNativeTabSelectorsAndExactShortcuts() async {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
@@ -960,12 +1132,6 @@ struct AppKitHostedTests {
     for title in ["Indent Line(s)", "Unindent Line(s)", "Make Uppercase", "Make Lowercase", "Trim Trailing Whitespace"] {
         #expect(menuItem(title, in: menu)?.keyEquivalent.isEmpty == true)
     }
-
-    let shortcuts = flattenedMenuItems(in: menu).compactMap { item -> String? in
-        guard !item.keyEquivalent.isEmpty else { return nil }
-        return "\(item.keyEquivalentModifierMask.rawValue):\(item.keyEquivalent.lowercased())"
-    }
-    #expect(Set(shortcuts).count == shortcuts.count)
 
     let findInFolder = menuItem("Find in Folder…", in: menu)
     #expect(findInFolder?.action == #selector(DuckpadWindowController.performFindInFolder(_:)))

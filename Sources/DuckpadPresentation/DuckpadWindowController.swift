@@ -663,6 +663,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         _ = languageUseCase?.toggleLineComment()
     }
 
+    @objc public func performToggleBlockComment(_ sender: Any?) {
+        guard blockCommentsAreActionable,
+              case .accepted = languageUseCase?.toggleBlockComment() else { return }
+        activeEditor.focus()
+    }
+
     @objc public func performShowLanguageChooser(_ sender: Any?) {
         guard workspaceInteractionsAreActionable else { return }
         let menu = makeLanguageStatusMenu()
@@ -1262,6 +1268,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return !workspace.tabIDs(for: scope, relativeTo: active).isEmpty
         }
         switch menuItem.action {
+        case #selector(performToggleBlockComment(_:)):
+            return blockCommentsAreActionable
         case #selector(performCloseActiveTab(_:)),
              #selector(performNextTab(_:)),
              #selector(performPreviousTab(_:)),
@@ -1418,6 +1426,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private var workspaceInteractionsAreActionable: Bool {
         workspace.snapshot().startup == .ready && !terminationReviewInProgress
+    }
+
+    private var blockCommentsAreActionable: Bool {
+        guard workspaceInteractionsAreActionable,
+              let languageUseCase,
+              case .ready = languageUseCase.state,
+              let editor = activeEditor as? any LanguageEditorPort else { return false }
+        return editor.canToggleBlockComment
     }
 
     private var workspaceBrowserCommandsAreActionable: Bool {
