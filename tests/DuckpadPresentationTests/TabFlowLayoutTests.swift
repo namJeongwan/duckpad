@@ -1728,6 +1728,80 @@ func everyCoreShortcutIdentityIsUnique() {
     #expect(move?.1 == tabs.count - 1)
 }
 
+@Test @MainActor func tabDragWriterCarriesItsSourceEditorGroup() throws {
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let strip = MultilineTabStripView(frame: .zero)
+    strip.setEditorGroupID(.secondary)
+    strip.apply(tabs: tabs)
+    defer { strip.tearDownHostedViews() }
+
+    let writer = try #require(strip.collectionView(
+        strip.hostedCollectionView,
+        pasteboardWriterForItemAt: IndexPath(item: 1, section: 0)
+    ) as? NSPasteboardItem)
+    let type = NSPasteboard.PasteboardType(EditorGroupDragPayload.pasteboardType)
+    guard let data = writer.data(forType: type) else {
+        Issue.record("drag writer omitted the editor-group payload")
+        return
+    }
+    let payload = EditorGroupDragPayload(data: data)
+
+    #expect(payload?.tabID == tabs[1].id)
+    #expect(payload?.sourceGroup == .secondary)
+}
+
+@Test @MainActor func localOptionDropStillUsesStableReorderSemantics() {
+    let tabs = makeTabs(count: 4, activeIndex: 0)
+    let strip = MultilineTabStripView(frame: .zero)
+    strip.setEditorGroupID(.primary)
+    strip.apply(tabs: tabs)
+    defer { strip.tearDownHostedViews() }
+    let pasteboard = NSPasteboard(name: .init("duckpad.tab.group.drag.test.\(UUID().uuidString)"))
+    pasteboard.clearContents()
+    let payload = EditorGroupDragPayload(tabID: tabs[0].id, sourceGroup: .primary)
+    pasteboard.setData(payload.encodedData(), forType: .init(EditorGroupDragPayload.pasteboardType))
+    var move: (TabID, Int)?
+    strip.onMove = { move = ($0, $1) }
+
+    #expect(strip.acceptDrop(from: pasteboard, insertionIndex: 3, optionPressed: true))
+    #expect(move?.0 == tabs[0].id)
+    #expect(move?.1 == 2)
+}
+
+@Test @MainActor func crossGroupOptionDropAdvertisesAndPublishesCopy() {
+    let destinationTabs = makeTabs(count: 1, activeIndex: 0)
+    let sourceTabID = TabID()
+    let strip = MultilineTabStripView(frame: .zero)
+    strip.setEditorGroupID(.secondary)
+    strip.apply(tabs: destinationTabs)
+    defer { strip.tearDownHostedViews() }
+    let pasteboard = NSPasteboard(name: .init("duckpad.tab.cross-group.drag.test.\(UUID().uuidString)"))
+    pasteboard.clearContents()
+    let payload = EditorGroupDragPayload(tabID: sourceTabID, sourceGroup: .primary)
+    pasteboard.setData(payload.encodedData(), forType: .init(EditorGroupDragPayload.pasteboardType))
+    var published: (EditorGroupDragPayload, Int, EditorGroupDropOperation)?
+    strip.onValidateGroupDrop = { _, _, operation in operation == .copy }
+    strip.onGroupDrop = {
+        published = ($0, $1, $2)
+        return true
+    }
+
+    #expect(strip.acceptDrop(from: pasteboard, insertionIndex: 1, optionPressed: true))
+    #expect(published?.0 == payload)
+    #expect(published?.1 == 1)
+    #expect(published?.2 == .copy)
+}
+
+@Test @MainActor func tabStripTeardownUnregistersItsCollectionDropTypes() {
+    let strip = MultilineTabStripView(frame: .zero)
+    let groupType = NSPasteboard.PasteboardType(EditorGroupDragPayload.pasteboardType)
+    #expect(strip.hostedCollectionView.registeredDraggedTypes.contains(groupType))
+
+    strip.tearDownHostedViews()
+
+    #expect(strip.hostedCollectionView.registeredDraggedTypes.isEmpty)
+}
+
 @Test @MainActor func appKitHostedResizeCapsOverflowAndKeepsSelectedTabVisible() {
     let tabs = makeTabs(count: 500, activeIndex: 499)
     let (window, root, strip) = hostStrip(width: 700, height: 300, tabs: tabs)

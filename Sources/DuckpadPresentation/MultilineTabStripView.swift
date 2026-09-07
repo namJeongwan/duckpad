@@ -333,7 +333,7 @@ final class TabOverflowScrollView: NSScrollView {
 
 @MainActor
 public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NSCollectionViewDelegate {
-    private static let tabPasteboardType = NSPasteboard.PasteboardType("com.duckpad.tab-id")
+    private static let tabPasteboardType = NSPasteboard.PasteboardType(EditorGroupDragPayload.pasteboardType)
     public struct UpdateMetrics: Equatable {
         public fileprivate(set) var fullReloads = 0
         public fileprivate(set) var itemReloads = 0
@@ -342,6 +342,8 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     public var onClose: ((TabID) -> Void)?
     public var onMove: ((TabID, Int) -> Void)?
     public var onContextAction: ((TabID, TabContextAction) -> Void)?
+    public var onValidateGroupDrop: ((EditorGroupDragPayload, Int, EditorGroupDropOperation) -> Bool)?
+    public var onGroupDrop: ((EditorGroupDragPayload, Int, EditorGroupDropOperation) -> Bool)?
     public var viewportPolicy = TabStripViewportPolicy() {
         didSet { updateViewportHeight() }
     }
@@ -358,6 +360,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     private var isSynchronizingSelection = false
     private var activeIndex: Int?
     private var hoveredTabID: TabID?
+    public private(set) var editorGroupID: EditorGroupID = .primary
     public private(set) var updateMetrics = UpdateMetrics()
     public private(set) var interactionsEnabled = true
 
@@ -375,7 +378,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedCollectionView.allowsEmptySelection = false
         hostedCollectionView.backgroundColors = [.clear]
         hostedCollectionView.registerForDraggedTypes([Self.tabPasteboardType])
-        hostedCollectionView.setDraggingSourceOperationMask(.move, forLocal: true)
+        hostedCollectionView.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
         hostedCollectionView.setAccessibilityIdentifier("duckpad.tab.collection")
         hostedCollectionView.setAccessibilityLabel("Open document tabs")
         hostedCollectionView.register(
@@ -554,10 +557,15 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         documentSwitcher.setInteractionsEnabled(isEnabled)
     }
 
+    public func setEditorGroupID(_ groupID: EditorGroupID) {
+        editorGroupID = groupID
+    }
+
     func tearDownHostedViews() {
         hoveredTabID = nil
         documentSwitcher.documentPanel.dismiss()
         flowLayout.onContentSizeChange = nil
+        hostedCollectionView.unregisterDraggedTypes()
         hostedCollectionView.dataSource = nil
         hostedCollectionView.delegate = nil
         hostedScrollView.documentView = nil
@@ -566,12 +574,16 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         onClose = nil
         onMove = nil
         onContextAction = nil
+        onValidateGroupDrop = nil
+        onGroupDrop = nil
         documentSwitcher.onActivate = nil
     }
 
     public var contentHeight: CGFloat { measuredContentHeight }
     public var viewportHeight: CGFloat { heightConstraint.constant }
     public var rowCount: Int { flowLayout.rowCount }
+    public var tabIDs: [TabID] { tabs.map(\.id) }
+    public var activeTabID: TabID? { tabs.first(where: \.isActive)?.id }
 
     public var selectedTabIsVisible: Bool {
         guard let index = tabs.firstIndex(where: \.isActive),
@@ -657,7 +669,11 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     ) -> (any NSPasteboardWriting)? {
         guard interactionsEnabled, tabs.indices.contains(indexPath.item) else { return nil }
         let item = NSPasteboardItem()
-        item.setString(tabs[indexPath.item].id.rawValue.uuidString, forType: Self.tabPasteboardType)
+        let payload = EditorGroupDragPayload(
+            tabID: tabs[indexPath.item].id,
+            sourceGroup: editorGroupID
+        )
+        item.setData(payload.encodedData(), forType: Self.tabPasteboardType)
         return item
     }
 
@@ -667,9 +683,19 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>,
         dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>
     ) -> NSDragOperation {
-        guard interactionsEnabled else { return [] }
+        guard interactionsEnabled,
+              let payload = dragPayload(from: draggingInfo.draggingPasteboard) else { return [] }
         proposedDropOperation.pointee = .before
-        return .move
+        let index = min(proposedDropIndexPath.pointee.item, tabs.count)
+        if payload.sourceGroup == editorGroupID {
+            return tabs.contains(where: { $0.id == payload.tabID }) ? .move : []
+        }
+        let operation = EditorGroupDragPayload.dropOperation(
+            optionPressed: NSEvent.modifierFlags.contains(.option)
+        )
+        return onValidateGroupDrop?(payload, index, operation) == true
+            ? (operation == .copy ? .copy : .move)
+            : []
     }
 
     public func collectionView(
@@ -678,21 +704,40 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         indexPath: IndexPath,
         dropOperation: NSCollectionView.DropOperation
     ) -> Bool {
-        acceptDrop(from: draggingInfo.draggingPasteboard, insertionIndex: indexPath.item)
+        acceptDrop(
+            from: draggingInfo.draggingPasteboard,
+            insertionIndex: indexPath.item,
+            optionPressed: NSEvent.modifierFlags.contains(.option)
+        )
     }
 
     func acceptDrop(from pasteboard: NSPasteboard, insertionIndex: Int) -> Bool {
+        acceptDrop(from: pasteboard, insertionIndex: insertionIndex, optionPressed: false)
+    }
+
+    func acceptDrop(
+        from pasteboard: NSPasteboard,
+        insertionIndex: Int,
+        optionPressed: Bool
+    ) -> Bool {
         guard interactionsEnabled,
-              let value = pasteboard.string(forType: Self.tabPasteboardType),
-              let uuid = UUID(uuidString: value), !tabs.isEmpty else { return false }
-        let tabID = TabID(rawValue: uuid)
-        guard let source = tabs.firstIndex(where: { $0.id == tabID }) else { return false }
+              let payload = dragPayload(from: pasteboard) else { return false }
+        let boundedInsertionIndex = min(max(0, insertionIndex), tabs.count)
+        if payload.sourceGroup != editorGroupID {
+            let operation = EditorGroupDragPayload.dropOperation(optionPressed: optionPressed)
+            guard onValidateGroupDrop?(payload, boundedInsertionIndex, operation) == true else {
+                return false
+            }
+            return onGroupDrop?(payload, boundedInsertionIndex, operation) == true
+        }
+        guard !tabs.isEmpty,
+              let source = tabs.firstIndex(where: { $0.id == payload.tabID }) else { return false }
         guard let destination = TabDropDestination.finalIndex(
             sourceIndex: source,
-            insertionIndex: min(insertionIndex, tabs.count),
+            insertionIndex: boundedInsertionIndex,
             itemCount: tabs.count
         ) else { return false }
-        performDrop(tabID: tabID, to: destination)
+        performDrop(tabID: payload.tabID, to: destination)
         return true
     }
 
@@ -727,6 +772,11 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedScrollView.autohidesScrollers = true
         hostedScrollView.requiresHorizontalScroller = horizontallyOverflows
         if widthChanged { flowLayout.invalidateLayout() }
+    }
+
+    private func dragPayload(from pasteboard: NSPasteboard) -> EditorGroupDragPayload? {
+        guard let data = pasteboard.data(forType: Self.tabPasteboardType) else { return nil }
+        return EditorGroupDragPayload(data: data)
     }
 
     private func updateViewportHeight() {
