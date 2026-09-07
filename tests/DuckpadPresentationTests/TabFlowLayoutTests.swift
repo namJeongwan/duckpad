@@ -1919,6 +1919,26 @@ func everyCoreShortcutIdentityIsUnique() {
     }
 }
 
+@Test @MainActor func tabContextMenuPublishesValidatedOpenDocumentCompare() throws {
+    _ = NSApplication.shared
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 700, height: 220, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    var actions: [TabContextAction] = []
+    strip.onContextAction = { _, action in actions.append(action) }
+    strip.onValidateContextAction = { _, action in action == .compareWithOpenDocument }
+    let menu = try #require(strip.contextMenu(for: tabs[0].id))
+    let item = try #require(menu.items.first(where: { $0.title == "Compare with Open Document…" }))
+
+    #expect(item.isEnabled)
+    menu.performActionForItem(at: try #require(menu.items.firstIndex(of: item)))
+    #expect(actions == [.compareWithOpenDocument])
+}
+
 @Test @MainActor func headlessCollectionPasteboardAcceptsCrossRowDropAtEnd() {
     let tabs = makeTabs(count: 12, activeIndex: 0)
     let (window, _, strip) = hostStrip(width: 300, height: 320, tabs: tabs)

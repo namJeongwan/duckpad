@@ -156,6 +156,15 @@ public enum DuckpadMainMenuFactory {
             modifiers: [.command, .option],
             to: viewMenu
         )
+        add(
+            "Compare with Open Document…",
+            #selector(DuckpadWindowController.performCompareWithOpenDocument(_:)),
+            "",
+            target,
+            modifiers: [],
+            accessibilityLabel: "Compare the active document with another open document",
+            to: viewMenu
+        )
         viewMenu.addItem(.separator())
         add("Word Wrap", #selector(DuckpadWindowController.performToggleWordWrap(_:)), "", target, modifiers: [], to: viewMenu)
         add("Show Wrap Symbols", #selector(DuckpadWindowController.performToggleWrapMarker(_:)), "", target, modifiers: [], to: viewMenu)

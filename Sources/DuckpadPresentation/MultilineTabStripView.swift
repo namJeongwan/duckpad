@@ -11,6 +11,7 @@ public enum TabContextAction: Equatable, Sendable {
     case cloneToEditorGroup(EditorGroupSplitOrientation)
     case focusOtherEditorGroup
     case closeEditorGroup
+    case compareWithOpenDocument
 }
 
 @MainActor
@@ -279,6 +280,13 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         add("Clone to Group Down", action: #selector(cloneToGroupDown), to: menu, contextAction: .cloneToEditorGroup(.stacked))
         add("Focus Other Group", action: #selector(focusOtherEditorGroup), to: menu, contextAction: .focusOtherEditorGroup)
         add("Close Editor Group", action: #selector(closeEditorGroup), to: menu, contextAction: .closeEditorGroup)
+        menu.addItem(.separator())
+        add(
+            "Compare with Open Document…",
+            action: #selector(compareWithOpenDocument),
+            to: menu,
+            contextAction: .compareWithOpenDocument
+        )
         if tab.fullPath != nil {
             menu.addItem(.separator())
             add("Copy Full Path", action: #selector(copyFullPath), to: menu)
@@ -324,6 +332,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     @objc private func cloneToGroupDown() { onContextAction?(.cloneToEditorGroup(.stacked)) }
     @objc private func focusOtherEditorGroup() { onContextAction?(.focusOtherEditorGroup) }
     @objc private func closeEditorGroup() { onContextAction?(.closeEditorGroup) }
+    @objc private func compareWithOpenDocument() { onContextAction?(.compareWithOpenDocument) }
 }
 
 @MainActor

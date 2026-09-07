@@ -253,6 +253,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let fileUseCase: FileDocumentUseCase?
     private let filePanels: (any FilePanelPresenting)?
     private let fileConflictPresenter: (any FileConflictPresenting)?
+    private let openDocumentComparePresenter: any OpenDocumentComparePresenting
+    private let openDocumentComparisonUseCase: OpenDocumentComparisonUseCase
     private let dirtyDecisionPresenter: (any DirtyDocumentDecisionPresenting)?
     private let pathActionHandler: any TabPathActionHandling
     private let navigationPresenter: any EditorNavigationPresenting
@@ -285,6 +287,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var pendingWorkspaceBrowserTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingWorkspaceFileOpenTasks: [UUID: Task<Void, Never>] = [:]
     private var editorGroupActivationTask: Task<Void, Never>?
+    private var openDocumentCompareTask: Task<Void, Never>?
+    private var openDocumentCompareGeneration: UInt64 = 0
+    private var openDocumentCompareRevisions: [TabID: UInt64] = [:]
+    private var openDocumentCompareFocusGeneration: UInt64?
     private var requestedEditorGroupSelection: (tabID: TabID, group: EditorGroupID)?
     private var editorGroupTabIndices: [EditorGroupID: [TabID: Int]] = [:]
     private(set) var editorGroupIncrementalLookupCount = 0
@@ -303,6 +309,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         fileUseCase: FileDocumentUseCase? = nil,
         filePanels: (any FilePanelPresenting)? = nil,
         fileConflictPresenter: (any FileConflictPresenting)? = nil,
+        openDocumentComparePresenter: (any OpenDocumentComparePresenting)? = nil,
         dirtyDecisionPresenter: (any DirtyDocumentDecisionPresenting)? = nil,
         pathActionHandler: (any TabPathActionHandling)? = nil,
         navigationPresenter: (any EditorNavigationPresenting)? = nil,
@@ -348,6 +355,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.fileUseCase = fileUseCase
         self.filePanels = filePanels
         self.fileConflictPresenter = fileConflictPresenter
+        self.openDocumentComparePresenter = openDocumentComparePresenter
+            ?? (fileConflictPresenter as? any OpenDocumentComparePresenting)
+            ?? NativeOpenDocumentComparePresenter()
+        openDocumentComparisonUseCase = OpenDocumentComparisonUseCase(
+            workspace: workspace,
+            editor: editorAdapter ?? fallback!
+        )
         self.dirtyDecisionPresenter = dirtyDecisionPresenter
         self.pathActionHandler = pathActionHandler ?? NativeTabPathActionHandler()
         self.navigationPresenter = navigationPresenter ?? NativeEditorNavigationPresenter()
@@ -471,6 +485,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         pendingWorkspaceBrowserTasks.values.forEach { $0.cancel() }
         pendingWorkspaceFileOpenTasks.values.forEach { $0.cancel() }
         editorGroupActivationTask?.cancel()
+        openDocumentCompareTask?.cancel()
     }
 
     public override func close() {
@@ -512,6 +527,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         cancelWorkspaceBrowserTasks()
         editorGroupActivationTask?.cancel()
         editorGroupActivationTask = nil
+        cancelOpenDocumentCompare(superseded: true)
         window?.delegate = nil
         workspace.onChange = nil
         editorGroupRouter?.onEditorGroupFocus = nil
@@ -971,6 +987,121 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             ? editorGroupWorkspace.secondaryPane?.tabStrip
             : tabStrip
         (strip ?? tabStrip).documentSwitcher.showDocumentSwitcher()
+    }
+
+    @objc public func performCompareWithOpenDocument(_ sender: Any? = nil) {
+        guard let source = workspace.snapshot().tabs.first(where: \.isActive) else { return }
+        beginOpenDocumentCompare(source: source, initiatingGroup: editorGroupLayout.snapshot.focusedGroup)
+    }
+
+    func waitForOpenDocumentCompare() async {
+        await openDocumentCompareTask?.value
+    }
+
+    private func beginOpenDocumentCompare(source: TabSnapshot, initiatingGroup: EditorGroupID) {
+        guard workspaceInteractionsAreActionable,
+              workspace.snapshot().tabs.count >= 2 else { return }
+        cancelOpenDocumentCompare(superseded: true)
+        openDocumentCompareGeneration &+= 1
+        let generation = openDocumentCompareGeneration
+        openDocumentCompareRevisions = [source.id: source.buffer.revision]
+        openDocumentCompareFocusGeneration = generation
+        let candidates = openDocumentComparisonUseCase.eligibleTabs(excluding: source.id)
+        openDocumentCompareTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.openDocumentCompareGeneration == generation {
+                    self.openDocumentCompareTask = nil
+                    self.openDocumentCompareRevisions.removeAll()
+                }
+                if self.openDocumentCompareFocusGeneration == generation {
+                    self.openDocumentCompareFocusGeneration = nil
+                    if !self.hasTornDownWindow {
+                        self.restoreEditorFocus(to: initiatingGroup)
+                    }
+                }
+            }
+            guard let targetID = await self.openDocumentComparePresenter.chooseTarget(
+                source: source,
+                candidates: candidates,
+                attachedTo: self.window
+            ), !Task.isCancelled,
+               self.openDocumentCompareGeneration == generation else { return }
+            do {
+                let comparison = try self.openDocumentComparisonUseCase.capture(
+                    leftTabID: source.id,
+                    rightTabID: targetID
+                )
+                self.openDocumentCompareRevisions = [
+                    comparison.left.tabID: comparison.left.revision,
+                    comparison.right.tabID: comparison.right.revision,
+                ]
+                let content = self.compareContent(comparison)
+                try await self.openDocumentComparePresenter.present(
+                    content,
+                    attachedTo: self.window,
+                    isCurrent: { [weak self] in
+                        self?.openDocumentComparisonIsCurrent(generation: generation) == true
+                    }
+                )
+            } catch let error as OpenDocumentComparison.Error {
+                guard error != .cancelled,
+                      self.openDocumentCompareGeneration == generation else { return }
+                self.openDocumentComparePresenter.presentFailure(error, attachedTo: self.window)
+            } catch {
+                guard self.openDocumentCompareGeneration == generation else { return }
+                self.openDocumentComparePresenter.presentFailure(.cancelled, attachedTo: self.window)
+            }
+        }
+    }
+
+    private func compareContent(_ comparison: OpenDocumentComparison) -> OpenDocumentCompareContent {
+        let duplicateTitle = comparison.left.title == comparison.right.title
+        return OpenDocumentCompareContent(
+            title: "Compare Open Documents",
+            leftTitle: duplicateTitle
+                ? "\(comparison.left.title) — \(comparison.left.fullPath ?? "Untitled")"
+                : comparison.left.title,
+            rightTitle: duplicateTitle
+                ? "\(comparison.right.title) — \(comparison.right.fullPath ?? "Untitled")"
+                : comparison.right.title,
+            leftText: comparison.left.text,
+            rightText: comparison.right.text
+        )
+    }
+
+    private func openDocumentComparisonIsCurrent(generation: UInt64) -> Bool {
+        guard openDocumentCompareGeneration == generation,
+              !hasTornDownWindow,
+              workspaceInteractionsAreActionable else { return false }
+        let revisions = Dictionary(uniqueKeysWithValues: workspace.snapshot().tabs.map {
+            ($0.id, $0.buffer.revision)
+        })
+        return openDocumentCompareRevisions.allSatisfy { revisions[$0.key] == $0.value }
+    }
+
+    private func invalidateOpenDocumentCompareIfNeeded(_ snapshot: WorkspaceSnapshot) {
+        guard !openDocumentCompareRevisions.isEmpty else { return }
+        let revisions = Dictionary(uniqueKeysWithValues: snapshot.tabs.map { ($0.id, $0.buffer.revision) })
+        guard openDocumentCompareRevisions.contains(where: { revisions[$0.key] != $0.value }) else { return }
+        cancelOpenDocumentCompare()
+    }
+
+    private func cancelOpenDocumentCompare(superseded: Bool = false) {
+        openDocumentCompareTask?.cancel()
+        openDocumentComparePresenter.cancelOutstandingComparisons()
+        if superseded {
+            openDocumentCompareTask = nil
+            openDocumentCompareRevisions.removeAll()
+            openDocumentCompareFocusGeneration = nil
+        }
+    }
+
+    private func restoreEditorFocus(to group: EditorGroupID) {
+        let layout = editorGroupLayout.snapshot
+        let restoredGroup = layout.orientation == nil ? .primary : group
+        editorGroupRouter?.activateEditorGroup(restoredGroup)
+        activeEditor.focus()
     }
 
     @objc public func performShowCommandPalette(_ sender: Any? = nil) {
@@ -1468,6 +1599,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performPreviousTab(_:)),
              #selector(performLastUsedTab(_:)),
              #selector(performShowDocumentSwitcher(_:)),
+             #selector(performCompareWithOpenDocument(_:)),
              #selector(performShowCommandPalette(_:)),
              #selector(performMoveActiveTabLeft(_:)),
              #selector(performMoveActiveTabRight(_:)),
@@ -1478,6 +1610,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performToggleLineComment(_:)),
              #selector(performShowLanguageChooser(_:)),
              #selector(performShowExtensions(_:)):
+            if menuItem.action == #selector(performCompareWithOpenDocument(_:)) {
+                return workspaceInteractionsAreActionable && workspace.snapshot().tabs.count >= 2
+            }
             return workspaceInteractionsAreActionable
         case #selector(performSaveAll(_:)):
             return workspaceInteractionsAreActionable && fileUseCase != nil
@@ -2731,6 +2866,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func handle(_ change: WorkspaceChange) {
+        invalidateOpenDocumentCompareIfNeeded(change.snapshot)
         if shouldInvalidateDocumentIntelligence(for: change) {
             documentIntelligenceTask?.cancel()
             documentIntelligenceTask = nil
@@ -3117,6 +3253,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return editorGroupRouter != nil
                 && provisionalEditorGroupLayout == nil
                 && editorGroupLayout.snapshot.orientation != nil
+        case .compareWithOpenDocument:
+            return workspaceInteractionsAreActionable && workspace.snapshot().tabs.count >= 2
         case .close, .setPinned, .copyFullPath, .openContainingFolder:
             return workspaceInteractionsAreActionable
         }
@@ -3164,6 +3302,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             performEditorGroupFocus(group.other)
         case .closeEditorGroup:
             performCloseEditorGroup(nil)
+        case .compareWithOpenDocument:
+            guard let source = workspace.snapshot().tabs.first(where: { $0.id == tabID }) else { return }
+            beginOpenDocumentCompare(source: source, initiatingGroup: group)
         }
     }
 
