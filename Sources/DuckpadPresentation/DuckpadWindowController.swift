@@ -836,6 +836,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard workspaceInteractionsAreActionable,
               provisionalEditorGroupLayout == nil,
               editorGroupLayout.snapshot.orientation != nil,
+              editorGroupLayout.snapshot.focusedGroup != group,
               let tabID = editorGroupLayout.snapshot.selectedTabID(in: group) else { return }
         performActivate(tabID, in: group)
     }

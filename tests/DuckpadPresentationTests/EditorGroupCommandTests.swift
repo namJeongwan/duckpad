@@ -112,6 +112,8 @@ private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPor
     private(set) var suspendedInternalSplitOrientation: EditorSplitOrientation?
     private(set) var splitOrientation: EditorSplitOrientation?
     private(set) var events: [Event] = []
+    var publishesGroupFocusSynchronously = false
+    private(set) var synchronousGroupFocusCallbackCount = 0
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
 
     func setEditorGroupOrientation(_ orientation: EditorGroupSplitOrientation?) {
@@ -154,7 +156,13 @@ private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPor
     func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? { snapshots[bufferID] }
     func retire(bufferID: BufferID) { snapshots.removeValue(forKey: bufferID) }
     func setInputEnabled(_ isEnabled: Bool) {}
-    func focus() { events.append(.focus) }
+    func focus() {
+        events.append(.focus)
+        guard publishesGroupFocusSynchronously,
+              synchronousGroupFocusCallbackCount < 8 else { return }
+        synchronousGroupFocusCallbackCount += 1
+        onEditorGroupFocus?(activeEditorGroup)
+    }
 
     func split(orientation: EditorSplitOrientation) {
         splitOrientation = orientation
@@ -168,11 +176,74 @@ private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPor
 
     func focusOtherPane() {}
 
-    func resetEvents() { events = [] }
+    func resetEvents() {
+        events = []
+        synchronousGroupFocusCallbackCount = 0
+    }
 }
 
 @Suite(.serialized)
 struct EditorGroupCommandTests {
+    @Test @MainActor
+    func reentrantEditorFocusIgnoresAffirmationButStillRoutesGenuineGroupFocus() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 2)
+        defer { fixture.controller.close() }
+        let tabs = fixture.workspace.snapshot().tabs
+        let moved = try #require(tabs.first(where: { $0.isActive }))
+        fixture.router.resetEvents()
+        fixture.router.publishesGroupFocusSynchronously = true
+
+        fixture.controller.performMoveActiveTabToGroupRight(nil)
+        await eventually {
+            fixture.controller.editorGroupLayoutSnapshot.orientation == .sideBySide
+                && fixture.controller.editorGroupLayoutSnapshot.focusedGroup == .secondary
+        }
+
+        #expect(fixture.controller.editorGroupLayoutSnapshot.secondaryTabIDs == [moved.id])
+        #expect(fixture.router.events.filter { $0 == .display(moved.buffer, .secondary) }.count == 1)
+        #expect(fixture.router.events.filter { $0 == .activate(.secondary) }.count == 1)
+        #expect(fixture.router.events.filter { $0 == .focus }.count == 1)
+        #expect(fixture.router.synchronousGroupFocusCallbackCount == 1)
+
+        let primarySelection = try #require(
+            fixture.controller.editorGroupLayoutSnapshot.primarySelectedTabID
+        )
+        fixture.router.resetEvents()
+        fixture.router.activateEditorGroup(.primary)
+        fixture.router.onEditorGroupFocus?(.primary)
+        await eventually {
+            fixture.workspace.snapshot().tabs.first(where: \.isActive)?.id == primarySelection
+                && fixture.controller.editorGroupLayoutSnapshot.focusedGroup == .primary
+                && fixture.router.synchronousGroupFocusCallbackCount == 1
+        }
+
+        #expect(fixture.router.events.filter { $0 == .focus }.count == 1)
+        #expect(fixture.router.synchronousGroupFocusCallbackCount == 1)
+    }
+
+    @Test @MainActor
+    func reentrantEditorFocusAfterCloneRendersAndFocusesDestinationOnce() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 2)
+        defer { fixture.controller.close() }
+        let cloned = try #require(
+            fixture.workspace.snapshot().tabs.first(where: { $0.isActive })
+        )
+        fixture.router.resetEvents()
+        fixture.router.publishesGroupFocusSynchronously = true
+
+        fixture.controller.performCloneActiveTabToGroupDown(nil)
+        await eventually {
+            fixture.controller.editorGroupLayoutSnapshot.orientation == .stacked
+                && fixture.controller.editorGroupLayoutSnapshot.focusedGroup == .secondary
+        }
+
+        #expect(fixture.controller.editorGroupLayoutSnapshot.secondaryTabIDs == [cloned.id])
+        #expect(fixture.router.events.filter { $0 == .display(cloned.buffer, .secondary) }.count == 1)
+        #expect(fixture.router.events.filter { $0 == .activate(.secondary) }.count == 1)
+        #expect(fixture.router.events.filter { $0 == .focus }.count == 1)
+        #expect(fixture.router.synchronousGroupFocusCallbackCount == 1)
+    }
+
     @Test @MainActor
     func splitCloneAssignsAndActivatesDestinationBeforeWorkspaceDisplay() async throws {
         let fixture = await makeEditorGroupController(tabCount: 2)
