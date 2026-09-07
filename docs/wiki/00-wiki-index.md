@@ -86,7 +86,7 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 72 | [Phase 29B parity gap assessment and extension shortcuts](35-parity-gap-assessment.md) | **Approved, committed and pushed** | 94개 feature를 보수적으로 전수 분류하고 manifest 단축키를 native menu에 연결하며 Extended 검색 escape를 확장했다. commit `f33c4e8`. |
 | 73 | [Phase 29C document dropdown and immediate tab interaction](36-document-dropdown-and-close-latency.md) | **Close behavior retained; visible chrome superseded** | Optimistic durable close, hover, 새 문서 focus와 collection 단위 갱신은 유지된다. 당시 visible `Documents (N)` dropdown과 overlay tab scroller는 Phase 33에서 제거됐다. |
 | 74 | [Phase 30 lightweight smart editing](37-lightweight-smart-editing.md) | **Approved, committed and pushed** | Scintilla의 native insertion contract로 `{[(` 자동 닫기, JSON/Python Enter 들여쓰기, 단일 undo/recovery revision과 Plain Text·paste·IME 비개입 경계를 기록한다. 최종 독립 re-review는 0 Critical / 0 Important / 0 Minor로 승인했고 commit `3c718ef`을 audit 후 원격 브랜치에 반영했다. |
-| 75 | [Phase 33 editor groups, Compare, and native tab chrome](38-editor-groups-compare-and-native-tabs.md) | **Reviewed, audited, and pushed; packaged visual rerun pending** | 두 editor group, 일반 Compare, shared external renderer, exact-`NSMenu` pull-down command bar, visible Documents/internal tab viewport 제거, full-title exact-width justified rows를 기록한다. Focus recursion fix `9ecdd588`, final chrome `cfb6329`, bounded routing fix `c0a0083`, reviewed docs `3388caa`가 `origin/feature/editor-groups-compare`에 push·SHA 검증됐으며 잠긴 Mac의 packaged UI rerun만 pending이다. |
+| 75 | [Phase 33 editor groups, Compare, and native tab chrome](38-editor-groups-compare-and-native-tabs.md) | **Complete — reviewed source is audited, pushed, and smoke-validated** | 두 editor group, 일반 Compare, shared external renderer, exact-`NSMenu` pull-down command bar, visible Documents/internal tab viewport 제거, full-title exact-width justified rows를 기록한다. Focus recursion fix `9ecdd588`, final chrome `cfb6329`, bounded routing fix `c0a0083`을 포함한 source/history `c517cc8`은 review·audit·remote SHA 검증됐고, 이후 그 source로 만든 native `.app`의 서명/리소스/Finder/security-scope/XPC smoke까지 통과했다. |
 
 상태 정의:
 
@@ -185,16 +185,24 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
   authoritative full reconcile로 안전하게 fallback한다.
 - **Validation:** Task 10 layout 7/7, command bar 5/5, editor-group commands
   27/27, TabFlow/AppKit 85/85, layout model 15/15, workspace 16/16, Compare
-  21/21, Scintilla group 23/23; full serial suite 633 discovered
-  tests exit 0, Debug/Release builds가 통과했다. Default parallel whole suite의
-  AppKit `signal 11`은 known baseline이며 pass가 아니다. Task 9–11 이후 real
-  packaged group move/Split/Compare rerun은 Mac session lock 때문에 pending이며
-  pass로 기록하지 않는다.
-- **Delivery state:** implementation commit `50905ca`부터 `c0a0083`까지와
-  documentation commit `3388caa`가 independent 0/0/0 review와 local commit
-  audit를 통과했다. Final cumulative pre-push review도 0/0/0이며 `3388caa`는
-  `origin/feature/editor-groups-compare`와 exact SHA가 일치한다. Mac lock으로
-  막힌 packaged UI visual rerun만 남아 있다.
+  21/21, Scintilla group 23/23; fresh full serial suite 633 discovered tests,
+  Debug/Release builds가 통과했다. 현재 source로 native `.app`을 다시
+  package한 뒤 bundle/resource/XPC/signature verification과 Finder/Open With,
+  two-launch security-scoped bookmark recovery/save, extension 및 XPC-isolation
+  smoke도 통과했다. 최초 smoke가 멈춘 원인은 9월 3일 stale bundle에 현재
+  security-scope smoke entry point가 없었기 때문이며, source/runtime 결함이
+  아니었다. Default parallel whole suite의 AppKit `signal 11`은 known
+  baseline이며 pass가 아니다.
+- **Delivery state:** 사용자가 2026-09-07 최종 gate로 잠금 화면의 수동 UI
+  조작 대신 non-interactive packaged smoke를 명시적으로 선택했다. 따라서
+  pixel-by-pixel visual inspection은 주장하지 않으며, drag Split/Move/Copy와
+  Compare 동작은 위 focused AppKit/command/drag/Compare 자동화와 현재-source
+  packaged smoke의 조합으로 닫는다. Implementation commit `50905ca`부터
+  `c0a0083`까지와 기존 documentation `c517cc8`은 independent 0/0/0 review,
+  local commit audit 및 `origin/feature/editor-groups-compare` SHA equality를
+  통과했다. Fresh package와 smoke는 그 remote-verified source 이후에
+  실행됐다. 이 문단은 현재 3-doc closeout 자체의 review/audit/push 완료를
+  미리 주장하지 않는다.
 
 ### 2026-09-04 — Phase 28 independent content review
 

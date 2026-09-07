@@ -1,6 +1,6 @@
 # Phase 33 — Editor groups, open-document Compare, and native tab chrome
 
-Status: **Reviewed, audited, and pushed; packaged visual rerun pending**
+Status: **Complete — reviewed source is audited, pushed, and smoke-validated**
 
 ## Outcome
 
@@ -219,17 +219,28 @@ The full serial suite (`swift test --no-parallel`) exits 0 across 633 discovered
 tests, and Debug and Release builds pass. Independent review reports 0 Critical
 / 0 Important / 0 Minor.
 
-The packaged group move/Split/Compare rerun after Tasks 9–11 remains
-pending because the Mac session was locked. This is an environment-limited
-manual validation gap, not a claimed packaged pass.
+On 2026-09-07 the user explicitly selected a non-interactive packaged smoke as
+the final gate instead of a locked-screen manual UI rerun. A fresh native
+`.app` built from the reviewed current source passes bundle/resource/XPC/signature
+verification and the complete Finder/Open With, two-launch security-scoped
+bookmark recovery/save, extension, and XPC-isolation smoke. The first attempt
+had targeted a stale 2026-09-03 bundle that did not contain the current
+security-scope smoke entry point; rebuilding from current source removed that
+validation-artifact mismatch. It was not a product-code failure.
+
+No pixel-by-pixel visual inspection is claimed. Drag reorder, right/down Split,
+cross-group move/Option-copy, group focus/close, and Compare are closed by their
+focused AppKit, command, drag, and Compare suites together with the successful
+current-source packaged smoke, which is the user-approved completion boundary.
 
 The default parallel whole-suite run still receives AppKit `signal 11`. That
 same process-global instability is an established baseline; it is not recorded
 as a pass and does not replace the successful serial suite.
 
-Implementation commits through `c0a0083` and documentation commit `3388caa`
-have independent 0/0/0 reviews and local commit audits. A final cumulative
-pre-push review also reports 0/0/0, and local/remote
-`feature/editor-groups-compare` matched exactly at `3388caa`. The packaged UI
-visual rerun remains pending only because the Mac session is locked; no manual
-visual pass is claimed.
+Implementation commits through `c0a0083` and the existing documentation at
+`c517cc8` have independent 0/0/0 reviews and local commit audits. A final
+cumulative pre-push review also reports 0/0/0, and that source/history is
+remote-verified on `origin/feature/editor-groups-compare`. The fresh package and
+smoke above ran afterward from that exact source. This paragraph does not claim
+that the current three-document closeout has already been reviewed, audited, or
+pushed.
