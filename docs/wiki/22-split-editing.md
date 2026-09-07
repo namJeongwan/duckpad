@@ -1,6 +1,22 @@
 # Phase 19 — Shared-Document Split Editing
 
-Status: **Implemented; review pending**
+Status: **Implemented; distinct from Phase 33 editor groups**
+
+## Editor split versus editor groups
+
+This phase's Split Editor commands show the **same document** in two Scintilla
+views that share one native document and one Undo history. [Phase 33 editor
+groups](38-editor-groups-compare-and-native-tabs.md) instead keep a selected tab
+and routed Scintilla host for each of at most two groups, normally showing two
+different open documents. Option-drag may place one logical document in both
+groups, but that is a transient group clone rather than this phase's recovered
+secondary editor-pane state.
+
+Entering two-group mode suspends the focused buffer's internal split and
+disables the four Split Editor commands below. Its stored orientation and
+secondary view state are retained. Closing the editor group restores that
+internal split; group placement itself is window-local and is not written to
+the recovery schema.
 
 ## Outcome
 

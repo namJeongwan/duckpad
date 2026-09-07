@@ -1,21 +1,32 @@
 # Phase 12 — Searchable Open Document Switcher
 
-- **Status:** Approved, committed, audited, and pushed to `origin/main`
+- **Status:** Phase 12 delivered; launch chrome updated by Phase 33
 - **Owner/agent:** `/root` direct investigator and builder
 - **Last updated:** 2026-09-03
-- **Related:** [Multiline tab workspace](08-multiline-tabs.md), [Workspace chrome](14-workspace-chrome-and-document-dropdown.md), [Standard shortcuts](13-standard-editing-shortcuts.md)
+- **Related:** [Multiline tab workspace](08-multiline-tabs.md), [Workspace chrome](14-workspace-chrome-and-document-dropdown.md), [Editor groups and native tabs](38-editor-groups-compare-and-native-tabs.md)
 
-## Goal
+## Current launch path
+
+The searchable panel remains the open-document escape hatch, but
+[Phase 33](38-editor-groups-compare-and-native-tabs.md) removes its visible
+`Documents (N)` launcher and the tab-strip width reserved for that control.
+Choose **Tabs → Open Document…** or press `Command-Shift-O`; the panel now
+anchors to the tab-strip surface. Its search, keyboard navigation, stable-`TabID`
+activation, bounded incremental updates, accessibility, and lifecycle gate are
+unchanged.
+
+## Historical Phase 12 goal
 
 The Phase 11 dropdown made every open document discoverable, but a flat native
 menu becomes slow to scan long before the multiline tab bar reaches its tested
 500-tab range. This phase turns the same chrome control into a searchable,
 keyboard-first document switcher without moving document authority into UI.
 
-## Implemented behavior
+## Phase 12 behavior retained by the current panel
 
-- Clicking Open Documents or choosing **Tabs → Open Document…** opens a native
-  transient popover. `Command-Shift-O` is the collision-tested shortcut.
+- In the Phase 12 interface, clicking Open Documents or choosing **Tabs → Open
+  Document…** opened a native transient popover. The visible button is now
+  superseded; `Command-Shift-O` remains the collision-tested shortcut.
 - Search matches title and full path, ignores case and diacritics, supports
   whitespace-separated terms, and ranks exact title, title prefix, title
   containment, then path containment while preserving visual-order ties.
@@ -73,9 +84,13 @@ scope.
 - Commit: `5f816e0249951e65598551c428ef4f9fccd2aa72`
 - Delivery: `origin/main`
 
-## Follow-up TODO
+## Resolved follow-up
 
-- [ ] Rebalance multiline-tab chrome width and internal padding so short titles
-  do not truncate prematurely. Hidden pin/dirty/close affordances must collapse
-  their reserved space, the active tab must retain a readable title, and the
-  50/200-tab wrap and viewport-performance contracts must remain intact.
+Phase 33 removes title truncation entirely. Short and long titles use their
+complete intrinsic width, hidden affordances do not compress the filename, and
+rows wrap only between complete tab items. Every justified row reaches the
+container's right edge with zero inter-item/trailing gap. Tab row caps and the
+internal viewport are removed: 56 and 500 tabs expose their full content
+height, both scrollers stay disabled, and wheel/activation/programmatic clip
+movement stays at origin zero. The switcher remains a fast independent
+navigation route rather than a workaround for hidden tab rows.

@@ -1,16 +1,35 @@
 # Phase 29C — Document dropdown and immediate tab interaction
 
-Status: **Implemented; independent review pending**
+Status: **Close-latency behavior retained; visible dropdown and tab scrollers superseded by Phase 33**
 
-## Outcome
+## Current chrome correction
 
-The crowded-tab chrome now presents one explicit `Documents (N)` dropdown
+[Phase 33](38-editor-groups-compare-and-native-tabs.md) removes the visible
+`Documents (N)` control, its reserved trailing width, and both visible tab
+scrollers. **Tabs → Open Document…** and `Command-Shift-O` still open the same
+searchable panel, now anchored to the tab-strip surface. Tabs are connected,
+multi-row 27-point strips; every title uses its complete intrinsic width and is
+never truncated or ellipsized, even when a legacy maximum width is supplied.
+Rows wrap only between whole tab items, then distribute remaining width so
+every row has zero inter-item and trailing gap. There is no row cap or internal
+tab viewport: all rows in the 56- and 500-tab layouts contribute their full content height, clip
+origin stays zero, and wheel, activation, resize, or programmatic reflection
+cannot re-enable scrolling.
+
+The immediate-close transaction, stable-`TabID` routing, active-editor focus,
+hover-only close affordance, and last-tab scratch behavior documented below
+remain current. References below to a visible dropdown, reserved width, or
+overlay tab scrollbars describe the historical Phase 29C UI only.
+
+## Historical Phase 29C chrome outcome
+
+The historical Phase 29C crowded-tab chrome presented one explicit `Documents (N)` dropdown
 instead of an unlabeled icon/count and a separate plus button. The dropdown
 keeps the existing searchable open-document panel, keyboard navigation, dirty
 and pinned state, and stable TabID activation. New scratch documents remain
 available through the native File menu and Command-N.
 
-The tab scroller uses overlay scrollbars with fixed autohide behavior, disabled
+The historical tab scroller used overlay scrollbars with fixed autohide behavior, disabled
 elastic overscroll, consistent right spacing, and an inset scroll thumb. Hover
 tracking is active whenever the pointer is over a tab, including inactive
 windows, and now exposes a stronger accent background/border plus a 20-point
@@ -38,6 +57,12 @@ item reload path. Insert and reorder keep the conservative full reconciliation
 path because AppKit cannot safely animate those transitions while a concurrent
 Restore Closed Tab operation changes editor ownership.
 
+The current retained-item hover path resolves stable `TabID` through a
+structural-change-time index map. Deleting an earlier tab therefore cannot
+leave a reused item pointing at its creation-time index. At 500 tabs,
+incremental configuration remains bounded: single update 1, persistence 0,
+hover enter/exit 1 each, and active old/new 2.
+
 ## Focus and last-tab behavior
 
 Successful new-document creation, tab activation, and close completion return
@@ -47,7 +72,8 @@ scratch document. This matches the immediate-editing Notepad++ model; an empty
 
 ## Acceptance
 
-- 64-tab chrome exposes `Documents (64)` and contains no plus/add button.
+- Historical Phase 29C acceptance exposed `Documents (64)` and contained no
+  plus/add button; Phase 33 supersedes that visible control entirely.
 - Hover tracking is `activeAlways`, changes the local visual affordance, and
   exposes the close target without reloading other items.
 - A blocked durable close removes the tab from the visible workspace snapshot

@@ -1,6 +1,6 @@
 # Duckpad Delivery Dashboard
 
-Last updated: 2026-09-05 (Asia/Seoul)
+Last updated: 2026-09-07 (Asia/Seoul)
 
 ## Product direction
 
@@ -13,13 +13,19 @@ Last updated: 2026-09-05 (Asia/Seoul)
 
 | Item | Status | Evidence / next gate |
 | --- | --- | --- |
-| Phase 32 block-comment/indent design | User approved | Literal manifest capability, one stream selection, bounded direct-closer dedent; no parser, background service, or dependency |
-| Block-comment implementation | Implemented | UTF-8/CRLF literal wrap/unwrap, one aggregate authority revision, split focus, rejection recovery, and Undo/Redo reviewed clean at its task checkpoint |
-| Closing-delimiter and explicit indentation | Implemented | Direct `}`, `]`, `)` dedent is bounded to 4,096 bytes and requires five revision slots; rejected-input recovery snapshots both panes' input-time caret/anchor; 2/4-space and Makefile-tab indent/outdent proofs pass |
-| Native command surface | Implemented | Accessible Edit menu and Command Palette expose unique `⌥⌘/`; extension shortcut collisions fail closed |
-| Tab hover selection-look regression | Fixed | Strip-owned single-hover state clears stale tracking/reuse state; Debug and Release `TabFlowLayoutTests` pass 66/66 after independent review |
-| Phase 32 validation | Complete with baseline blocker | Debug/Release builds and focused gates, six Release budgets, 1 MiB stress, and real AppKit smoke pass; monolithic signal 11 reproduces at parent `4510f3a` |
-| Phase 32 final review and push | Delivered | Final independent review reached 0 Critical / 0 Important / 0 Minor; audited delivery commit `c438a760` was pushed and remote-verified on `feature/block-comment-indentation`; this row is the reviewed closeout follow-up |
+| Editor groups | Implemented and locally audited | Two window-local groups, separate routed Scintilla hosts, right/down drag Split, move/Option-copy, focus/close commands, and state normalization are committed through `92c5773` |
+| Open-document Compare | Implemented and locally audited | Immutable non-activating capture, bounded Myers alignment, shared external-conflict renderer, read-only fixed rows, semantic markers, synchronized vertical and independent horizontal scroll are committed through `04d6d4d` |
+| Native command and tab chrome | Implemented and locally audited | Genuine AppKit pull-down command controls retain exact native menu identity; full-height exact-width-justified multi-row tabs have no internal viewport, gaps, scrollers, clipping movement, or title shrink/ellipsis. Latest chrome correction is `cfb6329` |
+| Recursive editor-group focus | Fixed and locally audited | `9ecdd588` rejects an already-focused synchronous Scintilla callback at the transition boundary; Task 9 group-command tests pass 21/21 and independent review reports 0/0/0 |
+| Bounded editor-group routing | Fixed and locally audited | `c0a0083` restores the source editor after native tab reparenting and makes normal 500-tab edit/activation/click/clone-focus paths cache-validated O(1), with group-local updates and synchronized pane focus/accessibility |
+| Focused and serial validation | Passed | Compare 21/21, editor-group commands 27/27, TabFlow/AppKit 85/85, layout model 15/15, workspace 16/16, Scintilla group 23/23; full serial suite exits 0 across 633 discovered tests; Debug/Release builds pass |
+| Packaged editor-group rerun | Pending — Mac locked | The Task 9 crash, Task 10 chrome, and Task 11 bounded-routing fixes are code-reviewed and tested, but the real packaged group move/Split/Compare rerun could not be performed while the Mac session was locked; this is not claimed as a pass |
+| Default parallel whole suite | Known baseline blocker | Process-global AppKit `signal 11`; this is not counted as a pass and the serial suite is the attributable whole-suite gate |
+| Final documentation review and push | Pending | Code commits through `c0a0083` are reviewed and audited locally; packaged UI rerun, this documentation's exact-candidate review/commit/audit, and remote push remain open |
+
+The [Phase 33 delivery record](wiki/38-editor-groups-compare-and-native-tabs.md)
+is authoritative for this slice. Earlier rows below retain historical evidence
+for already delivered work.
 
 ## Recently delivered
 

@@ -1,13 +1,39 @@
 # Phase 5 — Multiline tab workspace
 
-**Status:** Implemented; review pending
+**Status:** Historical Phase 5 record; tab chrome superseded by Phase 33
 **Date:** 2026-09-02
 
 ## Product contract
 
-Duckpad의 tab strip은 열린 문서가 많아도 단일 행에서 제목을 숨기지 않는다. 창 너비와 제목 길이에 따라 96–220 pt 범위에서 tab 폭을 정하고, stable document order 그대로 다음 행으로 wrap한다. 최대 4행/작업영역 높이 34%를 넘으면 수직 overflow scroll을 사용하며 active tab은 언제나 visible 영역으로 이동한다.
+Duckpad의 tab strip은 열린 문서가 많아도 단일 행으로 제목을 축약하지
+않고 stable document order 그대로 다음 행으로 wrap한다. Phase 5의
+96–220 pt tab 폭과 visible 수직 overflow scroller 계약은 역사적 구현이며,
+[Phase 33](38-editor-groups-compare-and-native-tabs.md)이 이를 대체한다.
+현재 tab은 완전한 제목의 intrinsic width로만 측정하고 tab item 사이에서만
+wrap한다. 제목 truncation/abbreviation/ellipsis와 visible tab scroller는 모두
+금지된다. Row cap과 내부 tab viewport도 없다. 56개와 500개 tab 모두 모든
+행의 전체 content height를 차지하며 strip 아래 editor가 그만큼 내려간다.
+Wheel, activation, resize, programmatic clip movement 뒤에도 clip origin은
+항상 zero이고 horizontal/vertical scroller는 계속 비활성이다.
 
-지원 interaction은 mouse select, close button, middle-click close, `Cmd-W`, 행 사이 drag reorder, pin/unpin, 시각 순서 next/previous, MRU 전환, active tab left/right 이동이다. context menu는 이번 slice의 명시 범위인 Close, Close Others, Close to Right, Pin/Unpin, file-backed tab의 Copy Full Path/Open Containing Folder만 노출한다. dirty indicator, 중앙 생략 path tooltip, stable accessibility ID와 selected/modified/pinned/index/row metadata를 제공한다.
+각 행은 full intrinsic title width를 최소값으로 보존한 채 남는 폭을 item에
+동일 분배한다. 따라서 legacy maximum-width 설정도 제목을 줄일 수 없고,
+item 사이와 마지막 item 뒤의 trailing gap은 정확히 0이다. **Tabs → Open
+Document…** (`Command-Shift-O`)는 별도의 keyboard-first navigation 경로로
+계속 제공된다.
+
+지원 interaction은 mouse select, active/hover close button, middle-click
+close, `Cmd-W`, 행 사이 drag reorder, pin/unpin, 시각 순서 next/previous,
+MRU 전환, active tab left/right 이동이다. 이후 Phase 14와 Phase 33이 bulk
+close, editor-group Move/Clone/Focus/Close, edge Split, Compare를 같은 context
+menu와 validation 경로에 추가했다. 완전한 path tooltip, stable accessibility
+ID와 selected/modified/pinned/index/row metadata를 유지한다.
+
+현재 시각 계약은 분리된 rounded card가 아니라 27 pt connected strip이다.
+active tab은 editor에 이어지는 배경과 system-accent underline을 사용하고,
+inactive/hover/dirty/pin state는 AppKit semantic color와 VoiceOver metadata로
+표현한다. 자세한 최신 동작과 Notepad++ 근거는 [Phase 33 delivery
+record](38-editor-groups-compare-and-native-tabs.md)를 따른다.
 
 ## Architecture and safety
 
@@ -41,10 +67,20 @@ Duckpad의 tab strip은 열린 문서가 많아도 단일 행에서 제목을 �
 - `tests/DuckpadApplicationTests/ScratchWorkspaceUseCaseTests.swift`, `TabCloseCoordinatorTests.swift`
 - `tests/DuckpadPresentationTests/TabFlowLayoutTests.swift`, `FileCommandRoutingTests.swift`
 
-## Acceptance and validation
+## Historical and current acceptance
 
-- 50/500 tabs, narrow resize, row cap/overflow, stable order and selected visibility.
+- Phase 5 historical acceptance는 50/500 tabs, narrow resize, row cap/overflow,
+  stable order와 selected visibility를 검증했다. Phase 33 Task 10은 row cap과
+  internal overflow를 제거하고 56/500 tabs의 complete content height,
+  zero clip origin, disabled scrollers를 검증한다.
+- Every row가 container right edge까지 exact-width justify되며 inter-item과
+  trailing gap은 0이다. Full intrinsic title은 legacy maximum에도 줄거나
+  ellipsize되지 않는다.
 - single-pass cached layout, O(1) item/rowCount lookup, O(log rows + intersecting rows/items) visible query, engine-input invalidation, persistence-only no-op and settled 500-tab edit `fullReload=0/itemReload=1`.
+- Current 500-tab incremental metrics는 single-tab update 1, persistence 0,
+  hover enter/exit 각각 1, active old/new 2 item configuration을 보장한다.
+  Stable `TabID`→current-index map으로 앞 tab 삭제 뒤 retained item hover와
+  close affordance도 올바른 현재 위치를 사용한다.
 - drag writer→pasteboard→cross-row/end acceptance, forward/backward/end insertion conversion and pin-boundary clamp.
 - MRU close, keyboard navigation/move, recovery round-trip and Phase 4 schema-v1 migration.
 - single/bulk/termination shared dirty review: duplicate prompt exactly once, mid-batch Cancel, save failure, stale target skip, prompt-time edit와 transaction-time expected-revision race, operation-preserving actionable Retry.

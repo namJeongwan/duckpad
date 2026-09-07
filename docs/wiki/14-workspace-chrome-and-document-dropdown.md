@@ -1,11 +1,32 @@
 # Phase 11 — Workspace Chrome and Document Dropdown
 
-- **Status:** Approved, committed, audited, and pushed to `origin/main`
+- **Status:** Phase 11 delivered; visible document-dropdown chrome superseded by Phase 33
 - **Owner/agent:** `/root` direct builder
 - **Last updated:** 2026-09-03
-- **Related:** [Multiline tab workspace](08-multiline-tabs.md), [Language support](10-language-support.md), [Standard editing shortcuts](13-standard-editing-shortcuts.md)
+- **Related:** [Multiline tab workspace](08-multiline-tabs.md), [Searchable document switcher](15-searchable-document-switcher.md), [Editor groups and native tabs](38-editor-groups-compare-and-native-tabs.md)
 
-## Goal
+## Current chrome contract
+
+[Phase 33](38-editor-groups-compare-and-native-tabs.md) removes the visible
+Open Documents/`Documents (N)` control and every width reservation for it. The
+searchable switcher remains available through **Tabs → Open Document…** and
+`Command-Shift-O`, anchored to the tab-strip surface. Phase 11's visible right-side
+button description below is retained only as historical delivery evidence.
+
+The current window keeps the native macOS main menu and adds one slim
+window-local command bar above all editor groups. Each entry is a genuine
+`NSPopUpButton(frame:pullsDown:true)` backed by the exact original `NSMenu`
+object—not a copied item tree—so menu identity, supermenu attachment, targets,
+selectors, shortcuts, state, hidden items, and validation remain authoritative.
+Dark/Light Aqua receive semantic hover and open feedback. Teardown/reapply
+restores the original menu attachment and every item visibility bit.
+
+Tabs are connected multi-row strips with complete, never-ellipsized titles,
+exact row-wide justification, and no visible or internal tab viewport. Every
+row remains in the window at full content height; wheel/selection/resize cannot
+move the clip origin or re-enable a scroller.
+
+## Historical Phase 11 goal
 
 The first functional UI exposed the editor engine, but it did not yet present a
 cohesive macOS workspace. A hidden persistence banner still reserved 36 points,
@@ -16,15 +37,15 @@ selection were discoverable only through menus.
 This phase makes those existing capabilities visible without adding a document
 organizer or changing scratch-first behavior.
 
-## Implemented interface
+## Historical Phase 11 interface
 
 - The empty persistence banner now collapses to zero height and expands only
   when an actionable persistence failure is presented.
 - The multiline tab row is 34 points high with 28-point tabs, tighter spacing,
   restrained semantic colors, a two-point active indicator, SF Symbol pin/close
   controls, and close affordances shown only for the active or hovered tab.
-- The right side of the tab strip contains native New Scratch and Open Documents
-  buttons. Phase 11 originally used a flat native menu with active, edited,
+- Historically, the right side of the tab strip contained native New Scratch
+  and Open Documents buttons. Phase 11 originally used a flat native menu with active, edited,
   pinned/file/scratch and path state. [Phase 12](15-searchable-document-switcher.md)
   supersedes that menu with the current searchable keyboard-first popover while
   preserving stable-`TabID` routing.
@@ -48,7 +69,7 @@ the new status dropdown activates the existing Lexilla syntax styling.
 
 ## Architecture and performance
 
-`DocumentSwitcherButton` is a Presentation adapter over immutable
+In the Phase 11 implementation, `DocumentSwitcherButton` was a Presentation adapter over immutable
 `TabSnapshot` values. It forwards only `TabID`; workspace mutation remains in
 `ScratchWorkspaceUseCase`. Structural tab changes rebuild its native menu, while
 ordinary buffer edits update exactly one menu item. This preserves the existing
@@ -77,8 +98,8 @@ text revision, undo history, dirty state, file binding, or recovery data.
   Debug run exposed one pre-existing persistence timing flake; its isolated test
   and clean full rerun passed.
 - A clean macOS 13 x86_64 release build/link and the production Scintilla
-  50-tab multiline smoke pass. Exact independent review remains required before
-  candidate freeze.
+  50-tab multiline smoke pass. The exact independent review and candidate
+  freeze were subsequently completed, as recorded below.
 - README files, the ignored Notepad++ checkout, and the pre-existing unstaged
   implementation-foundation/vendor-script files are outside this change.
 
