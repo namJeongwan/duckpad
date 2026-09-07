@@ -21,7 +21,7 @@ Last updated: 2026-09-07 (Asia/Seoul)
 | Focused and serial validation | Passed | Compare 21/21, editor-group commands 27/27, TabFlow/AppKit 85/85, layout model 15/15, workspace 16/16, Scintilla group 23/23; full serial suite exits 0 across 633 discovered tests; Debug/Release builds pass |
 | Packaged editor-group rerun | Pending — Mac locked | The Task 9 crash, Task 10 chrome, and Task 11 bounded-routing fixes are code-reviewed and tested, but the real packaged group move/Split/Compare rerun could not be performed while the Mac session was locked; this is not claimed as a pass |
 | Default parallel whole suite | Known baseline blocker | Process-global AppKit `signal 11`; this is not counted as a pass and the serial suite is the attributable whole-suite gate |
-| Final documentation review and push | Pending | Code commits through `c0a0083` are reviewed and audited locally; packaged UI rerun, this documentation's exact-candidate review/commit/audit, and remote push remain open |
+| Final review and branch push | Delivered; packaged visual rerun pending | Final cumulative review is 0/0/0, all 35 branch commits audit clean, and reviewed documentation commit `3388caa` is remote-verified on `origin/feature/editor-groups-compare`. The Mac-lock-limited packaged UI rerun remains explicitly open |
 
 The [Phase 33 delivery record](wiki/38-editor-groups-compare-and-native-tabs.md)
 is authoritative for this slice. Earlier rows below retain historical evidence

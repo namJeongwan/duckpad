@@ -86,7 +86,7 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 72 | [Phase 29B parity gap assessment and extension shortcuts](35-parity-gap-assessment.md) | **Approved, committed and pushed** | 94개 feature를 보수적으로 전수 분류하고 manifest 단축키를 native menu에 연결하며 Extended 검색 escape를 확장했다. commit `f33c4e8`. |
 | 73 | [Phase 29C document dropdown and immediate tab interaction](36-document-dropdown-and-close-latency.md) | **Close behavior retained; visible chrome superseded** | Optimistic durable close, hover, 새 문서 focus와 collection 단위 갱신은 유지된다. 당시 visible `Documents (N)` dropdown과 overlay tab scroller는 Phase 33에서 제거됐다. |
 | 74 | [Phase 30 lightweight smart editing](37-lightweight-smart-editing.md) | **Approved, committed and pushed** | Scintilla의 native insertion contract로 `{[(` 자동 닫기, JSON/Python Enter 들여쓰기, 단일 undo/recovery revision과 Plain Text·paste·IME 비개입 경계를 기록한다. 최종 독립 re-review는 0 Critical / 0 Important / 0 Minor로 승인했고 commit `3c718ef`을 audit 후 원격 브랜치에 반영했다. |
-| 75 | [Phase 33 editor groups, Compare, and native tab chrome](38-editor-groups-compare-and-native-tabs.md) | **Code reviewed and audited locally; final delivery pending** | 두 editor group, 일반 Compare, shared external renderer, exact-`NSMenu` pull-down command bar, visible Documents/internal tab viewport 제거, full-title exact-width justified rows를 기록한다. Focus recursion fix `9ecdd588`, final chrome `cfb6329`, bounded routing fix `c0a0083`까지 0/0/0 review와 local audit가 끝났으며, 잠긴 Mac의 packaged UI rerun과 최종 문서 review/commit/audit/remote push가 pending이다. |
+| 75 | [Phase 33 editor groups, Compare, and native tab chrome](38-editor-groups-compare-and-native-tabs.md) | **Reviewed, audited, and pushed; packaged visual rerun pending** | 두 editor group, 일반 Compare, shared external renderer, exact-`NSMenu` pull-down command bar, visible Documents/internal tab viewport 제거, full-title exact-width justified rows를 기록한다. Focus recursion fix `9ecdd588`, final chrome `cfb6329`, bounded routing fix `c0a0083`, reviewed docs `3388caa`가 `origin/feature/editor-groups-compare`에 push·SHA 검증됐으며 잠긴 Mac의 packaged UI rerun만 pending이다. |
 
 상태 정의:
 
@@ -190,9 +190,11 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
   AppKit `signal 11`은 known baseline이며 pass가 아니다. Task 9–11 이후 real
   packaged group move/Split/Compare rerun은 Mac session lock 때문에 pending이며
   pass로 기록하지 않는다.
-- **Delivery state:** implementation commit `50905ca`부터 `c0a0083`까지
-  independent 0/0/0 review와 local commit audit를 통과했다. 이 문서 candidate의
-  독립 review/commit/audit와 remote push는 아직 수행하지 않았다.
+- **Delivery state:** implementation commit `50905ca`부터 `c0a0083`까지와
+  documentation commit `3388caa`가 independent 0/0/0 review와 local commit
+  audit를 통과했다. Final cumulative pre-push review도 0/0/0이며 `3388caa`는
+  `origin/feature/editor-groups-compare`와 exact SHA가 일치한다. Mac lock으로
+  막힌 packaged UI visual rerun만 남아 있다.
 
 ### 2026-09-04 — Phase 28 independent content review
 

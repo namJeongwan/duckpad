@@ -1,6 +1,6 @@
 # Phase 33 — Editor groups, open-document Compare, and native tab chrome
 
-Status: **Implementation commits audited locally; delivery pending**
+Status: **Reviewed, audited, and pushed; packaged visual rerun pending**
 
 ## Outcome
 
@@ -227,7 +227,9 @@ The default parallel whole-suite run still receives AppKit `signal 11`. That
 same process-global instability is an established baseline; it is not recorded
 as a pass and does not replace the successful serial suite.
 
-Implementation commits through `c0a0083` have independent 0/0/0 reviews and
-local commit audits. The packaged UI rerun, followed by this documentation's
-independent review, exact-candidate commit, audit, and remote push, are still
-pending; no delivery claim is made before those gates complete.
+Implementation commits through `c0a0083` and documentation commit `3388caa`
+have independent 0/0/0 reviews and local commit audits. A final cumulative
+pre-push review also reports 0/0/0, and local/remote
+`feature/editor-groups-compare` matched exactly at `3388caa`. The packaged UI
+visual rerun remains pending only because the Mac session is locked; no manual
+visual pass is claimed.
