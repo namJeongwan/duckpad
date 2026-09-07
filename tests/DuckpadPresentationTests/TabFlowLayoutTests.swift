@@ -415,7 +415,7 @@ private func blockCommentLanguageRegistry() throws -> LanguageRegistry {
     let engine = TabFlowLayoutEngine(minimumItemWidth: 90, maximumItemWidth: 180)
     let result = engine.layout(itemWidths: [20, 500], containerWidth: 95)
     #expect(result.frames.map(\.width) == [90, 180])
-    #expect(result.contentWidth >= 186)
+    #expect(result.contentWidth >= 180)
     #expect(result.rowCount == 2)
 }
 
@@ -424,7 +424,7 @@ private func blockCommentLanguageRegistry() throws -> LanguageRegistry {
     let result = engine.layout(itemWidths: [640], containerWidth: 240)
 
     #expect(result.frames.first?.width == 640)
-    #expect(result.contentWidth >= 646)
+    #expect(result.contentWidth == 640)
     #expect(result.rowCount == 1)
 }
 
@@ -453,6 +453,23 @@ private func blockCommentLanguageRegistry() throws -> LanguageRegistry {
     }
 }
 
+@Test func defaultTabGeometryIsCompactAndConnected() {
+    let engine = TabFlowLayoutEngine()
+    let result = engine.layout(itemWidths: [100, 100, 100], containerWidth: 250)
+
+    #expect(engine.rowHeight >= 26)
+    #expect(engine.rowHeight <= 28)
+    #expect(engine.horizontalSpacing == 0)
+    #expect(engine.verticalSpacing == 0)
+    #expect(result.frames[1].minX == result.frames[0].maxX)
+    #expect(result.frames[2].minY == result.frames[0].maxY)
+    #expect(result.contentWidth == 250)
+
+    let splitPaneResult = engine.layout(itemWidths: [100], containerWidth: 50)
+    #expect(splitPaneResult.frames[0].width == 100)
+    #expect(splitPaneResult.contentWidth == 100)
+}
+
 @Test func appKitBeforeDropIndexConvertsToStableFinalIndexInEveryDirection() {
     #expect(TabDropDestination.finalIndex(sourceIndex: 1, insertionIndex: 4, itemCount: 5) == 3)
     #expect(TabDropDestination.finalIndex(sourceIndex: 4, insertionIndex: 1, itemCount: 5) == 1)
@@ -463,6 +480,44 @@ private func blockCommentLanguageRegistry() throws -> LanguageRegistry {
 
 @Suite(.serialized)
 struct AppKitHostedTests {
+@Test @MainActor func tabChromeHasNoVisibleDocumentsControlOrScrollbars() {
+    let tabs = makeTabs(count: 30, activeIndex: 29)
+    let (window, _, strip) = hostStrip(width: 320, height: 240, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    #expect(strip.documentSwitcher.superview == nil)
+    #expect(strip.hostedScrollView.frame.maxX == strip.bounds.maxX)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
+    #expect(!strip.hostedScrollView.hasVerticalScroller)
+    #expect(strip.rowCount > 1)
+    #expect(strip.selectedTabIsVisible)
+}
+
+@Test @MainActor func compactTabShowsAccentAndCloseOnlyForActiveOrHoveredState() throws {
+    let tabs = makeTabs(count: 3, activeIndex: 1)
+    let (window, _, strip) = hostStrip(width: 420, height: 180, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let inactive = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 0, section: 0)))
+    let active = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 1, section: 0)))
+    let inactiveClose = try #require(descendantButtons(of: inactive.view).first)
+    let activeClose = try #require(descendantButtons(of: active.view).first)
+
+    #expect(inactive.view.layer?.cornerRadius == 0)
+    #expect(active.view.layer?.cornerRadius == 0)
+    #expect(inactiveClose.isHidden)
+    #expect(!activeClose.isHidden)
+    #expect(active.view.layer?.sublayers?.contains(where: {
+        $0.frame.height == 2 && !$0.isHidden
+    }) == true)
+}
 @Test @MainActor func documentSwitcherSearchMatchesTitlePathAndDiacriticsDeterministically() {
     let tabs = [
         TabSnapshot(
@@ -568,7 +623,7 @@ struct AppKitHostedTests {
     window.makeKeyAndOrderFront(nil)
     strip.setInteractionsEnabled(true)
 
-    strip.documentSwitcher.showDocumentSwitcher()
+    strip.showDocumentSwitcher()
     RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     #expect(strip.documentSwitcher.documentPanel.isPresented)
     #expect(strip.documentSwitcher.documentPanel.selectedTabID == tabs[3].id)
@@ -598,7 +653,7 @@ struct AppKitHostedTests {
     }
     window.makeKeyAndOrderFront(nil)
     strip.setInteractionsEnabled(true)
-    strip.documentSwitcher.showDocumentSwitcher()
+    strip.showDocumentSwitcher()
     RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     let panel = strip.documentSwitcher.documentPanel
     #expect(panel.isPresented)
@@ -653,7 +708,7 @@ struct AppKitHostedTests {
     }
     window.makeKeyAndOrderFront(nil)
     strip.setInteractionsEnabled(true)
-    strip.documentSwitcher.showDocumentSwitcher()
+    strip.showDocumentSwitcher()
     RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     let panel = strip.documentSwitcher.documentPanel
     #expect(panel.isPresented)
@@ -704,7 +759,7 @@ struct AppKitHostedTests {
     }
     window.makeKeyAndOrderFront(nil)
     strip.setInteractionsEnabled(true)
-    strip.documentSwitcher.showDocumentSwitcher()
+    strip.showDocumentSwitcher()
     RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     let panel = strip.documentSwitcher.documentPanel
     panel.setQuery("new")
@@ -776,7 +831,7 @@ struct AppKitHostedTests {
     let (window, _, strip) = hostStrip(width: 500, height: 300, tabs: tabs)
     window.makeKeyAndOrderFront(nil)
     strip.setInteractionsEnabled(true)
-    strip.documentSwitcher.showDocumentSwitcher()
+    strip.showDocumentSwitcher()
     RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     #expect(strip.documentSwitcher.documentPanel.isPresented)
 
@@ -2105,7 +2160,7 @@ func everyCoreShortcutIdentityIsUnique() {
     #expect(closed == tabs[0].id)
 }
 
-@Test @MainActor func tabTitlesNeverUseEllipsisAndLongNamesRemainScrollable() throws {
+@Test @MainActor func shortAndLongTabTitlesKeepTheirFullIntrinsicLabelWidth() throws {
     let longTitle = "release-notes-" + String(repeating: "complete-name-", count: 30) + ".txt"
     let tab = TabSnapshot(
         id: TabID(),
@@ -2129,11 +2184,23 @@ func everyCoreShortcutIdentityIsUnique() {
 
     #expect(title.lineBreakMode == .byClipping)
     #expect(title.cell?.truncatesLastVisibleLine == false)
+    #expect(title.toolTip == longTitle)
+    #expect(title.frame.width >= title.intrinsicContentSize.width)
     #expect(frame.width > strip.hostedScrollView.contentSize.width)
     #expect(strip.flowLayout.collectionViewContentSize.width >= frame.maxX)
+
+    let shortTabs = makeTabs(count: 2, activeIndex: 0)
+    strip.apply(tabs: shortTabs)
+    strip.layoutSubtreeIfNeeded()
+    strip.hostedCollectionView.layoutSubtreeIfNeeded()
+    let shortItem = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 0, section: 0)))
+    let shortTitle = try #require(
+        descendantTextFields(of: shortItem.view).first { $0.stringValue == "new 1" }
+    )
+    #expect(shortTitle.frame.width >= shortTitle.intrinsicContentSize.width)
 }
 
-@Test @MainActor func liveWindowKeepsLongTitleDocumentWidthAndHorizontalScrolling() throws {
+@Test @MainActor func liveWindowKeepsFullLongTabWidthWithoutVisibleScrollers() throws {
     let longTitle = "release-notes-" + String(repeating: "complete-name-", count: 30) + ".txt"
     let longTab = TabSnapshot(
         id: TabID(), title: longTitle, isActive: true, isDirty: false, isPinned: false,
@@ -2156,14 +2223,10 @@ func everyCoreShortcutIdentityIsUnique() {
     strip.hostedScrollView.layoutSubtreeIfNeeded()
     strip.hostedCollectionView.layoutSubtreeIfNeeded()
 
-    let clipView = strip.hostedScrollView.contentView
     let layoutWidth = strip.flowLayout.collectionViewContentSize.width
-    #expect(strip.hostedCollectionView.frame.width >= layoutWidth)
-    #expect(strip.hostedScrollView.requiresHorizontalScroller)
-
-    strip.hostedCollectionView.scroll(NSPoint(x: 300, y: 0))
-    strip.hostedScrollView.reflectScrolledClipView(clipView)
-    #expect(clipView.bounds.minX > 0)
+    #expect(layoutWidth > strip.hostedScrollView.contentSize.width)
+    #expect(!strip.hostedScrollView.requiresHorizontalScroller)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
 
     let changed = [
         TabSnapshot(
@@ -2183,7 +2246,7 @@ func everyCoreShortcutIdentityIsUnique() {
         kind: .activeTabChanged(previousIndex: 0, currentIndex: 1)
     ))
 
-    #expect(clipView.bounds.minX < 10)
+    #expect(strip.hostedScrollView.contentView.bounds.minX == 0)
     #expect(strip.selectedTabIsVisible)
 }
 
@@ -2404,14 +2467,17 @@ func everyCoreShortcutIdentityIsUnique() {
     hoveredItem.view.mouseEntered(with: event)
     #expect(!close.isHidden)
 
-    strip.hostedCollectionView.scrollToItems(at: [lastPath], scrollPosition: .centeredVertically)
+    let lastFrame = try #require(strip.flowLayout.layoutAttributesForItem(at: lastPath)?.frame)
+    strip.hostedScrollView.contentView.scroll(to: NSPoint(x: 0, y: lastFrame.minY))
+    strip.hostedScrollView.reflectScrolledClipView(strip.hostedScrollView.contentView)
     for _ in 0..<20 where strip.hostedCollectionView.item(at: hoveredPath) != nil {
         strip.hostedCollectionView.layoutSubtreeIfNeeded()
         await Task.yield()
     }
     #expect(strip.hostedCollectionView.item(at: hoveredPath) == nil)
 
-    strip.hostedCollectionView.scrollToItems(at: [hoveredPath], scrollPosition: .centeredVertically)
+    strip.hostedScrollView.contentView.scroll(to: .zero)
+    strip.hostedScrollView.reflectScrolledClipView(strip.hostedScrollView.contentView)
     for _ in 0..<20 where strip.hostedCollectionView.item(at: hoveredPath) == nil {
         strip.hostedCollectionView.layoutSubtreeIfNeeded()
         await Task.yield()
@@ -2424,7 +2490,7 @@ func everyCoreShortcutIdentityIsUnique() {
     #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
 }
 
-@Test @MainActor func tabChromeUsesExplicitDocumentDropdownWithoutNewButton() {
+@Test @MainActor func tabChromeKeepsDocumentSwitcherAsKeyboardOnlyEscapeHatch() {
     let tabs = makeTabs(count: 64, activeIndex: 40)
     let (window, _, strip) = hostStrip(width: 900, height: 620, tabs: tabs)
     defer {
@@ -2434,13 +2500,14 @@ func everyCoreShortcutIdentityIsUnique() {
     }
 
     #expect(strip.documentSwitcher.title == "Documents (64)")
-    #expect(strip.documentSwitcher.imagePosition == .imageTrailing)
     #expect(strip.documentSwitcher.accessibilityLabel() == "Open Documents")
+    #expect(strip.documentSwitcher.superview == nil)
     #expect(descendantButtons(of: strip).contains {
         $0.accessibilityIdentifier() == "duckpad.tab.add"
     } == false)
     #expect(strip.hostedScrollView.scrollerStyle == .overlay)
-    #expect(strip.hostedScrollView.autohidesScrollers)
+    #expect(!strip.hostedScrollView.hasVerticalScroller)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
     #expect(strip.hostedScrollView.verticalScrollElasticity == .none)
     #expect(strip.hostedScrollView.horizontalScrollElasticity == .none)
 }
@@ -3013,13 +3080,36 @@ func everyCoreShortcutIdentityIsUnique() {
     let chrome = controller.workspaceChromeSmokeState()
     #expect(chrome.documentCount == 1)
     #expect(chrome.bannerHeight == 0)
-    #expect(chrome.tabStripHeight == 34)
+    #expect(chrome.tabStripHeight == 27)
     #expect(chrome.statusBarHeight == 24)
     #expect(!chrome.editorOverlapsStatusBar)
     #expect(chrome.interactionsEnabled)
     #expect(chrome.languageStatusEnabled)
     #expect(chrome.extensionStatusEnabled)
-    #expect(controller.tabStrip.documentSwitcher.accessibilityIdentifier() == "duckpad.tab.documents")
+    #expect(controller.tabStrip.documentSwitcher.superview == nil)
+}
+
+@Test @MainActor func windowHostsOneCommandBarAboveTheEntireEditorGroupWorkspace() throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    let menu = DuckpadMainMenuFactory.make(target: controller)
+    let fileMenu = try #require(menu.items.first { $0.submenu?.title == "File" }?.submenu)
+
+    controller.applicationMainMenuDidChange(menu)
+    let content = try #require(controller.window?.contentView)
+    content.layoutSubtreeIfNeeded()
+    let commandFrame = controller.commandBar.convert(controller.commandBar.bounds, to: content)
+    let workspaceFrame = controller.editorGroupWorkspace.convert(
+        controller.editorGroupWorkspace.bounds,
+        to: content
+    )
+
+    #expect(controller.commandBar.superview === content)
+    #expect(controller.commandBar.menuTitles == WindowCommandBarView.presentedMenuTitles)
+    #expect(controller.commandBar.menu(named: "File") === fileMenu)
+    #expect(commandFrame.minY >= workspaceFrame.maxY)
 }
 
 @Test @MainActor func realControllerTypingWithFiveHundredTabsPerformsOneItemReload() async {

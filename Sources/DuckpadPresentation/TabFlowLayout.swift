@@ -44,11 +44,11 @@ public struct TabFlowLayoutEngine: Sendable {
     public var maximumItemWidth: CGFloat
 
     public init(
-        rowHeight: CGFloat = 28,
-        horizontalSpacing: CGFloat = 2,
-        verticalSpacing: CGFloat = 2,
-        insets: NSEdgeInsets = NSEdgeInsets(top: 3, left: 6, bottom: 3, right: 6),
-        minimumItemWidth: CGFloat = 88,
+        rowHeight: CGFloat = 27,
+        horizontalSpacing: CGFloat = 0,
+        verticalSpacing: CGFloat = 0,
+        insets: NSEdgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0),
+        minimumItemWidth: CGFloat = 76,
         maximumItemWidth: CGFloat = .greatestFiniteMagnitude
     ) {
         self.rowHeight = rowHeight
@@ -107,7 +107,7 @@ public struct TabStripViewportPolicy: Equatable, Sendable {
     public init(
         maximumRows: Int = 4,
         maximumWorkspaceFraction: CGFloat = 0.34,
-        minimumHeight: CGFloat = 34
+        minimumHeight: CGFloat = 27
     ) {
         self.maximumRows = maximumRows
         self.maximumWorkspaceFraction = maximumWorkspaceFraction
@@ -160,7 +160,7 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
     private var rowIndices: [Int] = []
     private var rows: [RowCache] = []
     private var cachedRowCount = 0
-    private var calculatedSize = NSSize(width: 0, height: 34)
+    private var calculatedSize = NSSize(width: 0, height: 27)
     private var widthsVersion: UInt64 = 0
     private var preparedWidthsVersion: UInt64 = .max
     private var preparedWidth: CGFloat = -.greatestFiniteMagnitude
@@ -203,12 +203,12 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         var upper = rows.count
         while lower < upper {
             let middle = (lower + upper) / 2
-            if rows[middle].maxY < rect.minY { lower = middle + 1 }
+            if rows[middle].maxY <= rect.minY { lower = middle + 1 }
             else { upper = middle }
         }
         var visible: [NSCollectionViewLayoutAttributes] = []
         var rowIndex = lower
-        while rowIndex < rows.count, rows[rowIndex].minY <= rect.maxY {
+        while rowIndex < rows.count, rows[rowIndex].minY < rect.maxY {
             let row = rows[rowIndex]
             lastElementsQueryVisitedRows += 1
             for itemIndex in row.itemRange {

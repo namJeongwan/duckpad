@@ -112,8 +112,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         }
         view = tabView
         view.wantsLayer = true
-        view.layer?.cornerRadius = 5
-        view.layer?.borderWidth = 1
+        view.layer?.cornerRadius = 0
+        view.layer?.borderWidth = 0.5
         view.layer?.addSublayer(activeIndicator)
         titleLabel.lineBreakMode = .byClipping
         titleLabel.maximumNumberOfLines = 1
@@ -132,7 +132,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         closeButton.imageScaling = .scaleProportionallyDown
         closeButton.contentTintColor = .secondaryLabelColor
         closeButton.wantsLayer = true
-        closeButton.layer?.cornerRadius = 5
+        closeButton.layer?.cornerRadius = 3
         closeButton.target = self
         closeButton.action = #selector(closePressed)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
@@ -141,7 +141,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         view.addSubview(titleLabel)
         view.addSubview(closeButton)
         NSLayoutConstraint.activate([
-            pinImage.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            pinImage.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
             pinImage.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             pinImage.widthAnchor.constraint(equalToConstant: 10),
             pinImage.heightAnchor.constraint(equalToConstant: 10),
@@ -151,7 +151,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
             titleLabel.leadingAnchor.constraint(equalTo: dirtyLabel.trailingAnchor, constant: 3),
             titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             closeButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 4),
-            closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
+            closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
             closeButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             closeButton.widthAnchor.constraint(equalToConstant: 20),
             closeButton.heightAnchor.constraint(equalToConstant: 20),
@@ -160,7 +160,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        activeIndicator.frame = NSRect(x: 7, y: 0, width: max(0, view.bounds.width - 14), height: 2)
+        activeIndicator.frame = NSRect(x: 0, y: 0, width: view.bounds.width, height: 2)
     }
 
     func configure(tab: TabSnapshot, index: Int, row: Int, isHovered: Bool) {
@@ -178,7 +178,6 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         pinImage.isHidden = !tab.isPinned
         titleLabel.toolTip = tab.fullPath ?? tab.title
         view.toolTip = tab.fullPath ?? tab.title
-        activeIndicator.backgroundColor = NSColor.controlAccentColor.cgColor
         updateVisualState()
         updateCloseVisibility()
 
@@ -222,20 +221,21 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     private func updateVisualState() {
         guard isViewLoaded else { return }
         let active = configuredTab?.isActive == true || isSelected
+        activeIndicator.backgroundColor = NSColor.controlAccentColor.cgColor
         titleLabel.textColor = active || isHovered ? .labelColor : .secondaryLabelColor
         if active {
             view.layer?.backgroundColor = (isHovered
-                ? NSColor.controlAccentColor.withAlphaComponent(0.18)
-                : NSColor.controlBackgroundColor.withAlphaComponent(0.96)).cgColor
+                ? NSColor.controlAccentColor.withAlphaComponent(0.13)
+                : NSColor.textBackgroundColor.withAlphaComponent(0.98)).cgColor
             view.layer?.borderColor = (isHovered
-                ? NSColor.controlAccentColor.withAlphaComponent(0.65)
-                : NSColor.separatorColor.withAlphaComponent(0.72)).cgColor
+                ? NSColor.controlAccentColor.withAlphaComponent(0.48)
+                : NSColor.separatorColor.withAlphaComponent(0.52)).cgColor
         } else if isHovered {
-            view.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.17).cgColor
-            view.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.62).cgColor
+            view.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.11).cgColor
+            view.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.34).cgColor
         } else {
-            view.layer?.backgroundColor = NSColor.clear.cgColor
-            view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.24).cgColor
+            view.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.44).cgColor
+            view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.32).cgColor
         }
         closeButton.contentTintColor = isHovered ? .controlAccentColor : .secondaryLabelColor
         closeButton.layer?.backgroundColor = isHovered
@@ -360,6 +360,7 @@ final class TabOverflowScrollView: NSScrollView {
 
     override func layout() {
         super.layout()
+        if hasVerticalScroller { hasVerticalScroller = false }
         synchronizeHorizontalScroller()
     }
 
@@ -425,14 +426,14 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             DuckpadTabItem.self,
             forItemWithIdentifier: DuckpadTabItem.identifier
         )
-        hostedCollectionView.frame = NSRect(x: 0, y: 0, width: 1, height: 34)
+        hostedCollectionView.frame = NSRect(x: 0, y: 0, width: 1, height: 27)
         hostedCollectionView.autoresizingMask = []
 
         hostedScrollView.documentView = hostedCollectionView
         hostedScrollView.drawsBackground = false
-        hostedScrollView.autohidesScrollers = true
-        hostedScrollView.hasVerticalScroller = true
-        hostedScrollView.hasHorizontalScroller = true
+        hostedScrollView.autohidesScrollers = false
+        hostedScrollView.hasVerticalScroller = false
+        hostedScrollView.hasHorizontalScroller = false
         hostedScrollView.scrollerStyle = .overlay
         hostedScrollView.verticalScrollElasticity = .none
         hostedScrollView.horizontalScrollElasticity = .none
@@ -447,18 +448,13 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             self?.onActivate?(id)
         }
         addSubview(hostedScrollView)
-        addSubview(documentSwitcher)
-        heightConstraint = heightAnchor.constraint(equalToConstant: 34)
+        heightConstraint = heightAnchor.constraint(equalToConstant: 27)
         NSLayoutConstraint.activate([
             heightConstraint,
             hostedScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             hostedScrollView.topAnchor.constraint(equalTo: topAnchor),
             hostedScrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            hostedScrollView.trailingAnchor.constraint(equalTo: documentSwitcher.leadingAnchor, constant: -6),
-            documentSwitcher.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            documentSwitcher.topAnchor.constraint(equalTo: topAnchor, constant: 5),
-            documentSwitcher.widthAnchor.constraint(equalToConstant: 128),
-            documentSwitcher.heightAnchor.constraint(equalToConstant: 24),
+            hostedScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
         flowLayout.onContentSizeChange = { [weak self] size in
             guard let self else { return }
@@ -484,6 +480,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         updateDocumentFrame()
         updateViewportHeight()
         refreshVisibleItems()
+        scrollSelectedTabVisible()
     }
 
     public func apply(tabs: [TabSnapshot]) {
@@ -617,6 +614,12 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
 
     public func setEditorGroupID(_ groupID: EditorGroupID) {
         editorGroupID = groupID
+    }
+
+    public func showDocumentSwitcher() {
+        guard interactionsEnabled, !tabs.isEmpty else { return }
+        documentSwitcher.documentPanel.apply(tabs: tabs)
+        documentSwitcher.documentPanel.present(relativeTo: hostedScrollView)
     }
 
     func tearDownHostedViews() {
@@ -827,12 +830,12 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         let viewportWidth = max(1, hostedScrollView.contentSize.width)
         let width = max(viewportWidth, measuredContentWidth)
         let height = max(measuredContentHeight, hostedScrollView.contentSize.height)
-        let horizontallyOverflows = width > viewportWidth
         let documentSize = NSSize(width: width, height: height)
         let widthChanged = hostedCollectionView.frame.width != width
         hostedCollectionView.setRequiredDocumentSize(documentSize)
-        hostedScrollView.autohidesScrollers = true
-        hostedScrollView.requiresHorizontalScroller = horizontallyOverflows
+        hostedScrollView.autohidesScrollers = false
+        hostedScrollView.hasVerticalScroller = false
+        hostedScrollView.requiresHorizontalScroller = false
         if widthChanged { flowLayout.invalidateLayout() }
     }
 
@@ -868,10 +871,15 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             clipView.scroll(to: NSPoint(x: targetX, y: visible.minY))
             hostedScrollView.reflectScrolledClipView(clipView)
         }
-        hostedCollectionView.scrollToItems(
-            at: [IndexPath(item: index, section: 0)],
-            scrollPosition: .centeredVertically
-        )
+        if attributes.frame.minY < visible.minY || attributes.frame.maxY > visible.maxY {
+            let maximumY = max(0, hostedCollectionView.bounds.maxY - visible.height)
+            let targetY = min(
+                max(0, attributes.frame.midY - visible.height / 2),
+                maximumY
+            )
+            clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: targetY))
+            hostedScrollView.reflectScrolledClipView(clipView)
+        }
     }
 
     private func synchronizeSelection() {

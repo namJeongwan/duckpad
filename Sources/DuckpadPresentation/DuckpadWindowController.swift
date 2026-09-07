@@ -224,6 +224,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let activeEditor: any EditorPort
     private let editorGroupRouter: (any EditorGroupRoutingPort)?
     private let searchPanel = SearchPanelView(frame: .zero)
+    let commandBar = WindowCommandBarView(frame: .zero)
     private let statusBar = WorkspaceBarView(edge: .top)
     private let persistenceBanner = PersistenceErrorBanner(frame: .zero)
     private let languageStatus = NSButton(title: "Plain Text", target: nil, action: nil)
@@ -540,6 +541,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         documentIntelligenceUseCase?.cancel()
         commandPalettePanel.dismiss()
         symbolOutlinePanel.dismiss()
+        commandBar.tearDown()
         extensionUseCase?.onStateChange = nil
         workspaceBrowserUseCase?.onStateChange = nil
         editorBinding = nil
@@ -986,7 +988,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         let strip = layout.focusedGroup == .secondary
             ? editorGroupWorkspace.secondaryPane?.tabStrip
             : tabStrip
-        (strip ?? tabStrip).documentSwitcher.showDocumentSwitcher()
+        (strip ?? tabStrip).showDocumentSwitcher()
     }
 
     @objc public func performCompareWithOpenDocument(_ sender: Any? = nil) {
@@ -1110,11 +1112,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         commandPalettePanel.present(
             menu: menu,
             excludingAction: #selector(performShowCommandPalette(_:)),
-            relativeTo: tabStrip.documentSwitcher
+            relativeTo: commandBar
         )
     }
 
     public func applicationMainMenuDidChange(_ menu: NSMenu) {
+        commandBar.apply(mainMenu: menu)
         commandPalettePanel.refreshIfPresented(
             menu: menu,
             excludingAction: #selector(performShowCommandPalette(_:))
@@ -2547,6 +2550,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         root.view = dropView
         root.view.addSubview(persistenceBanner)
         root.view.addSubview(searchPanel)
+        root.view.addSubview(commandBar)
         workspaceContentSplit.isVertical = true
         workspaceContentSplit.dividerStyle = .thin
         workspaceContentSplit.translatesAutoresizingMaskIntoConstraints = false
@@ -2594,9 +2598,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             searchPanel.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             searchPanel.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             searchPanel.topAnchor.constraint(equalTo: persistenceBanner.bottomAnchor),
+            commandBar.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            commandBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            commandBar.topAnchor.constraint(equalTo: searchPanel.bottomAnchor),
             workspaceContentSplit.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             workspaceContentSplit.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            workspaceContentSplit.topAnchor.constraint(equalTo: searchPanel.bottomAnchor),
+            workspaceContentSplit.topAnchor.constraint(equalTo: commandBar.bottomAnchor),
             workspaceContentSplit.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             statusBar.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             statusBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
@@ -2617,6 +2624,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             languageStatus.heightAnchor.constraint(equalToConstant: 20),
             extensionStatus.trailingAnchor.constraint(lessThanOrEqualTo: languageStatus.leadingAnchor, constant: -12),
         ])
+        if let mainMenu = NSApplication.shared.mainMenu {
+            commandBar.apply(mainMenu: mainMenu)
+        }
         window?.contentViewController = root
         return injectedPresenter ?? persistenceBanner
     }
