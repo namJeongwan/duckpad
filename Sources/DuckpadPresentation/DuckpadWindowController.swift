@@ -209,13 +209,20 @@ private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
 @MainActor
 public final class DuckpadWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
     private let workspace: ScratchWorkspaceUseCase
-    let tabStrip = MultilineTabStripView(frame: .zero)
+    let editorGroupWorkspace: EditorGroupWorkspaceView
+    private let editorGroupLayout = EditorGroupLayoutModel()
+    private var provisionalEditorGroupLayout: EditorGroupLayoutSnapshot?
+    var editorGroupLayoutSnapshot: EditorGroupLayoutSnapshot {
+        provisionalEditorGroupLayout ?? editorGroupLayout.snapshot
+    }
+    var tabStrip: MultilineTabStripView { editorGroupWorkspace.primaryPane.tabStrip }
     private let fallbackEditor: TextViewEditorAdapter?
     var editor: TextViewEditorAdapter {
         precondition(fallbackEditor != nil, "NSTextView adapter is not active in production composition")
         return fallbackEditor!
     }
     private let activeEditor: any EditorPort
+    private let editorGroupRouter: (any EditorGroupRoutingPort)?
     private let searchPanel = SearchPanelView(frame: .zero)
     private let statusBar = WorkspaceBarView(edge: .top)
     private let persistenceBanner = PersistenceErrorBanner(frame: .zero)
@@ -277,6 +284,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var pendingFileCommandTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingWorkspaceBrowserTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingWorkspaceFileOpenTasks: [UUID: Task<Void, Never>] = [:]
+    private var editorGroupActivationTask: Task<Void, Never>?
+    private var requestedEditorGroupSelection: (tabID: TabID, group: EditorGroupID)?
+    private var editorGroupTabIndices: [EditorGroupID: [TabID: Int]] = [:]
+    private(set) var editorGroupIncrementalLookupCount = 0
+    private(set) var editorGroupIndexRebuildCount = 0
     private var workspaceRestoreTask: Task<Void, Never>?
     private var workspaceNavigationRevisions: [WorkspaceRootID: UInt64] = [:]
     private var accessibilityDisplayObserver: WorkspaceNotificationObservation?
@@ -285,6 +297,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspace: ScratchWorkspaceUseCase,
         editorAdapter: (any EditorPort)? = nil,
         editorView: NSView? = nil,
+        secondaryEditorView: NSView? = nil,
+        editorGroupRouter: (any EditorGroupRoutingPort)? = nil,
         errorPresenter: (any PersistenceErrorPresenting)? = nil,
         fileUseCase: FileDocumentUseCase? = nil,
         filePanels: (any FilePanelPresenting)? = nil,
@@ -309,9 +323,28 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             (editorAdapter == nil) == (editorView == nil),
             "an injected editor port and view must be supplied together"
         )
+        precondition(
+            (secondaryEditorView == nil) == (editorGroupRouter == nil),
+            "editor-group routing and its secondary view must be supplied together"
+        )
+        precondition(
+            editorGroupRouter == nil || editorAdapter != nil,
+            "editor-group routing requires the injected editor adapter"
+        )
+        if let editorAdapter, let editorGroupRouter {
+            precondition(
+                editorAdapter === editorGroupRouter,
+                "editor-group routing must use the injected editor adapter"
+            )
+        }
         fallbackEditor = fallback
         activeEditor = editorAdapter ?? fallback!
+        self.editorGroupRouter = editorGroupRouter
         editorHostView = editorView ?? fallback!.scrollView
+        editorGroupWorkspace = EditorGroupWorkspaceView(
+            primaryEditorHost: editorView ?? fallback!.scrollView,
+            secondaryEditorHost: secondaryEditorView ?? NSView()
+        )
         self.fileUseCase = fileUseCase
         self.filePanels = filePanels
         self.fileConflictPresenter = fileConflictPresenter
@@ -358,10 +391,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 recoveryUseCase?.editorViewStateDidChange()
             }
         }
-        tabStrip.onActivate = { [weak self] id in self?.performActivate(id) }
-        tabStrip.onClose = { [weak self] id in self?.performClose(id) }
-        tabStrip.onMove = { [weak self] id, index in self?.performMove(id, to: index) }
-        tabStrip.onContextAction = { [weak self] id, action in self?.performContextAction(action, for: id) }
+        editorGroupWorkspace.onAction = { [weak self] action in self?.performEditorGroupAction(action) }
+        bindEditorGroupContextValidation()
+        editorGroupRouter?.onEditorGroupFocus = { [weak self] group in
+            self?.performEditorGroupFocus(group)
+        }
         searchPanel.onFind = { [weak self] query in self?.routeFind(query) }
         searchPanel.onReplace = { [weak self] query in self?.routeReplace(query) }
         searchPanel.onReplaceAll = { [weak self] query in self?.routeReplaceAll(query) }
@@ -436,6 +470,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         pendingFileCommandTasks.values.forEach { $0.cancel() }
         pendingWorkspaceBrowserTasks.values.forEach { $0.cancel() }
         pendingWorkspaceFileOpenTasks.values.forEach { $0.cancel() }
+        editorGroupActivationTask?.cancel()
     }
 
     public override func close() {
@@ -475,8 +510,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceRestoreTask?.cancel()
         workspaceRestoreTask = nil
         cancelWorkspaceBrowserTasks()
+        editorGroupActivationTask?.cancel()
+        editorGroupActivationTask = nil
         window?.delegate = nil
         workspace.onChange = nil
+        editorGroupRouter?.onEditorGroupFocus = nil
         activeEditor.onEdit = nil
         if let foldingEditor = activeEditor as? any FoldingEditorPort {
             foldingEditor.onFoldStateChange = nil
@@ -490,7 +528,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceBrowserUseCase?.onStateChange = nil
         editorBinding = nil
         errorPresenter = nil
-        tabStrip.tearDownHostedViews()
+        editorGroupWorkspace.tearDown()
         let closingWindow = window
         closingWindow?.contentViewController = nil
         closingWindow?.windowController = nil
@@ -506,7 +544,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         showWindow(nil)
         window?.center()
         window?.makeKeyAndOrderFront(nil)
-        editorBinding.render(workspace.snapshot(), requestFocus: true)
+        renderEditorGroups(workspace.snapshot(), requestFocus: true)
     }
 
     public func tabWorkspaceSmokeState() -> TabWorkspaceSmokeState {
@@ -557,7 +595,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         let statusFrame = statusBar.convert(statusBar.bounds, to: window?.contentView)
         let overlap = editorFrame.intersection(statusFrame)
         return WorkspaceChromeSmokeState(
-            documentCount: tabStrip.documentSwitcher.tabs.count,
+            documentCount: workspace.snapshot().tabs.count,
             bannerHeight: persistenceBanner.frame.height,
             tabStripHeight: tabStrip.frame.height,
             statusBarHeight: statusBar.frame.height,
@@ -728,12 +766,94 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     func performActivate(_ id: TabID) {
-        guard workspaceInteractionsAreActionable else { return }
-        Task { @MainActor [weak self] in
+        guard workspaceInteractionsAreActionable,
+              provisionalEditorGroupLayout == nil else { return }
+        let layout = editorGroupLayout.snapshot
+        let groups = EditorGroupID.allCases.filter { layout.tabIDs(in: $0).contains(id) }
+        let group = groups.contains(layout.focusedGroup) ? layout.focusedGroup : (groups.first ?? .primary)
+        performActivate(id, in: group)
+    }
+
+    private func performActivate(_ id: TabID, in group: EditorGroupID) {
+        guard workspaceInteractionsAreActionable,
+              editorGroupLayout.select(id, in: group) else { return }
+        renderLayoutAndActivate(tabID: id, group: group)
+    }
+
+    private func renderLayoutAndActivate(tabID: TabID, group: EditorGroupID) {
+        let snapshot = workspace.snapshot()
+        requestedEditorGroupSelection = (tabID, group)
+        applyEditorGroupOrientation()
+        editorGroupWorkspace.apply(workspace: snapshot, layout: editorGroupLayout.snapshot)
+        bindEditorGroupContextValidation()
+        if let buffer = snapshot.tabs.first(where: { $0.id == tabID })?.buffer {
+            editorGroupRouter?.display(buffer, in: group)
+        }
+        editorGroupRouter?.activateEditorGroup(group)
+        editorGroupActivationTask?.cancel()
+        if snapshot.tabs.first(where: \.isActive)?.id == tabID {
+            editorBinding.render(snapshot)
+            activeEditor.focus()
+            if requestedEditorGroupSelection?.tabID == tabID,
+               requestedEditorGroupSelection?.group == group {
+                requestedEditorGroupSelection = nil
+            }
+            return
+        }
+        editorGroupActivationTask = Task { @MainActor [weak self] in
             guard let self, self.workspaceInteractionsAreActionable else { return }
-            if case .applied = await self.workspace.activate(tabID: id) {
+            guard !Task.isCancelled else { return }
+            if case .applied = await self.workspace.activate(tabID: tabID) {
+                guard !Task.isCancelled else { return }
                 self.activeEditor.focus()
             }
+            if self.requestedEditorGroupSelection?.tabID == tabID,
+               self.requestedEditorGroupSelection?.group == group {
+                self.requestedEditorGroupSelection = nil
+            }
+        }
+    }
+
+    private func performEditorGroupFocus(_ group: EditorGroupID) {
+        guard workspaceInteractionsAreActionable,
+              provisionalEditorGroupLayout == nil,
+              editorGroupLayout.snapshot.orientation != nil,
+              let tabID = editorGroupLayout.snapshot.selectedTabID(in: group) else { return }
+        performActivate(tabID, in: group)
+    }
+
+    private func performEditorGroupAction(_ action: EditorGroupWorkspaceView.Action) {
+        guard workspaceInteractionsAreActionable,
+              provisionalEditorGroupLayout == nil else { return }
+        switch action {
+        case .select(let tabID, let group):
+            performActivate(tabID, in: group)
+        case .reorder(let tabID, let group, let index):
+            performGroupReorder(tabID: tabID, group: group, groupIndex: index)
+        case .split(let tabID, let source, let orientation, let operation):
+            performGroupTransfer(tabID: tabID, source: source, orientation: orientation, operation: operation)
+        case .move(let tabID, let source, let destination):
+            performGroupTransfer(
+                tabID: tabID,
+                source: source,
+                orientation: editorGroupLayout.snapshot.orientation,
+                operation: .move,
+                destination: destination
+            )
+        case .clone(let tabID, let source, let destination):
+            performGroupTransfer(
+                tabID: tabID,
+                source: source,
+                orientation: editorGroupLayout.snapshot.orientation,
+                operation: .copy,
+                destination: destination
+            )
+        case .focus(let group):
+            performEditorGroupFocus(group)
+        case .close(let tabID, let group):
+            performClose(tabID, in: group)
+        case .context(let tabID, let group, let contextAction):
+            performContextAction(contextAction, for: tabID, in: group)
         }
     }
 
@@ -741,6 +861,35 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     func performClose(_ id: TabID, decision: CloseDecision? = nil) -> Task<Void, Never> {
         guard workspaceInteractionsAreActionable else { return Task {} }
         return performClose(tabIDs: [id], decision: decision)
+    }
+
+    private func performClose(_ id: TabID, in group: EditorGroupID) {
+        guard workspaceInteractionsAreActionable,
+              provisionalEditorGroupLayout == nil,
+              editorGroupLayout.select(id, in: group) else { return }
+        editorGroupActivationTask?.cancel()
+        requestedEditorGroupSelection = (id, group)
+        let snapshot = workspace.snapshot()
+        editorGroupWorkspace.apply(workspace: snapshot, layout: editorGroupLayout.snapshot)
+        bindEditorGroupContextValidation()
+        if let buffer = snapshot.tabs.first(where: { $0.id == id })?.buffer {
+            editorGroupRouter?.display(buffer, in: group)
+        }
+        editorGroupRouter?.activateEditorGroup(group)
+        let token = UUID()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.pendingCloseTasks.removeValue(forKey: token)
+                if self.requestedEditorGroupSelection?.tabID == id,
+                   self.requestedEditorGroupSelection?.group == group {
+                    self.requestedEditorGroupSelection = nil
+                }
+            }
+            guard case .applied = await self.workspace.activate(tabID: id) else { return }
+            await self.requestClose(tabIDs: [id], retryingSaveTabID: nil)
+        }
+        pendingCloseTasks[token] = task
     }
 
     @discardableResult
@@ -817,7 +966,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performShowDocumentSwitcher(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable else { return }
-        tabStrip.documentSwitcher.showDocumentSwitcher()
+        let layout = editorGroupLayout.snapshot
+        let strip = layout.focusedGroup == .secondary
+            ? editorGroupWorkspace.secondaryPane?.tabStrip
+            : tabStrip
+        (strip ?? tabStrip).documentSwitcher.showDocumentSwitcher()
     }
 
     @objc public func performShowCommandPalette(_ sender: Any? = nil) {
@@ -1209,6 +1362,46 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         recoveryUseCase?.editorViewStateDidChange()
     }
 
+    @objc public func performMoveActiveTabToGroupRight(_ sender: Any? = nil) {
+        performActiveTabGroupTransfer(orientation: .sideBySide, operation: .move)
+    }
+
+    @objc public func performMoveActiveTabToGroupDown(_ sender: Any? = nil) {
+        performActiveTabGroupTransfer(orientation: .stacked, operation: .move)
+    }
+
+    @objc public func performCloneActiveTabToGroupRight(_ sender: Any? = nil) {
+        performActiveTabGroupTransfer(orientation: .sideBySide, operation: .copy)
+    }
+
+    @objc public func performCloneActiveTabToGroupDown(_ sender: Any? = nil) {
+        performActiveTabGroupTransfer(orientation: .stacked, operation: .copy)
+    }
+
+    @objc public func performFocusOtherEditorGroup(_ sender: Any? = nil) {
+        guard editorGroupLayout.snapshot.orientation != nil else { return }
+        performEditorGroupFocus(editorGroupLayout.snapshot.focusedGroup.other)
+    }
+
+    @objc public func performCloseEditorGroup(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable,
+              provisionalEditorGroupLayout == nil,
+              editorGroupRouter != nil,
+              editorGroupLayout.snapshot.orientation != nil else { return }
+        editorGroupActivationTask?.cancel()
+        requestedEditorGroupSelection = nil
+        editorGroupLayout.closeSecondaryGroup()
+        let snapshot = workspace.snapshot()
+        reconcileEditorGroups(snapshot)
+        rebuildEditorGroupIndexCache(editorGroupLayout.snapshot)
+        editorGroupWorkspace.apply(workspace: snapshot, layout: editorGroupLayout.snapshot)
+        bindEditorGroupContextValidation()
+        routeSelectedEditorGroups(snapshot)
+        editorBinding.render(snapshot)
+        activeEditor.focus()
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
     @objc public func performToggleBookmark(_ sender: Any? = nil) {
         guard let editor = actionableBookmarkEditor else { return }
         editor.toggleBookmarkAtCaret()
@@ -1363,6 +1556,19 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case #selector(performFocusOtherEditorPane(_:)),
              #selector(performCloseEditorSplit(_:)):
             return actionableSplitEditor?.splitOrientation != nil
+        case #selector(performMoveActiveTabToGroupRight(_:)):
+            return canPerformActiveTabGroupTransfer(orientation: .sideBySide, operation: .move)
+        case #selector(performMoveActiveTabToGroupDown(_:)):
+            return canPerformActiveTabGroupTransfer(orientation: .stacked, operation: .move)
+        case #selector(performCloneActiveTabToGroupRight(_:)):
+            return canPerformActiveTabGroupTransfer(orientation: .sideBySide, operation: .copy)
+        case #selector(performCloneActiveTabToGroupDown(_:)):
+            return canPerformActiveTabGroupTransfer(orientation: .stacked, operation: .copy)
+        case #selector(performFocusOtherEditorGroup(_:)),
+             #selector(performCloseEditorGroup(_:)):
+            return editorGroupRouter != nil && workspaceInteractionsAreActionable
+                && provisionalEditorGroupLayout == nil
+                && editorGroupLayout.snapshot.orientation != nil
         default:
             return true
         }
@@ -1379,7 +1585,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private var actionableSplitEditor: (any SplitEditorPort)? {
-        guard editorCommandsAreActionable else { return nil }
+        guard editorCommandsAreActionable,
+              editorGroupLayout.snapshot.orientation == nil else { return nil }
         return activeEditor as? any SplitEditorPort
     }
 
@@ -1897,6 +2104,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func routeSaveAll() async {
         guard let fileUseCase else { return }
         let originalTabID = workspace.snapshot().tabs.first(where: \.isActive)?.id
+        let originalGroup = editorGroupLayout.snapshot.focusedGroup
         let dirtyTabIDs = workspace.snapshot().tabs.filter(\.isDirty).map(\.id)
         for tabID in dirtyTabIDs {
             guard !Task.isCancelled, !hasTornDownWindow,
@@ -1921,9 +2129,25 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         if let originalTabID,
            !hasTornDownWindow,
-           workspace.snapshot().tabs.contains(where: { $0.id == originalTabID }),
-           workspace.snapshot().tabs.first(where: \.isActive)?.id != originalTabID {
-            _ = await workspace.activate(tabID: originalTabID)
+           workspace.snapshot().tabs.contains(where: { $0.id == originalTabID }) {
+            if editorGroupLayout.snapshot.tabIDs(in: originalGroup).contains(originalTabID) {
+                _ = editorGroupLayout.select(originalTabID, in: originalGroup)
+                requestedEditorGroupSelection = (originalTabID, originalGroup)
+                let snapshot = workspace.snapshot()
+                editorGroupWorkspace.apply(workspace: snapshot, layout: editorGroupLayout.snapshot)
+                bindEditorGroupContextValidation()
+                if let buffer = snapshot.tabs.first(where: { $0.id == originalTabID })?.buffer {
+                    editorGroupRouter?.display(buffer, in: originalGroup)
+                }
+                editorGroupRouter?.activateEditorGroup(originalGroup)
+            }
+            if workspace.snapshot().tabs.first(where: \.isActive)?.id != originalTabID {
+                _ = await workspace.activate(tabID: originalTabID)
+            }
+            if requestedEditorGroupSelection?.tabID == originalTabID,
+               requestedEditorGroupSelection?.group == originalGroup {
+                requestedEditorGroupSelection = nil
+            }
         }
     }
 
@@ -2187,12 +2411,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         root.view = dropView
         root.view.addSubview(persistenceBanner)
-        root.view.addSubview(tabStrip)
         root.view.addSubview(searchPanel)
         workspaceContentSplit.isVertical = true
         workspaceContentSplit.dividerStyle = .thin
         workspaceContentSplit.translatesAutoresizingMaskIntoConstraints = false
-        workspaceContentSplit.addArrangedSubview(editorHostView)
+        workspaceContentSplit.addArrangedSubview(editorGroupWorkspace)
         workspaceSidebar.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
         let preferredSidebarWidth = workspaceSidebar.widthAnchor.constraint(equalToConstant: 220)
         preferredSidebarWidth.priority = .defaultHigh
@@ -2233,12 +2456,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             persistenceBanner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             persistenceBanner.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             persistenceBanner.topAnchor.constraint(equalTo: root.view.topAnchor),
-            tabStrip.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
-            tabStrip.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            tabStrip.topAnchor.constraint(equalTo: persistenceBanner.bottomAnchor),
             searchPanel.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             searchPanel.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            searchPanel.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
+            searchPanel.topAnchor.constraint(equalTo: persistenceBanner.bottomAnchor),
             workspaceContentSplit.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             workspaceContentSplit.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             workspaceContentSplit.topAnchor.constraint(equalTo: searchPanel.bottomAnchor),
@@ -2267,11 +2487,194 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func renderInitial(_ snapshot: WorkspaceSnapshot) {
-        tabStrip.apply(tabs: snapshot.tabs)
+        renderEditorGroups(snapshot)
         updateWorkspaceInteractionAdmission(snapshot)
-        editorBinding.render(snapshot)
         updateWindowTitle(snapshot)
         renderFileFormatStatus()
+    }
+
+    private func renderEditorGroups(_ snapshot: WorkspaceSnapshot, requestFocus: Bool = false) {
+        reconcileEditorGroups(snapshot)
+        rebuildEditorGroupIndexCache(editorGroupLayout.snapshot)
+        editorGroupWorkspace.apply(workspace: snapshot, layout: editorGroupLayout.snapshot)
+        bindEditorGroupContextValidation()
+        routeSelectedEditorGroups(snapshot)
+        editorBinding.render(snapshot, requestFocus: requestFocus)
+    }
+
+    private func reconcileEditorGroups(_ snapshot: WorkspaceSnapshot) {
+        editorGroupLayout.reconcile(workspace: snapshot)
+        if let editorGroupRouter,
+           let activeTabID = snapshot.tabs.first(where: \.isActive)?.id {
+            let layout = editorGroupLayout.snapshot
+            let activeGroups = EditorGroupID.allCases.filter {
+                layout.tabIDs(in: $0).contains(activeTabID)
+            }
+            if activeGroups.count == 2 {
+                let preferredGroup = requestedEditorGroupSelection.flatMap {
+                    $0.tabID == activeTabID ? $0.group : nil
+                } ?? editorGroupRouter.activeEditorGroup
+                if activeGroups.contains(preferredGroup) {
+                    _ = editorGroupLayout.select(activeTabID, in: preferredGroup)
+                }
+            }
+        }
+        applyEditorGroupOrientation()
+    }
+
+    private func makeProvisionalEditorGroupLayout(
+        durable: EditorGroupLayoutSnapshot,
+        workspace: WorkspaceSnapshot
+    ) -> EditorGroupLayoutSnapshot {
+        let workspaceTabIDs = workspace.tabs.map(\.id)
+        let workspaceTabIDSet = Set(workspaceTabIDs)
+        func retained(_ tabIDs: [TabID]) -> [TabID] {
+            let retainedIDs = Set(tabIDs).intersection(workspaceTabIDSet)
+            return workspaceTabIDs.filter { retainedIDs.contains($0) }
+        }
+
+        var primary = retained(durable.primaryTabIDs)
+        var secondary = retained(durable.secondaryTabIDs)
+        var primarySelection = durable.primarySelectedTabID.flatMap {
+            primary.contains($0) ? $0 : nil
+        } ?? primary.first
+        var secondarySelection = durable.secondarySelectedTabID.flatMap {
+            secondary.contains($0) ? $0 : nil
+        } ?? secondary.first
+        var focusedGroup = durable.focusedGroup
+        var orientation = durable.orientation
+
+        if primary.isEmpty || secondary.isEmpty {
+            if primary.isEmpty {
+                primary = secondary
+                primarySelection = secondarySelection
+            }
+            secondary = []
+            secondarySelection = nil
+            focusedGroup = .primary
+            orientation = nil
+        }
+
+        if let activeTabID = workspace.tabs.first(where: \.isActive)?.id {
+            let inPrimary = primary.contains(activeTabID)
+            let inSecondary = secondary.contains(activeTabID)
+            switch (inPrimary, inSecondary) {
+            case (true, false):
+                primarySelection = activeTabID
+                focusedGroup = .primary
+            case (false, true):
+                secondarySelection = activeTabID
+                focusedGroup = .secondary
+            case (true, true):
+                if focusedGroup == .primary { primarySelection = activeTabID }
+                else { secondarySelection = activeTabID }
+            case (false, false):
+                primary.append(activeTabID)
+                primarySelection = activeTabID
+                focusedGroup = .primary
+            }
+        }
+
+        return EditorGroupLayoutSnapshot(
+            primaryTabIDs: primary,
+            secondaryTabIDs: secondary,
+            primarySelectedTabID: primarySelection,
+            secondarySelectedTabID: secondarySelection,
+            focusedGroup: focusedGroup,
+            orientation: orientation
+        )
+    }
+
+    private func applyEditorGroupOrientation(
+        _ layout: EditorGroupLayoutSnapshot? = nil
+    ) {
+        let orientation = (layout ?? editorGroupLayout.snapshot).orientation
+        guard let editorGroupRouter,
+              editorGroupRouter.editorGroupOrientation != orientation else { return }
+        editorGroupRouter.setEditorGroupOrientation(orientation)
+    }
+
+    private func applyEditorGroupWorkspace(
+        snapshot: WorkspaceSnapshot,
+        change: WorkspaceChange,
+        previousLayout: EditorGroupLayoutSnapshot,
+        currentLayout: EditorGroupLayoutSnapshot
+    ) {
+        if previousLayout.orientation == nil, currentLayout.orientation == nil {
+            tabStrip.apply(change: change)
+        } else if previousLayout.orientation != nil,
+                  currentLayout.orientation != nil,
+                  applyIncrementalEditorGroupChange(change, layout: currentLayout) {
+            return
+        } else {
+            editorGroupWorkspace.apply(workspace: snapshot, layout: currentLayout)
+            bindEditorGroupContextValidation()
+        }
+    }
+
+    private func applyIncrementalEditorGroupChange(
+        _ change: WorkspaceChange,
+        layout: EditorGroupLayoutSnapshot
+    ) -> Bool {
+        switch change.kind {
+        case .persistence:
+            return true
+        case .tabUpdated(let workspaceIndex), .bufferEdited(let workspaceIndex):
+            guard change.snapshot.tabs.indices.contains(workspaceIndex) else { return false }
+            let changedTab = change.snapshot.tabs[workspaceIndex]
+            for group in EditorGroupID.allCases {
+                editorGroupIncrementalLookupCount += 1
+                guard let groupIndex = editorGroupTabIndices[group]?[changedTab.id],
+                      let strip = tabStrip(for: group) else { continue }
+                let groupTab = TabSnapshot(
+                    id: changedTab.id,
+                    title: changedTab.title,
+                    isActive: changedTab.id == layout.selectedTabID(in: group),
+                    isDirty: changedTab.isDirty,
+                    isPinned: changedTab.isPinned,
+                    buffer: changedTab.buffer,
+                    fullPath: changedTab.fullPath
+                )
+                guard strip.apply(tab: groupTab, at: groupIndex) else { return false }
+            }
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func tabStrip(for group: EditorGroupID) -> MultilineTabStripView? {
+        switch group {
+        case .primary: tabStrip
+        case .secondary: editorGroupWorkspace.secondaryPane?.tabStrip
+        }
+    }
+
+    private func rebuildEditorGroupIndexCache(_ layout: EditorGroupLayoutSnapshot) {
+        editorGroupTabIndices = Dictionary(uniqueKeysWithValues: EditorGroupID.allCases.map { group in
+            (group, Dictionary(uniqueKeysWithValues: layout.tabIDs(in: group).enumerated().map {
+                ($0.element, $0.offset)
+            }))
+        })
+        editorGroupIndexRebuildCount += 1
+    }
+
+    private func routeSelectedEditorGroups(
+        _ snapshot: WorkspaceSnapshot,
+        layout: EditorGroupLayoutSnapshot? = nil
+    ) {
+        guard let editorGroupRouter else { return }
+        let layout = layout ?? editorGroupLayout.snapshot
+        let tabsByID = Dictionary(uniqueKeysWithValues: snapshot.tabs.map { ($0.id, $0) })
+        let visibleGroups: [EditorGroupID] = layout.orientation == nil
+            ? [.primary]
+            : EditorGroupID.allCases
+        for group in visibleGroups {
+            guard let selected = layout.selectedTabID(in: group),
+                  let buffer = tabsByID[selected]?.buffer else { continue }
+            editorGroupRouter.display(buffer, in: group)
+        }
+        editorGroupRouter.activateEditorGroup(layout.focusedGroup)
     }
 
     private func renderWorkspaceBrowser(_ state: WorkspaceBrowserState) {
@@ -2337,13 +2740,48 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             setStatus(symbolStatus, text: "Symbols", warning: false)
             symbolStatus.setAccessibilityValue("Current document symbols")
         }
-        tabStrip.apply(change: change)
+        let previousLayout = editorGroupLayoutSnapshot
+        let currentLayout: EditorGroupLayoutSnapshot
+        if case .tabRemovalPending = change.kind {
+            let provisional = makeProvisionalEditorGroupLayout(
+                durable: editorGroupLayout.snapshot,
+                workspace: change.snapshot
+            )
+            provisionalEditorGroupLayout = provisional
+            currentLayout = provisional
+            applyEditorGroupOrientation(provisional)
+        } else if provisionalEditorGroupLayout != nil,
+                  !editorGroupRemovalDidFinish(change.kind) {
+            let provisional = makeProvisionalEditorGroupLayout(
+                durable: editorGroupLayout.snapshot,
+                workspace: change.snapshot
+            )
+            provisionalEditorGroupLayout = provisional
+            currentLayout = provisional
+            applyEditorGroupOrientation(provisional)
+        } else {
+            provisionalEditorGroupLayout = nil
+            reconcileEditorGroups(change.snapshot)
+            currentLayout = editorGroupLayout.snapshot
+        }
+        if editorGroupMembershipMayHaveChanged(change.kind) {
+            rebuildEditorGroupIndexCache(currentLayout)
+        }
+        applyEditorGroupWorkspace(
+            snapshot: change.snapshot,
+            change: change,
+            previousLayout: previousLayout,
+            currentLayout: currentLayout
+        )
         updateWorkspaceInteractionAdmission(change.snapshot)
         let firstLanguageValidation = change.snapshot.startup == .ready && !languageValidated
         var registryReady = true
         if firstLanguageValidation {
             languageValidated = true
             registryReady = languageUseCase?.validateRegistry() ?? false
+        }
+        if shouldRouteSelectedEditorGroups(for: change.kind) {
+            routeSelectedEditorGroups(change.snapshot, layout: currentLayout)
         }
         editorBinding.render(change)
         if terminationReviewInProgress {
@@ -2374,7 +2812,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func updateWorkspaceInteractionAdmission(_ snapshot: WorkspaceSnapshot) {
         let enabled = snapshot.startup == .ready && !terminationReviewInProgress
-        tabStrip.setInteractionsEnabled(enabled)
+        let tabInteractionsEnabled = enabled && provisionalEditorGroupLayout == nil
+        tabStrip.setInteractionsEnabled(tabInteractionsEnabled)
+        editorGroupWorkspace.secondaryPane?.tabStrip.setInteractionsEnabled(tabInteractionsEnabled)
         workspaceSidebar.setInteractionsEnabled(enabled && workspaceBrowserUseCase?.acceptsCommands == true)
         languageStatus.isEnabled = enabled
         symbolStatus.isEnabled = enabled && documentIntelligenceUseCase != nil
@@ -2389,6 +2829,34 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case .tabUpdated(let index):
             return change.snapshot.tabs.indices.contains(index) && change.snapshot.tabs[index].isActive
         case .bufferEdited, .persistence, .tabsReordered:
+            return false
+        }
+    }
+
+    private func shouldRouteSelectedEditorGroups(for kind: WorkspaceChangeKind) -> Bool {
+        switch kind {
+        case .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabRemoved:
+            return true
+        case .tabUpdated, .bufferEdited, .persistence, .tabsReordered:
+            return false
+        }
+    }
+
+    private func editorGroupMembershipMayHaveChanged(_ kind: WorkspaceChangeKind) -> Bool {
+        switch kind {
+        case .reset, .tabInserted, .tabRemovalPending, .tabRemoved, .tabsReordered:
+            return true
+        case .activeTabChanged, .tabUpdated, .bufferEdited, .persistence:
+            return false
+        }
+    }
+
+    private func editorGroupRemovalDidFinish(_ kind: WorkspaceChangeKind) -> Bool {
+        switch kind {
+        case .reset, .tabRemoved:
+            return true
+        case .tabInserted, .activeTabChanged, .tabUpdated, .bufferEdited,
+             .tabRemovalPending, .tabsReordered, .persistence:
             return false
         }
     }
@@ -2485,11 +2953,188 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    private func performContextAction(_ action: TabContextAction, for tabID: TabID) {
+    private func performGroupReorder(tabID: TabID, group: EditorGroupID, groupIndex: Int) {
+        let snapshot = workspace.snapshot()
+        var reorderedGroup = editorGroupLayout.snapshot.tabIDs(in: group)
+        guard let source = reorderedGroup.firstIndex(of: tabID),
+              reorderedGroup.indices.contains(groupIndex) else { return }
+        reorderedGroup.remove(at: source)
+        reorderedGroup.insert(tabID, at: groupIndex)
+        var replacement = reorderedGroup.makeIterator()
+        let groupSet = Set(reorderedGroup)
+        let desiredOrder = snapshot.tabs.map(\.id).map { id in
+            groupSet.contains(id) ? (replacement.next() ?? id) : id
+        }
+        guard let destination = desiredOrder.firstIndex(of: tabID) else { return }
+        performMove(tabID, to: destination)
+    }
+
+    private func performActiveTabGroupTransfer(
+        orientation: EditorGroupSplitOrientation,
+        operation: EditorGroupDropOperation
+    ) {
+        let layout = editorGroupLayout.snapshot
+        guard let tabID = layout.selectedTabID(in: layout.focusedGroup) else { return }
+        performGroupTransfer(
+            tabID: tabID,
+            source: layout.focusedGroup,
+            orientation: orientation,
+            operation: operation
+        )
+    }
+
+    private func performGroupTransfer(
+        tabID: TabID,
+        source: EditorGroupID,
+        orientation: EditorGroupSplitOrientation?,
+        operation: EditorGroupDropOperation,
+        destination: EditorGroupID? = nil
+    ) {
+        let destination = destination ?? source.other
+        guard let orientation,
+              canPerformGroupTransfer(
+                  tabID: tabID,
+                  source: source,
+                  destination: destination,
+                  orientation: orientation,
+                  operation: operation
+              ),
+              let buffer = workspace.snapshot().tabs.first(where: { $0.id == tabID })?.buffer else { return }
+        let changed: Bool
+        if editorGroupLayout.snapshot.orientation == nil {
+            changed = editorGroupLayout.split(
+                tabID: tabID,
+                source: source,
+                orientation: orientation,
+                operation: operation
+            )
+        } else {
+            switch operation {
+            case .move:
+                changed = editorGroupLayout.move(tabID, from: source, to: destination)
+            case .copy:
+                changed = editorGroupLayout.split(
+                    tabID: tabID,
+                    source: source,
+                    orientation: editorGroupLayout.snapshot.orientation ?? orientation,
+                    operation: .copy
+                )
+            }
+        }
+        guard changed else { return }
+        applyEditorGroupOrientation()
+        rebuildEditorGroupIndexCache(editorGroupLayout.snapshot)
+        editorGroupRouter?.assign(
+            buffer,
+            from: source,
+            to: destination,
+            cloning: operation == .copy
+        )
+        renderLayoutAndActivate(tabID: tabID, group: destination)
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
+    private func canPerformActiveTabGroupTransfer(
+        orientation: EditorGroupSplitOrientation,
+        operation: EditorGroupDropOperation
+    ) -> Bool {
+        let layout = editorGroupLayout.snapshot
+        if layout.orientation != nil, layout.focusedGroup != .primary { return false }
+        guard let tabID = layout.selectedTabID(in: layout.focusedGroup) else { return false }
+        return canPerformGroupTransfer(
+            tabID: tabID,
+            source: layout.focusedGroup,
+            destination: layout.focusedGroup.other,
+            orientation: orientation,
+            operation: operation
+        )
+    }
+
+    private func canPerformGroupTransfer(
+        tabID: TabID,
+        source: EditorGroupID,
+        destination: EditorGroupID,
+        orientation: EditorGroupSplitOrientation,
+        operation: EditorGroupDropOperation
+    ) -> Bool {
+        guard editorGroupRouter != nil,
+              workspaceInteractionsAreActionable,
+              provisionalEditorGroupLayout == nil else { return false }
+        let layout = editorGroupLayout.snapshot
+        guard layout.orientation == nil || layout.orientation == orientation,
+              source != destination,
+              layout.tabIDs(in: source).contains(tabID) else { return false }
+        let destinationContainsTab = layout.tabIDs(in: destination).contains(tabID)
+        switch operation {
+        case .copy:
+            return !destinationContainsTab
+        case .move:
+            return layout.tabIDs(in: source).count > 1 || destinationContainsTab
+        }
+    }
+
+    private func bindEditorGroupContextValidation() {
+        bindEditorGroupContextValidation(tabStrip, group: .primary)
+        if let secondary = editorGroupWorkspace.secondaryPane?.tabStrip {
+            bindEditorGroupContextValidation(secondary, group: .secondary)
+        }
+    }
+
+    private func bindEditorGroupContextValidation(
+        _ strip: MultilineTabStripView,
+        group: EditorGroupID
+    ) {
+        strip.onValidateContextAction = { [weak self] tabID, action in
+            self?.validateContextAction(action, tabID: tabID, group: group) ?? false
+        }
+    }
+
+    private func validateContextAction(
+        _ action: TabContextAction,
+        tabID: TabID,
+        group: EditorGroupID
+    ) -> Bool {
+        switch action {
+        case .moveToEditorGroup(let orientation):
+            if editorGroupLayout.snapshot.orientation != nil, group != .primary { return false }
+            return canPerformGroupTransfer(
+                tabID: tabID,
+                source: group,
+                destination: group.other,
+                orientation: orientation,
+                operation: .move
+            )
+        case .cloneToEditorGroup(let orientation):
+            if editorGroupLayout.snapshot.orientation != nil, group != .primary { return false }
+            return canPerformGroupTransfer(
+                tabID: tabID,
+                source: group,
+                destination: group.other,
+                orientation: orientation,
+                operation: .copy
+            )
+        case .focusOtherEditorGroup, .closeEditorGroup:
+            return editorGroupRouter != nil
+                && provisionalEditorGroupLayout == nil
+                && editorGroupLayout.snapshot.orientation != nil
+        case .close, .setPinned, .copyFullPath, .openContainingFolder:
+            return workspaceInteractionsAreActionable
+        }
+    }
+
+    private func performContextAction(
+        _ action: TabContextAction,
+        for tabID: TabID,
+        in group: EditorGroupID
+    ) {
         guard workspaceInteractionsAreActionable else { return }
         switch action {
         case .close(let scope):
-            performClose(scope: scope, relativeTo: tabID)
+            if scope == .current { performClose(tabID, in: group) }
+            else {
+                performActivate(tabID, in: group)
+                performClose(scope: scope, relativeTo: tabID)
+            }
         case .setPinned(let pinned):
             Task { @MainActor [weak self] in
                 guard let self, self.workspaceInteractionsAreActionable else { return }
@@ -2501,6 +3146,24 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case .openContainingFolder:
             guard let path = workspace.snapshot().tabs.first(where: { $0.id == tabID })?.fullPath else { return }
             pathActionHandler.openContainingFolder(for: path)
+        case .moveToEditorGroup(let orientation):
+            performGroupTransfer(
+                tabID: tabID,
+                source: group,
+                orientation: orientation,
+                operation: .move
+            )
+        case .cloneToEditorGroup(let orientation):
+            performGroupTransfer(
+                tabID: tabID,
+                source: group,
+                orientation: orientation,
+                operation: .copy
+            )
+        case .focusOtherEditorGroup:
+            performEditorGroupFocus(group.other)
+        case .closeEditorGroup:
+            performCloseEditorGroup(nil)
         }
     }
 

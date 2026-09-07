@@ -7,6 +7,10 @@ public enum TabContextAction: Equatable, Sendable {
     case setPinned(Bool)
     case copyFullPath
     case openContainingFolder
+    case moveToEditorGroup(EditorGroupSplitOrientation)
+    case cloneToEditorGroup(EditorGroupSplitOrientation)
+    case focusOtherEditorGroup
+    case closeEditorGroup
 }
 
 @MainActor
@@ -80,6 +84,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     var onActivate: (() -> Void)?
     var onClose: (() -> Void)?
     var onContextAction: ((TabContextAction) -> Void)?
+    var validateContextAction: ((TabContextAction) -> Bool)?
     var onHoverChanged: ((TabID, Bool) -> Void)?
     private var configuredTab: TabSnapshot?
     private var configuredIndex: Int?
@@ -248,6 +253,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         onActivate = nil
         onClose = nil
         onContextAction = nil
+        validateContextAction = nil
         onHoverChanged = nil
         updateVisualState()
         updateCloseVisibility()
@@ -266,6 +272,13 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         add("Close Unpinned", action: #selector(closeUnpinned), to: menu)
         menu.addItem(.separator())
         add(tab.isPinned ? "Unpin Tab" : "Pin Tab", action: #selector(togglePinned), to: menu)
+        menu.addItem(.separator())
+        add("Move to Group Right", action: #selector(moveToGroupRight), to: menu, contextAction: .moveToEditorGroup(.sideBySide))
+        add("Move to Group Down", action: #selector(moveToGroupDown), to: menu, contextAction: .moveToEditorGroup(.stacked))
+        add("Clone to Group Right", action: #selector(cloneToGroupRight), to: menu, contextAction: .cloneToEditorGroup(.sideBySide))
+        add("Clone to Group Down", action: #selector(cloneToGroupDown), to: menu, contextAction: .cloneToEditorGroup(.stacked))
+        add("Focus Other Group", action: #selector(focusOtherEditorGroup), to: menu, contextAction: .focusOtherEditorGroup)
+        add("Close Editor Group", action: #selector(closeEditorGroup), to: menu, contextAction: .closeEditorGroup)
         if tab.fullPath != nil {
             menu.addItem(.separator())
             add("Copy Full Path", action: #selector(copyFullPath), to: menu)
@@ -277,8 +290,18 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     func contextMenu() -> NSMenu? { makeContextMenu() }
 
     private func add(_ title: String, action: Selector, to menu: NSMenu) {
+        add(title, action: action, to: menu, contextAction: nil)
+    }
+
+    private func add(
+        _ title: String,
+        action: Selector,
+        to menu: NSMenu,
+        contextAction: TabContextAction?
+    ) {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
+        if let contextAction { item.isEnabled = validateContextAction?(contextAction) ?? false }
         menu.addItem(item)
     }
 
@@ -295,6 +318,12 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     }
     @objc private func copyFullPath() { onContextAction?(.copyFullPath) }
     @objc private func openContainingFolder() { onContextAction?(.openContainingFolder) }
+    @objc private func moveToGroupRight() { onContextAction?(.moveToEditorGroup(.sideBySide)) }
+    @objc private func moveToGroupDown() { onContextAction?(.moveToEditorGroup(.stacked)) }
+    @objc private func cloneToGroupRight() { onContextAction?(.cloneToEditorGroup(.sideBySide)) }
+    @objc private func cloneToGroupDown() { onContextAction?(.cloneToEditorGroup(.stacked)) }
+    @objc private func focusOtherEditorGroup() { onContextAction?(.focusOtherEditorGroup) }
+    @objc private func closeEditorGroup() { onContextAction?(.closeEditorGroup) }
 }
 
 @MainActor
@@ -337,11 +366,13 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     public struct UpdateMetrics: Equatable {
         public fileprivate(set) var fullReloads = 0
         public fileprivate(set) var itemReloads = 0
+        public fileprivate(set) var directItemInspections = 0
     }
     public var onActivate: ((TabID) -> Void)?
     public var onClose: ((TabID) -> Void)?
     public var onMove: ((TabID, Int) -> Void)?
     public var onContextAction: ((TabID, TabContextAction) -> Void)?
+    public var onValidateContextAction: ((TabID, TabContextAction) -> Bool)?
     public var onValidateGroupDrop: ((EditorGroupDragPayload, Int, EditorGroupDropOperation) -> Bool)?
     public var onGroupDrop: ((EditorGroupDragPayload, Int, EditorGroupDropOperation) -> Bool)?
     public var viewportPolicy = TabStripViewportPolicy() {
@@ -551,6 +582,24 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         }
     }
 
+    @discardableResult
+    public func apply(tab: TabSnapshot, at index: Int) -> Bool {
+        guard tabs.indices.contains(index),
+              tabs[index].id == tab.id,
+              tabs[index].isActive == tab.isActive,
+              documentSwitcher.apply(tab: tab, at: index) else { return false }
+        let previous = tabs[index]
+        tabs[index] = tab
+        if previous.title != tab.title || previous.isPinned != tab.isPinned {
+            flowLayout.updateItemWidth(tabWidth(tab), at: index)
+        }
+        hostedCollectionView.reloadItems(at: [IndexPath(item: index, section: 0)])
+        updateMetrics.itemReloads += 1
+        updateMetrics.directItemInspections += 1
+        refreshVisibleItems()
+        return true
+    }
+
     public func setInteractionsEnabled(_ isEnabled: Bool) {
         interactionsEnabled = isEnabled
         hostedCollectionView.isSelectable = isEnabled
@@ -574,6 +623,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         onClose = nil
         onMove = nil
         onContextAction = nil
+        onValidateContextAction = nil
         onValidateGroupDrop = nil
         onGroupDrop = nil
         documentSwitcher.onActivate = nil
@@ -635,6 +685,9 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         tabItem.onContextAction = { [weak self] action in
             guard self?.interactionsEnabled == true else { return }
             self?.onContextAction?(tab.id, action)
+        }
+        tabItem.validateContextAction = { [weak self] action in
+            self?.onValidateContextAction?(tab.id, action) ?? false
         }
         tabItem.onHoverChanged = { [weak self] tabID, isHovered in
             self?.updateHoveredTab(isHovered, tabID: tabID)

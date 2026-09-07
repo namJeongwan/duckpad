@@ -206,6 +206,63 @@ public enum DuckpadMainMenuFactory {
         add("Zoom Out", #selector(DuckpadWindowController.performZoomOut(_:)), "-", target, to: viewMenu)
         add("Actual Size", #selector(DuckpadWindowController.performResetZoom(_:)), "0", target, to: viewMenu)
         viewMenu.addItem(.separator())
+        let rightArrow = String(UnicodeScalar(NSRightArrowFunctionKey)!)
+        let downArrow = String(UnicodeScalar(NSDownArrowFunctionKey)!)
+        add(
+            "Move Active Tab to Group Right",
+            #selector(DuckpadWindowController.performMoveActiveTabToGroupRight(_:)),
+            rightArrow,
+            target,
+            modifiers: [.command, .control],
+            accessibilityLabel: "Move active tab to editor group on the right",
+            to: viewMenu
+        )
+        add(
+            "Move Active Tab to Group Down",
+            #selector(DuckpadWindowController.performMoveActiveTabToGroupDown(_:)),
+            downArrow,
+            target,
+            modifiers: [.command, .control],
+            accessibilityLabel: "Move active tab to editor group below",
+            to: viewMenu
+        )
+        add(
+            "Clone Active Tab to Group Right",
+            #selector(DuckpadWindowController.performCloneActiveTabToGroupRight(_:)),
+            rightArrow,
+            target,
+            modifiers: [.command, .control, .option],
+            accessibilityLabel: "Clone active tab to editor group on the right",
+            to: viewMenu
+        )
+        add(
+            "Clone Active Tab to Group Down",
+            #selector(DuckpadWindowController.performCloneActiveTabToGroupDown(_:)),
+            downArrow,
+            target,
+            modifiers: [.command, .control, .option],
+            accessibilityLabel: "Clone active tab to editor group below",
+            to: viewMenu
+        )
+        add(
+            "Focus Other Editor Group",
+            #selector(DuckpadWindowController.performFocusOtherEditorGroup(_:)),
+            "`",
+            target,
+            modifiers: [.command, .control],
+            accessibilityLabel: "Focus the other editor group",
+            to: viewMenu
+        )
+        add(
+            "Close Editor Group",
+            #selector(DuckpadWindowController.performCloseEditorGroup(_:)),
+            "w",
+            target,
+            modifiers: [.command, .option, .shift],
+            accessibilityLabel: "Close the secondary editor group",
+            to: viewMenu
+        )
+        viewMenu.addItem(.separator())
         add("Split Editor Right", #selector(DuckpadWindowController.performSplitEditorRight(_:)), "\\", target, to: viewMenu)
         add("Split Editor Down", #selector(DuckpadWindowController.performSplitEditorDown(_:)), "\\", target, modifiers: [.command, .option], to: viewMenu)
         add("Focus Other Editor Pane", #selector(DuckpadWindowController.performFocusOtherEditorPane(_:)), "\\", target, modifiers: [.command, .control], to: viewMenu)

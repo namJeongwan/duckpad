@@ -587,6 +587,190 @@ struct AppKitHostedTests {
     #expect(!strip.documentSwitcher.documentPanel.isPresented)
 }
 
+@Test @MainActor func openDocumentSwitcherUpdatesOneFilteredTabWithoutFullScanOrReload() throws {
+    let tabs = makeTabs(count: 500, activeIndex: 499)
+    let (window, _, strip) = hostStrip(width: 560, height: 360, tabs: tabs)
+    defer {
+        strip.documentSwitcher.documentPanel.dismiss()
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+    strip.setInteractionsEnabled(true)
+    strip.documentSwitcher.showDocumentSwitcher()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    let panel = strip.documentSwitcher.documentPanel
+    #expect(panel.isPresented)
+    panel.setQuery("one-item-match")
+    #expect(panel.filteredTabs.isEmpty)
+    let before = panel.updateMetrics
+    let original = tabs[499]
+    let matching = TabSnapshot(
+        id: original.id,
+        title: "one-item-match",
+        isActive: true,
+        isDirty: true,
+        isPinned: original.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: original.buffer.bufferID, revision: 1),
+        fullPath: original.fullPath
+    )
+
+    #expect(strip.apply(tab: matching, at: 499))
+
+    #expect(panel.filteredTabs.map(\.id) == [matching.id])
+    #expect(panel.selectedTabID == matching.id)
+    #expect(panel.updateMetrics.fullScans == before.fullScans)
+    #expect(panel.updateMetrics.fullReloads == before.fullReloads)
+    #expect(panel.updateMetrics.directItemInspections == before.directItemInspections + 1)
+    #expect(panel.updateMetrics.rowInsertions == before.rowInsertions + 1)
+
+    let hiddenAgain = TabSnapshot(
+        id: matching.id,
+        title: original.title,
+        isActive: true,
+        isDirty: false,
+        isPinned: original.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: original.buffer.bufferID, revision: 2),
+        fullPath: original.fullPath
+    )
+    #expect(strip.apply(tab: hiddenAgain, at: 499))
+    #expect(panel.filteredTabs.isEmpty)
+    #expect(panel.updateMetrics.fullScans == before.fullScans)
+    #expect(panel.updateMetrics.fullReloads == before.fullReloads)
+    #expect(panel.updateMetrics.directItemInspections == before.directItemInspections + 2)
+    #expect(panel.updateMetrics.rowRemovals == before.rowRemovals + 1)
+}
+
+@Test @MainActor func openDocumentSwitcherReloadsSameTierTabWithoutStructuralWork() throws {
+    let tabs = makeTabs(count: 500, activeIndex: 499)
+    let (window, _, strip) = hostStrip(width: 560, height: 360, tabs: tabs)
+    defer {
+        strip.documentSwitcher.documentPanel.dismiss()
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+    strip.setInteractionsEnabled(true)
+    strip.documentSwitcher.showDocumentSwitcher()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    let panel = strip.documentSwitcher.documentPanel
+    #expect(panel.isPresented)
+    panel.setQuery("new")
+    #expect(panel.filteredTabs.count == 500)
+    panel.selectResult(at: 499)
+    #expect(panel.selectedTabID == tabs[499].id)
+    let before = panel.updateMetrics
+    let original = tabs[0]
+    let updated = TabSnapshot(
+        id: original.id,
+        title: original.title,
+        isActive: false,
+        isDirty: true,
+        isPinned: original.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: original.buffer.bufferID, revision: 1),
+        fullPath: original.fullPath
+    )
+
+    #expect(strip.apply(tab: updated, at: 0))
+
+    #expect(panel.filteredTabs[0].id == updated.id)
+    #expect(panel.filteredTabs[0].isDirty)
+    #expect(panel.filteredTabs[0].buffer.revision == 1)
+    let firstRow = try #require(
+        panel.tableView(NSTableView(), viewFor: nil, row: 0) as? NSTableCellView
+    )
+    #expect(firstRow.textField?.stringValue == "new 1  •")
+    #expect(panel.selectedTabID == tabs[499].id)
+    #expect(panel.updateMetrics.fullScans == before.fullScans)
+    #expect(panel.updateMetrics.fullReloads == before.fullReloads)
+    #expect(panel.updateMetrics.directItemInspections == before.directItemInspections + 1)
+    #expect(panel.updateMetrics.rowUpdates == before.rowUpdates + 1)
+    #expect(panel.updateMetrics.rowInsertions == before.rowInsertions)
+    #expect(panel.updateMetrics.rowRemovals == before.rowRemovals)
+    #expect(panel.updateMetrics.filteredReorders == before.filteredReorders)
+    #expect(panel.updateMetrics.rankSearches == before.rankSearches)
+}
+
+@Test @MainActor func documentSwitcherRepairsRowCacheAfterEveryStructuralUpdate() {
+    let tabs = makeTabs(count: 500, activeIndex: 499)
+    let (window, _, strip) = hostStrip(width: 560, height: 360, tabs: tabs)
+    defer {
+        strip.documentSwitcher.documentPanel.dismiss()
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+    strip.setInteractionsEnabled(true)
+    strip.documentSwitcher.showDocumentSwitcher()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    let panel = strip.documentSwitcher.documentPanel
+    panel.setQuery("new")
+    panel.selectResult(at: 499)
+    let target = tabs[100]
+
+    let reordered = TabSnapshot(
+        id: target.id, title: "new", isActive: false, isDirty: false,
+        isPinned: target.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: target.buffer.bufferID, revision: 1),
+        fullPath: target.fullPath
+    )
+    #expect(strip.apply(tab: reordered, at: 100))
+    #expect(panel.filteredTabs.first?.id == target.id)
+    var before = panel.updateMetrics
+    let reorderedEdit = TabSnapshot(
+        id: target.id, title: "new", isActive: false, isDirty: true,
+        isPinned: target.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: target.buffer.bufferID, revision: 2),
+        fullPath: target.fullPath
+    )
+    #expect(strip.apply(tab: reorderedEdit, at: 100))
+    #expect(panel.updateMetrics.rankSearches == before.rankSearches)
+    #expect(panel.updateMetrics.filteredReorders == before.filteredReorders)
+
+    let removed = TabSnapshot(
+        id: target.id, title: "hidden", isActive: false, isDirty: false,
+        isPinned: target.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: target.buffer.bufferID, revision: 3),
+        fullPath: target.fullPath
+    )
+    #expect(strip.apply(tab: removed, at: 100))
+    #expect(!panel.filteredTabs.contains(where: { $0.id == target.id }))
+    before = panel.updateMetrics
+    let stable = tabs[0]
+    let stableEdit = TabSnapshot(
+        id: stable.id, title: stable.title, isActive: false, isDirty: true,
+        isPinned: stable.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: stable.buffer.bufferID, revision: 1),
+        fullPath: stable.fullPath
+    )
+    #expect(strip.apply(tab: stableEdit, at: 0))
+    #expect(panel.updateMetrics.rankSearches == before.rankSearches)
+    #expect(panel.updateMetrics.filteredReorders == before.filteredReorders)
+
+    let inserted = TabSnapshot(
+        id: target.id, title: target.title, isActive: false, isDirty: false,
+        isPinned: target.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: target.buffer.bufferID, revision: 4),
+        fullPath: target.fullPath
+    )
+    #expect(strip.apply(tab: inserted, at: 100))
+    #expect(panel.filteredTabs.contains(where: { $0.id == target.id }))
+    before = panel.updateMetrics
+    let insertedEdit = TabSnapshot(
+        id: target.id, title: target.title, isActive: false, isDirty: true,
+        isPinned: target.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: target.buffer.bufferID, revision: 5),
+        fullPath: target.fullPath
+    )
+    #expect(strip.apply(tab: insertedEdit, at: 100))
+    #expect(panel.updateMetrics.rankSearches == before.rankSearches)
+    #expect(panel.updateMetrics.filteredReorders == before.filteredReorders)
+    #expect(panel.selectedTabID == tabs[499].id)
+}
+
 @Test @MainActor func documentSwitcherPopoverClosesWithItsHostWindow() {
     let tabs = makeTabs(count: 3, activeIndex: 0)
     let (window, _, strip) = hostStrip(width: 500, height: 300, tabs: tabs)
@@ -1699,6 +1883,39 @@ func everyCoreShortcutIdentityIsUnique() {
         let index = try #require(menu.items.firstIndex(where: { $0.title == title }))
         menu.performActionForItem(at: index)
         #expect(actions.last == .close(scope))
+    }
+}
+
+@Test @MainActor func tabContextMenuRoutesGroupCommandsAndAppliesSharedValidation() throws {
+    _ = NSApplication.shared
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 700, height: 220, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    var actions: [TabContextAction] = []
+    strip.onContextAction = { _, action in actions.append(action) }
+    strip.onValidateContextAction = { _, action in
+        action != .moveToEditorGroup(.sideBySide)
+    }
+    let menu = try #require(strip.contextMenu(for: tabs[0].id))
+    let expected: [(String, TabContextAction, Bool)] = [
+        ("Move to Group Right", .moveToEditorGroup(.sideBySide), false),
+        ("Move to Group Down", .moveToEditorGroup(.stacked), true),
+        ("Clone to Group Right", .cloneToEditorGroup(.sideBySide), true),
+        ("Clone to Group Down", .cloneToEditorGroup(.stacked), true),
+        ("Focus Other Group", .focusOtherEditorGroup, true),
+        ("Close Editor Group", .closeEditorGroup, true),
+    ]
+
+    for (title, action, enabled) in expected {
+        let index = try #require(menu.items.firstIndex(where: { $0.title == title }))
+        #expect(menu.items[index].isEnabled == enabled)
+        guard enabled else { continue }
+        menu.performActionForItem(at: index)
+        #expect(actions.last == action)
     }
 }
 

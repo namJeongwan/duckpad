@@ -709,6 +709,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             workspace: workspace,
             editorAdapter: editor,
             editorView: editor.view,
+            secondaryEditorView: editor.secondaryGroupView,
+            editorGroupRouter: editor,
             fileUseCase: fileUseCase,
             filePanels: panels,
             fileConflictPresenter: panels,
