@@ -395,27 +395,31 @@ private func blockCommentLanguageRegistry() throws -> LanguageRegistry {
     #expect(result.contentHeight == 69)
 }
 
-@Test func fiftyAndFiveHundredTabsRemainCappedInNarrowWorkspace() {
+@Test func everyRowIsJustifiedToTheContainerRightEdgeWithoutShrinkingTitles() {
     let engine = TabFlowLayoutEngine()
-    let policy = TabStripViewportPolicy(maximumRows: 4, maximumWorkspaceFraction: 0.34)
-    for count in [50, 500] {
-        let result = engine.layout(itemWidths: Array(repeating: 120, count: count), containerWidth: 250)
-        let viewport = policy.height(
-            contentHeight: result.contentHeight,
-            workspaceHeight: 300,
-            engine: engine
-        )
-        #expect(result.rowCount >= count / 3)
-        #expect(viewport <= 300 * 0.34)
-        #expect(viewport < result.contentHeight)
+    let cases: [[CGFloat]] = [[100], [100, 100], [80, 90, 100, 110, 120]]
+    for widths in cases {
+        let result = engine.layout(itemWidths: widths, containerWidth: 250)
+        for row in 0..<result.rowCount {
+            let indices = result.rowIndices.indices.filter { result.rowIndices[$0] == row }
+            let frames = indices.map { result.frames[$0] }
+            #expect(frames.first?.minX == 0)
+            #expect(frames.last?.maxX == 250)
+            for pair in zip(frames, frames.dropFirst()) {
+                #expect(pair.0.maxX == pair.1.minX)
+            }
+            for index in indices {
+                #expect(result.frames[index].width >= widths[index])
+            }
+        }
     }
 }
 
-@Test func explicitWidthBoundsDoNotForceTitlesDownToTheViewportWidth() {
+@Test func legacyMaximumWidthCannotShrinkAFullIntrinsicTitle() {
     let engine = TabFlowLayoutEngine(minimumItemWidth: 90, maximumItemWidth: 180)
     let result = engine.layout(itemWidths: [20, 500], containerWidth: 95)
-    #expect(result.frames.map(\.width) == [90, 180])
-    #expect(result.contentWidth >= 180)
+    #expect(result.frames.map(\.width) == [95, 500])
+    #expect(result.contentWidth >= 500)
     #expect(result.rowCount == 2)
 }
 
@@ -2094,7 +2098,7 @@ func everyCoreShortcutIdentityIsUnique() {
     #expect(strip.hostedCollectionView.registeredDraggedTypes.isEmpty)
 }
 
-@Test @MainActor func appKitHostedResizeCapsOverflowAndKeepsSelectedTabVisible() {
+@Test @MainActor func appKitHostedResizeExposesEveryRowAtItsCompleteContentHeight() {
     let tabs = makeTabs(count: 500, activeIndex: 499)
     let (window, root, strip) = hostStrip(width: 700, height: 300, tabs: tabs)
     defer {
@@ -2113,10 +2117,85 @@ func everyCoreShortcutIdentityIsUnique() {
     strip.apply(tabs: tabs)
 
     #expect(strip.contentHeight > wideContentHeight)
-    #expect(strip.viewportHeight <= root.bounds.height * strip.viewportPolicy.maximumWorkspaceFraction)
-    #expect(strip.viewportHeight < strip.contentHeight)
+    #expect(strip.viewportHeight == strip.contentHeight)
+    #expect(strip.viewportHeight > root.bounds.height)
     #expect(strip.hostedScrollView.documentView === strip.hostedCollectionView)
     #expect(strip.selectedTabIsVisible)
+    #expect(strip.hostedScrollView.contentView.bounds.origin == .zero)
+}
+
+@Test @MainActor func fiftySixAndFiveHundredTabsNeverCreateAnInternalViewport() {
+    for count in [56, 500] {
+        let tabs = makeTabs(count: count, activeIndex: count - 1)
+        let (window, _, strip) = hostStrip(width: 320, height: 220, tabs: tabs)
+        #expect(strip.rowCount > 4)
+        #expect(strip.viewportHeight == strip.contentHeight)
+        #expect(strip.hostedScrollView.contentView.bounds.height == strip.contentHeight)
+        #expect(!strip.hostedScrollView.hasHorizontalScroller)
+        #expect(!strip.hostedScrollView.hasVerticalScroller)
+        #expect(strip.hostedScrollView.contentView.bounds.origin == .zero)
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+}
+
+@Test @MainActor func activeTabChangesDoNotScrollTheMultilineTabSurface() {
+    let tabs = makeTabs(count: 56, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 320, height: 220, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    var changed = tabs
+    changed[0] = TabSnapshot(
+        id: changed[0].id, title: changed[0].title, isActive: false,
+        isDirty: changed[0].isDirty, isPinned: changed[0].isPinned, buffer: changed[0].buffer
+    )
+    let finalIndex = changed.count - 1
+    changed[finalIndex] = TabSnapshot(
+        id: changed[finalIndex].id, title: changed[finalIndex].title, isActive: true,
+        isDirty: changed[finalIndex].isDirty, isPinned: changed[finalIndex].isPinned,
+        buffer: changed[finalIndex].buffer
+    )
+    strip.hostedScrollView.contentView.scroll(to: NSPoint(x: 12, y: 54))
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(), tabs: changed, activeBuffer: changed[finalIndex].buffer,
+            persistence: .pending, startup: .ready
+        ),
+        kind: .activeTabChanged(previousIndex: 0, currentIndex: finalIndex)
+    ))
+
+    #expect(strip.hostedScrollView.contentView.bounds.origin == .zero)
+    #expect(strip.selectedTabIsVisible)
+}
+
+@Test @MainActor func wheelInputCannotScrollTheMultilineTabSurface() throws {
+    let tabs = makeTabs(count: 56, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 320, height: 220, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let cgEvent = try #require(CGEvent(
+        scrollWheelEvent2Source: nil,
+        units: .pixel,
+        wheelCount: 2,
+        wheel1: 80,
+        wheel2: 40,
+        wheel3: 0
+    ))
+    let event = try #require(NSEvent(cgEvent: cgEvent))
+    strip.hostedScrollView.contentView.scroll(to: NSPoint(x: 20, y: 80))
+
+    strip.hostedScrollView.scrollWheel(with: event)
+
+    #expect(strip.hostedScrollView.contentView.bounds.origin == .zero)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
+    #expect(!strip.hostedScrollView.hasVerticalScroller)
 }
 
 @Test @MainActor func hostedSelectionAndAccessibilityExposeStableStateAndActions() {
@@ -2437,7 +2516,7 @@ func everyCoreShortcutIdentityIsUnique() {
     #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
 }
 
-@Test @MainActor func offscreenReuseCannotRestoreStaleTabHover() async throws {
+@Test @MainActor func programmaticClipMovementCannotTurnTabsIntoAnInternalViewport() throws {
     let tabs = makeTabs(count: 500, activeIndex: 0)
     let pointerWindow = makePointerLocationWindow(width: 300, height: 320)
     let (window, _, strip) = hostStrip(
@@ -2452,7 +2531,6 @@ func everyCoreShortcutIdentityIsUnique() {
         window.close()
     }
     let hoveredPath = IndexPath(item: 1, section: 0)
-    let lastPath = IndexPath(item: tabs.count - 1, section: 0)
     let hoveredItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
     let stableID = tabs[1].id.rawValue.uuidString.lowercased()
     let close = try #require(descendantButtons(of: hoveredItem.view).first {
@@ -2467,27 +2545,57 @@ func everyCoreShortcutIdentityIsUnique() {
     hoveredItem.view.mouseEntered(with: event)
     #expect(!close.isHidden)
 
-    let lastFrame = try #require(strip.flowLayout.layoutAttributesForItem(at: lastPath)?.frame)
-    strip.hostedScrollView.contentView.scroll(to: NSPoint(x: 0, y: lastFrame.minY))
+    strip.hostedScrollView.contentView.scroll(to: NSPoint(x: 40, y: 400))
     strip.hostedScrollView.reflectScrolledClipView(strip.hostedScrollView.contentView)
-    for _ in 0..<20 where strip.hostedCollectionView.item(at: hoveredPath) != nil {
-        strip.hostedCollectionView.layoutSubtreeIfNeeded()
-        await Task.yield()
-    }
-    #expect(strip.hostedCollectionView.item(at: hoveredPath) == nil)
+    #expect(strip.hostedScrollView.contentView.bounds.origin == .zero)
+    #expect(strip.hostedCollectionView.item(at: hoveredPath) === hoveredItem)
+    #expect(!close.isHidden)
+    hoveredItem.view.mouseExited(with: event)
+    #expect(close.isHidden)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+}
 
-    strip.hostedScrollView.contentView.scroll(to: .zero)
-    strip.hostedScrollView.reflectScrolledClipView(strip.hostedScrollView.contentView)
-    for _ in 0..<20 where strip.hostedCollectionView.item(at: hoveredPath) == nil {
-        strip.hostedCollectionView.layoutSubtreeIfNeeded()
-        await Task.yield()
+@Test @MainActor func retainedTabHoverUsesItsCurrentIndexAfterAnEarlierDeletion() throws {
+    let tabs = makeTabs(count: 500, activeIndex: 499)
+    let (window, _, strip) = hostStrip(width: 700, height: 400, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
     }
-    let redisplayedItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
-    let redisplayedClose = try #require(descendantButtons(of: redisplayedItem.view).first {
+    let originalIndex = 300
+    let originalPath = IndexPath(item: originalIndex, section: 0)
+    let retainedItem = try #require(strip.hostedCollectionView.item(at: originalPath))
+    let stableID = tabs[originalIndex].id.rawValue.uuidString.lowercased()
+    let close = try #require(descendantButtons(of: retainedItem.view).first {
         $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
     })
-    #expect(redisplayedClose.isHidden)
-    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+    #expect(close.isHidden)
+
+    let remaining = Array(tabs.dropFirst())
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(), tabs: remaining,
+            activeBuffer: remaining.last?.buffer,
+            persistence: .pending, startup: .ready
+        ),
+        kind: .tabRemovalPending(index: 0)
+    ))
+    strip.layoutSubtreeIfNeeded()
+    strip.hostedCollectionView.layoutSubtreeIfNeeded()
+    let currentPath = IndexPath(item: originalIndex - 1, section: 0)
+    let currentItem = try #require(strip.hostedCollectionView.item(at: currentPath))
+    #expect(currentItem === retainedItem)
+    let event = try mouseMovementEvent(for: window)
+    let beforeEnter = strip.updateMetrics.itemConfigurations
+
+    currentItem.view.mouseEntered(with: event)
+
+    #expect(!close.isHidden)
+    #expect(strip.updateMetrics.itemConfigurations - beforeEnter == 1)
+    currentItem.view.mouseExited(with: event)
+    #expect(close.isHidden)
+    #expect(strip.updateMetrics.itemConfigurations - beforeEnter == 2)
 }
 
 @Test @MainActor func tabChromeKeepsDocumentSwitcherAsKeyboardOnlyEscapeHatch() {
@@ -2920,6 +3028,69 @@ func everyCoreShortcutIdentityIsUnique() {
     #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 249, section: 0)])
     #expect(strip.selectedTabIsVisible)
     #expect(elapsed < .milliseconds(50))
+}
+
+@Test @MainActor func fiveHundredTabIncrementalPathsConfigureOnlyKnownItems() throws {
+    var tabs = makeTabs(count: 500, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 700, height: 400, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let index = 250
+    tabs[index] = TabSnapshot(
+        id: tabs[index].id, title: tabs[index].title, isActive: false,
+        isDirty: true, isPinned: tabs[index].isPinned,
+        buffer: EditorBufferDescriptor(bufferID: tabs[index].buffer.bufferID, revision: 1)
+    )
+    let beforeSingle = strip.updateMetrics.itemConfigurations
+    #expect(strip.apply(tab: tabs[index], at: index))
+    let afterSingle = strip.updateMetrics.itemConfigurations
+    #expect(afterSingle - beforeSingle == 1)
+
+    let persistenceBefore = afterSingle
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(), tabs: tabs, activeBuffer: tabs[0].buffer,
+            persistence: .saved, startup: .ready
+        ),
+        kind: .persistence
+    ))
+    let persistenceAfter = strip.updateMetrics.itemConfigurations
+    #expect(persistenceAfter - persistenceBefore == 0)
+
+    let hoveredPath = IndexPath(item: 300, section: 0)
+    let hoveredItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
+    let event = try mouseMovementEvent(for: window)
+    let hoverBefore = persistenceAfter
+    hoveredItem.view.mouseEntered(with: event)
+    let hoverAfter = strip.updateMetrics.itemConfigurations
+    #expect(hoverAfter - hoverBefore == 1)
+    hoveredItem.view.mouseExited(with: event)
+    let exitAfter = strip.updateMetrics.itemConfigurations
+    #expect(exitAfter - hoverAfter == 1)
+
+    var activated = tabs
+    activated[0] = TabSnapshot(
+        id: activated[0].id, title: activated[0].title, isActive: false,
+        isDirty: activated[0].isDirty, isPinned: activated[0].isPinned,
+        buffer: activated[0].buffer
+    )
+    let finalIndex = activated.count - 1
+    activated[finalIndex] = TabSnapshot(
+        id: activated[finalIndex].id, title: activated[finalIndex].title, isActive: true,
+        isDirty: activated[finalIndex].isDirty, isPinned: activated[finalIndex].isPinned,
+        buffer: activated[finalIndex].buffer
+    )
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(), tabs: activated, activeBuffer: activated[finalIndex].buffer,
+            persistence: .saved, startup: .ready
+        ),
+        kind: .activeTabChanged(previousIndex: 0, currentIndex: finalIndex)
+    ))
+    #expect(strip.updateMetrics.itemConfigurations - exitAfter == 2)
 }
 
 @Test @MainActor func blockedActivationPublishesTheSelectedTabBeforeDiskCommitCompletes() async {

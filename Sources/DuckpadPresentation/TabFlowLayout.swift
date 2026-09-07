@@ -70,61 +70,60 @@ public struct TabFlowLayoutEngine: Sendable {
             )
         }
         let usableWidth = max(minimumItemWidth, containerWidth - insets.left - insets.right)
-        var x = insets.left
-        var y = insets.top
+        // A proposed width includes the complete rendered filename. It is an
+        // inviolable minimum even when a caller still supplies the legacy
+        // maximumItemWidth configuration.
+        var boundedWidths = itemWidths.map { max($0, minimumItemWidth) }
+        var rowRanges: [Range<Int>] = []
+        var rowStart = 0
+        var rowWidth: CGFloat = 0
+        for (index, width) in boundedWidths.enumerated() {
+            let candidateWidth = rowWidth == 0 ? width : rowWidth + horizontalSpacing + width
+            if index > rowStart, candidateWidth > usableWidth {
+                rowRanges.append(rowStart..<index)
+                rowStart = index
+                rowWidth = width
+            } else {
+                rowWidth = candidateWidth
+            }
+        }
+        rowRanges.append(rowStart..<boundedWidths.count)
+
+        for range in rowRanges {
+            let gaps = CGFloat(max(0, range.count - 1)) * horizontalSpacing
+            let occupied = range.reduce(gaps) { $0 + boundedWidths[$1] }
+            let remaining = max(0, usableWidth - occupied)
+            if remaining > 0, !range.isEmpty {
+                let addition = remaining / CGFloat(range.count)
+                for index in range {
+                    boundedWidths[index] += addition
+                }
+            }
+        }
+
         var frames: [CGRect] = []
         var rowIndices: [Int] = []
-        var row = 0
         var maximumFrameX: CGFloat = 0
-        for proposedWidth in itemWidths {
-            let width = min(max(proposedWidth, minimumItemWidth), maximumItemWidth)
-            if x > insets.left, x + width > insets.left + usableWidth {
-                x = insets.left
-                y += rowHeight + verticalSpacing
-                row += 1
+        for (row, range) in rowRanges.enumerated() {
+            var x = insets.left
+            let y = insets.top + CGFloat(row) * (rowHeight + verticalSpacing)
+            for index in range {
+                let frame = CGRect(x: x, y: y, width: boundedWidths[index], height: rowHeight)
+                frames.append(frame)
+                rowIndices.append(row)
+                maximumFrameX = max(maximumFrameX, frame.maxX)
+                x += boundedWidths[index] + horizontalSpacing
             }
-            let frame = CGRect(x: x, y: y, width: width, height: rowHeight)
-            frames.append(frame)
-            rowIndices.append(row)
-            maximumFrameX = max(maximumFrameX, frame.maxX)
-            x += width + horizontalSpacing
         }
         return TabFlowLayoutResult(
             frames: frames,
             rowIndices: rowIndices,
-            rowCount: row + 1,
+            rowCount: rowRanges.count,
             contentWidth: max(containerWidth, maximumFrameX + insets.right),
-            contentHeight: y + rowHeight + insets.bottom
+            contentHeight: insets.top + insets.bottom
+                + CGFloat(rowRanges.count) * rowHeight
+                + CGFloat(max(0, rowRanges.count - 1)) * verticalSpacing
         )
-    }
-}
-
-public struct TabStripViewportPolicy: Equatable, Sendable {
-    public var maximumRows: Int
-    public var maximumWorkspaceFraction: CGFloat
-    public var minimumHeight: CGFloat
-
-    public init(
-        maximumRows: Int = 4,
-        maximumWorkspaceFraction: CGFloat = 0.34,
-        minimumHeight: CGFloat = 27
-    ) {
-        self.maximumRows = maximumRows
-        self.maximumWorkspaceFraction = maximumWorkspaceFraction
-        self.minimumHeight = minimumHeight
-    }
-
-    public func height(
-        contentHeight: CGFloat,
-        workspaceHeight: CGFloat,
-        engine: TabFlowLayoutEngine
-    ) -> CGFloat {
-        let rows = max(1, maximumRows)
-        let rowCap = engine.insets.top + engine.insets.bottom
-            + CGFloat(rows) * engine.rowHeight
-            + CGFloat(rows - 1) * engine.verticalSpacing
-        let fractionCap = max(minimumHeight, workspaceHeight * maximumWorkspaceFraction)
-        return min(contentHeight, max(minimumHeight, min(rowCap, fractionCap)))
     }
 }
 

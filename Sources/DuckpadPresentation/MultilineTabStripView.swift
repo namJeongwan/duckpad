@@ -362,6 +362,29 @@ final class TabOverflowScrollView: NSScrollView {
         super.layout()
         if hasVerticalScroller { hasVerticalScroller = false }
         synchronizeHorizontalScroller()
+        pinContentOrigin()
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        // Notepad++ multiline tabs expose every row at once. Wheel input belongs
+        // to the editor below and never turns this strip into a hidden viewport.
+        pinContentOrigin()
+    }
+
+    override func reflectScrolledClipView(_ cView: NSClipView) {
+        if cView === contentView, cView.bounds.origin != .zero {
+            cView.scroll(to: .zero)
+        }
+        super.reflectScrolledClipView(cView)
+    }
+
+    func pinContentOrigin() {
+        if contentView.bounds.origin != .zero {
+            contentView.scroll(to: .zero)
+            super.reflectScrolledClipView(contentView)
+        }
+        if hasVerticalScroller { hasVerticalScroller = false }
+        if hasHorizontalScroller { hasHorizontalScroller = false }
     }
 
     private func synchronizeHorizontalScroller() {
@@ -377,6 +400,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         public fileprivate(set) var fullReloads = 0
         public fileprivate(set) var itemReloads = 0
         public fileprivate(set) var directItemInspections = 0
+        public fileprivate(set) var itemConfigurations = 0
     }
     public var onActivate: ((TabID) -> Void)?
     public var onClose: ((TabID) -> Void)?
@@ -385,10 +409,6 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     public var onValidateContextAction: ((TabID, TabContextAction) -> Bool)?
     public var onValidateGroupDrop: ((EditorGroupDragPayload, Int, EditorGroupDropOperation) -> Bool)?
     public var onGroupDrop: ((EditorGroupDragPayload, Int, EditorGroupDropOperation) -> Bool)?
-    public var viewportPolicy = TabStripViewportPolicy() {
-        didSet { updateViewportHeight() }
-    }
-
     let hostedCollectionView = TabDocumentCollectionView()
     let hostedScrollView = TabOverflowScrollView()
     let flowLayout = MultilineTabCollectionLayout()
@@ -398,9 +418,11 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     private var measuredContentWidth: CGFloat = 1
     private var measuredContentHeight: CGFloat = 34
     private let bottomSeparator = CALayer()
+    private var tabIndexByID: [TabID: Int] = [:]
     private var isSynchronizingSelection = false
     private var activeIndex: Int?
     private var hoveredTabID: TabID?
+    private var hoveredTabIndex: Int?
     public private(set) var editorGroupID: EditorGroupID = .primary
     public private(set) var updateMetrics = UpdateMetrics()
     public private(set) var interactionsEnabled = true
@@ -463,7 +485,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             updateDocumentFrame()
             updateViewportHeight()
             refreshVisibleItems()
-            scrollSelectedTabVisible()
+            pinTabSurfaceOrigin()
         }
     }
 
@@ -480,12 +502,14 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         updateDocumentFrame()
         updateViewportHeight()
         refreshVisibleItems()
-        scrollSelectedTabVisible()
+        pinTabSurfaceOrigin()
     }
 
     public func apply(tabs: [TabSnapshot]) {
         hoveredTabID = nil
+        hoveredTabIndex = nil
         self.tabs = tabs
+        rebuildTabIndices()
         activeIndex = tabs.firstIndex(where: \.isActive)
         documentSwitcher.apply(tabs: tabs)
         flowLayout.itemWidths = tabs.map(tabWidth)
@@ -499,7 +523,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         updateDocumentFrame()
         updateViewportHeight()
         refreshVisibleItems()
-        scrollSelectedTabVisible()
+        pinTabSurfaceOrigin()
     }
 
     public func apply(change: WorkspaceChange) {
@@ -512,8 +536,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             }
             tabs = change.snapshot.tabs
             synchronizeSelection()
-            refreshVisibleItems()
-            scrollSelectedTabVisible()
+            pinTabSurfaceOrigin()
             return
         case .tabUpdated(let index), .bufferEdited(let index):
             guard tabs.count == change.snapshot.tabs.count,
@@ -549,7 +572,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             hostedCollectionView.selectionIndexPaths = [IndexPath(item: currentIndex, section: 0)]
             isSynchronizingSelection = false
             updateMetrics.itemReloads += affected.count
-            scrollSelectedTabVisible()
+            pinTabSurfaceOrigin()
         case .tabInserted:
             apply(tabs: change.snapshot.tabs)
         case .tabRemovalPending(let index):
@@ -558,17 +581,22 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
                 // observes the smaller data source, avoiding stale attributes
                 // for the old final index during AppKit's delete transaction.
                 if hoveredTabID == tabs[index].id { hoveredTabID = nil }
+                if hoveredTabIndex == index {
+                    hoveredTabIndex = nil
+                } else if let hoveredTabIndex, hoveredTabIndex > index {
+                    self.hoveredTabIndex = hoveredTabIndex - 1
+                }
                 flowLayout.itemWidths = change.snapshot.tabs.map(tabWidth)
                 tabs = change.snapshot.tabs
+                rebuildTabIndices()
                 activeIndex = tabs.firstIndex(where: \.isActive)
                 hostedCollectionView.deleteItems(at: [IndexPath(item: index, section: 0)])
                 synchronizeSelection()
-                scrollSelectedTabVisible()
+                pinTabSurfaceOrigin()
             } else if tabs.map(\.id) == change.snapshot.tabs.map(\.id) {
                 tabs = change.snapshot.tabs
                 activeIndex = tabs.firstIndex(where: \.isActive)
                 synchronizeSelection()
-                refreshVisibleItems()
             } else {
                 apply(tabs: change.snapshot.tabs)
             }
@@ -580,7 +608,6 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             tabs = change.snapshot.tabs
             activeIndex = tabs.firstIndex(where: \.isActive)
             synchronizeSelection()
-            refreshVisibleItems()
         case .tabsReordered:
             apply(tabs: change.snapshot.tabs)
         case .reset:
@@ -602,7 +629,6 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedCollectionView.reloadItems(at: [IndexPath(item: index, section: 0)])
         updateMetrics.itemReloads += 1
         updateMetrics.directItemInspections += 1
-        refreshVisibleItems()
         return true
     }
 
@@ -624,6 +650,8 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
 
     func tearDownHostedViews() {
         hoveredTabID = nil
+        hoveredTabIndex = nil
+        tabIndexByID.removeAll(keepingCapacity: false)
         documentSwitcher.documentPanel.dismiss()
         flowLayout.onContentSizeChange = nil
         hostedCollectionView.unregisterDraggedTypes()
@@ -679,13 +707,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             return item
         }
         let tab = tabs[indexPath.item]
-        let row = flowLayout.row(forItemAt: indexPath.item) ?? 0
-        tabItem.configure(
-            tab: tab,
-            index: indexPath.item,
-            row: row,
-            isHovered: hoveredTabID == tab.id
-        )
+        configure(tabItem, at: indexPath.item)
         tabItem.onActivate = { [weak self] in
             guard self?.interactionsEnabled == true else { return }
             self?.onActivate?(tab.id)
@@ -717,6 +739,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             return
         }
         hoveredTabID = nil
+        hoveredTabIndex = nil
     }
 
     public func collectionView(
@@ -837,6 +860,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedScrollView.hasVerticalScroller = false
         hostedScrollView.requiresHorizontalScroller = false
         if widthChanged { flowLayout.invalidateLayout() }
+        pinTabSurfaceOrigin()
     }
 
     private func dragPayload(from pasteboard: NSPasteboard) -> EditorGroupDragPayload? {
@@ -845,41 +869,11 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     private func updateViewportHeight() {
-        let workspaceHeight = max(1, superview?.bounds.height ?? window?.contentLayoutRect.height ?? 620)
-        heightConstraint.constant = viewportPolicy.height(
-            contentHeight: measuredContentHeight,
-            workspaceHeight: workspaceHeight,
-            engine: flowLayout.engine
-        )
+        heightConstraint.constant = measuredContentHeight
     }
 
-    private func scrollSelectedTabVisible() {
-        guard let index = activeIndex,
-              tabs.indices.contains(index),
-              let attributes = flowLayout.layoutAttributesForItem(
-                at: IndexPath(item: index, section: 0)
-              ) else {
-            return
-        }
-        let clipView = hostedScrollView.contentView
-        let visible = clipView.bounds
-        let horizontallyIntersects = attributes.frame.maxX > visible.minX
-            && attributes.frame.minX < visible.maxX
-        if !horizontallyIntersects {
-            let maximumX = max(0, hostedCollectionView.bounds.maxX - visible.width)
-            let targetX = min(max(0, attributes.frame.minX), maximumX)
-            clipView.scroll(to: NSPoint(x: targetX, y: visible.minY))
-            hostedScrollView.reflectScrolledClipView(clipView)
-        }
-        if attributes.frame.minY < visible.minY || attributes.frame.maxY > visible.maxY {
-            let maximumY = max(0, hostedCollectionView.bounds.maxY - visible.height)
-            let targetY = min(
-                max(0, attributes.frame.midY - visible.height / 2),
-                maximumY
-            )
-            clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: targetY))
-            hostedScrollView.reflectScrolledClipView(clipView)
-        }
+    private func pinTabSurfaceOrigin() {
+        hostedScrollView.pinContentOrigin()
     }
 
     private func synchronizeSelection() {
@@ -898,22 +892,55 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
                   tabs.indices.contains(path.item) else {
                 continue
             }
-            item.configure(
-                tab: tabs[path.item],
-                index: path.item,
-                row: flowLayout.row(forItemAt: path.item) ?? 0,
-                isHovered: hoveredTabID == tabs[path.item].id
-            )
+            configure(item, at: path.item)
+        }
+    }
+
+    private func configure(_ item: DuckpadTabItem, at index: Int) {
+        guard tabs.indices.contains(index) else { return }
+        let tab = tabs[index]
+        item.configure(
+            tab: tab,
+            index: index,
+            row: flowLayout.row(forItemAt: index) ?? 0,
+            isHovered: hoveredTabID == tab.id
+        )
+        updateMetrics.itemConfigurations += 1
+    }
+
+    private func refreshItems(at indices: Set<Int>) {
+        for index in indices where tabs.indices.contains(index) {
+            guard let item = hostedCollectionView.item(
+                at: IndexPath(item: index, section: 0)
+            ) as? DuckpadTabItem else { continue }
+            configure(item, at: index)
         }
     }
 
     private func updateHoveredTab(_ isHovered: Bool, tabID: TabID) {
-        let nextHoveredTabID = isHovered
-            ? tabID
-            : (hoveredTabID == tabID ? nil : hoveredTabID)
-        guard hoveredTabID != nextHoveredTabID else { return }
+        let nextHoveredTabID: TabID?
+        let nextIndex: Int?
+        if isHovered, let index = tabIndexByID[tabID] {
+            nextHoveredTabID = tabID
+            nextIndex = index
+        } else if hoveredTabID == tabID {
+            nextHoveredTabID = nil
+            nextIndex = nil
+        } else {
+            nextHoveredTabID = hoveredTabID
+            nextIndex = hoveredTabIndex
+        }
+        guard hoveredTabID != nextHoveredTabID || hoveredTabIndex != nextIndex else { return }
+        let previousIndex = hoveredTabIndex
         hoveredTabID = nextHoveredTabID
-        refreshVisibleItems()
+        hoveredTabIndex = nextIndex
+        refreshItems(at: Set([previousIndex, nextIndex].compactMap { $0 }))
+    }
+
+    private func rebuildTabIndices() {
+        tabIndexByID = Dictionary(
+            uniqueKeysWithValues: tabs.enumerated().map { ($0.element.id, $0.offset) }
+        )
     }
 
     private func tabWidth(_ tab: TabSnapshot) -> CGFloat {
