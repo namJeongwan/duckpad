@@ -53,6 +53,24 @@ private actor DelayedSearchSessionStore: SessionStore {
 @Suite(.serialized)
 struct ScintillaBridgeTests {
     @Test @MainActor
+    func freshViewPublishesWillModifyBeforeItsFirstEdit() throws {
+        let view = makeHostedView()
+        try view.loadUTF8(Data("base".utf8), revision: 0)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 4, length: 0))
+        var events: [String] = []
+        view.onWillModifyDocument = {
+            events.append("will:\(text(view) ?? "<nil>"):\(view.revision)")
+        }
+        view.onEdit = { _ in
+            events.append("edit:\(text(view) ?? "<nil>"):\(view.revision)")
+        }
+
+        view.insertCommittedText("X")
+
+        #expect(events == ["will:base:0", "edit:baseX:1"])
+    }
+
+    @Test @MainActor
     func realViewUsesUTF8ByteRangesAndRejectsStaleRevision() throws {
         let view = makeHostedView()
         try view.loadUTF8(Data("Duckpad 한글 🦆".utf8), revision: 4)

@@ -233,8 +233,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         _scintilla.delegate = self;
         [self addSubview:_scintilla];
         [_scintilla message:SCI_SETCODEPAGE wParam:SC_CP_UTF8];
-        [_scintilla message:SCI_SETMODEVENTMASK
-                     wParam:SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT];
+        _publishesDocumentEdits = YES;
+        [self updateModificationEventMask];
         [_scintilla message:SCI_SETUNDOSELECTIONHISTORY
                      wParam:SC_UNDO_SELECTION_HISTORY_ENABLED];
         [_scintilla message:SCI_SETWRAPMODE wParam:SC_WRAP_WORD];
@@ -246,7 +246,6 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         _highlightedBraceUTF8Position = -1;
         _matchingBraceUTF8Position = -1;
         _badBraceUTF8Position = -1;
-        _publishesDocumentEdits = YES;
         _pendingSmartCaretPosition = -1;
         _pendingSmartInsertionEnd = -1;
         _pendingSmartIndentationInsertionPosition = -1;
@@ -282,6 +281,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     if (publisher != nil && publisher->_directInputInitiator == self) {
         publisher->_directInputInitiator = nil;
     }
+    self.onWillModifyDocument = nil;
     self.onSmartIndentationStateChange = nil;
     _scintilla.delegate = nil;
 }
@@ -293,6 +293,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         publisher->_directInputInitiator = nil;
     }
     _directInputInitiator = nil;
+    self.onWillModifyDocument = nil;
     self.onEdit = nil;
     self.onError = nil;
     self.onFocus = nil;
@@ -717,7 +718,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)updateModificationEventMask {
     uptr_t mask = _publishesDocumentEdits
-        ? SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT : 0;
+        ? SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT
+            | SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE
+        : 0;
     if (_smartEditingEnabled) mask |= SC_MOD_INSERTCHECK;
     [_scintilla message:SCI_SETMODEVENTMASK wParam:mask];
 }
@@ -1501,6 +1504,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
     const uint64_t baseRevision = _revision;
     if (baseRevision == UINT64_MAX) return NO;
+    if (_publishesDocumentEdits && self.onWillModifyDocument) {
+        self.onWillModifyDocument();
+    }
     const BOOL wasSuppressingEdit = _suppressEdit;
     _suppressEdit = YES;
     @try {
@@ -2012,6 +2018,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     }
     if (notification->nmhdr.code != SCN_MODIFIED) return;
     const int flags = notification->modificationType;
+    if (!_suppressEdit
+        && (flags & (SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE)) != 0) {
+        if (_publishesDocumentEdits && self.onWillModifyDocument) {
+            self.onWillModifyDocument();
+        }
+        return;
+    }
     if (_suppressEdit) {
         const BOOL isSingleInsertedCharacter = (flags & SC_MOD_INSERTTEXT) != 0
             && notification->text != nullptr && notification->length == 1;

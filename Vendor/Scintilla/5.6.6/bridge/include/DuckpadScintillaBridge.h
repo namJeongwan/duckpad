@@ -59,6 +59,7 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 
 /// Narrow AppKit facade. No Scintilla message, pointer, or C++ type is public.
 @interface DPScintillaEditorView : NSView
+@property(nonatomic, copy, nullable) void (^onWillModifyDocument)(void);
 @property(nonatomic, copy, nullable) void (^onEdit)(DPScintillaEdit *edit);
 @property(nonatomic, copy, nullable) void (^onError)(NSError *error);
 @property(nonatomic, copy, nullable) void (^onFocus)(void);

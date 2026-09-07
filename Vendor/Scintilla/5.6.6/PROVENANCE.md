@@ -50,3 +50,10 @@ Phase 32 block-comment selection validation, aggregate edit publication,
 shared-document publisher routing, and direct-closing-delimiter indentation
 likewise modify only Duckpad-owned files under `bridge/`; no upstream Scintilla
 or Lexilla source file changed.
+
+Editor-group rejection recovery uses a Duckpad-owned, publisher-only
+pre-mutation callback in `bridge/`. The callback is driven by Scintilla's public
+`SC_MOD_BEFOREINSERT` and `SC_MOD_BEFOREDELETE` notifications. Its publisher
+event mask is installed during bridge-view construction and reused for later
+mask reconfiguration. This does not modify any upstream Scintilla or Lexilla
+source file.
