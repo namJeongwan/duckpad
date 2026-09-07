@@ -100,6 +100,19 @@ public final class EditorGroupWorkspaceView: NSView {
         onAction?(.focus(group))
     }
 
+    @discardableResult
+    public func applyFocus(layout: EditorGroupLayoutSnapshot) -> Bool {
+        if layout.orientation == nil {
+            guard layout.focusedGroup == .primary, secondaryPane == nil else { return false }
+        } else {
+            guard secondaryPane != nil else { return false }
+        }
+        layoutSnapshot = layout
+        primaryPane.setFocused(layout.focusedGroup == .primary)
+        secondaryPane?.setFocused(layout.focusedGroup == .secondary)
+        return true
+    }
+
     public func validateEdgeDrop(
         payload: EditorGroupDragPayload,
         location: NSPoint,

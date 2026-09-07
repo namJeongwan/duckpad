@@ -115,6 +115,7 @@ private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPor
     var publishesGroupFocusSynchronously = false
     private(set) var synchronousGroupFocusCallbackCount = 0
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
+    private(set) var visibleBuffers: [EditorGroupID: EditorBufferDescriptor] = [:]
 
     func setEditorGroupOrientation(_ orientation: EditorGroupSplitOrientation?) {
         events.append(.orientation(orientation))
@@ -135,6 +136,7 @@ private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPor
 
     func display(_ buffer: EditorBufferDescriptor, in group: EditorGroupID) {
         events.append(.display(buffer, group))
+        visibleBuffers[group] = buffer
     }
 
     func assign(
@@ -144,6 +146,10 @@ private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPor
         cloning: Bool
     ) {
         events.append(.assign(buffer, source, destination, cloning))
+        if !cloning, let source, visibleBuffers[source]?.bufferID == buffer.bufferID {
+            visibleBuffers.removeValue(forKey: source)
+        }
+        visibleBuffers[destination] = buffer
     }
 
     func display(_ buffer: EditorBufferDescriptor) {
@@ -242,6 +248,39 @@ struct EditorGroupCommandTests {
         #expect(fixture.router.events.filter { $0 == .activate(.secondary) }.count == 1)
         #expect(fixture.router.events.filter { $0 == .focus }.count == 1)
         #expect(fixture.router.synchronousGroupFocusCallbackCount == 1)
+    }
+
+    @Test @MainActor
+    func movingActivePrimaryTabToNewSecondaryRendersThePrimaryReplacementAfterAssignment() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 3)
+        defer { fixture.controller.close() }
+        let tabs = fixture.workspace.snapshot().tabs
+        let moved = try #require(tabs.first(where: { $0.isActive }))
+        fixture.router.resetEvents()
+
+        fixture.controller.performMoveActiveTabToGroupRight(nil)
+
+        let layout = fixture.controller.editorGroupLayoutSnapshot
+        let primaryTabID = try #require(layout.primarySelectedTabID)
+        let primary = try #require(tabs.first(where: { $0.id == primaryTabID }))
+        let events = fixture.router.events
+        let assignment = try #require(events.firstIndex(of: .assign(
+            moved.buffer,
+            .primary,
+            .secondary,
+            false
+        )))
+        let sourceDisplay = try #require(events.firstIndex(of: .display(primary.buffer, .primary)))
+        let destinationDisplay = try #require(events.firstIndex(of: .display(moved.buffer, .secondary)))
+
+        #expect(assignment < sourceDisplay)
+        #expect(sourceDisplay < destinationDisplay)
+        #expect(events.filter { $0 == .display(primary.buffer, .primary) }.count == 1)
+        #expect(events.filter { $0 == .display(moved.buffer, .secondary) }.count == 1)
+        #expect(fixture.router.visibleBuffers[.primary] == primary.buffer)
+        #expect(fixture.router.visibleBuffers[.secondary] == moved.buffer)
+        #expect(layout.secondarySelectedTabID == moved.id)
+        #expect(fixture.router.events.filter { $0 == .focus }.count == 1)
     }
 
     @Test @MainActor
@@ -693,6 +732,193 @@ struct EditorGroupCommandTests {
         #expect(secondaryStrip.updateMetrics.directItemInspections == secondaryBefore.directItemInspections + 1)
         #expect(fixture.controller.tabStrip.activeTabID == active.id)
         #expect(secondaryStrip.activeTabID == active.id)
+    }
+
+    @Test @MainActor
+    func incrementalEventsSkipMembershipReconciliationWhileStructuralEventsStillReconcile() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 500)
+        defer { fixture.controller.close() }
+        let active = try #require(fixture.workspace.snapshot().tabs.last)
+        fixture.controller.editorGroupWorkspace.onAction?(
+            .split(active.id, .primary, .sideBySide, .copy)
+        )
+        let reconcileBefore = fixture.controller.editorGroupReconcileCount
+        let inspectionsBefore = fixture.controller.editorGroupReconcileTabInspectionCount
+
+        markDirty(active.buffer, workspace: fixture.workspace, router: fixture.router, text: "bounded")
+        #expect(fixture.controller.editorGroupReconcileCount == reconcileBefore)
+        #expect(fixture.controller.editorGroupReconcileTabInspectionCount == inspectionsBefore)
+
+        await fixture.workspace.waitForPendingPersistence()
+        #expect(fixture.controller.editorGroupReconcileCount == reconcileBefore)
+        #expect(fixture.controller.editorGroupReconcileTabInspectionCount == inspectionsBefore)
+
+        _ = await fixture.workspace.setLanguageOverride(
+            .manual(LanguageID(rawValue: "json")),
+            for: active.id
+        )
+        #expect(fixture.controller.editorGroupReconcileCount == reconcileBefore)
+        #expect(fixture.controller.editorGroupReconcileTabInspectionCount == inspectionsBefore)
+
+        _ = await fixture.workspace.addScratch()
+        #expect(fixture.controller.editorGroupReconcileCount == reconcileBefore + 1)
+        #expect(fixture.controller.editorGroupReconcileTabInspectionCount == inspectionsBefore + 501)
+        #expect(fixture.controller.editorGroupLayoutSnapshot.secondaryTabIDs.count == 2)
+    }
+
+    @Test @MainActor
+    func splitActiveChangeUsesCachedGroupSelectionWithoutFullReconciliationOrReload() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 500)
+        defer { fixture.controller.close() }
+        let tabs = fixture.workspace.snapshot().tabs
+        let secondary = try #require(tabs.last)
+        fixture.controller.editorGroupWorkspace.onAction?(
+            .split(secondary.id, .primary, .sideBySide, .move)
+        )
+        let primary = tabs[250]
+        let oldPrimarySelection = try #require(
+            fixture.controller.editorGroupLayoutSnapshot.primarySelectedTabID
+        )
+        let secondaryStrip = try #require(fixture.controller.editorGroupWorkspace.secondaryPane?.tabStrip)
+        let reconcileBefore = fixture.controller.editorGroupReconcileCount
+        let inspectionsBefore = fixture.controller.editorGroupReconcileTabInspectionCount
+        let cachedLookupsBefore = fixture.controller.editorGroupCachedTabLookupCount
+        let linearInspectionsBefore = fixture.controller.editorGroupLinearTabInspectionCount
+        let primaryMetricsBefore = fixture.controller.tabStrip.updateMetrics
+        let secondaryMetricsBefore = secondaryStrip.updateMetrics
+        let primaryFocusBefore = fixture.controller.editorGroupWorkspace.primaryPane.focusUpdateCount
+        let secondaryFocusBefore = fixture.controller.editorGroupWorkspace.secondaryPane?.focusUpdateCount
+        fixture.router.resetEvents()
+
+        _ = await fixture.workspace.activate(tabID: primary.id)
+
+        #expect(fixture.controller.editorGroupReconcileCount == reconcileBefore)
+        #expect(fixture.controller.editorGroupReconcileTabInspectionCount == inspectionsBefore)
+        #expect(fixture.controller.editorGroupLinearTabInspectionCount == linearInspectionsBefore)
+        #expect(fixture.controller.editorGroupCachedTabLookupCount - cachedLookupsBefore <= 8)
+        #expect(fixture.controller.tabStrip.updateMetrics.fullReloads == primaryMetricsBefore.fullReloads)
+        #expect(secondaryStrip.updateMetrics.fullReloads == secondaryMetricsBefore.fullReloads)
+        #expect(fixture.controller.tabStrip.updateMetrics.itemReloads == primaryMetricsBefore.itemReloads + 2)
+        #expect(secondaryStrip.updateMetrics.itemReloads == secondaryMetricsBefore.itemReloads)
+        #expect(fixture.controller.tabStrip.activeTabID == primary.id)
+        #expect(secondaryStrip.activeTabID == secondary.id)
+        #expect(fixture.controller.editorGroupLayoutSnapshot.primarySelectedTabID == primary.id)
+        #expect(fixture.controller.editorGroupLayoutSnapshot.secondarySelectedTabID == secondary.id)
+        #expect(fixture.controller.editorGroupLayoutSnapshot.focusedGroup == .primary)
+        #expect(fixture.controller.editorGroupWorkspace.primaryPane.isFocused)
+        #expect(fixture.controller.editorGroupWorkspace.primaryPane.accessibilityValue() as? String == "focused")
+        #expect(fixture.controller.editorGroupWorkspace.secondaryPane?.isFocused == false)
+        #expect(fixture.controller.editorGroupWorkspace.primaryPane.focusUpdateCount == primaryFocusBefore + 1)
+        #expect(fixture.controller.editorGroupWorkspace.secondaryPane?.focusUpdateCount == secondaryFocusBefore.map { $0 + 1 })
+        #expect(fixture.workspace.snapshot().tabs.first(where: { $0.isActive })?.id == primary.id)
+        #expect(oldPrimarySelection != primary.id)
+        #expect(fixture.router.events.filter { $0 == .display(primary.buffer, .primary) }.count == 1)
+        #expect(fixture.router.events.filter { $0 == .display(primary.buffer, nil) }.count == 1)
+        #expect(fixture.router.events.filter { $0 == .display(secondary.buffer, .secondary) }.isEmpty)
+    }
+
+    @Test @MainActor
+    func groupTabClickUsesCachedLocalSelectionAndAvoidsFullWorkspaceApply() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 500)
+        defer { fixture.controller.close() }
+        let tabs = fixture.workspace.snapshot().tabs
+        let secondary = try #require(tabs.last)
+        fixture.controller.editorGroupWorkspace.onAction?(
+            .split(secondary.id, .primary, .sideBySide, .move)
+        )
+        let primary = tabs[250]
+        let secondaryStrip = try #require(fixture.controller.editorGroupWorkspace.secondaryPane?.tabStrip)
+        let reconcileBefore = fixture.controller.editorGroupReconcileCount
+        let inspectionsBefore = fixture.controller.editorGroupReconcileTabInspectionCount
+        let cachedLookupsBefore = fixture.controller.editorGroupCachedTabLookupCount
+        let linearInspectionsBefore = fixture.controller.editorGroupLinearTabInspectionCount
+        let primaryMetricsBefore = fixture.controller.tabStrip.updateMetrics
+        let secondaryMetricsBefore = secondaryStrip.updateMetrics
+        let primaryFocusBefore = fixture.controller.editorGroupWorkspace.primaryPane.focusUpdateCount
+        let secondaryFocusBefore = fixture.controller.editorGroupWorkspace.secondaryPane?.focusUpdateCount
+        fixture.router.resetEvents()
+
+        fixture.controller.editorGroupWorkspace.onAction?(.select(primary.id, .primary))
+        await eventually {
+            fixture.workspace.snapshot().tabs.first(where: { $0.isActive })?.id == primary.id
+        }
+
+        #expect(fixture.controller.editorGroupReconcileCount == reconcileBefore)
+        #expect(fixture.controller.editorGroupReconcileTabInspectionCount == inspectionsBefore)
+        #expect(fixture.controller.editorGroupLinearTabInspectionCount == linearInspectionsBefore)
+        #expect(fixture.controller.editorGroupCachedTabLookupCount - cachedLookupsBefore <= 8)
+        #expect(fixture.controller.tabStrip.updateMetrics.fullReloads == primaryMetricsBefore.fullReloads)
+        #expect(secondaryStrip.updateMetrics.fullReloads == secondaryMetricsBefore.fullReloads)
+        #expect(fixture.controller.tabStrip.updateMetrics.itemReloads == primaryMetricsBefore.itemReloads + 2)
+        #expect(secondaryStrip.updateMetrics.itemReloads == secondaryMetricsBefore.itemReloads)
+        #expect(fixture.controller.editorGroupLayoutSnapshot.primarySelectedTabID == primary.id)
+        #expect(fixture.controller.editorGroupLayoutSnapshot.focusedGroup == .primary)
+        #expect(fixture.router.activeEditorGroup == .primary)
+        #expect(fixture.controller.editorGroupWorkspace.primaryPane.isFocused)
+        #expect(fixture.controller.editorGroupWorkspace.primaryPane.accessibilityValue() as? String == "focused")
+        #expect(fixture.controller.editorGroupWorkspace.secondaryPane?.isFocused == false)
+        #expect(fixture.controller.editorGroupWorkspace.primaryPane.focusUpdateCount == primaryFocusBefore + 1)
+        #expect(fixture.controller.editorGroupWorkspace.secondaryPane?.focusUpdateCount == secondaryFocusBefore.map { $0 + 1 })
+        #expect(fixture.router.events.filter { $0 == .display(primary.buffer, .primary) }.count == 1)
+        #expect(fixture.router.events.filter { $0 == .display(primary.buffer, nil) }.count == 1)
+        #expect(fixture.router.events.filter { $0 == .display(secondary.buffer, .secondary) }.isEmpty)
+    }
+
+    @Test @MainActor
+    func focusingTheOtherCloneGroupChangesOnlyFocusWithoutReloadingEitherStrip() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 500)
+        defer { fixture.controller.close() }
+        let cloned = try #require(fixture.workspace.snapshot().tabs.last)
+        fixture.controller.editorGroupWorkspace.onAction?(
+            .split(cloned.id, .primary, .sideBySide, .copy)
+        )
+        let secondaryStrip = try #require(fixture.controller.editorGroupWorkspace.secondaryPane?.tabStrip)
+        let primaryMetricsBefore = fixture.controller.tabStrip.updateMetrics
+        let secondaryMetricsBefore = secondaryStrip.updateMetrics
+        let cachedLookupsBefore = fixture.controller.editorGroupCachedTabLookupCount
+        let linearInspectionsBefore = fixture.controller.editorGroupLinearTabInspectionCount
+        let primaryFocusBefore = fixture.controller.editorGroupWorkspace.primaryPane.focusUpdateCount
+        let secondaryFocusBefore = fixture.controller.editorGroupWorkspace.secondaryPane?.focusUpdateCount
+        fixture.router.resetEvents()
+
+        fixture.controller.editorGroupWorkspace.onAction?(.focus(.primary))
+
+        #expect(fixture.controller.editorGroupLayoutSnapshot.focusedGroup == .primary)
+        #expect(fixture.controller.editorGroupLayoutSnapshot.primarySelectedTabID == cloned.id)
+        #expect(fixture.controller.editorGroupWorkspace.primaryPane.isFocused)
+        #expect(fixture.controller.editorGroupWorkspace.primaryPane.accessibilityValue() as? String == "focused")
+        #expect(fixture.controller.editorGroupWorkspace.secondaryPane?.isFocused == false)
+        #expect(fixture.controller.editorGroupWorkspace.primaryPane.focusUpdateCount == primaryFocusBefore + 1)
+        #expect(fixture.controller.editorGroupWorkspace.secondaryPane?.focusUpdateCount == secondaryFocusBefore.map { $0 + 1 })
+        #expect(fixture.workspace.snapshot().tabs.first(where: { $0.isActive })?.id == cloned.id)
+        #expect(fixture.controller.tabStrip.updateMetrics == primaryMetricsBefore)
+        #expect(secondaryStrip.updateMetrics == secondaryMetricsBefore)
+        #expect(fixture.controller.editorGroupLinearTabInspectionCount == linearInspectionsBefore)
+        #expect(fixture.controller.editorGroupCachedTabLookupCount - cachedLookupsBefore <= 4)
+        #expect(fixture.router.events.filter { $0 == .display(cloned.buffer, .primary) }.count == 1)
+        #expect(fixture.router.events.filter { $0 == .activate(.primary) }.count == 1)
+        #expect(fixture.router.events.filter { $0 == .focus }.count == 1)
+    }
+
+    @Test @MainActor
+    func unsplitTabClickDoesNotApplyTheSameSelectionTwice() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 500)
+        defer { fixture.controller.close() }
+        let target = fixture.workspace.snapshot().tabs[250]
+        let metricsBefore = fixture.controller.tabStrip.updateMetrics
+        let reconcileBefore = fixture.controller.editorGroupReconcileCount
+        let linearBefore = fixture.controller.editorGroupLinearTabInspectionCount
+
+        fixture.controller.editorGroupWorkspace.onAction?(.select(target.id, .primary))
+        await eventually {
+            fixture.workspace.snapshot().tabs.first(where: { $0.isActive })?.id == target.id
+        }
+
+        #expect(fixture.controller.editorGroupReconcileCount == reconcileBefore)
+        #expect(fixture.controller.editorGroupLinearTabInspectionCount == linearBefore)
+        #expect(fixture.controller.tabStrip.updateMetrics.fullReloads == metricsBefore.fullReloads)
+        #expect(fixture.controller.tabStrip.updateMetrics.itemReloads == metricsBefore.itemReloads + 2)
+        #expect(fixture.controller.tabStrip.activeTabID == target.id)
     }
 
 }

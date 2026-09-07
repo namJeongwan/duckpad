@@ -632,6 +632,38 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         return true
     }
 
+    @discardableResult
+    public func applySelection(
+        previous: TabSnapshot,
+        at previousIndex: Int,
+        current: TabSnapshot,
+        at currentIndex: Int
+    ) -> Bool {
+        guard previousIndex != currentIndex,
+              tabs.indices.contains(previousIndex),
+              tabs.indices.contains(currentIndex),
+              tabs[previousIndex].id == previous.id,
+              tabs[currentIndex].id == current.id,
+              !previous.isActive,
+              current.isActive else { return false }
+        guard documentSwitcher.apply(tab: previous, at: previousIndex),
+              documentSwitcher.apply(tab: current, at: currentIndex) else { return false }
+        tabs[previousIndex] = previous
+        tabs[currentIndex] = current
+        activeIndex = currentIndex
+        isSynchronizingSelection = true
+        hostedCollectionView.reloadItems(at: [
+            IndexPath(item: previousIndex, section: 0),
+            IndexPath(item: currentIndex, section: 0),
+        ])
+        hostedCollectionView.selectionIndexPaths = [IndexPath(item: currentIndex, section: 0)]
+        isSynchronizingSelection = false
+        updateMetrics.itemReloads += 2
+        updateMetrics.directItemInspections += 2
+        pinTabSurfaceOrigin()
+        return true
+    }
+
     public func setInteractionsEnabled(_ isEnabled: Bool) {
         interactionsEnabled = isEnabled
         hostedCollectionView.isSelectable = isEnabled

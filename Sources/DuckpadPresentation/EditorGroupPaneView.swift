@@ -8,6 +8,7 @@ public final class EditorGroupPaneView: NSView {
     public let tabStrip: MultilineTabStripView
     public let editorHostView: NSView
     public private(set) var isFocused = false
+    public private(set) var focusUpdateCount = 0
 
     public init(
         groupID: EditorGroupID,
@@ -65,7 +66,16 @@ public final class EditorGroupPaneView: NSView {
             )
         }
         tabStrip.apply(tabs: selectedTabs)
+        setFocused(focused)
+    }
+
+    public func setFocused(_ focused: Bool) {
+        guard isFocused != focused else {
+            setAccessibilityValue(focused ? "focused" : "not focused")
+            return
+        }
         isFocused = focused
+        focusUpdateCount += 1
         setAccessibilityValue(focused ? "focused" : "not focused")
         applyFocusAppearance()
     }

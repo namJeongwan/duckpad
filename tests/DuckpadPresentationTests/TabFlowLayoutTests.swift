@@ -3030,6 +3030,41 @@ func everyCoreShortcutIdentityIsUnique() {
     #expect(elapsed < .milliseconds(50))
 }
 
+@Test @MainActor func groupLocalSelectionUpdatesOnlyAuthoritativePreviousAndCurrentItems() {
+    let tabs = makeTabs(count: 500, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 700, height: 400, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let previous = TabSnapshot(
+        id: tabs[0].id, title: tabs[0].title, isActive: false,
+        isDirty: tabs[0].isDirty, isPinned: tabs[0].isPinned,
+        buffer: tabs[0].buffer, fullPath: tabs[0].fullPath
+    )
+    let current = TabSnapshot(
+        id: tabs[249].id, title: tabs[249].title, isActive: true,
+        isDirty: tabs[249].isDirty, isPinned: tabs[249].isPinned,
+        buffer: tabs[249].buffer, fullPath: tabs[249].fullPath
+    )
+    let before = strip.updateMetrics
+
+    #expect(strip.applySelection(previous: previous, at: 0, current: current, at: 249))
+    #expect(strip.updateMetrics.fullReloads == before.fullReloads)
+    #expect(strip.updateMetrics.itemReloads == before.itemReloads + 2)
+    #expect(strip.updateMetrics.directItemInspections == before.directItemInspections + 2)
+    #expect(strip.activeTabID == current.id)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 249, section: 0)])
+    #expect(strip.documentSwitcher.tabs[0] == previous)
+    #expect(strip.documentSwitcher.tabs[249] == current)
+
+    let after = strip.updateMetrics
+    #expect(!strip.applySelection(previous: previous, at: 0, current: current, at: 500))
+    #expect(strip.updateMetrics == after)
+    #expect(strip.activeTabID == current.id)
+}
+
 @Test @MainActor func fiveHundredTabIncrementalPathsConfigureOnlyKnownItems() throws {
     var tabs = makeTabs(count: 500, activeIndex: 0)
     let (window, _, strip) = hostStrip(width: 700, height: 400, tabs: tabs)

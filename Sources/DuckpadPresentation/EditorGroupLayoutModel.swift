@@ -57,9 +57,13 @@ public final class EditorGroupLayoutModel {
     @discardableResult
     public func select(_ tabID: TabID, in group: EditorGroupID) -> Bool {
         guard tabIDs(in: group).contains(tabID) else { return false }
+        selectKnownMember(tabID, in: group)
+        return true
+    }
+
+    func selectKnownMember(_ tabID: TabID, in group: EditorGroupID) {
         setSelected(tabID, in: group)
         focusedGroup = group
-        return true
     }
 
     @discardableResult
