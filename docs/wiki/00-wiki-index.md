@@ -176,8 +176,9 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
   `50 tabs, 6 rows`였고 남은 process가 없었다.
 - **Review/delivery:** `0dc85b7`, `1a45f15`, `f63d1e2`, `7012327`, `1a9f8fe`,
   `ca97721`은 모두 exact signed receipt/audit를 통과했다. Cumulative pre-push
-  review는 0 Critical / 0 Important / 0 Minor이며 local/remote feature SHA는
-  `ca97721d8795a647c8677ab339cdfd5b49ff4182`로 일치한다. 이 문서 후보 자체의
+  review는 0 Critical / 0 Important / 0 Minor이다. 문서 커밋 전 code/test
+  checkpoint는 local history와 remote feature 양쪽에서
+  `ca97721d8795a647c8677ab339cdfd5b49ff4182`로 검증됐다. 이 문서 후보 자체의
   receipt/commit 및 이후 main 병합은 순환 자기주장 대신 Git metadata로 검증한다.
 - **Safety:** 루트 worktree의 사용자 소유
   `docs/wiki/04-implementation-foundation.md` 수정과 untracked

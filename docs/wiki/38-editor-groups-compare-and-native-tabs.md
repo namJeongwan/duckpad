@@ -328,8 +328,9 @@ smoke (`6` rows); no app process remains.
 
 Commits `0dc85b7`, `1a45f15`, `f63d1e2`, `7012327`, `1a9f8fe`, and `ca97721`
 each pass exact signed-receipt verification and post-commit audit. Cumulative
-pre-push review reports 0 Critical / 0 Important / 0 Minor. Local and remote
-`feature/editor-groups-compare` both resolve to
+pre-push review reports 0 Critical / 0 Important / 0 Minor. Before documentation
+commits, the code/test checkpoint was verified on both local history and remote
+`feature/editor-groups-compare` as
 `ca97721d8795a647c8677ab339cdfd5b49ff4182`. Documentation-candidate receipt and
 the later main integration are verified from Git metadata rather than claimed
 recursively by this file's own bytes.
