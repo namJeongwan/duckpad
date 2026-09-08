@@ -832,8 +832,6 @@ struct ScintillaBridgeTests {
             styleMask: [.titled], backing: .buffered, defer: false
         )
         window.contentView = adapter.view
-        window.makeKeyAndOrderFront(nil)
-        defer { window.orderOut(nil) }
         secondary.focusEditor()
         let event = try #require(NSEvent.keyEvent(
             with: .keyDown,
@@ -847,14 +845,17 @@ struct ScintillaBridgeTests {
             isARepeat: false,
             keyCode: 33
         ))
-        NSApplication.shared.postEvent(event, atStart: true)
-        let queuedEvent = try #require(NSApplication.shared.nextEvent(
-            matching: .keyDown,
-            until: Date(timeIntervalSinceNow: 0.1),
-            inMode: .default,
-            dequeue: true
-        ))
-        NSApplication.shared.sendEvent(queuedEvent)
+        let application = NSApplication.shared
+        // Smart editing classifies direct input from NSApp.currentEvent. Avoid
+        // nextEvent(_:), which takes over the test runner's main event drain.
+        let setCurrentEvent = NSSelectorFromString("_setCurrentEvent:")
+        try #require(application.responds(to: setCurrentEvent))
+        do {
+            let previousEvent = application.currentEvent
+            _ = application.perform(setCurrentEvent, with: event)
+            defer { _ = application.perform(setCurrentEvent, with: previousEvent) }
+            window.sendEvent(event)
+        }
         #expect(secondary.caretUTF8Position == 1)
 
         #expect(adapter.applyLanguage(.init(
@@ -1214,21 +1215,28 @@ struct ScintillaBridgeTests {
         ))
         adapter.display(second.buffer)
         let originalRecovery = try #require(adapter.recoverySnapshot(for: second.buffer.bufferID))
+        let regexEngine = SearchScanBarrierRegexEngine(base: ICURegexEngine())
+        defer { regexEngine.releaseScan() }
         let search = SearchWorkspaceUseCase(
             workspace: workspace,
             editor: adapter,
-            regexEngine: ICURegexEngine()
+            regexEngine: regexEngine
         )
 
         await store.arm()
+        let replacement = Task {
+            try await search.replaceAll(SearchQuery(
+                pattern: "duck",
+                replacement: "goose",
+                options: SearchOptions(mode: .regularExpression)
+            ))
+        }
+        await regexEngine.waitUntilScanEntered()
         let activation = Task { await workspace.activate(tabID: first.id) }
         await store.waitUntilBlocked()
-        let replacement = Task {
-            try await search.replaceAll(SearchQuery(pattern: "duck", replacement: "goose"))
-        }
-        await Task.yield()
         await store.release()
         #expect(await activation.value == .applied(.saved))
+        regexEngine.releaseScan()
 
         do {
             _ = try await replacement.value
