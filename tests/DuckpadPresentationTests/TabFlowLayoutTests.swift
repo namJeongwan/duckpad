@@ -1346,6 +1346,39 @@ func languageMenusUseBoundedAlphabetHierarchyWithoutLosingDefinitions() throws {
     }
 }
 
+@Test @MainActor
+func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async throws {
+    let registry = try LanguageManifestLoader().loadBundled()
+    let selectedID = LanguageID(rawValue: "cpp")
+    var restored = ScratchSession()
+    let tabID = restored.addUntitled()
+    try restored.setLanguageOverride(.manual(selectedID), for: tabID)
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore(session: restored))
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = Set(registry.definitions.map(\.lexerName))
+    let service = LanguageWorkspaceUseCase(
+        registry: registry,
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(frame: .zero),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+
+    controller.start()
+    await controller.waitForStartup()
+
+    let menu = controller.makeLanguageStatusMenu()
+    let positioningItem = try #require(LanguageMenuBuilder.positioningItem(in: menu))
+    #expect(positioningItem.title == "C")
+    #expect(positioningItem.submenu?.items.first { $0.state == .on }?.title == "C++")
+}
+
 @Test @MainActor func mainMenuPublishesNativeTabSelectorsAndExactShortcuts() async {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())

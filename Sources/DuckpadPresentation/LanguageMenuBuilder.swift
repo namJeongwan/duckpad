@@ -26,4 +26,16 @@ enum LanguageMenuBuilder {
             menu.addItem(parent)
         }
     }
+
+    static func positioningItem(in menu: NSMenu) -> NSMenuItem? {
+        menu.items.first { item in
+            item.state == .on || item.submenu.map(containsSelectedItem) == true
+        }
+    }
+
+    private static func containsSelectedItem(in menu: NSMenu) -> Bool {
+        menu.items.contains { item in
+            item.state == .on || item.submenu.map(containsSelectedItem) == true
+        }
+    }
 }

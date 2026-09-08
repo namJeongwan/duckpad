@@ -735,7 +735,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard workspaceInteractionsAreActionable else { return }
         let menu = makeLanguageStatusMenu()
         menu.popUp(
-            positioning: menu.items.first(where: { $0.state == .on }),
+            positioning: LanguageMenuBuilder.positioningItem(in: menu),
             at: NSPoint(x: languageStatus.bounds.minX, y: languageStatus.bounds.maxY + 3),
             in: languageStatus
         )
