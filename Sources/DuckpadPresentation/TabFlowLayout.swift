@@ -73,7 +73,7 @@ public struct TabFlowLayoutEngine: Sendable {
         // A proposed width includes the complete rendered filename. It is an
         // inviolable minimum even when a caller still supplies the legacy
         // maximumItemWidth configuration.
-        var boundedWidths = itemWidths.map { max($0, minimumItemWidth) }
+        let boundedWidths = itemWidths.map { max($0, minimumItemWidth) }
         var rowRanges: [Range<Int>] = []
         var rowStart = 0
         var rowWidth: CGFloat = 0
@@ -88,18 +88,6 @@ public struct TabFlowLayoutEngine: Sendable {
             }
         }
         rowRanges.append(rowStart..<boundedWidths.count)
-
-        for range in rowRanges {
-            let gaps = CGFloat(max(0, range.count - 1)) * horizontalSpacing
-            let occupied = range.reduce(gaps) { $0 + boundedWidths[$1] }
-            let remaining = max(0, usableWidth - occupied)
-            if remaining > 0, !range.isEmpty {
-                let addition = remaining / CGFloat(range.count)
-                for index in range {
-                    boundedWidths[index] += addition
-                }
-            }
-        }
 
         var frames: [CGRect] = []
         var rowIndices: [Int] = []

@@ -2543,25 +2543,30 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             manuallySelectedID = nil
             automatic.state = .on
         }
-        menu.addItem(.separator())
-        var currentGroup: String?
-        for definition in languageDefinitions {
-            if definition.group != currentGroup {
-                if currentGroup != nil { menu.addItem(.separator()) }
-                let heading = NSMenuItem(title: definition.group, action: nil, keyEquivalent: "")
-                heading.isEnabled = false
-                menu.addItem(heading)
-                currentGroup = definition.group
-            }
+        if let plainText = languageDefinitions.first(where: { $0.id == .plainText }) {
             let item = menu.addItem(
-                withTitle: definition.displayName,
+                withTitle: plainText.displayName,
+                action: #selector(performChooseLanguage(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = plainText.id.rawValue
+            item.state = manuallySelectedID == plainText.id ? .on : .off
+        }
+        menu.addItem(.separator())
+        LanguageMenuBuilder.append(
+            languageDefinitions.filter { $0.id != .plainText },
+            to: menu
+        ) { [self] definition in
+            let item = NSMenuItem(
+                title: definition.displayName,
                 action: #selector(performChooseLanguage(_:)),
                 keyEquivalent: ""
             )
             item.target = self
             item.representedObject = definition.id.rawValue
-            item.indentationLevel = 1
             item.state = manuallySelectedID == definition.id ? .on : .off
+            return item
         }
         return menu
     }

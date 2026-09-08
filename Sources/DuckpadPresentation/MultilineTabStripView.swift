@@ -141,17 +141,17 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         view.addSubview(titleLabel)
         view.addSubview(closeButton)
         NSLayoutConstraint.activate([
-            pinImage.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
+            pinImage.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 3),
             pinImage.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             pinImage.widthAnchor.constraint(equalToConstant: 10),
             pinImage.heightAnchor.constraint(equalToConstant: 10),
-            dirtyLabel.leadingAnchor.constraint(equalTo: pinImage.trailingAnchor, constant: 2),
+            dirtyLabel.leadingAnchor.constraint(equalTo: pinImage.trailingAnchor, constant: 1),
             dirtyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             dirtyLabel.widthAnchor.constraint(equalToConstant: 8),
-            titleLabel.leadingAnchor.constraint(equalTo: dirtyLabel.trailingAnchor, constant: 3),
+            titleLabel.leadingAnchor.constraint(equalTo: dirtyLabel.trailingAnchor, constant: 1.5),
             titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            closeButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 4),
-            closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
+            closeButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 2),
+            closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -2),
             closeButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             closeButton.widthAnchor.constraint(equalToConstant: 20),
             closeButton.heightAnchor.constraint(equalToConstant: 20),
@@ -363,6 +363,7 @@ final class TabOverflowScrollView: NSScrollView {
         if hasVerticalScroller { hasVerticalScroller = false }
         synchronizeHorizontalScroller()
         pinContentOrigin()
+        suppressScrollerChrome()
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -376,6 +377,7 @@ final class TabOverflowScrollView: NSScrollView {
             cView.scroll(to: .zero)
         }
         super.reflectScrolledClipView(cView)
+        suppressScrollerChrome()
     }
 
     func pinContentOrigin() {
@@ -385,11 +387,20 @@ final class TabOverflowScrollView: NSScrollView {
         }
         if hasVerticalScroller { hasVerticalScroller = false }
         if hasHorizontalScroller { hasHorizontalScroller = false }
+        suppressScrollerChrome()
     }
 
     private func synchronizeHorizontalScroller() {
         guard hasHorizontalScroller != requiresHorizontalScroller else { return }
         hasHorizontalScroller = requiresHorizontalScroller
+    }
+
+    private func suppressScrollerChrome() {
+        for scroller in [verticalScroller, horizontalScroller].compactMap({ $0 }) {
+            scroller.alphaValue = 0
+            scroller.isHidden = true
+            scroller.setAccessibilityHidden(true)
+        }
     }
 }
 
@@ -979,10 +990,9 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         let width = (tab.title as NSString).size(
             withAttributes: [.font: NSFont.systemFont(ofSize: 12)]
         ).width
-        // Fixed signal/close slots consume 57 pt. Keeping them reserved avoids
-        // hover-induced title movement; the extra breathing room prevents any
-        // filename abbreviation at normal display scales.
-        return ceil(width) + 63
+        // Keep fixed signal/close hit targets while halving only the surrounding
+        // whitespace. The reserved width prevents hover-induced title movement.
+        return ceil(width) + 51
     }
 
     public override func viewDidChangeEffectiveAppearance() {

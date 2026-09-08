@@ -371,23 +371,18 @@ public enum DuckpadMainMenuFactory {
         plain.target = target
         plain.representedObject = LanguageID.plainText.rawValue
         languageMenu.addItem(.separator())
-        var currentGroup: String?
-        for definition in target.languageDefinitions where definition.id != .plainText {
-            if currentGroup != definition.group {
-                if currentGroup != nil { languageMenu.addItem(.separator()) }
-                let heading = NSMenuItem(title: definition.group, action: nil, keyEquivalent: "")
-                heading.isEnabled = false
-                languageMenu.addItem(heading)
-                currentGroup = definition.group
-            }
-            let item = languageMenu.addItem(
-                withTitle: definition.displayName,
+        LanguageMenuBuilder.append(
+            target.languageDefinitions.filter { $0.id != .plainText },
+            to: languageMenu
+        ) { definition in
+            let item = NSMenuItem(
+                title: definition.displayName,
                 action: #selector(DuckpadWindowController.performChooseLanguage(_:)),
                 keyEquivalent: ""
             )
             item.target = target
             item.representedObject = definition.id.rawValue
-            item.indentationLevel = 1
+            return item
         }
         languageMenu.addItem(.separator())
         add("Toggle Line Comment", #selector(DuckpadWindowController.performToggleLineComment(_:)), "/", target, to: languageMenu)

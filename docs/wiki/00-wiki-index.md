@@ -86,7 +86,7 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 72 | [Phase 29B parity gap assessment and extension shortcuts](35-parity-gap-assessment.md) | **Approved, committed and pushed** | 94개 feature를 보수적으로 전수 분류하고 manifest 단축키를 native menu에 연결하며 Extended 검색 escape를 확장했다. commit `f33c4e8`. |
 | 73 | [Phase 29C document dropdown and immediate tab interaction](36-document-dropdown-and-close-latency.md) | **Close behavior retained; visible chrome superseded** | Optimistic durable close, hover, 새 문서 focus와 collection 단위 갱신은 유지된다. 당시 visible `Documents (N)` dropdown과 overlay tab scroller는 Phase 33에서 제거됐다. |
 | 74 | [Phase 30 lightweight smart editing](37-lightweight-smart-editing.md) | **Approved, committed and pushed** | Scintilla의 native insertion contract로 `{[(` 자동 닫기, JSON/Python Enter 들여쓰기, 단일 undo/recovery revision과 Plain Text·paste·IME 비개입 경계를 기록한다. 최종 독립 re-review는 0 Critical / 0 Important / 0 Minor로 승인했고 commit `3c718ef`을 audit 후 원격 브랜치에 반영했다. |
-| 75 | [Phase 33 editor groups, Compare, and native tab chrome](38-editor-groups-compare-and-native-tabs.md) | **Complete — reviewed source is audited, pushed, and smoke-validated** | 두 editor group, 일반 Compare, shared external renderer, exact-`NSMenu` pull-down command bar, visible Documents/internal tab viewport 제거, full-title exact-width justified rows를 기록한다. Focus recursion fix `9ecdd588`, final chrome `cfb6329`, bounded routing fix `c0a0083`을 포함한 source/history `c517cc8`은 review·audit·remote SHA 검증됐고, 이후 그 source로 만든 native `.app`의 서명/리소스/Finder/security-scope/XPC smoke까지 통과했다. |
+| 75 | [Phase 33 editor groups, Compare, and native tab chrome](38-editor-groups-compare-and-native-tabs.md) | **Complete; intrinsic-width/Language follow-up under review** | 두 editor group, 일반 Compare, shared external renderer, exact-`NSMenu` pull-down command bar, visible Documents/internal tab viewport 제거를 기록한다. 2026-09-08 follow-up은 full-title intrinsic-width tabs, overflow-only multiline wrap, 절반 title padding, no-scroll chrome와 bounded alphabet Language menu로 과거의 강제 row justification 설명을 바로잡았다. 기존 reviewed source/history `c517cc8`과 smoke evidence는 그대로 보존한다. |
 
 상태 정의:
 
@@ -163,8 +163,8 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
   Visible `Documents (N)` control/reserved width, row cap, internal viewport와
   scroller를 제거했다. 56-tab/500-tab layout의 모든 row는 full height이며 wheel/activation/
   resize/programmatic clip origin은 zero다. Full intrinsic title은 legacy
-  maximum에도 줄지 않고, every row는 zero inter-item/trailing gap으로 exact
-  right edge까지 justify된다.
+  maximum에도 줄지 않고, 남는 너비로 tab을 억지로 확장하지 않는다. 다음
+  complete tab이 들어가지 않을 때에만 새 row가 생긴다.
 - **Incremental state:** 500-tab path에서 single update 1, persistence 0,
   hover enter/exit 1 each, active old/new 2 configuration만 수행한다. Stable
   `TabID` current-index map이 앞 tab 삭제 뒤 retained hover/close state를
@@ -172,7 +172,7 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - **Notepad++ evidence:** ignored local reference `dda973d2b`의
   `DocTabView.cpp:72-96,196-238`과
   `TabBar.cpp:260-310,700-805,1420-1815`를 read-only로 확인했다. Full
-  label/justified multiline/no-scroll/selected-hover-pin-close semantics만
+  label/intrinsic-width multiline/no-scroll/selected-hover-pin-close semantics만
   Swift/AppKit으로 옮겼고 Win32 owner-draw UI는 복제하지 않았다.
 - **Focus remediation:** packaged UI가 발견한 recursive Scintilla focus는
   already-focused callback을 transition boundary에서 거부하는 `9ecdd588`로

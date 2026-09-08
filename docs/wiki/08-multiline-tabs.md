@@ -16,9 +16,9 @@ wrap한다. 제목 truncation/abbreviation/ellipsis와 visible tab scroller는 �
 Wheel, activation, resize, programmatic clip movement 뒤에도 clip origin은
 항상 zero이고 horizontal/vertical scroller는 계속 비활성이다.
 
-각 행은 full intrinsic title width를 최소값으로 보존한 채 남는 폭을 item에
-동일 분배한다. 따라서 legacy maximum-width 설정도 제목을 줄일 수 없고,
-item 사이와 마지막 item 뒤의 trailing gap은 정확히 0이다. **Tabs → Open
+각 행은 full intrinsic title width를 그대로 보존하고 남는 폭을 item에
+분배하지 않는다. 따라서 legacy maximum-width 설정도 제목을 줄일 수 없고,
+다음 complete item이 들어가지 않을 때에만 새 행으로 wrap한다. **Tabs → Open
 Document…** (`Command-Shift-O`)는 별도의 keyboard-first navigation 경로로
 계속 제공된다.
 
@@ -73,9 +73,9 @@ record](38-editor-groups-compare-and-native-tabs.md)를 따른다.
   stable order와 selected visibility를 검증했다. Phase 33 Task 10은 row cap과
   internal overflow를 제거하고 56/500 tabs의 complete content height,
   zero clip origin, disabled scrollers를 검증한다.
-- Every row가 container right edge까지 exact-width justify되며 inter-item과
-  trailing gap은 0이다. Full intrinsic title은 legacy maximum에도 줄거나
-  ellipsize되지 않는다.
+- 각 item은 full intrinsic title width를 유지하고 남는 row width를 소비하지
+  않는다. 다음 complete item이 들어가지 않을 때만 wrap하며 legacy maximum에도
+  줄거나 ellipsize되지 않는다.
 - single-pass cached layout, O(1) item/rowCount lookup, O(log rows + intersecting rows/items) visible query, engine-input invalidation, persistence-only no-op and settled 500-tab edit `fullReload=0/itemReload=1`.
 - Current 500-tab incremental metrics는 single-tab update 1, persistence 0,
   hover enter/exit 각각 1, active old/new 2 item configuration을 보장한다.

@@ -88,9 +88,10 @@ scope.
 
 Phase 33 removes title truncation entirely. Short and long titles use their
 complete intrinsic width, hidden affordances do not compress the filename, and
-rows wrap only between complete tab items. Every justified row reaches the
-container's right edge with zero inter-item/trailing gap. Tab row caps and the
-internal viewport are removed: 56 and 500 tabs expose their full content
-height, both scrollers stay disabled, and wheel/activation/programmatic clip
-movement stays at origin zero. The switcher remains a fast independent
-navigation route rather than a workaround for hidden tab rows.
+rows wrap only between complete tab items when the next item no longer fits.
+Rows do not stretch their items to consume unused width, so a small tab set
+keeps a normal trailing area. Tab row caps and the internal viewport are
+removed: 56 and 500 tabs expose their full content height, both scrollers and
+their chrome stay suppressed, and wheel/activation/programmatic clip movement
+stays at origin zero. The switcher remains a fast independent navigation route
+rather than a workaround for hidden tab rows.

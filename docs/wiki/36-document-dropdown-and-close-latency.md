@@ -10,8 +10,8 @@ scrollers. **Tabs → Open Document…** and `Command-Shift-O` still open the sa
 searchable panel, now anchored to the tab-strip surface. Tabs are connected,
 multi-row 27-point strips; every title uses its complete intrinsic width and is
 never truncated or ellipsized, even when a legacy maximum width is supplied.
-Rows wrap only between whole tab items, then distribute remaining width so
-every row has zero inter-item and trailing gap. There is no row cap or internal
+Rows wrap only between whole tab items when the next item no longer fits and
+leave unused row width available instead of stretching titles. There is no row cap or internal
 tab viewport: all rows in the 56- and 500-tab layouts contribute their full content height, clip
 origin stays zero, and wheel, activation, resize, or programmatic reflection
 cannot re-enable scrolling.

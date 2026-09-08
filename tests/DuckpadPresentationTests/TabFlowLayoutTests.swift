@@ -1,6 +1,7 @@
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
+import DuckpadInfrastructure
 @testable import DuckpadPresentation
 import Testing
 
@@ -395,30 +396,25 @@ private func blockCommentLanguageRegistry() throws -> LanguageRegistry {
     #expect(result.contentHeight == 69)
 }
 
-@Test func everyRowIsJustifiedToTheContainerRightEdgeWithoutShrinkingTitles() {
+@Test func rowsKeepIntrinsicWidthsAndWrapOnlyWhenTheNextTabDoesNotFit() {
     let engine = TabFlowLayoutEngine()
-    let cases: [[CGFloat]] = [[100], [100, 100], [80, 90, 100, 110, 120]]
-    for widths in cases {
-        let result = engine.layout(itemWidths: widths, containerWidth: 250)
-        for row in 0..<result.rowCount {
-            let indices = result.rowIndices.indices.filter { result.rowIndices[$0] == row }
-            let frames = indices.map { result.frames[$0] }
-            #expect(frames.first?.minX == 0)
-            #expect(frames.last?.maxX == 250)
-            for pair in zip(frames, frames.dropFirst()) {
-                #expect(pair.0.maxX == pair.1.minX)
-            }
-            for index in indices {
-                #expect(result.frames[index].width >= widths[index])
-            }
-        }
-    }
+    let roomy = engine.layout(itemWidths: [100, 100, 100, 100], containerWidth: 500)
+    let exactFit = engine.layout(itemWidths: [100, 100, 100, 100], containerWidth: 400)
+    let wrapped = engine.layout(itemWidths: [100, 100, 100, 100], containerWidth: 399)
+
+    #expect(roomy.frames.map(\.width) == [100, 100, 100, 100])
+    #expect(roomy.frames.last?.maxX == 400)
+    #expect(roomy.rowIndices == [0, 0, 0, 0])
+    #expect(exactFit.frames.map(\.width) == [100, 100, 100, 100])
+    #expect(exactFit.rowIndices == [0, 0, 0, 0])
+    #expect(wrapped.frames.map(\.width) == [100, 100, 100, 100])
+    #expect(wrapped.rowIndices == [0, 0, 0, 1])
 }
 
 @Test func legacyMaximumWidthCannotShrinkAFullIntrinsicTitle() {
     let engine = TabFlowLayoutEngine(minimumItemWidth: 90, maximumItemWidth: 180)
     let result = engine.layout(itemWidths: [20, 500], containerWidth: 95)
-    #expect(result.frames.map(\.width) == [95, 500])
+    #expect(result.frames.map(\.width) == [90, 500])
     #expect(result.contentWidth >= 500)
     #expect(result.rowCount == 2)
 }
@@ -497,6 +493,8 @@ struct AppKitHostedTests {
     #expect(strip.hostedScrollView.frame.maxX == strip.bounds.maxX)
     #expect(!strip.hostedScrollView.hasHorizontalScroller)
     #expect(!strip.hostedScrollView.hasVerticalScroller)
+    #expect(strip.hostedScrollView.horizontalScroller?.alphaValue ?? 0 == 0)
+    #expect(strip.hostedScrollView.verticalScroller?.alphaValue == 0)
     #expect(strip.rowCount > 1)
     #expect(strip.selectedTabIsVisible)
 }
@@ -1288,6 +1286,64 @@ func everyCoreShortcutIdentityIsUnique() {
     }
 
     #expect(Set(identities).count == identities.count)
+}
+
+@Test @MainActor
+func languageMenusUseBoundedAlphabetHierarchyWithoutLosingDefinitions() throws {
+    _ = NSApplication.shared
+    let registry = try LanguageManifestLoader().loadBundled()
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = Set(registry.definitions.map(\.lexerName))
+    let service = LanguageWorkspaceUseCase(
+        registry: registry,
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+
+    let mainMenu = DuckpadMainMenuFactory.make(target: controller)
+    let mainLanguageMenu = try #require(
+        mainMenu.items.first { $0.submenu?.title == "Language" }?.submenu
+    )
+    let statusLanguageMenu = controller.makeLanguageStatusMenu()
+
+    for menu in [mainLanguageMenu, statusLanguageMenu] {
+        #expect(menu.items.count <= 30)
+        let a = try #require(menu.items.first { $0.title == "A" })
+        let c = try #require(menu.items.first { $0.title == "C" })
+        #expect(a.submenu != nil)
+        #expect(c.submenu?.items.map(\.title).contains("C") == true)
+        #expect(c.submenu?.items.map(\.title).contains("C#") == true)
+        #expect(c.submenu?.items.map(\.title).contains("C++") == true)
+        #expect(c.submenu?.items.map(\.title).contains("CMake") == true)
+
+        for singletonTitle in ["XML", "YAML"] {
+            let singleton = try #require(menu.items.first { $0.title == singletonTitle })
+            #expect(singleton.submenu == nil)
+            #expect(singleton.indentationLevel == 0)
+        }
+        for formerHeading in ["Build", "C Family", "Config", "Data", "Database"] {
+            #expect(menu.items.contains { $0.title == formerHeading } == false)
+        }
+
+        let languageLeaves = flattenedMenuItems(in: menu).filter {
+            $0.action == #selector(DuckpadWindowController.performChooseLanguage(_:))
+        }
+        let languageIDs = languageLeaves.compactMap { $0.representedObject as? String }
+        let expectedIDs = registry.definitions.map { $0.id.rawValue }
+        #expect(languageIDs.count == expectedIDs.count)
+        #expect(Set(languageIDs) == Set(expectedIDs))
+        #expect(Set(languageIDs).count == languageIDs.count)
+        #expect(languageLeaves.allSatisfy { $0.target === controller })
+    }
 }
 
 @Test @MainActor func mainMenuPublishesNativeTabSelectorsAndExactShortcuts() async {
@@ -2237,6 +2293,37 @@ func everyCoreShortcutIdentityIsUnique() {
     #expect(closeButton?.accessibilityLabel() == "Close new 1")
     closeButton?.performClick(nil)
     #expect(closed == tabs[0].id)
+}
+
+@Test @MainActor func fourShortTabsKeepMeasuredWidthsAndCompactTitlePadding() throws {
+    let tabs = makeTabs(count: 4, activeIndex: 3)
+    let (window, _, strip) = hostStrip(width: 890, height: 200, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    let frames = try (0..<tabs.count).map { index in
+        try #require(strip.flowLayout.layoutAttributesForItem(
+            at: IndexPath(item: index, section: 0)
+        )?.frame)
+    }
+    #expect(strip.rowCount == 1)
+    #expect(frames.map(\.width) == strip.flowLayout.itemWidths)
+    #expect(frames.last?.maxX ?? .infinity < strip.hostedScrollView.contentSize.width)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
+    #expect(!strip.hostedScrollView.hasVerticalScroller)
+
+    let item = try #require(strip.hostedCollectionView.item(
+        at: IndexPath(item: 0, section: 0)
+    ))
+    let title = try #require(descendantTextFields(of: item.view).first {
+        $0.stringValue == tabs[0].title
+    })
+    #expect(title.frame.minX <= 24)
+    #expect(item.view.bounds.maxX - title.frame.maxX <= 24)
+    #expect(title.frame.width >= title.intrinsicContentSize.width)
 }
 
 @Test @MainActor func shortAndLongTabTitlesKeepTheirFullIntrinsicLabelWidth() throws {

@@ -21,10 +21,13 @@ selectors, shortcuts, state, hidden items, and validation remain authoritative.
 Dark/Light Aqua receive semantic hover and open feedback. Teardown/reapply
 restores the original menu attachment and every item visibility bit.
 
-Tabs are connected multi-row strips with complete, never-ellipsized titles,
-exact row-wide justification, and no visible or internal tab viewport. Every
-row remains in the window at full content height; wheel/selection/resize cannot
-move the clip origin or re-enable a scroller.
+Tabs are connected multi-row strips with complete, never-ellipsized titles and
+compact title-side whitespace. Each tab keeps its measured intrinsic width, so
+a short row leaves ordinary trailing room instead of stretching to fill 100%.
+Wrapping adds a row only when the next whole tab no longer fits. There is no
+visible or internal tab viewport; every row remains in the window at full
+content height, and wheel/selection/resize cannot move the clip origin or
+expose scroller chrome.
 
 ## Historical Phase 11 goal
 
@@ -50,9 +53,10 @@ organizer or changing scratch-first behavior.
   supersedes that menu with the current searchable keyboard-first popover while
   preserving stable-`TabID` routing.
 - A real 24-point status bar owns extension and language controls outside the
-  editor frame. Extension status opens the manager. Language status opens a
-  grouped native dropdown containing Automatic Detection and every bundled
-  language; the current automatic/manual choice is checked.
+  editor frame. Extension status opens the manager. Language status opens the
+  bounded native alphabet menu shared with the command bar; Automatic
+  Detection, Plain Text, and the current automatic/manual check state remain
+  direct and authoritative.
 - Scintilla now styles the line-number and fold margins for light/dark palettes,
   uses a smaller coherent gutter, adds editor text padding and line spacing, and
   gives the caret line a low-alpha highlight. The `NSTextView` fallback uses

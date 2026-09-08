@@ -1,6 +1,6 @@
 # Duckpad Delivery Dashboard
 
-Last updated: 2026-09-07 (Asia/Seoul)
+Last updated: 2026-09-08 (Asia/Seoul)
 
 ## Product direction
 
@@ -15,7 +15,8 @@ Last updated: 2026-09-07 (Asia/Seoul)
 | --- | --- | --- |
 | Editor groups | Implemented and locally audited | Two window-local groups, separate routed Scintilla hosts, right/down drag Split, move/Option-copy, focus/close commands, and state normalization are committed through `92c5773` |
 | Open-document Compare | Implemented and locally audited | Immutable non-activating capture, bounded Myers alignment, shared external-conflict renderer, read-only fixed rows, semantic markers, synchronized vertical and independent horizontal scroll are committed through `04d6d4d` |
-| Native command and tab chrome | Implemented and locally audited | Genuine AppKit pull-down command controls retain exact native menu identity; full-height exact-width-justified multi-row tabs have no internal viewport, gaps, scrollers, clipping movement, or title shrink/ellipsis. Latest chrome correction is `cfb6329` |
+| Native command and tab chrome | Follow-up candidate validated | Genuine AppKit pull-down command controls retain exact native menu identity. Tabs keep full intrinsic title widths and compact spacing, leave ordinary trailing room instead of stretching to 100%, and add a full-height row only when the next complete tab no longer fits. Tab scrolling and scroller chrome remain disabled |
+| Compact Language menus | Follow-up candidate validated | The window command bar and status control use the same bounded native `NSMenu`: Auto/Plain Text stay direct, repeated initials become alphabet submenus, singleton initials such as XML/YAML/Zig stay direct, and all 78 definitions retain their original action/ID/state |
 | Recursive editor-group focus | Fixed and locally audited | `9ecdd588` rejects an already-focused synchronous Scintilla callback at the transition boundary; Task 9 group-command tests pass 21/21 and independent review reports 0/0/0 |
 | Bounded editor-group routing | Fixed and locally audited | `c0a0083` restores the source editor after native tab reparenting and makes normal 500-tab edit/activation/click/clone-focus paths cache-validated O(1), with group-local updates and synchronized pane focus/accessibility |
 | Focused and serial validation | Passed | Compare 21/21, editor-group commands 27/27, TabFlow/AppKit 85/85, layout model 15/15, workspace 16/16, Scintilla group 23/23; full serial suite exits 0 across 633 discovered tests; Debug/Release builds pass |

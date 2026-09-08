@@ -136,14 +136,17 @@ a retained item's hover/close behavior correct after an earlier deletion.
 
 Tab titles are never truncated, abbreviated, ellipsized, or shrunk by a legacy
 maximum width. Each item measures the complete filename at its intrinsic width,
-and wrapping occurs only between whole tab items. Remaining row width is
-distributed equally without violating those minimum widths, so every row ends
-at the container's exact right edge with zero inter-item or trailing gap.
+and wrapping occurs only between whole tab items when the next item no longer
+fits. Remaining row width is intentionally left available instead of being
+distributed across the row. Title-side whitespace is halved while fixed
+pin/dirty/close hit targets remain stable.
 
 There is no tab row cap or internal viewport. All rows contribute their full
 content height, including 56- and 500-tab layouts. Horizontal and vertical
 scrollers remain disabled, and wheel input, activation, resize, or programmatic
-clip movement leaves the clip origin at zero. **Open Document…** remains a
+clip movement leaves the clip origin at zero. AppKit-owned scrollers remain
+attached for lifecycle safety but are noninteractive, visually suppressed, and
+hidden from accessibility. **Open Document…** remains a
 keyboard-first navigation option, not a workaround for clipped tab rows.
 Editor and Compare content scrolling are unaffected by this tab-chrome rule.
 
@@ -171,8 +174,8 @@ The ignored local Notepad++ tree is pinned at
   updates the complete label and escapes ampersands so native measurement
   retains the literal filename.
 - `notepad-plus-plus/PowerEditor/src/WinControls/TabBar/TabBar.cpp:260-310`
-  enables multiline tabs without the ragged-right style, providing the pinned
-  row-wide justification behavior.
+  enables multiline tabs without opting into fixed-width/right-justified tab
+  styles, preserving content-measured widths until another row is needed.
 - `notepad-plus-plus/PowerEditor/src/WinControls/TabBar/TabBar.cpp:700-805`
   separates single-line wheel scrolling from multiline behavior and explicitly
   avoids scrolling the multiline tab mode.
@@ -181,8 +184,8 @@ The ignored local Notepad++ tree is pinned at
   without an ellipsis drawing flag.
 
 Duckpad translates those workflow semantics into Swift/AppKit: inviolable
-intrinsic full-title widths, item-boundary multi-row wrapping, exact row-wide
-justification, pinned zero-origin/no-scroller behavior, connected semantic
+intrinsic full-title widths, item-boundary multi-row wrapping only on overflow,
+ordinary trailing room, pinned zero-origin/no-scroll behavior, connected semantic
 colors, system accent, native pull-down menus, and accessibility. It does not
 copy Win32 owner-drawing or the legacy Windows visual style. The ignored
 reference tree was not modified or included in any feature commit.
@@ -244,3 +247,27 @@ remote-verified on `origin/feature/editor-groups-compare`. The fresh package and
 smoke above ran afterward from that exact source. This paragraph does not claim
 that the current three-document closeout has already been reviewed, audited, or
 pushed.
+
+## 2026-09-08 intrinsic-width and Language-menu follow-up
+
+The earlier Task 10 wording that described exact row-wide justification was an
+incorrect interpretation of the target behavior. The current layout keeps each
+tab at its full measured filename width and wraps only when the next complete
+item would exceed the row. Four short tabs therefore occupy only their required
+width; they do not stretch to 100%. Surrounding title whitespace is reduced by
+half without shrinking the pin, dirty, or close affordance slots.
+
+The window Language control and status Language control now share one compact
+native builder. Auto and Plain Text stay direct, repeated initials use alphabet
+submenus, singleton initials stay direct, and the root remains bounded while all
+78 definitions retain exactly one action leaf. This is an `NSMenu` hierarchy,
+not a custom popup, parser, indexer, or new dependency.
+
+RED tests captured the previous equal-width stretching and flat 78-item menu.
+The focused intrinsic/wrap, compact-padding, no-scroller-chrome, and menu
+identity/cardinality tests now pass. Nonvisible AppKit integration additionally
+passes the native right/down drag-Split suite 16/16, Compare command suite
+10/10, and Compare panel suite 10/10. A packaged screen check confirmed direct
+intrinsic-width tabs, overflow-only row creation, no tab scroller chrome, the
+bounded Language hierarchy, and exactly one selected tab; all disposable test
+apps and their isolated data were removed from the workspace afterward.

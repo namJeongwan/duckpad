@@ -196,7 +196,7 @@ private func paletteMenu(
     controller.commandPalettePanel.present(
         menu: paletteMenu(target: target),
         excludingAction: nil,
-        relativeTo: controller.tabStrip.documentSwitcher
+        relativeTo: controller.commandBar
     )
     #expect(controller.commandPalettePanel.isPresented)
     controller.applicationMainMenuDidChange(
