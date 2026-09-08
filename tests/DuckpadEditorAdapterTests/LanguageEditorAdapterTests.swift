@@ -49,14 +49,15 @@ struct LanguageEditorAdapterTests {
             isARepeat: false,
             keyCode: keyCode
         ))
-        NSApplication.shared.postEvent(event, atStart: true)
-        let queuedEvent = try #require(NSApplication.shared.nextEvent(
-            matching: .keyDown,
-            until: Date(timeIntervalSinceNow: 0.1),
-            inMode: .default,
-            dequeue: true
-        ))
-        NSApplication.shared.sendEvent(queuedEvent)
+        let application = NSApplication.shared
+        // Smart editing classifies direct input from NSApp.currentEvent. Avoid
+        // nextEvent(_:), which takes over the test runner's main event drain.
+        let setCurrentEvent = NSSelectorFromString("_setCurrentEvent:")
+        try #require(application.responds(to: setCurrentEvent))
+        let previousEvent = application.currentEvent
+        _ = application.perform(setCurrentEvent, with: event)
+        defer { _ = application.perform(setCurrentEvent, with: previousEvent) }
+        window.sendEvent(event)
     }
 
     @MainActor
@@ -276,7 +277,6 @@ struct LanguageEditorAdapterTests {
                 maximumStyleBytes: 1_000_000
             ))
             view.setPrimarySelectionUTF8Range(NSRange(location: 1, length: 0))
-            window.makeKeyAndOrderFront(nil)
             view.focusEditor()
 
             try sendKeyEvent(
@@ -288,7 +288,6 @@ struct LanguageEditorAdapterTests {
 
             #expect(String(decoding: view.contentUTF8, as: UTF8.self) == expected)
             #expect(view.caretUTF8Position == caret)
-            window.orderOut(nil)
         }
     }
 
@@ -305,7 +304,6 @@ struct LanguageEditorAdapterTests {
             braceMatching: true,
             maximumStyleBytes: 1_000_000
         ))
-        window.makeKeyAndOrderFront(nil)
         view.focusEditor()
         try sendKeyEvent(
             characters: "{",
