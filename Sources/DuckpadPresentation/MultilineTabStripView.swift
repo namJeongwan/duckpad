@@ -410,6 +410,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     public struct UpdateMetrics: Equatable {
         public fileprivate(set) var fullReloads = 0
         public fileprivate(set) var itemReloads = 0
+        public fileprivate(set) var itemInsertions = 0
         public fileprivate(set) var directItemInspections = 0
         public fileprivate(set) var itemConfigurations = 0
     }
@@ -538,6 +539,10 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     public func apply(change: WorkspaceChange) {
+        if case let .tabInserted(index) = change.kind {
+            applyTabInsertion(change, at: index)
+            return
+        }
         documentSwitcher.apply(change: change)
         switch change.kind {
         case .persistence:
@@ -585,7 +590,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             updateMetrics.itemReloads += affected.count
             pinTabSurfaceOrigin()
         case .tabInserted:
-            apply(tabs: change.snapshot.tabs)
+            assertionFailure("tab insertions are handled before the document switcher refresh")
         case .tabRemovalPending(let index):
             if tabs.count == change.snapshot.tabs.count + 1, tabs.indices.contains(index) {
                 // Shrink the custom layout cache before the collection view
@@ -927,6 +932,57 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         isSynchronizingSelection = true
         hostedCollectionView.selectionIndexPaths = authoritative
         isSynchronizingSelection = false
+    }
+
+    private func applyTabInsertion(_ change: WorkspaceChange, at index: Int) {
+        let updatedTabs = change.snapshot.tabs
+        let existingIDs = updatedTabs.enumerated().compactMap { entry in
+            entry.offset == index ? nil : entry.element.id
+        }
+        guard updatedTabs.count == tabs.count + 1,
+              (0...tabs.count).contains(index),
+              !tabs.contains(where: { $0.id == updatedTabs[index].id }),
+              tabs.map(\.id) == existingIDs,
+              flowLayout.itemWidths.count == tabs.count else {
+            apply(tabs: updatedTabs)
+            return
+        }
+
+        let previouslyActiveID = tabs.first(where: \.isActive)?.id
+        if let hoveredTabIndex, hoveredTabIndex >= index {
+            self.hoveredTabIndex = hoveredTabIndex + 1
+        }
+        tabs = updatedTabs
+        rebuildTabIndices()
+        activeIndex = tabs.firstIndex(where: \.isActive)
+        guard flowLayout.insertItemWidth(tabWidth(updatedTabs[index]), at: index) else {
+            apply(tabs: updatedTabs)
+            return
+        }
+        documentSwitcher.apply(change: change)
+
+        let previouslyActiveIndex = previouslyActiveID.flatMap { tabIndexByID[$0] }
+        let oldActiveNeedsReload = previouslyActiveIndex.map { !tabs[$0].isActive } ?? false
+
+        isSynchronizingSelection = true
+        hostedCollectionView.insertItems(at: [IndexPath(item: index, section: 0)])
+        hostedCollectionView.selectionIndexPaths = activeIndex.map {
+            Set([IndexPath(item: $0, section: 0)])
+        } ?? []
+        isSynchronizingSelection = false
+        updateMetrics.itemInsertions += 1
+
+        if oldActiveNeedsReload, let previouslyActiveIndex {
+            hostedCollectionView.reloadItems(
+                at: [IndexPath(item: previouslyActiveIndex, section: 0)]
+            )
+            updateMetrics.itemReloads += 1
+        }
+        hostedCollectionView.layoutSubtreeIfNeeded()
+        updateDocumentFrame()
+        updateViewportHeight()
+        refreshVisibleItems()
+        pinTabSurfaceOrigin()
     }
 
     private func refreshVisibleItems() {

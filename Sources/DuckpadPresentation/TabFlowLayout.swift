@@ -191,6 +191,7 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
     private var widthsVersion: UInt64 = 0
     private var preparedWidthsVersion: UInt64 = .max
     private var preparedWidth: CGFloat = -.greatestFiniteMagnitude
+    private var preparedItemCount = -1
     public private(set) var layoutGeneration: UInt64 = 0
     public private(set) var lastElementsQueryVisitedRows = 0
     public private(set) var lastElementsQueryInspectedItems = 0
@@ -200,7 +201,18 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         super.prepare()
         guard let collectionView else { return }
         let width = viewportWidth > 0 ? viewportWidth : collectionView.bounds.width
-        guard preparedWidthsVersion != widthsVersion || preparedWidth != width else { return }
+        let hasDataSource = collectionView.dataSource != nil
+        let itemCount = hasDataSource ? collectionView.numberOfItems(inSection: 0) : itemWidths.count
+        guard !hasDataSource || itemWidths.count == itemCount else {
+            // During a structural collection update, AppKit can prepare the
+            // layout while its internal item count still reflects the old
+            // data source. Keep the last coherent cache until both counts
+            // agree, then the already-invalidated layout will prepare again.
+            return
+        }
+        guard preparedWidthsVersion != widthsVersion
+                || preparedWidth != width
+                || preparedItemCount != itemCount else { return }
         let result = engine.layout(itemWidths: itemWidths, containerWidth: width)
         attributes = result.frames.enumerated().map { index, frame in
             let item = NSCollectionViewLayoutAttributes(forItemWith: IndexPath(item: index, section: 0))
@@ -212,6 +224,7 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         rows = Self.makeRows(frames: result.frames, rowIndices: result.rowIndices)
         preparedWidthsVersion = widthsVersion
         preparedWidth = width
+        preparedItemCount = itemCount
         layoutGeneration &+= 1
         let newSize = NSSize(width: result.contentWidth, height: result.contentHeight)
         if calculatedSize != newSize {
@@ -259,6 +272,13 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
     public func updateItemWidth(_ width: CGFloat, at index: Int) {
         guard itemWidths.indices.contains(index), itemWidths[index] != width else { return }
         itemWidths[index] = width
+    }
+
+    @discardableResult
+    public func insertItemWidth(_ width: CGFloat, at index: Int) -> Bool {
+        guard (0...itemWidths.count).contains(index) else { return false }
+        itemWidths.insert(width, at: index)
+        return true
     }
 
     public func destinationIndex(at point: NSPoint) -> Int {
