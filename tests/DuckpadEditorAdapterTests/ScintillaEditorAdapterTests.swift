@@ -787,7 +787,7 @@ struct ScintillaBridgeTests {
     }
 
     @Test @MainActor
-    func smartPairingKeepsCaretInTheSplitPaneThatReceivedInput() throws {
+    func smartPairingAndCloserSkipKeepCaretInTheSplitPaneThatReceivedInput() throws {
         let adapter = ScintillaEditorAdapter()
         let bufferID = BufferID()
         adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
@@ -808,6 +808,14 @@ struct ScintillaBridgeTests {
         #expect(String(decoding: primary.contentUTF8, as: UTF8.self) == "{}")
         #expect(String(decoding: secondary.contentUTF8, as: UTF8.self) == "{}")
         #expect(secondary.caretUTF8Position == 1)
+
+        secondary.insertCommittedText("}")
+
+        #expect(String(decoding: primary.contentUTF8, as: UTF8.self) == "{}")
+        #expect(String(decoding: secondary.contentUTF8, as: UTF8.self) == "{}")
+        #expect(secondary.caretUTF8Position == 2)
+        #expect(primary.revision == 1)
+        #expect(secondary.revision == 1)
     }
 
     @Test @MainActor

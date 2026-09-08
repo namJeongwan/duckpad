@@ -81,6 +81,23 @@ static BOOL DPIsClosingDelimiter(int character) {
     return character == '}' || character == ']' || character == ')';
 }
 
+static BOOL DPIsSmartClosingCharacter(int character) {
+    return DPIsClosingDelimiter(character)
+        || character == '\'' || character == '"' || character == '`';
+}
+
+static const char *DPSmartPairForOpening(int character) {
+    switch (character) {
+    case '{': return "{}";
+    case '[': return "[]";
+    case '(': return "()";
+    case '\'': return "''";
+    case '"': return "\"\"";
+    case '`': return "``";
+    default: return nullptr;
+    }
+}
+
 static NSUInteger DPIndentationColumns(const std::string &prefix, NSUInteger tabWidth) {
     NSUInteger columns = 0;
     for (const unsigned char character : prefix) {
@@ -1803,7 +1820,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (void)handleSmartCharacterAdded:(SCNotification *)notification {
     DPScintillaEditorView *directInputInitiator = _directInputInitiator;
     if (directInputInitiator != nil && directInputInitiator != self
-        && directInputInitiator->_pendingSmartIndentationInsertionPosition >= 0) {
+        && (directInputInitiator->_pendingSmartIndentationInsertionPosition >= 0
+            || directInputInitiator->_pendingSmartCaretPosition >= 0)) {
         [directInputInitiator handleSmartCharacterAdded:notification];
         return;
     }
@@ -1896,6 +1914,36 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _pendingSmartInsertionEnd = -1;
     _pendingSmartCharacter = 0;
     DPScintillaEditorView *directInputInitiator = _directInputInitiator;
+    DPScintillaEditorView *inputOwner = directInputInitiator ?: self;
+    const BOOL isSingleCharacter = notification->text != nullptr
+        && notification->length == 1;
+    const int insertedCharacter = isSingleCharacter
+        ? static_cast<unsigned char>(notification->text[0]) : 0;
+    const BOOL isEligibleDirectCharacter = inputOwner != nil
+        && inputOwner->_smartEditingEnabled
+        && inputOwner->_textInputSourceKnown
+        && inputOwner->_directInputInsertion
+        && inputOwner->_directInputByteLengthKnown
+        && inputOwner->_directInputByteLength == 1
+        && inputOwner->_directInputSelectionEligible
+        && ![[inputOwner->_scintilla content] hasMarkedText]
+        && isSingleCharacter;
+    const NSInteger documentLength = [_scintilla message:SCI_GETLENGTH];
+    if (isEligibleDirectCharacter
+        && DPIsSmartClosingCharacter(insertedCharacter)
+        && notification->position >= 0
+        && notification->position < documentLength
+        && [_scintilla message:SCI_GETCHARAT wParam:(uptr_t)notification->position]
+            == insertedCharacter) {
+        static const char emptyInsertion = '\0';
+        [_scintilla message:SCI_CHANGEINSERTION
+                     wParam:0
+                     lParam:reinterpret_cast<sptr_t>(&emptyInsertion)];
+        inputOwner->_pendingSmartCaretPosition = notification->position + 1;
+        inputOwner->_pendingSmartInsertionEnd = notification->position;
+        inputOwner->_pendingSmartCharacter = insertedCharacter;
+        return;
+    }
     if (isSingleClosingDelimiter && directInputInitiator != nil
         && directInputInitiator != self) {
         [directInputInitiator cancelPendingSmartIndentation];
@@ -1908,15 +1956,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const std::string inserted(notification->text, static_cast<size_t>(notification->length));
     const BOOL isNewline = inserted == "\n" || inserted == "\r" || inserted == "\r\n";
     const int opening = inserted.size() == 1 ? static_cast<unsigned char>(inserted[0]) : 0;
-    const char *pair = nullptr;
-    switch (opening) {
-    case '{': pair = "{}"; break;
-    case '[': pair = "[]"; break;
-    case '(': pair = "()"; break;
-    default: break;
-    }
-    BOOL isDirectInput = _textInputSourceKnown && _directInputInsertion;
-    if (!_textInputSourceKnown && self.window.firstResponder == [_scintilla content]) {
+    const char *pair = DPSmartPairForOpening(opening);
+    BOOL isDirectInput = inputOwner->_textInputSourceKnown
+        && inputOwner->_directInputInsertion;
+    if (!inputOwner->_textInputSourceKnown
+        && inputOwner.window.firstResponder == [inputOwner->_scintilla content]) {
         NSEvent *event = NSApp.currentEvent;
         const NSEventModifierFlags modifiers = event.modifierFlags
             & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption);
@@ -1927,13 +1971,18 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                 || (isNewline && ([characters isEqualToString:@"\r"] || [characters isEqualToString:@"\n"])));
     }
     if (!isDirectInput) return;
+    if (!inputOwner->_directInputByteLengthKnown
+        || inputOwner->_directInputByteLength != 1
+        || !inputOwner->_directInputSelectionEligible) {
+        return;
+    }
     if (pair != nullptr) {
         [_scintilla message:SCI_CHANGEINSERTION
                      wParam:2
                      lParam:reinterpret_cast<sptr_t>(pair)];
-        _pendingSmartCaretPosition = notification->position + 1;
-        _pendingSmartInsertionEnd = notification->position + 2;
-        _pendingSmartCharacter = opening;
+        inputOwner->_pendingSmartCaretPosition = notification->position + 1;
+        inputOwner->_pendingSmartInsertionEnd = notification->position + 2;
+        inputOwner->_pendingSmartCharacter = opening;
         return;
     }
     if (!isNewline) return;

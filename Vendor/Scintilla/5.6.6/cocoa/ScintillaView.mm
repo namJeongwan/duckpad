@@ -729,8 +729,19 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  */
 - (void) keyDown: (NSEvent *) theEvent {
 	bool handled = false;
-	if (mMarkedTextRange.length == 0)
+	if (mMarkedTextRange.length == 0) {
+		const NSEventModifierFlags commandModifiers = theEvent.modifierFlags &
+			(NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption);
+		NSString *characters = theEvent.characters;
+		const BOOL isDirectNewline = commandModifiers == 0 &&
+			([characters isEqualToString: @"\r"] || [characters isEqualToString: @"\n"]);
+		id delegate = isDirectNewline ? mOwner.delegate : nil;
+		if ([delegate respondsToSelector: @selector(scintillaWillInsertTextFromSource:)])
+			[delegate scintillaWillInsertTextFromSource: SCITextInputSourceDirect];
 		handled = mOwner.backend->KeyboardInput(theEvent);
+		if ([delegate respondsToSelector: @selector(scintillaDidInsertText)])
+			[delegate scintillaDidInsertText];
+	}
 	if (!handled) {
 		NSArray *events = @[theEvent];
 		[self interpretKeyEvents: events];

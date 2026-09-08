@@ -82,6 +82,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         action: nil
     )
     private let activeIndicator = CALayer()
+    private let trailingSeparator = CALayer()
+    private let bottomSeparator = CALayer()
     var onActivate: (() -> Void)?
     var onClose: (() -> Void)?
     var onContextAction: ((TabContextAction) -> Void)?
@@ -90,6 +92,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     private var configuredTab: TabSnapshot?
     private var configuredIndex: Int?
     private var configuredRow: Int?
+    private var ownsTrailingSeparator = false
+    private var ownsBottomSeparator = false
     private var isHovered = false
     var configuredTabID: TabID? { configuredTab?.id }
 
@@ -113,8 +117,14 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         view = tabView
         view.wantsLayer = true
         view.layer?.cornerRadius = 0
-        view.layer?.borderWidth = 0.5
+        view.layer?.borderWidth = 0
+        activeIndicator.name = "duckpad.tab.active-indicator"
+        activeIndicator.zPosition = 1
+        trailingSeparator.name = "duckpad.tab.separator.trailing"
+        bottomSeparator.name = "duckpad.tab.separator.bottom"
         view.layer?.addSublayer(activeIndicator)
+        view.layer?.addSublayer(trailingSeparator)
+        view.layer?.addSublayer(bottomSeparator)
         titleLabel.lineBreakMode = .byClipping
         titleLabel.maximumNumberOfLines = 1
         titleLabel.cell?.truncatesLastVisibleLine = false
@@ -161,11 +171,21 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     override func viewDidLayout() {
         super.viewDidLayout()
         activeIndicator.frame = NSRect(x: 0, y: 0, width: view.bounds.width, height: 2)
+        updateSeparatorFrames()
     }
 
-    func configure(tab: TabSnapshot, index: Int, row: Int, isHovered: Bool) {
+    func configure(
+        tab: TabSnapshot,
+        index: Int,
+        row: Int,
+        ownsTrailingSeparator: Bool,
+        ownsBottomSeparator: Bool,
+        isHovered: Bool
+    ) {
         self.isHovered = isHovered
-        guard configuredTab != tab || configuredIndex != index || configuredRow != row else {
+        guard configuredTab != tab || configuredIndex != index || configuredRow != row
+                || self.ownsTrailingSeparator != ownsTrailingSeparator
+                || self.ownsBottomSeparator != ownsBottomSeparator else {
             updateVisualState()
             updateCloseVisibility()
             return
@@ -173,6 +193,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         configuredTab = tab
         configuredIndex = index
         configuredRow = row
+        self.ownsTrailingSeparator = ownsTrailingSeparator
+        self.ownsBottomSeparator = ownsBottomSeparator
         titleLabel.stringValue = tab.title
         dirtyLabel.isHidden = !tab.isDirty
         pinImage.isHidden = !tab.isPinned
@@ -223,25 +245,45 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         let active = configuredTab?.isActive == true || isSelected
         activeIndicator.backgroundColor = NSColor.controlAccentColor.cgColor
         titleLabel.textColor = active || isHovered ? .labelColor : .secondaryLabelColor
+        let separatorColor: NSColor
         if active {
             view.layer?.backgroundColor = (isHovered
                 ? NSColor.controlAccentColor.withAlphaComponent(0.13)
                 : NSColor.textBackgroundColor.withAlphaComponent(0.98)).cgColor
-            view.layer?.borderColor = (isHovered
+            separatorColor = isHovered
                 ? NSColor.controlAccentColor.withAlphaComponent(0.48)
-                : NSColor.separatorColor.withAlphaComponent(0.52)).cgColor
+                : NSColor.separatorColor.withAlphaComponent(0.52)
         } else if isHovered {
             view.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.11).cgColor
-            view.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.34).cgColor
+            separatorColor = NSColor.controlAccentColor.withAlphaComponent(0.34)
         } else {
             view.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.44).cgColor
-            view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.32).cgColor
+            separatorColor = NSColor.separatorColor.withAlphaComponent(0.32)
         }
+        trailingSeparator.backgroundColor = separatorColor.cgColor
+        bottomSeparator.backgroundColor = separatorColor.cgColor
+        trailingSeparator.isHidden = !ownsTrailingSeparator
+        bottomSeparator.isHidden = !ownsBottomSeparator
+        updateSeparatorFrames()
         closeButton.contentTintColor = isHovered ? .controlAccentColor : .secondaryLabelColor
         closeButton.layer?.backgroundColor = isHovered
             ? NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
             : NSColor.clear.cgColor
         activeIndicator.isHidden = !active
+    }
+
+    private func updateSeparatorFrames() {
+        let scale = view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let thickness = 1 / scale
+        trailingSeparator.contentsScale = scale
+        bottomSeparator.contentsScale = scale
+        trailingSeparator.frame = NSRect(
+            x: max(0, view.bounds.maxX - thickness),
+            y: 0,
+            width: thickness,
+            height: view.bounds.height
+        )
+        bottomSeparator.frame = NSRect(x: 0, y: 0, width: view.bounds.width, height: thickness)
     }
 
     override func prepareForReuse() {
@@ -250,6 +292,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         configuredTab = nil
         configuredIndex = nil
         configuredRow = nil
+        ownsTrailingSeparator = false
+        ownsBottomSeparator = false
         isHovered = false
         onActivate = nil
         onClose = nil
@@ -357,13 +401,11 @@ final class TabOverflowScrollView: NSScrollView {
     var requiresHorizontalScroller = false {
         didSet { synchronizeHorizontalScroller() }
     }
+    private var scrollerSuppressionScheduled = false
 
     override func layout() {
         super.layout()
-        if hasVerticalScroller { hasVerticalScroller = false }
-        synchronizeHorizontalScroller()
-        pinContentOrigin()
-        suppressScrollerChrome()
+        forceScrollersOffAfterStyleSettlement()
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -388,6 +430,25 @@ final class TabOverflowScrollView: NSScrollView {
         if hasVerticalScroller { hasVerticalScroller = false }
         if hasHorizontalScroller { hasHorizontalScroller = false }
         suppressScrollerChrome()
+    }
+
+    func forceScrollersOffAfterStyleSettlement() {
+        autohidesScrollers = true
+        requiresHorizontalScroller = false
+        hasVerticalScroller = false
+        hasHorizontalScroller = false
+        suppressScrollerChrome()
+        guard !scrollerSuppressionScheduled else { return }
+        scrollerSuppressionScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.scrollerSuppressionScheduled = false
+            self.autohidesScrollers = true
+            self.requiresHorizontalScroller = false
+            self.hasVerticalScroller = false
+            self.hasHorizontalScroller = false
+            self.pinContentOrigin()
+        }
     }
 
     private func synchronizeHorizontalScroller() {
@@ -432,6 +493,8 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     private let bottomSeparator = CALayer()
     private var tabIndexByID: [TabID: Int] = [:]
     private var isSynchronizingSelection = false
+    private var isApplyingCollectionStructure = false
+    private var requiresVisibleItemRefreshAfterCollectionStructure = false
     private var activeIndex: Int?
     private var hoveredTabID: TabID?
     private var hoveredTabIndex: Int?
@@ -465,7 +528,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
 
         hostedScrollView.documentView = hostedCollectionView
         hostedScrollView.drawsBackground = false
-        hostedScrollView.autohidesScrollers = false
+        hostedScrollView.autohidesScrollers = true
         hostedScrollView.hasVerticalScroller = false
         hostedScrollView.hasHorizontalScroller = false
         hostedScrollView.scrollerStyle = .overlay
@@ -496,8 +559,16 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             measuredContentHeight = size.height
             updateDocumentFrame()
             updateViewportHeight()
-            refreshVisibleItems()
             pinTabSurfaceOrigin()
+        }
+        flowLayout.onLayoutRegenerated = { [weak self] in
+            guard let self else { return }
+            guard !self.isApplyingCollectionStructure else {
+                self.requiresVisibleItemRefreshAfterCollectionStructure = true
+                return
+            }
+            self.requiresVisibleItemRefreshAfterCollectionStructure = false
+            self.refreshVisibleItems()
         }
     }
 
@@ -508,7 +579,14 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         super.layout()
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         let thickness = 1 / scale
+        bottomSeparator.name = "duckpad.tab.separator.strip-bottom"
+        bottomSeparator.contentsScale = scale
         bottomSeparator.frame = NSRect(x: 0, y: 0, width: bounds.width, height: thickness)
+        if flowLayout.engine.backingScale != scale {
+            var engine = flowLayout.engine
+            engine.backingScale = scale
+            flowLayout.engine = engine
+        }
         flowLayout.viewportWidth = max(1, hostedScrollView.contentSize.width)
         hostedCollectionView.layoutSubtreeIfNeeded()
         updateDocumentFrame()
@@ -602,11 +680,17 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
                 } else if let hoveredTabIndex, hoveredTabIndex > index {
                     self.hoveredTabIndex = hoveredTabIndex - 1
                 }
+                requiresVisibleItemRefreshAfterCollectionStructure = false
+                isApplyingCollectionStructure = true
                 flowLayout.itemWidths = change.snapshot.tabs.map(tabWidth)
                 tabs = change.snapshot.tabs
                 rebuildTabIndices()
                 activeIndex = tabs.firstIndex(where: \.isActive)
                 hostedCollectionView.deleteItems(at: [IndexPath(item: index, section: 0)])
+                isApplyingCollectionStructure = false
+                refreshVisibleItemsAfterCollectionStructure()
+                updateDocumentFrame()
+                updateViewportHeight()
                 synchronizeSelection()
                 pinTabSurfaceOrigin()
             } else if tabs.map(\.id) == change.snapshot.tabs.map(\.id) {
@@ -702,6 +786,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         tabIndexByID.removeAll(keepingCapacity: false)
         documentSwitcher.documentPanel.dismiss()
         flowLayout.onContentSizeChange = nil
+        flowLayout.onLayoutRegenerated = nil
         hostedCollectionView.unregisterDraggedTypes()
         hostedCollectionView.dataSource = nil
         hostedCollectionView.delegate = nil
@@ -904,9 +989,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         let documentSize = NSSize(width: width, height: height)
         let widthChanged = hostedCollectionView.frame.width != width
         hostedCollectionView.setRequiredDocumentSize(documentSize)
-        hostedScrollView.autohidesScrollers = false
-        hostedScrollView.hasVerticalScroller = false
-        hostedScrollView.requiresHorizontalScroller = false
+        hostedScrollView.forceScrollersOffAfterStyleSettlement()
         if widthChanged { flowLayout.invalidateLayout() }
         pinTabSurfaceOrigin()
     }
@@ -964,12 +1047,14 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         let previouslyActiveIndex = previouslyActiveID.flatMap { tabIndexByID[$0] }
         let oldActiveNeedsReload = previouslyActiveIndex.map { !tabs[$0].isActive } ?? false
 
+        isApplyingCollectionStructure = true
         isSynchronizingSelection = true
         hostedCollectionView.insertItems(at: [IndexPath(item: index, section: 0)])
         hostedCollectionView.selectionIndexPaths = activeIndex.map {
             Set([IndexPath(item: $0, section: 0)])
         } ?? []
         isSynchronizingSelection = false
+        isApplyingCollectionStructure = false
         updateMetrics.itemInsertions += 1
 
         if oldActiveNeedsReload, let previouslyActiveIndex {
@@ -981,6 +1066,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedCollectionView.layoutSubtreeIfNeeded()
         updateDocumentFrame()
         updateViewportHeight()
+        requiresVisibleItemRefreshAfterCollectionStructure = false
         refreshVisibleItems()
         pinTabSurfaceOrigin()
     }
@@ -995,13 +1081,27 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         }
     }
 
+    private func refreshVisibleItemsAfterCollectionStructure() {
+        let generationBeforeSettlement = flowLayout.layoutGeneration
+        hostedCollectionView.layoutSubtreeIfNeeded()
+        guard requiresVisibleItemRefreshAfterCollectionStructure
+                || flowLayout.layoutGeneration == generationBeforeSettlement else {
+            return
+        }
+        requiresVisibleItemRefreshAfterCollectionStructure = false
+        refreshVisibleItems()
+    }
+
     private func configure(_ item: DuckpadTabItem, at index: Int) {
         guard tabs.indices.contains(index) else { return }
         let tab = tabs[index]
+        let row = flowLayout.row(forItemAt: index) ?? 0
         item.configure(
             tab: tab,
             index: index,
-            row: flowLayout.row(forItemAt: index) ?? 0,
+            row: row,
+            ownsTrailingSeparator: flowLayout.row(forItemAt: index + 1) == row,
+            ownsBottomSeparator: row < flowLayout.rowCount - 1,
             isHovered: hoveredTabID == tab.id
         )
         updateMetrics.itemConfigurations += 1

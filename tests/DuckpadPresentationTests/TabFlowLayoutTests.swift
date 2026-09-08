@@ -422,6 +422,46 @@ private func blockCommentLanguageRegistry() throws -> LanguageRegistry {
     #expect(result.frames[3].maxX == 399)
 }
 
+@Test func multilineJustificationSnapsCumulativeBoundariesToTwoXBackingPixels() {
+    for scale in [CGFloat(1), 2] {
+        let result = TabFlowLayoutEngine(backingScale: scale).layout(
+            itemWidths: Array(repeating: 76, count: 9),
+            containerWidth: 329
+        )
+
+        #expect(result.rowIndices == [0, 0, 0, 1, 1, 1, 2, 2, 2])
+        for row in 0..<result.rowCount {
+            let rowFrames = result.frames.enumerated().compactMap { entry in
+                result.rowIndices[entry.offset] == row ? entry.element : nil
+            }
+            #expect(rowFrames.first?.minX == 0)
+            #expect(rowFrames.last?.maxX == 329)
+            for (left, right) in zip(rowFrames, rowFrames.dropFirst()) {
+                #expect(left.maxX == right.minX)
+            }
+            #expect(rowFrames.allSatisfy {
+                ($0.minX * scale).rounded() == $0.minX * scale
+                    && ($0.maxX * scale).rounded() == $0.maxX * scale
+            })
+        }
+    }
+}
+
+@Test func justifiedLargeRowsStayWithinTheIncrementalLayoutBudget() {
+    let itemCount = 20_000
+    let clock = ContinuousClock()
+    let elapsed = clock.measure {
+        let result = TabFlowLayoutEngine().layout(
+            itemWidths: Array(repeating: 76, count: itemCount),
+            containerWidth: 760_123
+        )
+        #expect(result.frames.count == itemCount)
+        #expect(result.rowCount == 2)
+    }
+
+    #expect(elapsed < .milliseconds(250))
+}
+
 @Test func multilineRowsJustifyWithoutShrinkingTitles() {
     let engine = TabFlowLayoutEngine()
     let result = engine.layout(itemWidths: [100, 100, 100, 100, 100], containerWidth: 250)
@@ -2412,6 +2452,148 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     #expect(title.frame.width >= title.intrinsicContentSize.width)
 }
 
+@Test @MainActor func settledHostedStripUsesItsEntire893PointViewportWithoutScrollerReservation() {
+    let tabs = makeTabs(count: 12, activeIndex: 0)
+    let (window, root, strip) = hostStrip(width: 893, height: 320, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    strip.hostedScrollView.scrollerStyle = .legacy
+    strip.hostedScrollView.autohidesScrollers = false
+    strip.hostedScrollView.hasVerticalScroller = true
+    strip.hostedScrollView.hasHorizontalScroller = true
+    strip.hostedScrollView.needsLayout = true
+    window.orderFront(nil)
+    root.layoutSubtreeIfNeeded()
+    strip.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    root.layoutSubtreeIfNeeded()
+    strip.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+    #expect(strip.hostedScrollView.scrollerStyle == .legacy)
+    #expect(strip.hostedScrollView.contentSize.width == 893)
+    #expect(strip.hostedScrollView.contentView.bounds.width == 893)
+    #expect(strip.hostedScrollView.contentView.frame.width == 893)
+    #expect(strip.hostedScrollView.autohidesScrollers)
+    #expect(!strip.hostedScrollView.hasVerticalScroller)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
+}
+
+@Test @MainActor func tabItemsOwnOnlyInternalTrailingAndInterRowSeparators() throws {
+    let tabs = makeTabs(count: 12, activeIndex: 0)
+    let (window, root, strip) = hostStrip(width: 893, height: 320, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    window.orderFront(nil)
+    root.layoutSubtreeIfNeeded()
+    strip.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    strip.hostedCollectionView.layoutSubtreeIfNeeded()
+
+    for index in tabs.indices {
+        let item = try #require(strip.hostedCollectionView.item(
+            at: IndexPath(item: index, section: 0)
+        ))
+        let row = try #require(strip.flowLayout.row(forItemAt: index))
+        let nextRow = strip.flowLayout.row(forItemAt: index + 1)
+        let separatorNames = Set(item.view.layer?.sublayers?.compactMap { layer in
+            layer.isHidden ? nil : layer.name
+        } ?? [])
+        let layers = try #require(item.view.layer?.sublayers)
+        let trailing = try #require(layers.first { $0.name == "duckpad.tab.separator.trailing" })
+        let bottom = try #require(layers.first { $0.name == "duckpad.tab.separator.bottom" })
+        let scale = item.view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+
+        #expect(item.view.layer?.borderWidth == 0)
+        #expect(separatorNames.contains("duckpad.tab.separator.trailing") == (nextRow == row))
+        #expect(separatorNames.contains("duckpad.tab.separator.bottom") == (row < strip.rowCount - 1))
+        #expect(trailing.frame.width == 1 / scale)
+        #expect(bottom.frame.height == 1 / scale)
+    }
+    let stripLayers = try #require(strip.layer?.sublayers)
+    let stripSeparator = try #require(stripLayers.first { $0.name == "duckpad.tab.separator.strip-bottom" })
+    let stripScale = strip.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    #expect(stripLayers.filter { $0.name == "duckpad.tab.separator.strip-bottom" }.count == 1)
+    #expect(stripSeparator.frame.height == 1 / stripScale)
+}
+
+@Test @MainActor func activeTabKeepsItsTwoPointUnderlineAboveItsOnePixelInterrowSeam() throws {
+    let tabs = makeTabs(count: 12, activeIndex: 0)
+    let (window, root, strip) = hostStrip(width: 893, height: 320, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    window.orderFront(nil)
+    root.layoutSubtreeIfNeeded()
+    strip.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    let item = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 0, section: 0)))
+    let layers = try #require(item.view.layer?.sublayers)
+    let activeIndicator = try #require(layers.first { $0.name == "duckpad.tab.active-indicator" })
+    let interrowSeparator = try #require(layers.first { $0.name == "duckpad.tab.separator.bottom" })
+    let scale = item.view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+
+    #expect(!interrowSeparator.isHidden)
+    #expect(activeIndicator.frame.height == 2)
+    #expect(interrowSeparator.frame.height == 1 / scale)
+    #expect(activeIndicator.frame.intersects(interrowSeparator.frame))
+    #expect(activeIndicator.zPosition > interrowSeparator.zPosition)
+}
+
+@Test @MainActor func titleWidthRelayoutRefreshesVisibleSiblingRowStateWithoutAFullReload() throws {
+    let tabs = (0..<7).map { index in
+        TabSnapshot(
+            id: TabID(),
+            title: "x",
+            isActive: index == 0,
+            isDirty: false,
+            isPinned: false,
+            buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        )
+    }
+    let (window, _, strip) = hostStrip(width: 304, height: 320, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    let siblingPath = IndexPath(item: 3, section: 0)
+    let sibling = try #require(strip.hostedCollectionView.item(at: siblingPath))
+    #expect((sibling.view.accessibilityValue() as? String)?.contains("row 1") == true)
+    let before = strip.updateMetrics
+    let changed = TabSnapshot(
+        id: tabs[0].id,
+        title: "long-tab-title",
+        isActive: true,
+        isDirty: false,
+        isPinned: false,
+        buffer: tabs[0].buffer
+    )
+
+    #expect(strip.apply(tab: changed, at: 0))
+    strip.hostedCollectionView.layoutSubtreeIfNeeded()
+    let refreshedSibling = try #require(strip.hostedCollectionView.item(at: siblingPath))
+    let visibleItemCount = strip.hostedCollectionView.visibleItems().count
+
+    #expect(strip.flowLayout.row(forItemAt: 3) == 1)
+    #expect((refreshedSibling.view.accessibilityValue() as? String)?.contains("row 2") == true)
+    #expect(strip.updateMetrics.fullReloads == before.fullReloads)
+    #expect(strip.updateMetrics.itemReloads == before.itemReloads + 1)
+    #expect(strip.updateMetrics.itemConfigurations - before.itemConfigurations <= visibleItemCount + 1)
+}
+
 @Test @MainActor func shortAndLongTabTitlesKeepTheirFullIntrinsicLabelWidth() throws {
     let longTitle = "release-notes-" + String(repeating: "complete-name-", count: 30) + ".txt"
     let tab = TabSnapshot(
@@ -2769,6 +2951,74 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     currentItem.view.mouseExited(with: event)
     #expect(close.isHidden)
     #expect(strip.updateMetrics.itemConfigurations - beforeEnter == 2)
+}
+
+@Test @MainActor func deletionRefreshesReusedTabRowAccessibilityAndOnePixelSeamOwnership() throws {
+    let tabs = (0..<8).map { index in
+        TabSnapshot(
+            id: TabID(),
+            title: "x",
+            isActive: index == 0,
+            isDirty: false,
+            isPinned: false,
+            buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        )
+    }
+    let (window, _, strip) = hostStrip(width: 304, height: 320, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    let retainedItem = try #require(strip.hostedCollectionView.item(
+        at: IndexPath(item: 4, section: 0)
+    ))
+    let initialLayers = try #require(retainedItem.view.layer?.sublayers)
+    let initialTrailing = try #require(initialLayers.first {
+        $0.name == "duckpad.tab.separator.trailing"
+    })
+    let initialBottom = try #require(initialLayers.first {
+        $0.name == "duckpad.tab.separator.bottom"
+    })
+    #expect((retainedItem.view.accessibilityValue() as? String)?.contains("row 2") == true)
+    #expect(!initialTrailing.isHidden)
+    #expect(initialBottom.isHidden)
+
+    let remaining = Array(tabs.dropFirst())
+    let before = strip.updateMetrics
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(),
+            tabs: remaining,
+            activeBuffer: remaining.first(where: \.isActive)?.buffer,
+            persistence: .pending,
+            startup: .ready
+        ),
+        kind: .tabRemovalPending(index: 0)
+    ))
+
+    let currentItem = try #require(strip.hostedCollectionView.item(
+        at: IndexPath(item: 3, section: 0)
+    ))
+    let currentLayers = try #require(currentItem.view.layer?.sublayers)
+    let trailing = try #require(currentLayers.first { $0.name == "duckpad.tab.separator.trailing" })
+    let bottom = try #require(currentLayers.first { $0.name == "duckpad.tab.separator.bottom" })
+    let stripLayers = try #require(strip.layer?.sublayers)
+    let stripSeparator = try #require(stripLayers.first { $0.name == "duckpad.tab.separator.strip-bottom" })
+    let scale = currentItem.view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    let visibleItemCount = strip.hostedCollectionView.visibleItems().count
+
+    #expect(currentItem === retainedItem)
+    #expect(strip.flowLayout.row(forItemAt: 3) == 0)
+    #expect((currentItem.view.accessibilityValue() as? String)?.contains("row 1") == true)
+    #expect(trailing.isHidden)
+    #expect(!bottom.isHidden)
+    #expect(trailing.frame.width == 1 / scale)
+    #expect(bottom.frame.height == 1 / scale)
+    #expect(stripSeparator.frame.height == 1 / scale)
+    #expect(strip.updateMetrics.fullReloads == before.fullReloads)
+    #expect(strip.updateMetrics.itemConfigurations - before.itemConfigurations <= visibleItemCount)
 }
 
 @Test @MainActor func tabChromeKeepsDocumentSwitcherAsKeyboardOnlyEscapeHatch() {
