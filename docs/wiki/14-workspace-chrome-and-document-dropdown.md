@@ -14,12 +14,14 @@ searchable switcher remains available through **Tabs → Open Document…** and
 button description below is retained only as historical delivery evidence.
 
 The current window keeps the native macOS main menu and adds one slim
-window-local command bar above all editor groups. Each entry is a genuine
-`NSPopUpButton(frame:pullsDown:true)` backed by the exact original `NSMenu`
-object—not a copied item tree—so menu identity, supermenu attachment, targets,
-selectors, shortcuts, state, hidden items, and validation remain authoritative.
-Dark/Light Aqua receive semantic hover and open feedback. Teardown/reapply
-restores the original menu attachment and every item visibility bit.
+window-local command bar above all editor groups. Each compact
+`NSPopUpButton`-compatible trigger retains the exact original `NSMenu`
+object—not a copied item tree—but routes mouse, keyboard, and accessibility
+presentation through an explicit menu-content anchor one point below the bar.
+Menu identity, supermenu attachment, targets, selectors, shortcuts, state,
+hidden items, and validation therefore remain authoritative. Dark/Light Aqua
+receive semantic hover and open feedback, while teardown/reapply restores the
+original menu attachment and visibility state.
 
 Tabs are connected multi-row strips with complete, never-ellipsized titles and
 compact title-side whitespace. Each tab keeps its measured intrinsic width, so

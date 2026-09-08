@@ -15,14 +15,17 @@ private final class CommandBarTarget: NSObject, NSMenuItemValidation {
 }
 
 @MainActor
-private func makeCommandBarMenu(target: CommandBarTarget) -> NSMenu {
+private func makeCommandBarMenu(
+    target: CommandBarTarget,
+    overridingMenus: [String: NSMenu] = [:]
+) -> NSMenu {
     let main = NSMenu()
     let app = NSMenuItem(title: "Duckpad", action: nil, keyEquivalent: "")
     app.submenu = NSMenu(title: "Duckpad")
     main.addItem(app)
     for title in ["File", "Format", "Edit", "Search", "View", "Tabs", "Window", "Language", "Extensions"] {
         let root = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        let menu = NSMenu(title: title)
+        let menu = overridingMenus[title] ?? NSMenu(title: title)
         let command = NSMenuItem(
             title: "\(title) command",
             action: #selector(CommandBarTarget.performCommand(_:)),
@@ -95,8 +98,156 @@ struct WindowCommandBarViewTests {
         let fileButton = try #require(bar.button(named: "File"))
         #expect(fileButton.pullsDown)
         #expect(fileButton.menu === fileMenu)
-        #expect((fileButton.cell as? NSPopUpButtonCell)?.preferredEdge == .minY)
+        #expect(fileButton.target === bar)
+        #expect(fileButton.action == NSSelectorFromString("showMenu:"))
         #expect(!fileCommand.isHidden)
+    }
+
+    @Test @MainActor func menuContentStartsImmediatelyBelowItsCommandBarButton() throws {
+        _ = NSApplication.shared
+        let target = CommandBarTarget()
+        let languageMenu = MenuPresentationSpy(title: "Language")
+        let main = makeCommandBarMenu(
+            target: target,
+            overridingMenus: ["Language": languageMenu]
+        )
+        let (window, bar) = hostCommandBar(mainMenu: main, appearance: .darkAqua)
+        defer {
+            bar.tearDown()
+            window.contentView = nil
+            window.close()
+        }
+        let languageButton = try #require(bar.button(named: "Language"))
+        let action = try #require(languageButton.action)
+        let actionTarget = try #require(languageButton.target)
+
+        #expect(NSApplication.shared.sendAction(action, to: actionTarget, from: languageButton))
+
+        let location = try #require(languageMenu.presentedLocation)
+        #expect(languageMenu.presentedItem == nil)
+        #expect(languageMenu.presentedView === bar)
+        let buttonFrame = languageButton.convert(languageButton.bounds, to: bar)
+        #expect(location == NSPoint(x: buttonFrame.minX, y: bar.bounds.minY - 1))
+        #expect(location.y < buttonFrame.minY)
+    }
+
+    @Test @MainActor func popupTriggerPreservesTypedKeyboardAndAccessibilityPresentation() throws {
+        _ = NSApplication.shared
+        let target = CommandBarTarget()
+        let languageMenu = MenuPresentationSpy(title: "Language")
+        let main = makeCommandBarMenu(
+            target: target,
+            overridingMenus: ["Language": languageMenu]
+        )
+        let (window, bar) = hostCommandBar(mainMenu: main, appearance: .darkAqua)
+        defer {
+            bar.tearDown()
+            window.contentView = nil
+            window.close()
+        }
+        let languageButton: NSPopUpButton = try #require(bar.button(named: "Language"))
+
+        #expect(languageButton.accessibilityPerformShowMenu())
+        #expect(languageMenu.presentationCount == 1)
+
+        let space = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: " ",
+            charactersIgnoringModifiers: " ",
+            isARepeat: false,
+            keyCode: 49
+        ))
+        languageButton.keyDown(with: space)
+        #expect(languageMenu.presentationCount == 2)
+
+        languageButton.performClick(nil)
+        #expect(languageMenu.presentationCount == 3)
+    }
+
+    @Test @MainActor func popupTriggerIgnoresNonNativeKeyboardGestures() throws {
+        _ = NSApplication.shared
+        let target = CommandBarTarget()
+        let languageMenu = MenuPresentationSpy(title: "Language")
+        let main = makeCommandBarMenu(
+            target: target,
+            overridingMenus: ["Language": languageMenu]
+        )
+        let (window, bar) = hostCommandBar(mainMenu: main, appearance: .darkAqua)
+        defer {
+            bar.tearDown()
+            window.contentView = nil
+            window.close()
+        }
+        let languageButton = try #require(bar.button(named: "Language"))
+        let gestures: [(String, UInt16, NSEvent.ModifierFlags)] = [
+            (" ", 49, [.shift]),
+            ("\r", 36, []),
+            ("\r", 76, [.numericPad]),
+            ("\u{F701}", 125, [.numericPad]),
+        ]
+
+        for (characters, keyCode, modifiers) in gestures {
+            let event = try #require(NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: modifiers,
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                characters: characters,
+                charactersIgnoringModifiers: characters,
+                isARepeat: false,
+                keyCode: keyCode
+            ))
+            languageButton.keyDown(with: event)
+        }
+
+        #expect(languageMenu.presentationCount == 0)
+    }
+
+    @Test @MainActor func disabledPopupTriggerNeverPresentsItsMenu() throws {
+        _ = NSApplication.shared
+        let target = CommandBarTarget()
+        let languageMenu = MenuPresentationSpy(title: "Language")
+        let main = makeCommandBarMenu(
+            target: target,
+            overridingMenus: ["Language": languageMenu]
+        )
+        let (window, bar) = hostCommandBar(mainMenu: main, appearance: .darkAqua)
+        defer {
+            bar.tearDown()
+            window.contentView = nil
+            window.close()
+        }
+        let languageButton = try #require(bar.button(named: "Language"))
+        languageButton.isEnabled = false
+
+        languageButton.performClick(nil)
+        #expect(!languageButton.accessibilityPerformPress())
+        #expect(!languageButton.accessibilityPerformShowMenu())
+
+        let mouseDown = try #require(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: languageButton.convert(
+                NSPoint(x: languageButton.bounds.midX, y: languageButton.bounds.midY),
+                to: nil
+            ),
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1
+        ))
+        languageButton.mouseDown(with: mouseDown)
+
+        #expect(languageMenu.presentationCount == 0)
     }
 
     @Test @MainActor func hoverAndOpenStatesRemainDistinctInDarkAndLightAppearances() throws {
@@ -132,13 +283,13 @@ struct WindowCommandBarViewTests {
             #expect(file.layer?.backgroundColor == restingFile)
             #expect(edit.layer?.backgroundColor != restingEdit)
 
-            NotificationCenter.default.post(
-                name: NSPopUpButtonCell.willPopUpNotification,
-                object: file.cell
-            )
+            _ = bar.prepareMenuForPresentation(named: "File")
             #expect(bar.activeMenuTitle == "File")
             #expect(file.layer?.backgroundColor != restingFile)
-            NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: file.menu)
+            NotificationCenter.default.post(
+                name: NSMenu.didEndTrackingNotification,
+                object: bar.menu(named: "File")
+            )
             #expect(bar.activeMenuTitle == nil)
         }
     }

@@ -2,8 +2,8 @@ import AppKit
 
 /// A compact, window-local route into Duckpad's native menu tree.
 ///
-/// Every control is a genuine AppKit pull-down button backed by the original
-/// submenu. AppKit validation, state, shortcuts, targets, and actions therefore
+/// Every control opens the original native submenu at an explicit edge below
+/// the bar. AppKit validation, state, shortcuts, targets, and actions therefore
 /// remain authoritative in the application's native main menu.
 @MainActor
 public final class WindowCommandBarView: NSView {
@@ -144,7 +144,7 @@ public final class WindowCommandBarView: NSView {
     }
 
     private func makeButton(title: String, menu: NSMenu) -> NSPopUpButton {
-        let button = NSPopUpButton(frame: .zero, pullsDown: true)
+        let button = WindowCommandMenuButton(frame: .zero, pullsDown: true)
         let itemVisibility = menu.items.map(\.isHidden)
         button.menu = menu
         for (item, wasHidden) in zip(menu.items, itemVisibility) {
@@ -154,8 +154,9 @@ public final class WindowCommandBarView: NSView {
             cell.usesItemFromMenu = false
             cell.menuItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             cell.arrowPosition = .noArrow
-            cell.preferredEdge = .minY
         }
+        button.target = self
+        button.action = #selector(showMenu(_:))
         button.bezelStyle = .inline
         button.isBordered = false
         button.controlSize = .small
@@ -172,15 +173,24 @@ public final class WindowCommandBarView: NSView {
         return button
     }
 
+    @objc private func showMenu(_ sender: NSButton) {
+        let title = sender.title
+        guard let menu = prepareMenuForPresentation(named: title) else { return }
+        let buttonFrame = sender.convert(sender.bounds, to: self)
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: buttonFrame.minX, y: bounds.minY - 1),
+            in: self
+        )
+        if activeMenuTitle == title {
+            setActiveMenuTitle(nil)
+            synchronizeHoverWithPointer()
+        }
+    }
+
     private func startObservingMenuTracking() {
         guard !observesMenuTracking else { return }
         observesMenuTracking = true
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(popUpButtonWillOpen(_:)),
-            name: NSPopUpButtonCell.willPopUpNotification,
-            object: nil
-        )
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(menuDidBeginTracking(_:)),
@@ -199,11 +209,6 @@ public final class WindowCommandBarView: NSView {
         guard observesMenuTracking else { return }
         NotificationCenter.default.removeObserver(
             self,
-            name: NSPopUpButtonCell.willPopUpNotification,
-            object: nil
-        )
-        NotificationCenter.default.removeObserver(
-            self,
             name: NSMenu.didBeginTrackingNotification,
             object: nil
         )
@@ -213,12 +218,6 @@ public final class WindowCommandBarView: NSView {
             object: nil
         )
         observesMenuTracking = false
-    }
-
-    @objc private func popUpButtonWillOpen(_ notification: Notification) {
-        guard let cell = notification.object as? NSPopUpButtonCell,
-              let title = buttonsByTitle.first(where: { $0.value.cell === cell })?.key else { return }
-        _ = prepareMenuForPresentation(named: title)
     }
 
     @objc private func menuDidBeginTracking(_ notification: Notification) {

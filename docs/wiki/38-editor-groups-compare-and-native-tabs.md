@@ -19,9 +19,10 @@ group after the panel is dismissed.
 
 The window keeps the standard macOS application menu and adds one slim command
 bar above the entire editor-group workspace. Its File, Edit, Search, View,
-Format, Language, Tabs, Extensions, and Window entries are genuine
-`NSPopUpButton(frame:pullsDown:true)` controls backed by the exact original
-`NSMenu` objects. Menu identity/tree, supermenu attachment, targets, selectors,
+Format, Language, Tabs, Extensions, and Window entries remain typed
+`NSPopUpButton` controls backed by the exact original `NSMenu` objects. Their
+manual presentation path anchors each menu's content top immediately below the
+command bar. Menu identity/tree, supermenu attachment, targets, selectors,
 shortcuts, hidden and checked state, and AppKit validation therefore continue
 to have one authority.
 
@@ -150,12 +151,15 @@ hidden from accessibility. **Open Document…** remains a
 keyboard-first navigation option, not a workaround for clipped tab rows.
 Editor and Compare content scrolling are unaffected by this tab-chrome rule.
 
-The command bar uses a private display item only for each pull-down control;
-the attached command subtree remains the exact application menu. AppKit popup
-tracking and per-control tracking areas provide distinct open/hover feedback in
-both Aqua and Dark Aqua. Teardown or menu reapply captures hidden state before
-detachment, restores the original root-item/supermenu attachment when required,
-and then restores every menu item's visibility.
+The command bar uses a focused `NSPopUpButton` subclass to retain the public
+control contract while replacing only AppKit's automatic first-row alignment.
+Mouse, keyboard, accessibility press, and `AXShowMenu` all call native
+`NSMenu.popUp(positioning:at:in:)` with no positioning item and a point one
+point below the bar, so the menu starts below the trigger instead of aligning
+its first row over the bar. AppKit popup tracking and per-control tracking areas
+provide distinct open/hover feedback in both Aqua and Dark Aqua. Teardown or
+menu reapply restores the original root-item/supermenu attachment and every
+menu item's visibility.
 
 Drag reorder, edge Split, cross-group move/copy, Compare, context menus,
 middle-click close, keyboard navigation, bounded incremental updates,
@@ -186,7 +190,7 @@ The ignored local Notepad++ tree is pinned at
 Duckpad translates those workflow semantics into Swift/AppKit: inviolable
 intrinsic full-title widths, item-boundary multi-row wrapping only on overflow,
 ordinary trailing room, pinned zero-origin/no-scroll behavior, connected semantic
-colors, system accent, native pull-down menus, and accessibility. It does not
+colors, system accent, native `NSMenu` dropdowns, and accessibility. It does not
 copy Win32 owner-drawing or the legacy Windows visual style. The ignored
 reference tree was not modified or included in any feature commit.
 
@@ -218,7 +222,16 @@ change; an invalid cache retains the authoritative full-render fallback.
 
 The final focused gates pass editor-group commands 27/27, TabFlow/AppKit 85/85,
 layout model 15/15, workspace 16/16, Compare 21/21, and Scintilla groups 23/23.
-The full serial suite (`swift test --no-parallel`) exits 0 across 633 discovered
+
+The 2026-09-08 popup-anchor follow-up fixes a screenshot-confirmed regression
+where `NSPopUpButton` aligned Language's first `Auto` row over the command bar
+despite its preferred-edge hint. The explicit native-menu call now anchors the
+menu content directly below the bar. A headless `NSMenu` presentation spy
+captures the nil positioning item, exact anchor point, and command-bar view.
+Typed popup, native Space-key, and `AXShowMenu` paths share that presentation
+route, while disabled controls cannot dispatch it. The command-bar suite passes
+9/9 and the full serial suite exits 0.
+The full serial suite (`swift test --no-parallel`) exits 0 across 640 discovered
 tests, and Debug and Release builds pass. Independent review reports 0 Critical
 / 0 Important / 0 Minor.
 
