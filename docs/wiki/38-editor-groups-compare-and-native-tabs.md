@@ -151,9 +151,17 @@ content height, including 56- and 500-tab layouts. Horizontal and vertical
 scrollers remain disabled, and wheel input, activation, resize, or programmatic
 clip movement leaves the clip origin at zero. AppKit-owned scrollers remain
 attached for lifecycle safety but are noninteractive, visually suppressed, and
-hidden from accessibility. **Open Document…** remains a
+auto-hidden so legacy scroller style never reserves a trailing gutter. The clip
+width therefore remains identical to the strip width after AppKit style
+settlement. **Open Document…** remains a
 keyboard-first navigation option, not a workaround for clipped tab rows.
 Editor and Compare content scrolling are unaffected by this tab-chrome rule.
+
+Multiline slack is distributed with cumulative boundaries snapped to the
+window's backing pixels. Adjacent items remain contiguous, and every internal
+edge has one owner drawing a single physical-pixel separator; full per-item
+borders never double-paint a seam. The strip owns the sole final separator above
+the editor.
 
 The command bar uses a focused `NSPopUpButton` subclass to retain the public
 control contract while replacing only AppKit's automatic first-row alignment.
@@ -319,12 +327,13 @@ submenus, singleton initials stay direct, and the root remains bounded while all
 not a custom popup, parser, indexer, or new dependency.
 
 The completed follow-up passes TabFlow 93/93, insertion 5/5, editor-group
-commands 29/29, Scintilla groups 24/24, and Language editor 56/56. The
-monolithic serial run completes all 653 tests in 12 suites, and Debug/Release
-builds pass. A fresh Universal `x86_64 + arm64` app from `ca97721` passes
-bundle/resource/XPC/signature verification plus hidden Finder/Open With,
-security-scoped relaunch/save, extension, XPC-isolation, and 50-tab multiline
-smoke (`6` rows); no app process remains.
+commands 29/29, Scintilla groups 24/24, and Language editor 59/59. Current
+serial Debug and Release runs each complete all 668 tests in 12 suites, and
+deprecation-as-error Scintilla builds pass in both configurations. A fresh
+hidden Release app passes the production language smoke and 50-tab multiline
+smoke (`6` rows); no smoke process remains. The earlier Universal
+`x86_64 + arm64` app from `ca97721` retains its bundle/resource/XPC/signature,
+Finder/Open With, security-scope, extension, and XPC-isolation evidence.
 
 Commits `0dc85b7`, `1a45f15`, `f63d1e2`, `7012327`, `1a9f8fe`, and `ca97721`
 each pass exact signed-receipt verification and post-commit audit. Cumulative

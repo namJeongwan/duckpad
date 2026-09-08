@@ -20,7 +20,11 @@ row를 균형 있게 구성하고 각 multiline row의 positive slack을 item에
 Row cap과 내부 tab viewport는 없다. 56개와 500개 tab 모두 모든 행의 전체
 content height를 차지하며 strip 아래 editor가 그만큼 내려간다. Wheel,
 activation, resize, programmatic clip movement 뒤에도 clip origin은 항상
-zero이고 horizontal/vertical scroller는 계속 비활성이다. **Tabs → Open
+zero이고 horizontal/vertical scroller는 계속 비활성이다. Auto-hide 상태도
+함께 유지해 legacy scroller가 우측 공간을 예약하지 않으며 clip width는 항상
+strip width와 같다. Multiline row의 누적 경계는 backing pixel에 맞추고 각
+내부 경계는 한 item만 1 physical-pixel separator를 그려 이중 seam을 만들지
+않는다. **Tabs → Open
 Document…** (`Command-Shift-O`)는 별도의 keyboard-first navigation 경로로
 계속 제공된다. 이전의 multiline ragged-right 해석은 이 계약으로 대체된다.
 
@@ -132,11 +136,11 @@ Notepad++의 Close All, Close to Left, Close Unchanged, Close Unpinned는 Applic
   주장하지 않으며 Duckpad는 승인된 관찰 결과를 clean-room Swift/AppKit으로
   재현한다.
 - **Evidence:** TabFlow 93/93, insertion 5/5, editor-group commands 29/29,
-  Scintilla groups 24/24와 Language editor 56/56가 통과했다. 전체 serial은
-  653/653 tests, 12 suites를 완주했고 Debug/Release build가 통과했다.
-  `ca97721` Universal bundle은 hidden Finder/Open With, security-scope,
-  extension/XPC와 50-tab/6-row smoke를 통과했다. 여섯 follow-up commit은 모두
-  exact receipt/audit를 갖고 cumulative review 0/0/0 뒤 같은 SHA로 원격 검증됐다.
+  Scintilla groups 24/24와 Language editor 59/59가 통과했다. 현재 serial
+  Debug/Release는 각각 668/668 tests, 12 suites를 완주했고 deprecation-as-error
+  Scintilla build도 양쪽 configuration에서 통과했다. Fresh hidden Release app은
+  50-tab/6-row smoke를 통과했다. 기존 여섯 follow-up commit은 모두 exact
+  receipt/audit를 갖고 cumulative review 0/0/0 뒤 같은 SHA로 원격 검증됐다.
 
 ### 2026-09-02 — Phase 5 multiline-tab builder
 

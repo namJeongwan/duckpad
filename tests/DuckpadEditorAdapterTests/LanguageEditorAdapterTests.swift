@@ -219,6 +219,74 @@ struct LanguageEditorAdapterTests {
     }
 
     @Test @MainActor
+    func quoteLikeDelimitersAutoCloseAsOneNativeEdit() throws {
+        let fixtures: [(opening: String, paired: String)] = [
+            ("'", "''"),
+            ("\"", "\"\""),
+            ("`", "``"),
+        ]
+
+        for fixture in fixtures {
+            let (_, view) = hostedView()
+            try view.loadUTF8(Data(), revision: 0)
+            #expect(view.applyLexerNamed(
+                "python",
+                keywords: [],
+                tabWidth: 2,
+                useTabs: false,
+                folding: true,
+                braceMatching: true,
+                maximumStyleBytes: 1_000_000
+            ))
+
+            view.insertCommittedText(fixture.opening)
+
+            #expect(view.contentUTF8 == Data(fixture.paired.utf8))
+            #expect(view.caretUTF8Position == 1)
+            #expect(view.revision == 1)
+            view.undo()
+            #expect(view.contentUTF8.isEmpty)
+        }
+    }
+
+    @Test @MainActor
+    func matchingSmartCloserMovesAcrossThePairWithoutCreatingAnEdit() throws {
+        let fixtures: [(opening: String, closing: String, paired: String)] = [
+            ("(", ")", "()"),
+            ("[", "]", "[]"),
+            ("{", "}", "{}"),
+            ("'", "'", "''"),
+            ("\"", "\"", "\"\""),
+            ("`", "`", "``"),
+        ]
+
+        for fixture in fixtures {
+            let (_, view) = hostedView()
+            try view.loadUTF8(Data(), revision: 0)
+            #expect(view.applyLexerNamed(
+                "json",
+                keywords: [],
+                tabWidth: 2,
+                useTabs: false,
+                folding: true,
+                braceMatching: true,
+                maximumStyleBytes: 1_000_000
+            ))
+            view.insertCommittedText(fixture.opening)
+            view.resetInstrumentation()
+
+            view.insertCommittedText(fixture.closing)
+
+            #expect(view.contentUTF8 == Data(fixture.paired.utf8))
+            #expect(view.caretUTF8Position == 2)
+            #expect(view.revision == 1)
+            #expect(view.incrementalNotificationCount == 0)
+            view.undo()
+            #expect(view.contentUTF8.isEmpty)
+        }
+    }
+
+    @Test @MainActor
     func plainTextAndPasteDoNotTriggerSmartPairing() throws {
         let (_, plainTextView) = hostedView()
         try plainTextView.loadUTF8(Data(), revision: 0)
@@ -232,7 +300,8 @@ struct LanguageEditorAdapterTests {
             maximumStyleBytes: 1_000_000
         ))
         plainTextView.insertCommittedText("{")
-        #expect(String(decoding: plainTextView.contentUTF8, as: UTF8.self) == "{")
+        plainTextView.insertCommittedText("\"")
+        #expect(String(decoding: plainTextView.contentUTF8, as: UTF8.self) == "{\"")
 
         let (_, jsonView) = hostedView()
         try jsonView.loadUTF8(Data(), revision: 0)
@@ -251,12 +320,141 @@ struct LanguageEditorAdapterTests {
         #expect(String(decoding: jsonView.contentUTF8, as: UTF8.self) == "{")
 
         try jsonView.loadUTF8(Data(), revision: 1)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("\"", forType: .string)
+        jsonView.paste()
+        #expect(jsonView.contentUTF8 == Data("\"".utf8))
+
+        try jsonView.loadUTF8(Data(), revision: 2)
         let largePaste = String(repeating: "{", count: 4 * 1_024 * 1_024)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(largePaste, forType: .string)
         jsonView.paste()
         #expect(jsonView.documentByteLength == largePaste.utf8.count)
         #expect(jsonView.contentPrefixUTF8(withMaximumLength: 4) == Data("{{{{".utf8))
+    }
+
+    @Test @MainActor
+    func commandVPastesSingleSmartCharactersLiterally() throws {
+        let fixtures: [(source: String, caret: Int, pasted: String, expected: String)] = [
+            ("", 0, "{", "{"),
+            ("", 0, "\"", "\""),
+            (")", 0, ")", "))"),
+            ("  ", 2, "\n", "  \n"),
+        ]
+
+        for fixture in fixtures {
+            let (window, view) = hostedView()
+            try view.loadUTF8(Data(fixture.source.utf8), revision: 0)
+            #expect(view.applyLexerNamed(
+                "json",
+                keywords: [],
+                tabWidth: 2,
+                useTabs: false,
+                folding: true,
+                braceMatching: true,
+                maximumStyleBytes: 1_000_000
+            ))
+            view.setPrimarySelectionUTF8Range(NSRange(location: fixture.caret, length: 0))
+            NSPasteboard.general.clearContents()
+            #expect(NSPasteboard.general.setString(fixture.pasted, forType: .string))
+            window.makeKeyAndOrderFront(nil)
+            view.focusEditor()
+
+            try sendKeyEvent(
+                characters: "v",
+                charactersIgnoringModifiers: "v",
+                modifierFlags: [.command],
+                keyCode: 9,
+                to: window
+            )
+
+            #expect(view.contentUTF8 == Data(fixture.expected.utf8))
+            view.undo()
+            #expect(view.contentUTF8 == Data(fixture.source.utf8))
+        }
+    }
+
+    @Test @MainActor
+    func smartCloserSkipRequiresAnEmptyCaretBeforeTheExactNextCharacter() throws {
+        let (_, mismatchedView) = hostedView()
+        try mismatchedView.loadUTF8(Data("]".utf8), revision: 0)
+        #expect(mismatchedView.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        mismatchedView.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 0))
+
+        mismatchedView.insertCommittedText(")")
+
+        #expect(mismatchedView.contentUTF8 == Data(")]".utf8))
+
+        let (_, selectedView) = hostedView()
+        try selectedView.loadUTF8(Data("x)".utf8), revision: 0)
+        #expect(selectedView.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        selectedView.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 1))
+
+        selectedView.insertCommittedText(")")
+
+        #expect(selectedView.contentUTF8 == Data("))".utf8))
+    }
+
+    @Test @MainActor
+    func angleBracketsRemainTwoLiteralEdits() throws {
+        let (_, view) = hostedView()
+        try view.loadUTF8(Data(), revision: 0)
+        #expect(view.applyLexerNamed(
+            "cpp",
+            keywords: [],
+            tabWidth: 4,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+
+        view.insertCommittedText("<")
+        #expect(view.contentUTF8 == Data("<".utf8))
+        #expect(view.revision == 1)
+        view.insertCommittedText(">")
+
+        #expect(view.contentUTF8 == Data("<>".utf8))
+        #expect(view.revision == 2)
+    }
+
+    @Test @MainActor
+    func multiCharacterDirectInsertionPreservesEmbeddedCRLFWithoutSmartIndentation() throws {
+        let (_, view) = hostedView()
+        let prefix = "        "
+        let payload = "한글🦆\r\n두 번째 줄🙂"
+        try view.loadUTF8(Data(prefix.utf8), revision: 0)
+        #expect(view.applyLexerNamed(
+            "cpp",
+            keywords: [],
+            tabWidth: 4,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        view.setPrimarySelectionUTF8Range(NSRange(location: prefix.utf8.count, length: 0))
+
+        view.insertCommittedText(payload)
+
+        #expect(view.contentUTF8 == Data((prefix + payload).utf8))
     }
 
     @Test @MainActor
@@ -288,6 +486,64 @@ struct LanguageEditorAdapterTests {
 
             #expect(String(decoding: view.contentUTF8, as: UTF8.self) == expected)
             #expect(view.caretUTF8Position == caret)
+        }
+    }
+
+    @Test @MainActor
+    func realReturnWithSelectionOrMultipleCaretsRemainsNative() throws {
+        let source = "  first\n  second"
+        let selectionCases = [
+            [NSRange(location: 2, length: 5)],
+            [NSRange(location: 7, length: 0), NSRange(location: 16, length: 0)],
+        ]
+
+        for selections in selectionCases {
+            let (plainWindow, plainView) = hostedView()
+            try plainView.loadUTF8(Data(source.utf8), revision: 0)
+            plainView.setPrimarySelectionUTF8Range(selections[0])
+            for selection in selections.dropFirst() {
+                #expect(plainView.addSelectionUTF8Range(selection))
+            }
+            plainWindow.makeKeyAndOrderFront(nil)
+            plainView.focusEditor()
+            try sendKeyEvent(
+                characters: "\r",
+                charactersIgnoringModifiers: "\r",
+                keyCode: 36,
+                to: plainWindow
+            )
+
+            let (smartWindow, smartView) = hostedView()
+            try smartView.loadUTF8(Data(source.utf8), revision: 0)
+            #expect(smartView.applyLexerNamed(
+                "json",
+                keywords: [],
+                tabWidth: 2,
+                useTabs: false,
+                folding: true,
+                braceMatching: true,
+                maximumStyleBytes: 1_000_000
+            ))
+            smartView.setPrimarySelectionUTF8Range(selections[0])
+            for selection in selections.dropFirst() {
+                #expect(smartView.addSelectionUTF8Range(selection))
+            }
+            smartWindow.makeKeyAndOrderFront(nil)
+            smartView.focusEditor()
+            try sendKeyEvent(
+                characters: "\r",
+                charactersIgnoringModifiers: "\r",
+                keyCode: 36,
+                to: smartWindow
+            )
+
+            #expect(smartView.contentUTF8 == plainView.contentUTF8)
+            #expect(smartView.revision == plainView.revision)
+            smartView.undo()
+            plainView.undo()
+            #expect(smartView.contentUTF8 == Data(source.utf8))
+            #expect(smartView.contentUTF8 == plainView.contentUTF8)
+            #expect(smartView.revision == plainView.revision)
         }
     }
 
@@ -335,6 +591,20 @@ struct LanguageEditorAdapterTests {
         )
 
         #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{")
+        #expect(!view.hasMarkedText())
+
+        try view.loadUTF8(Data(), revision: 2)
+        view.setMarkedText(
+            "\"",
+            selectedRange: NSRange(location: 1, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        #expect(view.contentUTF8 == Data("\"".utf8))
+        textInputClient.insertText(
+            "\"",
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        #expect(view.contentUTF8 == Data("\"".utf8))
         #expect(!view.hasMarkedText())
     }
 
@@ -1534,6 +1804,95 @@ struct LanguageEditorAdapterTests {
 
         try view.loadUTF8(Data("{".utf8), revision: 7)
         #expect(String(decoding: view.contentUTF8, as: UTF8.self) == "{")
+    }
+
+    @Test @MainActor
+    func appKitKeyEventsAutoCloseQuotesAndSkipMatchingParenthesis() throws {
+        let (window, view) = hostedView()
+        try view.loadUTF8(Data(), revision: 0)
+        #expect(view.applyLexerNamed(
+            "json",
+            keywords: [],
+            tabWidth: 2,
+            useTabs: false,
+            folding: true,
+            braceMatching: true,
+            maximumStyleBytes: 1_000_000
+        ))
+        window.makeKeyAndOrderFront(nil)
+        view.focusEditor()
+
+        try sendKeyEvent(
+            characters: "\"",
+            charactersIgnoringModifiers: "'",
+            modifierFlags: [.shift],
+            keyCode: 39,
+            to: window
+        )
+
+        #expect(view.contentUTF8 == Data("\"\"".utf8))
+        #expect(view.caretUTF8Position == 1)
+        #expect(view.revision == 1)
+        view.resetInstrumentation()
+        try sendKeyEvent(
+            characters: "\"",
+            charactersIgnoringModifiers: "'",
+            modifierFlags: [.shift],
+            keyCode: 39,
+            to: window
+        )
+        #expect(view.contentUTF8 == Data("\"\"".utf8))
+        #expect(view.caretUTF8Position == 2)
+        #expect(view.revision == 1)
+        #expect(view.incrementalNotificationCount == 0)
+        view.undo()
+        #expect(view.contentUTF8.isEmpty)
+
+        try sendKeyEvent(
+            characters: "`",
+            charactersIgnoringModifiers: "`",
+            keyCode: 50,
+            to: window
+        )
+        #expect(view.contentUTF8 == Data("``".utf8))
+        #expect(view.caretUTF8Position == 1)
+        #expect(view.revision == 3)
+        view.resetInstrumentation()
+        try sendKeyEvent(
+            characters: "`",
+            charactersIgnoringModifiers: "`",
+            keyCode: 50,
+            to: window
+        )
+        #expect(view.contentUTF8 == Data("``".utf8))
+        #expect(view.caretUTF8Position == 2)
+        #expect(view.revision == 3)
+        #expect(view.incrementalNotificationCount == 0)
+        view.undo()
+        #expect(view.contentUTF8.isEmpty)
+
+        try sendKeyEvent(
+            characters: "(",
+            charactersIgnoringModifiers: "9",
+            modifierFlags: [.shift],
+            keyCode: 25,
+            to: window
+        )
+        view.resetInstrumentation()
+        try sendKeyEvent(
+            characters: ")",
+            charactersIgnoringModifiers: "0",
+            modifierFlags: [.shift],
+            keyCode: 29,
+            to: window
+        )
+
+        #expect(view.contentUTF8 == Data("()".utf8))
+        #expect(view.caretUTF8Position == 2)
+        #expect(view.revision == 5)
+        #expect(view.incrementalNotificationCount == 0)
+        view.undo()
+        #expect(view.contentUTF8.isEmpty)
     }
 
     @Test @MainActor

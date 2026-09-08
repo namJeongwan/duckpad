@@ -4,7 +4,7 @@
 
 Phase 7 adds a language-service foundation and production Lexilla syntax styling without reading or copying the ignored Notepad++ reference repository. It is not a Notepad++ parity claim. Implemented slices now include deterministic detection, per-document manual override, a broad bundled registry, real Lexilla lexers, light/dark/high-contrast-aware palettes, line numbers, fold margin and recovery, brace feedback, indentation settings/guides, loss-safe line and block comment commands, direct closing-delimiter dedent, and explicit configured indent/outdent.
 
-Quote pairing, selection surround, closer skip-over, LSP, importable user-defined languages, and Notepad++ language-menu exact ordering remain deferred. Lightweight current-document completion and symbols are separate bounded features, not an IDE-scale language server.
+All lightweight delimiter pairs and exact adjacent closer skip-over are implemented for direct input in brace-capable languages. Selection surround, LSP, importable user-defined languages, and Notepad++ language-menu exact ordering remain deferred. Lightweight current-document completion and symbols are separate bounded features, not an IDE-scale language server.
 
 ## Official source and reproducibility
 
@@ -171,6 +171,15 @@ Phase 32 validation on 2026-09-05:
   current-window pointer reconciliation, and reuse/removal cleanup fix it;
   Debug and Release `TabFlowLayoutTests` pass 66/66. Direct GUI reproduction was
   unavailable because the Mac session remained locked.
+
+Maintenance validation on 2026-09-08 supersedes the earlier whole-suite and
+compiler-warning limitations for the current source. Serial Debug and Release
+runs each pass all 668 tests in 12 suites. Focused real-input tests additionally
+prove literal Command-V and native selected/multi-caret Return behavior. Fresh
+hidden Release-app language smoke covers real highlighting, folding,
+indentation, exact UTF-8/CRLF multi-character insertion, and dark palette. Both
+Scintilla bridge configurations compile with deprecated declarations promoted
+to errors after the narrowly documented Cocoa compatibility updates.
 
 ## Agent Work Log
 

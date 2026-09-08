@@ -42,6 +42,7 @@ public struct TabFlowLayoutEngine: Sendable {
     public var insets: NSEdgeInsets
     public var minimumItemWidth: CGFloat
     public var maximumItemWidth: CGFloat
+    public var backingScale: CGFloat
 
     public init(
         rowHeight: CGFloat = 27,
@@ -49,7 +50,8 @@ public struct TabFlowLayoutEngine: Sendable {
         verticalSpacing: CGFloat = 0,
         insets: NSEdgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0),
         minimumItemWidth: CGFloat = 76,
-        maximumItemWidth: CGFloat = .greatestFiniteMagnitude
+        maximumItemWidth: CGFloat = .greatestFiniteMagnitude,
+        backingScale: CGFloat = 2
     ) {
         self.rowHeight = rowHeight
         self.horizontalSpacing = horizontalSpacing
@@ -57,6 +59,7 @@ public struct TabFlowLayoutEngine: Sendable {
         self.insets = insets
         self.minimumItemWidth = minimumItemWidth
         self.maximumItemWidth = maximumItemWidth
+        self.backingScale = backingScale
     }
 
     public func layout(itemWidths: [CGFloat], containerWidth: CGFloat) -> TabFlowLayoutResult {
@@ -131,10 +134,24 @@ public struct TabFlowLayoutEngine: Sendable {
                 ? max(0, usableWidth - naturalWidth(of: range))
                 : 0
             let distributedSlack = slack / CGFloat(range.count)
+            let pixelScale = max(1, backingScale)
+            func pixelAligned(_ value: CGFloat) -> CGFloat {
+                (value * pixelScale).rounded() / pixelScale
+            }
+            let justifiedRowEnd = pixelAligned(insets.left + usableWidth)
+            var naturalPrefix: CGFloat = 0
             for (offset, index) in range.enumerated() {
+                if offset > 0 { naturalPrefix += horizontalSpacing }
+                naturalPrefix += boundedWidths[index]
                 var width = boundedWidths[index] + distributedSlack
-                if distributedSlack > 0, offset == range.count - 1 {
-                    width = insets.left + usableWidth - x
+                if slack > 0 {
+                    if offset == range.count - 1 {
+                        width = justifiedRowEnd - x
+                    } else {
+                        let idealMaxX = insets.left + naturalPrefix
+                            + distributedSlack * CGFloat(offset + 1)
+                        width = pixelAligned(idealMaxX) - x
+                    }
                 }
                 let frame = CGRect(x: x, y: y, width: width, height: rowHeight)
                 frames.append(frame)
@@ -176,6 +193,7 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         }
     }
     public var onContentSizeChange: ((NSSize) -> Void)?
+    public var onLayoutRegenerated: (() -> Void)?
     public var viewportWidth: CGFloat = 0 {
         didSet {
             guard viewportWidth != oldValue else { return }
@@ -231,6 +249,7 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
             calculatedSize = newSize
             onContentSizeChange?(newSize)
         }
+        onLayoutRegenerated?()
     }
 
     public override var collectionViewContentSize: NSSize { calculatedSize }
