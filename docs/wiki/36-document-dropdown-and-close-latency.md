@@ -10,11 +10,14 @@ scrollers. **Tabs → Open Document…** and `Command-Shift-O` still open the sa
 searchable panel, now anchored to the tab-strip surface. Tabs are connected,
 multi-row 27-point strips; every title uses its complete intrinsic width and is
 never truncated or ellipsized, even when a legacy maximum width is supplied.
-Rows wrap only between whole tab items when the next item no longer fits and
-leave unused row width available instead of stretching titles. There is no row cap or internal
-tab viewport: all rows in the 56- and 500-tab layouts contribute their full content height, clip
-origin stays zero, and wheel, activation, resize, or programmatic reflection
-cannot re-enable scrolling.
+A single row preserves natural widths and unused trailing space. Once complete
+natural widths require multiple rows, contiguous rows are balanced where
+full-title minima allow and every multiline row distributes its positive slack.
+Widths are never reduced below the complete title minimum. There is no row cap
+or internal tab viewport: all rows in the 56- and 500-tab layouts contribute
+their full content height, clip origin stays zero, and wheel, activation,
+resize, or programmatic reflection cannot re-enable scrolling. This supersedes
+the earlier ragged-right interpretation.
 
 The immediate-close transaction, stable-`TabID` routing, active-editor focus,
 hover-only close affordance, and last-tab scratch behavior documented below
@@ -53,9 +56,16 @@ serialization remains held until the commit or rollback finishes.
 
 Removal events now use a collection-view structural delete instead of
 `reloadData()`. Active-tab and edited-tab changes retain the existing bounded
-item reload path. Insert and reorder keep the conservative full reconciliation
-path because AppKit cannot safely animate those transitions while a concurrent
-Restore Closed Tab operation changes editor ownership.
+item reload path. A valid `tabInserted(index:)` snapshot delta now updates the
+data-source/width caches and calls `NSCollectionView.insertItems` exactly once;
+an invalid index, count, or stable-ID order safely uses the authoritative full
+snapshot. Reorder retains its conservative reconciliation path.
+
+In editor-group mode, a valid insertion is translated from workspace position
+to the receiving group's local index and only that strip changes. The other
+strip is not reloaded or updated. Redisplaying the same buffer in the same
+Scintilla host is idempotent, so the already attached native view and editor
+focus remain stable while the new tab is reflected.
 
 The current retained-item hover path resolves stable `TabID` through a
 structural-change-time index map. Deleting an earlier tab therefore cannot
@@ -81,14 +91,26 @@ scratch document. This matches the immediate-editing Notepad++ model; an empty
 - A failed close restores the original tab and publishes one retryable failure.
 - Pending and committed close events leave the collection at the exact count
   without a full reload or stale-layout warning.
+- A valid insertion performs one native collection insertion; malformed deltas
+  use the full-snapshot fallback. Split mode updates only the receiving group's
+  local index.
 - Command-N creates and activates a scratch tab and makes its editor the first
-  responder.
+  responder; same-buffer/same-host redisplay does not detach that view or move
+  focus.
 
-Release validation passes the complete 119-test Application target and the
-52-test serialized AppKit-hosted suite. The packaged native performance gate
-also passes: warm ready 417.279 ms, typing p95 0.015958 ms, 100 MiB open
+The historical Phase 29C release validation passed the complete 119-test
+Application target and the 52-test serialized AppKit-hosted suite. Its packaged
+native performance gate also passed: warm ready 417.279 ms, typing p95
+0.015958 ms, 100 MiB open
 1011.250083 ms, 200-tab reflow p95 0.001917 ms, and folder search 282.666292
-ms. The 64-tab structural close probe is separately bounded below 250 ms.
+ms. The 64-tab structural close probe was separately bounded below 250 ms.
+Those numbers remain a historical performance baseline. The current
+multiline/insertion follow-up separately passes TabFlow 93/93, insertion 5/5,
+editor-group commands 29/29, Scintilla groups 24/24, Language editor 56/56,
+and the complete monolithic serial run at 653/653 tests in 12 suites. Debug and
+Release builds pass. A fresh Universal bundle from remote-verified `ca97721`
+passes hidden Finder/Open With, security-scope relaunch/save, extension/XPC,
+and 50-tab multiline smoke with six rows.
 
 ## Boundaries
 

@@ -9,18 +9,20 @@ Duckpad의 tab strip은 열린 문서가 많아도 단일 행으로 제목을 �
 않고 stable document order 그대로 다음 행으로 wrap한다. Phase 5의
 96–220 pt tab 폭과 visible 수직 overflow scroller 계약은 역사적 구현이며,
 [Phase 33](38-editor-groups-compare-and-native-tabs.md)이 이를 대체한다.
-현재 tab은 완전한 제목의 intrinsic width로만 측정하고 tab item 사이에서만
-wrap한다. 제목 truncation/abbreviation/ellipsis와 visible tab scroller는 모두
-금지된다. Row cap과 내부 tab viewport도 없다. 56개와 500개 tab 모두 모든
-행의 전체 content height를 차지하며 strip 아래 editor가 그만큼 내려간다.
-Wheel, activation, resize, programmatic clip movement 뒤에도 clip origin은
-항상 zero이고 horizontal/vertical scroller는 계속 비활성이다.
+현재 tab은 완전한 제목의 intrinsic width를 최소 폭으로 측정하고 tab item
+사이에서만 wrap한다. 단일 행은 각 item의 natural width와 남는 trailing
+space를 그대로 보존한다. 전체 natural width가 한 행에 들어가지 않으면
+stable order의 contiguous row로 나누되, full-title minima가 허용하는 범위에서
+row를 균형 있게 구성하고 각 multiline row의 positive slack을 item에 고르게
+분배한다. 어떤 경우에도 title을 truncate, abbreviate, ellipsize, shrink하지
+않으며 legacy maximum-width도 full-title minimum을 줄일 수 없다.
 
-각 행은 full intrinsic title width를 그대로 보존하고 남는 폭을 item에
-분배하지 않는다. 따라서 legacy maximum-width 설정도 제목을 줄일 수 없고,
-다음 complete item이 들어가지 않을 때에만 새 행으로 wrap한다. **Tabs → Open
+Row cap과 내부 tab viewport는 없다. 56개와 500개 tab 모두 모든 행의 전체
+content height를 차지하며 strip 아래 editor가 그만큼 내려간다. Wheel,
+activation, resize, programmatic clip movement 뒤에도 clip origin은 항상
+zero이고 horizontal/vertical scroller는 계속 비활성이다. **Tabs → Open
 Document…** (`Command-Shift-O`)는 별도의 keyboard-first navigation 경로로
-계속 제공된다.
+계속 제공된다. 이전의 multiline ragged-right 해석은 이 계약으로 대체된다.
 
 지원 interaction은 mouse select, active/hover close button, middle-click
 close, `Cmd-W`, 행 사이 drag reorder, pin/unpin, 시각 순서 next/previous,
@@ -44,6 +46,8 @@ record](38-editor-groups-compare-and-native-tabs.md)를 따른다.
 - Workspace가 이미 actionable retry와 함께 publish한 close persistence failure는 coordinator가 `workspaceFailure`로 구분해 Presentation이 중복 banner로 덮지 않는다.
 - File Retry는 시작 operation을 바꾸지 않는다. ordinary/bulk close는 당시 stable TabID target set을 다시 사용하고 failed tab의 최신 revision부터 이어가며, termination은 App delegate를 통해 새 native terminate request와 `terminateLater`/reply cycle을 시작해 남은 dirty review와 final recovery flush를 완료한다.
 - Presentation `MultilineTabCollectionLayout`은 한 번의 O(n) generation에서 attributes, item→row table, row→item range spatial index를 cache한다. 개별 item/rowCount 조회는 O(1), visible rect 조회는 O(log rows + intersecting rows/items)이며 bounds width, item width 또는 engine inputs가 바뀔 때만 generation을 다시 만든다.
+- `WorkspaceChangeKind.tabInserted(index:)`는 새 snapshot이 이전 stable-ID 순서에 해당 index의 item 하나만 더한 경우에만 authoritative하다. Valid delta는 width cache에 하나를 삽입하고 `NSCollectionView.insertItems`를 한 번 호출한다. index/order/count가 맞지 않으면 authoritative full snapshot apply로 안전하게 fallback한다.
+- 두 editor group에서는 삽입 뒤 계산한 receiving group의 local index로 그 strip 하나만 갱신한다. 다른 group의 membership, selection, metrics, host는 바뀌지 않는다. 같은 buffer를 같은 Scintilla host에 다시 display하는 요청은 idempotent하며 native view를 detach/re-attach하지 않고 first-responder focus를 보존한다.
 - AppKit drag의 `.before` index를 source removal 전 insertion으로 해석하고, forward move는 1을 빼 Domain final index로 변환한다. Domain이 pin boundary를 최종 clamp한다.
 - Recovery schema v1은 새 `activationHistory`를 저장한다. Phase 4 archive처럼 필드가 없으면 active-only history로 migration하여 기존 recovery를 거부하지 않는다.
 
@@ -73,14 +77,19 @@ record](38-editor-groups-compare-and-native-tabs.md)를 따른다.
   stable order와 selected visibility를 검증했다. Phase 33 Task 10은 row cap과
   internal overflow를 제거하고 56/500 tabs의 complete content height,
   zero clip origin, disabled scrollers를 검증한다.
-- 각 item은 full intrinsic title width를 유지하고 남는 row width를 소비하지
-  않는다. 다음 complete item이 들어가지 않을 때만 wrap하며 legacy maximum에도
-  줄거나 ellipsize되지 않는다.
+- 단일 행은 complete natural widths와 trailing space를 보존한다. Multiline은
+  full-title minima로 가능한 contiguous row를 균형 배치하고 각 row의 positive
+  slack을 분배한다. Legacy maximum이나 좁은 viewport에서도 item을 줄이거나
+  ellipsize하지 않으며 oversized title은 viewport보다 넓게 남는다.
 - single-pass cached layout, O(1) item/rowCount lookup, O(log rows + intersecting rows/items) visible query, engine-input invalidation, persistence-only no-op and settled 500-tab edit `fullReload=0/itemReload=1`.
 - Current 500-tab incremental metrics는 single-tab update 1, persistence 0,
   hover enter/exit 각각 1, active old/new 2 item configuration을 보장한다.
   Stable `TabID`→current-index map으로 앞 tab 삭제 뒤 retained item hover와
   close affordance도 올바른 현재 위치를 사용한다.
+- Valid `tabInserted`는 native collection insertion 1회와 필요한 이전 active
+  item reload만 수행한다. Malformed insertion은 full-snapshot fallback을 사용하고,
+  split mode에서는 receiving group의 local index만 적용한다. Same-buffer/same-host
+  Scintilla redisplay는 attached view와 editor focus를 그대로 유지한다.
 - drag writer→pasteboard→cross-row/end acceptance, forward/backward/end insertion conversion and pin-boundary clamp.
 - MRU close, keyboard navigation/move, recovery round-trip and Phase 4 schema-v1 migration.
 - single/bulk/termination shared dirty review: duplicate prompt exactly once, mid-batch Cancel, save failure, stale target skip, prompt-time edit와 transaction-time expected-revision race, operation-preserving actionable Retry.
@@ -104,6 +113,30 @@ DUCKPAD_TAB_SMOKE=1 DUCKPAD_SMOKE_EXIT=1 swift run DuckpadApp
 Notepad++의 Close All, Close to Left, Close Unchanged, Close Unpinned는 Application scope 모델에는 일부 준비되어 있으나 이번 Phase 5 context-menu/UI acceptance 범위에는 포함하지 않았다. 또한 tab을 다른 view/window로 move/clone, document list popup과 user-configurable tab appearance는 후속 parity slice다. 이 문서는 전체 tab-close workflow가 Full이라고 주장하지 않는다.
 
 ## Agent Work Log
+
+### 2026-09-08 — Native multiline and incremental-insertion follow-up
+
+- **Layout correction:** 단일 행의 complete natural widths/trailing space는
+  유지한다. Wrapping 후에는 full-title minima가 허용하는 contiguous row를
+  균형 배치하고 multiline row의 positive slack만 분배한다. 이전 ragged-right
+  해석은 superseded이며 title truncation/shrink/no-scroll 금지는 그대로다.
+- **Incremental boundary:** valid `tabInserted(index:)`는 width cache와 data
+  source를 일치시킨 뒤 native collection insertion을 정확히 한 번 수행한다.
+  Malformed/out-of-order delta는 full snapshot으로 안전하게 복구하며 split
+  mode는 receiving group의 local index만 갱신한다.
+- **Editor stability:** 같은 buffer를 이미 표시 중인 같은 Scintilla host에
+  다시 display해도 native view를 재부착하지 않으며 focus를 보존한다.
+- **Reference boundary:** Notepad++ source는 `WC_TABCONTROL`과
+  `TCS_MULTILINE` 사용 및 ordinary wheel scrolling을 multiline mode에서
+  비활성화하는 경로의 근거다. Row balancing 자체를 그 source가 증명한다고
+  주장하지 않으며 Duckpad는 승인된 관찰 결과를 clean-room Swift/AppKit으로
+  재현한다.
+- **Evidence:** TabFlow 93/93, insertion 5/5, editor-group commands 29/29,
+  Scintilla groups 24/24와 Language editor 56/56가 통과했다. 전체 serial은
+  653/653 tests, 12 suites를 완주했고 Debug/Release build가 통과했다.
+  `ca97721` Universal bundle은 hidden Finder/Open With, security-scope,
+  extension/XPC와 50-tab/6-row smoke를 통과했다. 여섯 follow-up commit은 모두
+  exact receipt/audit를 갖고 cumulative review 0/0/0 뒤 같은 SHA로 원격 검증됐다.
 
 ### 2026-09-02 — Phase 5 multiline-tab builder
 

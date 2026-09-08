@@ -1,6 +1,6 @@
 # Phase 33 — Editor groups, open-document Compare, and native tab chrome
 
-Status: **Complete — reviewed source is audited, pushed, and smoke-validated**
+Status: **Implementation complete; code/test reviewed and remote-verified**
 
 ## Outcome
 
@@ -136,11 +136,15 @@ enter/exit 1 each, and active old/new 2. A stable `TabID`→current-index map ke
 a retained item's hover/close behavior correct after an earlier deletion.
 
 Tab titles are never truncated, abbreviated, ellipsized, or shrunk by a legacy
-maximum width. Each item measures the complete filename at its intrinsic width,
-and wrapping occurs only between whole tab items when the next item no longer
-fits. Remaining row width is intentionally left available instead of being
-distributed across the row. Title-side whitespace is halved while fixed
-pin/dirty/close hit targets remain stable.
+maximum width. Each item's complete filename defines its minimum natural width.
+When every item fits one row, those natural widths and the unused trailing space
+remain unchanged. When the complete widths require multiple rows, stable-order
+contiguous items are balanced across rows wherever their full-title minima fit,
+then each multiline row distributes its positive remaining width evenly. No
+item is ever reduced below its full-title or existing minimum width; an
+oversized title remains wider than the viewport. Title-side whitespace is
+halved while fixed pin/dirty/close hit targets remain stable. This contract
+supersedes the earlier ragged-right interpretation.
 
 There is no tab row cap or internal viewport. All rows contribute their full
 content height, including 56- and 500-tab layouts. Horizontal and vertical
@@ -167,6 +171,21 @@ VoiceOver labels/actions, and live appearance updates all remain available.
 No dependency, parser, language server, background indexer, or IDE-scale
 service was added.
 
+For a valid `WorkspaceChangeKind.tabInserted(index:)`, the new workspace
+snapshot must equal the previous stable-ID order plus exactly one tab at that
+index. The strip then updates its data-source and width caches and performs one
+`NSCollectionView.insertItems` operation, reloading only an existing tab whose
+active appearance changed. A malformed or out-of-order delta uses the existing
+authoritative full-snapshot apply. In two-group mode, the controller converts
+the workspace index to the receiving group's local index and changes only that
+strip; the other group's membership, selection, metrics, and host stay intact.
+
+The Scintilla group adapter also treats display of the same buffer in the same
+host as idempotent. Descriptor, input, and language reflection can continue,
+but the already attached native view is not detached and re-added, so its
+first-responder focus is preserved. A real buffer or group change still uses
+the normal attachment path.
+
 ## Pinned Notepad++ parity evidence
 
 The ignored local Notepad++ tree is pinned at
@@ -178,23 +197,30 @@ The ignored local Notepad++ tree is pinned at
   updates the complete label and escapes ampersands so native measurement
   retains the literal filename.
 - `notepad-plus-plus/PowerEditor/src/WinControls/TabBar/TabBar.cpp:260-310`
-  enables multiline tabs without opting into fixed-width/right-justified tab
-  styles, preserving content-measured widths until another row is needed.
+  creates the native `WC_TABCONTROL` with `TCS_MULTILINE` for horizontal
+  multiline tabs.
 - `notepad-plus-plus/PowerEditor/src/WinControls/TabBar/TabBar.cpp:700-805`
-  separates single-line wheel scrolling from multiline behavior and explicitly
-  avoids scrolling the multiline tab mode.
+  separates single-line wheel scrolling from multiline behavior and disables
+  ordinary wheel scrolling for the multiline tab mode.
 - `notepad-plus-plus/PowerEditor/src/WinControls/TabBar/TabBar.cpp:1420-1815`
   draws selected/inactive/hover, close, pin, and full single-line label states
   without an ellipsis drawing flag.
 
-Duckpad translates those workflow semantics into Swift/AppKit: inviolable
-intrinsic full-title widths, item-boundary multi-row wrapping only on overflow,
-ordinary trailing room, pinned zero-origin/no-scroll behavior, connected semantic
-colors, system accent, native `NSMenu` dropdowns, and accessibility. It does not
-copy Win32 owner-drawing or the legacy Windows visual style. The ignored
-reference tree was not modified or included in any feature commit.
+Those source locations establish the complete-label, native multiline-control,
+and no-ordinary-wheel paths. They do not by themselves prove how the proprietary
+Windows control balances its rows. Duckpad clean-room Swift/AppKit matches the
+approved observed outcome: natural single-row widths and trailing space,
+balanced contiguous multiline rows where full-title minima permit, positive
+slack distribution without shrinking, and pinned zero-origin/no-scroll
+behavior. It does not copy Win32 owner-drawing or the legacy Windows visual
+style. The ignored reference tree was not modified or included in any feature
+commit.
 
 ## Validation and delivery state
+
+The results in this section through `c517cc8` are the historical delivered
+baseline. They do not validate the newer native multiline/incremental-insertion
+follow-up described below.
 
 Task 6 focused validation passed 21/21 Compare tests, 38/38 file-command tests,
 19/19 editor-group command tests, and 75/75 tab-flow tests. Task 7's combined
@@ -210,7 +236,7 @@ transition boundary. Its deterministic synchronous-focus regression and full
 workspace 16/16, Scintilla group 23/23, Debug/Release builds, and independent
 review at 0 Critical / 0 Important / 0 Minor also pass.
 
-Task 10 commit `cfb6329` verifies the final Notepad++-faithful chrome: layout
+Task 10 commit `cfb6329` verified the then-current chrome baseline: layout
 7/7, command bar 5/5, AppKit-hosted 77/77, workspace 16/16, Compare 21/21, and
 Scintilla group 23/23 pass. Cumulative review then found a native-move source
 editor routing hole and O(n) group reconciliation/full reload during ordinary
@@ -220,7 +246,7 @@ edit, activation, direct click, and cloned-tab focus paths. Only the affected
 group's old/current items, display route, border, and accessibility focus state
 change; an invalid cache retains the authoritative full-render fallback.
 
-The final focused gates pass editor-group commands 27/27, TabFlow/AppKit 85/85,
+The baseline final focused gates passed editor-group commands 27/27, TabFlow/AppKit 85/85,
 layout model 15/15, workspace 16/16, Compare 21/21, and Scintilla groups 23/23.
 
 The 2026-09-08 popup-anchor follow-up fixes a screenshot-confirmed regression
@@ -229,11 +255,11 @@ despite its preferred-edge hint. The explicit native-menu call now anchors the
 menu content directly below the bar. A headless `NSMenu` presentation spy
 captures the nil positioning item, exact anchor point, and command-bar view.
 Typed popup, native Space-key, and `AXShowMenu` paths share that presentation
-route, while disabled controls cannot dispatch it. The command-bar suite passes
-9/9 and the full serial suite exits 0.
-The full serial suite (`swift test --no-parallel`) exits 0 across 640 discovered
-tests, and Debug and Release builds pass. Independent review reports 0 Critical
-/ 0 Important / 0 Minor.
+route, while disabled controls cannot dispatch it. At that baseline, the
+command-bar suite passed 9/9, the full serial suite
+(`swift test --no-parallel`) exited 0 across 640 discovered tests, Debug and
+Release builds passed, and independent review reported 0 Critical / 0 Important
+/ 0 Minor.
 
 On 2026-09-07 the user explicitly selected a non-interactive packaged smoke as
 the final gate instead of a locked-screen manual UI rerun. A fresh native
@@ -249,26 +275,42 @@ cross-group move/Option-copy, group focus/close, and Compare are closed by their
 focused AppKit, command, drag, and Compare suites together with the successful
 current-source packaged smoke, which is the user-approved completion boundary.
 
-The default parallel whole-suite run still receives AppKit `signal 11`. That
-same process-global instability is an established baseline; it is not recorded
-as a pass and does not replace the successful serial suite.
+Process-global AppKit tests are not treated as parallel-safe. During the final
+serial gate, two raw test-owned `NSWindow` fixtures initially outlived pending
+popover/sheet animation cleanup and exposed `signal 11` in later run-loop work.
+Both fixtures now use the production window release policy and drain teardown;
+their causal predecessor/victim sequences pass under `NSZombieEnabled`. No
+product source was changed for those test-harness corrections.
 
-Implementation commits through `c0a0083` and the existing documentation at
+Implementation commits through `c0a0083` and the documentation baseline at
 `c517cc8` have independent 0/0/0 reviews and local commit audits. A final
 cumulative pre-push review also reports 0/0/0, and that source/history is
 remote-verified on `origin/feature/editor-groups-compare`. The fresh package and
-smoke above ran afterward from that exact source. This paragraph does not claim
-that the current three-document closeout has already been reviewed, audited, or
-pushed.
+smoke above ran afterward from that exact source. The newer follow-up evidence
+is recorded below rather than being attributed to this historical baseline.
 
-## 2026-09-08 intrinsic-width and Language-menu follow-up
+## 2026-09-08 native multiline and incremental-insertion follow-up
 
-The earlier Task 10 wording that described exact row-wide justification was an
-incorrect interpretation of the target behavior. The current layout keeps each
-tab at its full measured filename width and wraps only when the next complete
-item would exceed the row. Four short tabs therefore occupy only their required
-width; they do not stretch to 100%. Surrounding title whitespace is reduced by
-half without shrinking the pin, dirty, or close affordance slots.
+The prior follow-up's ragged-right interpretation is superseded. A single row
+still keeps complete natural widths and unused trailing space. If those minima
+require multiple rows, the layout balances stable-order contiguous rows where
+the complete titles fit and distributes each row's positive slack evenly.
+Titles and fixed pin, dirty, or close affordance slots never shrink; an
+oversized item remains wider than the viewport. Connected rows, zero tab-strip
+scrolling, full content height, and the reduced title-side whitespace remain.
+
+A valid `tabInserted(index:)` now maps one old snapshot to one new item and one
+native collection insertion. Snapshot count/order/index mismatches retain the
+safe full-snapshot fallback. In split mode, reconciliation derives the receiving
+group's local index and leaves the other strip unchanged. Repeated display of
+the same buffer in the same Scintilla host leaves the native view attached and
+preserves first-responder focus.
+
+The Notepad++ reference demonstrates `WC_TABCONTROL` with `TCS_MULTILINE`,
+complete labels, and disabled ordinary wheel scrolling in multiline mode. It
+does not itself prove row balancing. Duckpad's balancing and slack distribution
+are a clean-room Swift/AppKit match for the approved observed outcome; no
+Windows implementation or new dependency is shipped.
 
 The window Language control and status Language control now share one compact
 native builder. Auto and Plain Text stay direct, repeated initials use alphabet
@@ -276,11 +318,18 @@ submenus, singleton initials stay direct, and the root remains bounded while all
 78 definitions retain exactly one action leaf. This is an `NSMenu` hierarchy,
 not a custom popup, parser, indexer, or new dependency.
 
-RED tests captured the previous equal-width stretching and flat 78-item menu.
-The focused intrinsic/wrap, compact-padding, no-scroller-chrome, and menu
-identity/cardinality tests now pass. Nonvisible AppKit integration additionally
-passes the native right/down drag-Split suite 16/16, Compare command suite
-10/10, and Compare panel suite 10/10. A packaged screen check confirmed direct
-intrinsic-width tabs, overflow-only row creation, no tab scroller chrome, the
-bounded Language hierarchy, and exactly one selected tab; all disposable test
-apps and their isolated data were removed from the workspace afterward.
+The completed follow-up passes TabFlow 93/93, insertion 5/5, editor-group
+commands 29/29, Scintilla groups 24/24, and Language editor 56/56. The
+monolithic serial run completes all 653 tests in 12 suites, and Debug/Release
+builds pass. A fresh Universal `x86_64 + arm64` app from `ca97721` passes
+bundle/resource/XPC/signature verification plus hidden Finder/Open With,
+security-scoped relaunch/save, extension, XPC-isolation, and 50-tab multiline
+smoke (`6` rows); no app process remains.
+
+Commits `0dc85b7`, `1a45f15`, `f63d1e2`, `7012327`, `1a9f8fe`, and `ca97721`
+each pass exact signed-receipt verification and post-commit audit. Cumulative
+pre-push review reports 0 Critical / 0 Important / 0 Minor. Local and remote
+`feature/editor-groups-compare` both resolve to
+`ca97721d8795a647c8677ab339cdfd5b49ff4182`. Documentation-candidate receipt and
+the later main integration are verified from Git metadata rather than claimed
+recursively by this file's own bytes.
