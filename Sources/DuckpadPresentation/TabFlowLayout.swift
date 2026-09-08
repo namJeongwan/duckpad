@@ -74,20 +74,52 @@ public struct TabFlowLayoutEngine: Sendable {
         // inviolable minimum even when a caller still supplies the legacy
         // maximumItemWidth configuration.
         let boundedWidths = itemWidths.map { max($0, minimumItemWidth) }
-        var rowRanges: [Range<Int>] = []
-        var rowStart = 0
-        var rowWidth: CGFloat = 0
-        for (index, width) in boundedWidths.enumerated() {
-            let candidateWidth = rowWidth == 0 ? width : rowWidth + horizontalSpacing + width
-            if index > rowStart, candidateWidth > usableWidth {
-                rowRanges.append(rowStart..<index)
-                rowStart = index
-                rowWidth = width
-            } else {
-                rowWidth = candidateWidth
-            }
+        func naturalWidth(of range: Range<Int>) -> CGFloat {
+            range.reduce(CGFloat(0)) { $0 + boundedWidths[$1] }
+                + CGFloat(max(0, range.count - 1)) * horizontalSpacing
         }
-        rowRanges.append(rowStart..<boundedWidths.count)
+
+        let totalNaturalWidth = naturalWidth(of: boundedWidths.indices)
+        var rowRanges: [Range<Int>] = []
+        if totalNaturalWidth <= usableWidth || boundedWidths.count == 1 {
+            rowRanges = [boundedWidths.indices]
+        } else {
+            // A greedy pass gives the minimum ordered row count without
+            // dividing by a possibly zero usable width. A lone oversized
+            // title is valid by design.
+            var greedyRanges: [Range<Int>] = []
+            var rowStart = 0
+            var rowWidth: CGFloat = 0
+            for (index, width) in boundedWidths.enumerated() {
+                let candidateWidth = rowWidth == 0 ? width : rowWidth + horizontalSpacing + width
+                if index > rowStart, candidateWidth > usableWidth {
+                    greedyRanges.append(rowStart..<index)
+                    rowStart = index
+                    rowWidth = width
+                } else {
+                    rowWidth = candidateWidth
+                }
+            }
+            greedyRanges.append(rowStart..<boundedWidths.count)
+
+            let rowCount = greedyRanges.count
+            let baseItemCount = boundedWidths.count / rowCount
+            let fullerRowCount = boundedWidths.count % rowCount
+            var balancedRanges: [Range<Int>] = []
+            var balancedStart = 0
+            for row in 0..<rowCount {
+                let count = baseItemCount + (row < fullerRowCount ? 1 : 0)
+                let range = balancedStart..<(balancedStart + count)
+                balancedRanges.append(range)
+                balancedStart += count
+            }
+            // Variable-width titles can make the fuller-first candidate
+            // impossible even though the minimum ordered rows are valid.
+            // Keep that minimum contiguous packing in this case.
+            rowRanges = balancedRanges.allSatisfy {
+                $0.count == 1 || naturalWidth(of: $0) <= usableWidth
+            } ? balancedRanges : greedyRanges
+        }
 
         var frames: [CGRect] = []
         var rowIndices: [Int] = []
@@ -95,12 +127,20 @@ public struct TabFlowLayoutEngine: Sendable {
         for (row, range) in rowRanges.enumerated() {
             var x = insets.left
             let y = insets.top + CGFloat(row) * (rowHeight + verticalSpacing)
-            for index in range {
-                let frame = CGRect(x: x, y: y, width: boundedWidths[index], height: rowHeight)
+            let slack = rowRanges.count > 1
+                ? max(0, usableWidth - naturalWidth(of: range))
+                : 0
+            let distributedSlack = slack / CGFloat(range.count)
+            for (offset, index) in range.enumerated() {
+                var width = boundedWidths[index] + distributedSlack
+                if distributedSlack > 0, offset == range.count - 1 {
+                    width = insets.left + usableWidth - x
+                }
+                let frame = CGRect(x: x, y: y, width: width, height: rowHeight)
                 frames.append(frame)
                 rowIndices.append(row)
                 maximumFrameX = max(maximumFrameX, frame.maxX)
-                x += boundedWidths[index] + horizontalSpacing
+                x += width + horizontalSpacing
             }
         }
         return TabFlowLayoutResult(

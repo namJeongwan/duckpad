@@ -407,14 +407,67 @@ private func blockCommentLanguageRegistry() throws -> LanguageRegistry {
     #expect(roomy.rowIndices == [0, 0, 0, 0])
     #expect(exactFit.frames.map(\.width) == [100, 100, 100, 100])
     #expect(exactFit.rowIndices == [0, 0, 0, 0])
-    #expect(wrapped.frames.map(\.width) == [100, 100, 100, 100])
-    #expect(wrapped.rowIndices == [0, 0, 0, 1])
+    #expect(wrapped.frames.map(\.width) == [199.5, 199.5, 199.5, 199.5])
+    #expect(wrapped.rowIndices == [0, 0, 1, 1])
+}
+
+@Test func rowsUseNativeMultilineBalancing() {
+    let engine = TabFlowLayoutEngine()
+    let result = engine.layout(itemWidths: [100, 100, 100, 100], containerWidth: 399)
+
+    #expect(result.rowIndices == [0, 0, 1, 1])
+    #expect(result.frames.map(\.width) == [199.5, 199.5, 199.5, 199.5])
+    #expect(result.frames.allSatisfy { $0.width >= 100 })
+    #expect(result.frames[1].maxX == 399)
+    #expect(result.frames[3].maxX == 399)
+}
+
+@Test func multilineRowsJustifyWithoutShrinkingTitles() {
+    let engine = TabFlowLayoutEngine()
+    let result = engine.layout(itemWidths: [100, 100, 100, 100, 100], containerWidth: 250)
+
+    #expect(result.rowIndices == [0, 0, 1, 1, 2])
+    #expect(result.frames.map(\.width) == [125, 125, 125, 125, 250])
+    #expect(result.frames.allSatisfy { $0.width >= 100 })
+    #expect(result.frames[1].maxX == 250)
+    #expect(result.frames[3].maxX == 250)
+    #expect(result.frames[4].maxX == 250)
+}
+
+@Test func multilineRowsRemainMinimalWhenGapsConsumeWidth() {
+    let engine = TabFlowLayoutEngine(horizontalSpacing: 10)
+    let result = engine.layout(itemWidths: [100, 100, 100, 100], containerWidth: 210)
+
+    #expect(result.rowIndices == [0, 0, 1, 1])
+    #expect(result.rowCount == 2)
+    #expect(result.frames[1].maxX == 210)
+    #expect(result.frames[3].maxX == 210)
+}
+
+@Test func variableMultilineRowsPreserveTitlesAndSourceOrder() {
+    let engine = TabFlowLayoutEngine()
+    let titleWidths: [CGFloat] = [180, 80, 120, 100]
+    let result = engine.layout(itemWidths: titleWidths, containerWidth: 250)
+
+    #expect(result.rowIndices == [0, 1, 1, 2])
+    #expect(result.frames.map(\.width) == [250, 105, 145, 250])
+    #expect(result.frames.enumerated().allSatisfy { $0.element.width >= titleWidths[$0.offset] })
+    #expect(result.frames.map(\.minY) == [0, 27, 27, 54])
+}
+
+@Test func zeroUsableWidthKeepsPositiveTitlesWithoutTrapping() {
+    let engine = TabFlowLayoutEngine(minimumItemWidth: 0)
+    let result = engine.layout(itemWidths: [10, 20], containerWidth: 0)
+
+    #expect(result.rowIndices == [0, 1])
+    #expect(result.frames.map(\.width) == [10, 20])
+    #expect(result.contentWidth == 20)
 }
 
 @Test func legacyMaximumWidthCannotShrinkAFullIntrinsicTitle() {
     let engine = TabFlowLayoutEngine(minimumItemWidth: 90, maximumItemWidth: 180)
     let result = engine.layout(itemWidths: [20, 500], containerWidth: 95)
-    #expect(result.frames.map(\.width) == [90, 500])
+    #expect(result.frames.map(\.width) == [95, 500])
     #expect(result.contentWidth >= 500)
     #expect(result.rowCount == 2)
 }
