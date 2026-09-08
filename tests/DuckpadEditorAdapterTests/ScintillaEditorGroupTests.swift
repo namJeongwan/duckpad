@@ -44,6 +44,40 @@ struct ScintillaEditorGroupTests {
     }
 
     @Test @MainActor
+    func focusedCloneRedisplayKeepsTheSameNativeViewAndFirstResponder() throws {
+        _ = NSApplication.shared
+        let adapter = ScintillaEditorAdapter()
+        adapter.view.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+        adapter.secondaryGroupView.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+        let host = NSStackView(views: [adapter.view, adapter.secondaryGroupView])
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 200),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        let buffer = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        adapter.install(.init(bufferID: buffer.bufferID, revision: 0, text: "shared"))
+        adapter.display(buffer)
+        adapter.setEditorGroupOrientation(.sideBySide)
+        adapter.assign(buffer, from: .primary, to: .secondary, cloning: true)
+        adapter.display(buffer, in: .secondary)
+        adapter.activateEditorGroup(.secondary)
+        let secondary = try #require(adapter.activeScintillaView)
+        secondary.focusEditor()
+        let responder = try #require(window.firstResponder)
+        #expect(secondary.hasEditorFocus)
+
+        adapter.display(buffer, in: .secondary)
+
+        #expect(adapter.activeScintillaView === secondary)
+        #expect(window.firstResponder === responder)
+        #expect(secondary.hasEditorFocus)
+        #expect(secondary.superview === adapter.secondaryGroupView)
+    }
+
+    @Test @MainActor
     func clonePublishesEachSharedDocumentEditOnceAndSharesNativeUndoRedo() throws {
         let adapter = ScintillaEditorAdapter()
         let buffer = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)

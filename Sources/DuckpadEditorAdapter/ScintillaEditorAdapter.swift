@@ -1367,12 +1367,15 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     private func attach(_ editorView: DPScintillaEditorView, to group: EditorGroupID) {
+        let host = group == .primary ? primaryHost : secondaryGroupHost
+        guard displayedGroupViews[group] !== editorView || editorView.superview !== host else {
+            return
+        }
         for other in EditorGroupID.allCases
         where other != group && displayedGroupViews[other] === editorView {
             displayedGroupViews.removeValue(forKey: other)
             displayedGroupBuffers.removeValue(forKey: other)
         }
-        let host = group == .primary ? primaryHost : secondaryGroupHost
         displayedGroupViews[group]?.removeFromSuperview()
         editorView.removeFromSuperview()
         editorView.frame = host.bounds

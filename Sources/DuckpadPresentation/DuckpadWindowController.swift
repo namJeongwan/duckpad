@@ -2814,6 +2814,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         switch change.kind {
         case .persistence:
             return true
+        case .tabInserted(let workspaceIndex):
+            return applyIncrementalEditorGroupInsertion(
+                change,
+                workspaceIndex: workspaceIndex,
+                previousLayout: previousLayout,
+                currentLayout: currentLayout
+            )
         case .tabUpdated(let workspaceIndex), .bufferEdited(let workspaceIndex):
             guard change.snapshot.tabs.indices.contains(workspaceIndex) else { return false }
             let changedTab = change.snapshot.tabs[workspaceIndex]
@@ -2872,6 +2879,82 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         default:
             return false
         }
+    }
+
+    private func applyIncrementalEditorGroupInsertion(
+        _ change: WorkspaceChange,
+        workspaceIndex: Int,
+        previousLayout: EditorGroupLayoutSnapshot,
+        currentLayout: EditorGroupLayoutSnapshot
+    ) -> Bool {
+        guard previousLayout.orientation == currentLayout.orientation,
+              change.snapshot.tabs.indices.contains(workspaceIndex) else { return false }
+        let insertedTab = change.snapshot.tabs[workspaceIndex]
+        let previousGroups = EditorGroupID.allCases.filter {
+            previousLayout.tabIDs(in: $0).contains(insertedTab.id)
+        }
+        let currentGroups = EditorGroupID.allCases.filter {
+            currentLayout.tabIDs(in: $0).contains(insertedTab.id)
+        }
+        guard previousGroups.isEmpty,
+              currentGroups.count == 1,
+              workspaceTabIndices[insertedTab.id] == workspaceIndex else { return false }
+        let group = currentGroups[0]
+        let previousIDs = previousLayout.tabIDs(in: group)
+        let currentIDs = currentLayout.tabIDs(in: group)
+        guard let localIndex = currentIDs.firstIndex(of: insertedTab.id) else { return false }
+        var retainedIDs = currentIDs
+        retainedIDs.remove(at: localIndex)
+        guard retainedIDs == previousIDs else { return false }
+        for other in EditorGroupID.allCases where other != group {
+            let previousOtherIDs = previousLayout.tabIDs(in: other)
+            guard currentLayout.tabIDs(in: other) == previousOtherIDs,
+                  let previousOtherSelection = previousLayout.selectedTabID(in: other),
+                  previousOtherIDs.contains(previousOtherSelection),
+                  currentLayout.selectedTabID(in: other) == previousOtherSelection,
+                  let otherStrip = tabStrip(for: other),
+                  otherStrip.tabIDs == previousOtherIDs,
+                  otherStrip.activeTabID == previousOtherSelection else {
+                return false
+            }
+        }
+        guard let previousSelectedTabID = previousLayout.selectedTabID(in: group),
+              previousIDs.contains(previousSelectedTabID),
+              let selectedTabID = currentLayout.selectedTabID(in: group),
+              currentIDs.contains(selectedTabID),
+              let strip = tabStrip(for: group),
+              strip.tabIDs == previousIDs,
+              strip.activeTabID == previousSelectedTabID else { return false }
+        var groupTabs: [TabSnapshot] = []
+        groupTabs.reserveCapacity(currentIDs.count)
+        for tabID in currentIDs {
+            guard let tab = cachedWorkspaceTab(for: tabID, workspace: change.snapshot) else {
+                return false
+            }
+            groupTabs.append(TabSnapshot(
+                id: tab.id,
+                title: tab.title,
+                isActive: tab.id == selectedTabID,
+                isDirty: tab.isDirty,
+                isPinned: tab.isPinned,
+                buffer: tab.buffer,
+                fullPath: tab.fullPath
+            ))
+        }
+        guard editorGroupWorkspace.applyFocus(layout: currentLayout) else { return false }
+        let groupSnapshot = WorkspaceSnapshot(
+            sessionID: change.snapshot.sessionID,
+            tabs: groupTabs,
+            activeBuffer: groupTabs.first(where: \.isActive)?.buffer,
+            persistence: change.snapshot.persistence,
+            startup: change.snapshot.startup
+        )
+        strip.apply(change: WorkspaceChange(
+            snapshot: groupSnapshot,
+            kind: .tabInserted(index: localIndex),
+            failureEvent: change.failureEvent
+        ))
+        return true
     }
 
     private func tabStrip(for group: EditorGroupID) -> MultilineTabStripView? {

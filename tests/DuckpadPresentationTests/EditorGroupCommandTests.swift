@@ -735,6 +735,108 @@ struct EditorGroupCommandTests {
     }
 
     @Test @MainActor
+    func splitScratchInsertionUpdatesOnlyTheFocusedGroupStripWithFiveHundredTabs() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 500)
+        defer { fixture.controller.close() }
+        let cloned = try #require(fixture.workspace.snapshot().tabs.last)
+        fixture.controller.editorGroupWorkspace.onAction?(
+            .split(cloned.id, .primary, .sideBySide, .copy)
+        )
+        let secondaryStrip = try #require(
+            fixture.controller.editorGroupWorkspace.secondaryPane?.tabStrip
+        )
+        fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+        fixture.controller.tabStrip.layoutSubtreeIfNeeded()
+        secondaryStrip.layoutSubtreeIfNeeded()
+        fixture.controller.tabStrip.hostedCollectionView.layoutSubtreeIfNeeded()
+        secondaryStrip.hostedCollectionView.layoutSubtreeIfNeeded()
+        let layoutBefore = fixture.controller.editorGroupLayoutSnapshot
+        let primaryMetricsBefore = fixture.controller.tabStrip.updateMetrics
+        let secondaryMetricsBefore = secondaryStrip.updateMetrics
+        let primaryIDsBefore = fixture.controller.tabStrip.tabIDs
+        let primarySelectionBefore = fixture.controller.tabStrip.activeTabID
+
+        _ = await fixture.workspace.addScratch()
+
+        let inserted = try #require(fixture.workspace.snapshot().tabs.last)
+        let layout = fixture.controller.editorGroupLayoutSnapshot
+        #expect(fixture.controller.tabStrip.updateMetrics == primaryMetricsBefore)
+        #expect(secondaryStrip.updateMetrics.fullReloads == secondaryMetricsBefore.fullReloads)
+        #expect(secondaryStrip.updateMetrics.itemInsertions == secondaryMetricsBefore.itemInsertions + 1)
+        #expect(secondaryStrip.updateMetrics.itemReloads == secondaryMetricsBefore.itemReloads + 1)
+        #expect(!fixture.controller.tabStrip.tabIDs.contains(inserted.id))
+        #expect(secondaryStrip.tabIDs == [cloned.id, inserted.id])
+        #expect(fixture.controller.tabStrip.tabIDs == primaryIDsBefore)
+        #expect(fixture.controller.tabStrip.activeTabID == primarySelectionBefore)
+        #expect(layout.primaryTabIDs == layoutBefore.primaryTabIDs)
+        #expect(layout.primarySelectedTabID == layoutBefore.primarySelectedTabID)
+        #expect(layout.secondaryTabIDs == [cloned.id, inserted.id])
+        #expect(layout.secondarySelectedTabID == inserted.id)
+        #expect(layout.focusedGroup == .secondary)
+        #expect(secondaryStrip.tabIDs.count == 2)
+        #expect(secondaryStrip.activeTabID == inserted.id)
+    }
+
+    @Test @MainActor
+    func staleNonReceivingStripFallsBackToFullWorkspaceApply() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 4)
+        defer { fixture.controller.close() }
+        let workspaceTabs = fixture.workspace.snapshot().tabs
+        let cloned = try #require(workspaceTabs.last)
+        fixture.controller.editorGroupWorkspace.onAction?(
+            .split(cloned.id, .primary, .sideBySide, .copy)
+        )
+        let layoutBefore = fixture.controller.editorGroupLayoutSnapshot
+        let staleSelection = workspaceTabs[0].id
+        let tabsByID = Dictionary(uniqueKeysWithValues: workspaceTabs.map { ($0.id, $0) })
+        let stalePrimaryTabs = layoutBefore.primaryTabIDs.compactMap { tabID in
+            tabsByID[tabID].map { tab in
+                TabSnapshot(
+                    id: tab.id,
+                    title: tab.title,
+                    isActive: tab.id == staleSelection,
+                    isDirty: tab.isDirty,
+                    isPinned: tab.isPinned,
+                    buffer: tab.buffer,
+                    fullPath: tab.fullPath
+                )
+            }
+        }
+        #expect(stalePrimaryTabs.count == layoutBefore.primaryTabIDs.count)
+        fixture.controller.tabStrip.apply(tabs: stalePrimaryTabs)
+        #expect(fixture.controller.tabStrip.activeTabID == staleSelection)
+        let secondaryStrip = try #require(
+            fixture.controller.editorGroupWorkspace.secondaryPane?.tabStrip
+        )
+        let primaryMetricsBefore = fixture.controller.tabStrip.updateMetrics
+        let secondaryMetricsBefore = secondaryStrip.updateMetrics
+
+        _ = await fixture.workspace.addScratch()
+
+        let inserted = try #require(fixture.workspace.snapshot().tabs.last)
+        let authoritativeLayout = fixture.controller.editorGroupLayoutSnapshot
+        #expect(
+            fixture.controller.tabStrip.updateMetrics.fullReloads
+                == primaryMetricsBefore.fullReloads + 1
+        )
+        #expect(
+            secondaryStrip.updateMetrics.fullReloads
+                == secondaryMetricsBefore.fullReloads + 1
+        )
+        #expect(fixture.controller.tabStrip.tabIDs == authoritativeLayout.primaryTabIDs)
+        #expect(fixture.controller.tabStrip.activeTabID == authoritativeLayout.primarySelectedTabID)
+        #expect(authoritativeLayout.primarySelectedTabID == cloned.id)
+        #expect(secondaryStrip.tabIDs == [cloned.id, inserted.id])
+        #expect(secondaryStrip.activeTabID == inserted.id)
+        #expect(fixture.controller.editorGroupWorkspace.validateTabDrop(
+            payload: EditorGroupDragPayload(tabID: inserted.id, sourceGroup: .secondary),
+            destinationGroup: .primary,
+            insertionIndex: authoritativeLayout.primaryTabIDs.count,
+            optionPressed: true
+        ) == .copy)
+    }
+
+    @Test @MainActor
     func incrementalEventsSkipMembershipReconciliationWhileStructuralEventsStillReconcile() async throws {
         let fixture = await makeEditorGroupController(tabCount: 500)
         defer { fixture.controller.close() }
