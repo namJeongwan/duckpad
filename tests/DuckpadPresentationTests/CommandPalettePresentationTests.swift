@@ -219,12 +219,16 @@ private func paletteMenu(
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentView = anchor
     window.orderFront(nil)
     panel.present(menu: paletteMenu(target: target), excludingAction: nil, relativeTo: anchor)
     #expect(panel.isPresented)
 
-    window.close()
+    withExtendedLifetime(window) {
+        window.close()
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+    }
 
     #expect(!panel.isPresented)
     #expect(CommandPalettePresentationPolicy.popoverAnimates(reduceMotion: false))

@@ -246,7 +246,7 @@ private func compareContent(
         backing: .buffered,
         defer: false
     )
-    defer { parent.close() }
+    parent.isReleasedWhenClosed = false
     let presenter = NativeOpenDocumentComparePresenter()
 
     presenter.presentFailure(.complexityExceeded(maximumRows: 10), attachedTo: parent)
@@ -256,6 +256,11 @@ private func compareContent(
     for _ in 0..<20 { await Task.yield() }
     #expect(presenter.failureSheetCountForTesting == 0)
     #expect(parent.sheets.isEmpty)
+
+    withExtendedLifetime(parent) {
+        parent.close()
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+    }
 }
 
 @Test @MainActor func pickerFiltersSourceAndDisambiguatesDuplicateTitlesWithPaths() {
