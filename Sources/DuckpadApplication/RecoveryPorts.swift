@@ -11,6 +11,7 @@ public struct SecondaryEditorViewState: Codable, Equatable, Sendable {
     public var whitespaceVisible: Bool
     public var lineEndingsVisible: Bool
     public var zoomLevel: Int
+    public var foldState: FoldRecoveryState
 
     public init(
         anchorUTF8: Int = 0,
@@ -21,7 +22,8 @@ public struct SecondaryEditorViewState: Codable, Equatable, Sendable {
         wrapMarkerVisible: Bool = false,
         whitespaceVisible: Bool = false,
         lineEndingsVisible: Bool = false,
-        zoomLevel: Int = 0
+        zoomLevel: Int = 0,
+        foldState: FoldRecoveryState = .init()
     ) {
         self.anchorUTF8 = anchorUTF8
         self.caretUTF8 = caretUTF8
@@ -32,12 +34,14 @@ public struct SecondaryEditorViewState: Codable, Equatable, Sendable {
         self.whitespaceVisible = whitespaceVisible
         self.lineEndingsVisible = lineEndingsVisible
         self.zoomLevel = min(max(zoomLevel, -10), 20)
+        self.foldState = foldState
     }
 
     private enum CodingKeys: String, CodingKey {
         case anchorUTF8, caretUTF8, firstVisibleLine, horizontalScrollOffset
         case wordWrapEnabled, wrapMarkerVisible
         case whitespaceVisible, lineEndingsVisible, zoomLevel
+        case foldState
     }
 
     public init(from decoder: any Decoder) throws {
@@ -51,6 +55,7 @@ public struct SecondaryEditorViewState: Codable, Equatable, Sendable {
         whitespaceVisible = try values.decodeIfPresent(Bool.self, forKey: .whitespaceVisible) ?? false
         lineEndingsVisible = try values.decodeIfPresent(Bool.self, forKey: .lineEndingsVisible) ?? false
         zoomLevel = min(max(try values.decodeIfPresent(Int.self, forKey: .zoomLevel) ?? 0, -10), 20)
+        foldState = try values.decodeIfPresent(FoldRecoveryState.self, forKey: .foldState) ?? .init()
     }
 }
 
@@ -66,6 +71,7 @@ public struct EditorViewState: Codable, Equatable, Sendable {
     public var lineEndingsVisible: Bool
     public var zoomLevel: Int
     public var bookmarkedLines: [Int]
+    public var foldState: FoldRecoveryState
     public var splitOrientation: EditorSplitOrientation?
     public var secondaryViewState: SecondaryEditorViewState?
 
@@ -80,6 +86,7 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         lineEndingsVisible: Bool = false,
         zoomLevel: Int = 0,
         bookmarkedLines: [Int] = [],
+        foldState: FoldRecoveryState = .init(),
         splitOrientation: EditorSplitOrientation? = nil,
         secondaryViewState: SecondaryEditorViewState? = nil
     ) {
@@ -95,6 +102,7 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         self.bookmarkedLines = Array(
             Array(Set(bookmarkedLines.filter { $0 >= 0 })).sorted().prefix(Self.maximumBookmarkCount)
         )
+        self.foldState = foldState
         self.splitOrientation = splitOrientation
         self.secondaryViewState = splitOrientation == nil ? nil : (secondaryViewState ?? SecondaryEditorViewState())
     }
@@ -110,6 +118,7 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         case lineEndingsVisible
         case zoomLevel
         case bookmarkedLines
+        case foldState
         case splitOrientation
         case secondaryViewState
     }
@@ -135,6 +144,7 @@ public struct EditorViewState: Codable, Equatable, Sendable {
             )
         }
         bookmarkedLines = Array(Set(decodedBookmarks)).sorted()
+        foldState = try values.decodeIfPresent(FoldRecoveryState.self, forKey: .foldState) ?? .init()
         splitOrientation = try values.decodeIfPresent(EditorSplitOrientation.self, forKey: .splitOrientation)
         secondaryViewState = try values.decodeIfPresent(SecondaryEditorViewState.self, forKey: .secondaryViewState)
         guard (splitOrientation == nil) == (secondaryViewState == nil) else {
@@ -158,6 +168,7 @@ public struct EditorViewState: Codable, Equatable, Sendable {
         try values.encode(lineEndingsVisible, forKey: .lineEndingsVisible)
         try values.encode(zoomLevel, forKey: .zoomLevel)
         try values.encode(bookmarkedLines, forKey: .bookmarkedLines)
+        try values.encode(foldState, forKey: .foldState)
         try values.encodeIfPresent(splitOrientation, forKey: .splitOrientation)
         try values.encodeIfPresent(secondaryViewState, forKey: .secondaryViewState)
     }

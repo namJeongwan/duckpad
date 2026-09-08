@@ -1,6 +1,7 @@
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
+import DuckpadInfrastructure
 @testable import DuckpadPresentation
 import Testing
 
@@ -126,6 +127,25 @@ private final class WeakBox<Value: AnyObject> {
 }
 
 @MainActor
+private final class PointerLocationWindow: NSWindow {
+    var pointerLocation = NSPoint.zero
+
+    override var mouseLocationOutsideOfEventStream: NSPoint { pointerLocation }
+}
+
+@MainActor
+private func makePointerLocationWindow(width: CGFloat, height: CGFloat) -> PointerLocationWindow {
+    let window = PointerLocationWindow(
+        contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.pointerLocation = NSPoint(x: -1_000, y: -1_000)
+    return window
+}
+
+@MainActor
 private final class ApplicationMenuTargetSpy: NSObject, DuckpadApplicationCommandTarget {
     private(set) var settingsRequests = 0
     private(set) var openedRecentURLs: [URL] = []
@@ -154,6 +174,10 @@ private final class HostedLanguageEditorFake: LanguageEditorPort, DocumentIntell
     var configurations: [EditorLanguageConfiguration] = []
     private(set) var themes: [EditorThemePalette] = []
     private(set) var mutationCount = 0
+    var canToggleBlockComment = false
+    var blockCommentOutcome: EditorEditOutcome = .rejected(currentRevision: 0)
+    private(set) var blockCommentInvocationCount = 0
+    private(set) var focusCount = 0
     private var activeBuffer: EditorBufferDescriptor?
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
     private(set) var presentedCompletionItems: [String] = []
@@ -183,7 +207,7 @@ private final class HostedLanguageEditorFake: LanguageEditorPort, DocumentIntell
     func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? { snapshots[bufferID] }
     func retire(bufferID: BufferID) { snapshots.removeValue(forKey: bufferID) }
     func setInputEnabled(_ isEnabled: Bool) {}
-    func focus() {}
+    func focus() { focusCount += 1 }
     func detectionPrefix(maximumBytes: Int) -> Data { Data(prefix.prefix(maximumBytes)) }
     func supportsLexer(named name: String) -> Bool { supportedLexers.contains(name) }
     func applyLanguage(_ configuration: EditorLanguageConfiguration) -> Bool {
@@ -194,6 +218,10 @@ private final class HostedLanguageEditorFake: LanguageEditorPort, DocumentIntell
     func toggleLineComment(prefix: String) -> EditorEditOutcome {
         mutationCount += 1
         return .rejected(currentRevision: activeBuffer?.revision ?? 0)
+    }
+    func toggleBlockComment() -> EditorEditOutcome {
+        blockCommentInvocationCount += 1
+        return blockCommentOutcome
     }
     func captureDocumentIntelligence(maximumBytes: Int) -> DocumentIntelligenceCapture? {
         guard let activeBuffer, let snapshot = snapshots[activeBuffer.bufferID] else { return nil }
@@ -256,10 +284,11 @@ private func makeTabs(count: Int, activeIndex: Int, dirtyIndex: Int? = nil) -> [
 private func hostStrip(
     width: CGFloat,
     height: CGFloat,
-    tabs: [TabSnapshot]
+    tabs: [TabSnapshot],
+    window providedWindow: NSWindow? = nil
 ) -> (NSWindow, NSView, MultilineTabStripView) {
     _ = NSApplication.shared
-    let window = NSWindow(
+    let window = providedWindow ?? NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: width, height: height),
         styleMask: [.titled, .resizable],
         backing: .buffered,
@@ -295,6 +324,24 @@ private func descendantTextFields(of view: NSView) -> [NSTextField] {
 }
 
 @MainActor
+private func mouseMovementEvent(
+    for window: NSWindow,
+    location: NSPoint = .zero
+) throws -> NSEvent {
+    try #require(NSEvent.mouseEvent(
+        with: .mouseMoved,
+        location: location,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: window.windowNumber,
+        context: nil,
+        eventNumber: 0,
+        clickCount: 0,
+        pressure: 0
+    ))
+}
+
+@MainActor
 private func menuItem(_ title: String, in menu: NSMenu) -> NSMenuItem? {
     for item in menu.items {
         if item.title == title { return item }
@@ -306,6 +353,31 @@ private func menuItem(_ title: String, in menu: NSMenu) -> NSMenuItem? {
 @MainActor
 private func flattenedMenuItems(in menu: NSMenu) -> [NSMenuItem] {
     menu.items + menu.items.compactMap(\.submenu).flatMap(flattenedMenuItems)
+}
+
+private func blockCommentLanguageRegistry() throws -> LanguageRegistry {
+    try LanguageRegistry(definitions: [
+        LanguageDefinition(
+            id: .plainText,
+            displayName: "Plain Text",
+            group: "Text",
+            lexerName: "null",
+            supportTier: .plain
+        ),
+        LanguageDefinition(
+            id: LanguageID(rawValue: "c"),
+            displayName: "C",
+            group: "C Family",
+            lexerName: "cpp",
+            supportTier: .keywordComplete,
+            contentSignatures: ["#include"],
+            capabilities: .init(comments: .init(
+                line: "//",
+                blockStart: "/*",
+                blockEnd: "*/"
+            ))
+        ),
+    ])
 }
 
 @Test func tabsWrapAcrossRowsWhilePreservingOrder() {
@@ -324,27 +396,79 @@ private func flattenedMenuItems(in menu: NSMenu) -> [NSMenuItem] {
     #expect(result.contentHeight == 69)
 }
 
-@Test func fiftyAndFiveHundredTabsRemainCappedInNarrowWorkspace() {
+@Test func rowsKeepIntrinsicWidthsAndWrapOnlyWhenTheNextTabDoesNotFit() {
     let engine = TabFlowLayoutEngine()
-    let policy = TabStripViewportPolicy(maximumRows: 4, maximumWorkspaceFraction: 0.34)
-    for count in [50, 500] {
-        let result = engine.layout(itemWidths: Array(repeating: 120, count: count), containerWidth: 250)
-        let viewport = policy.height(
-            contentHeight: result.contentHeight,
-            workspaceHeight: 300,
-            engine: engine
-        )
-        #expect(result.rowCount >= count / 3)
-        #expect(viewport <= 300 * 0.34)
-        #expect(viewport < result.contentHeight)
-    }
+    let roomy = engine.layout(itemWidths: [100, 100, 100, 100], containerWidth: 500)
+    let exactFit = engine.layout(itemWidths: [100, 100, 100, 100], containerWidth: 400)
+    let wrapped = engine.layout(itemWidths: [100, 100, 100, 100], containerWidth: 399)
+
+    #expect(roomy.frames.map(\.width) == [100, 100, 100, 100])
+    #expect(roomy.frames.last?.maxX == 400)
+    #expect(roomy.rowIndices == [0, 0, 0, 0])
+    #expect(exactFit.frames.map(\.width) == [100, 100, 100, 100])
+    #expect(exactFit.rowIndices == [0, 0, 0, 0])
+    #expect(wrapped.frames.map(\.width) == [199.5, 199.5, 199.5, 199.5])
+    #expect(wrapped.rowIndices == [0, 0, 1, 1])
 }
 
-@Test func explicitWidthBoundsDoNotForceTitlesDownToTheViewportWidth() {
+@Test func rowsUseNativeMultilineBalancing() {
+    let engine = TabFlowLayoutEngine()
+    let result = engine.layout(itemWidths: [100, 100, 100, 100], containerWidth: 399)
+
+    #expect(result.rowIndices == [0, 0, 1, 1])
+    #expect(result.frames.map(\.width) == [199.5, 199.5, 199.5, 199.5])
+    #expect(result.frames.allSatisfy { $0.width >= 100 })
+    #expect(result.frames[1].maxX == 399)
+    #expect(result.frames[3].maxX == 399)
+}
+
+@Test func multilineRowsJustifyWithoutShrinkingTitles() {
+    let engine = TabFlowLayoutEngine()
+    let result = engine.layout(itemWidths: [100, 100, 100, 100, 100], containerWidth: 250)
+
+    #expect(result.rowIndices == [0, 0, 1, 1, 2])
+    #expect(result.frames.map(\.width) == [125, 125, 125, 125, 250])
+    #expect(result.frames.allSatisfy { $0.width >= 100 })
+    #expect(result.frames[1].maxX == 250)
+    #expect(result.frames[3].maxX == 250)
+    #expect(result.frames[4].maxX == 250)
+}
+
+@Test func multilineRowsRemainMinimalWhenGapsConsumeWidth() {
+    let engine = TabFlowLayoutEngine(horizontalSpacing: 10)
+    let result = engine.layout(itemWidths: [100, 100, 100, 100], containerWidth: 210)
+
+    #expect(result.rowIndices == [0, 0, 1, 1])
+    #expect(result.rowCount == 2)
+    #expect(result.frames[1].maxX == 210)
+    #expect(result.frames[3].maxX == 210)
+}
+
+@Test func variableMultilineRowsPreserveTitlesAndSourceOrder() {
+    let engine = TabFlowLayoutEngine()
+    let titleWidths: [CGFloat] = [180, 80, 120, 100]
+    let result = engine.layout(itemWidths: titleWidths, containerWidth: 250)
+
+    #expect(result.rowIndices == [0, 1, 1, 2])
+    #expect(result.frames.map(\.width) == [250, 105, 145, 250])
+    #expect(result.frames.enumerated().allSatisfy { $0.element.width >= titleWidths[$0.offset] })
+    #expect(result.frames.map(\.minY) == [0, 27, 27, 54])
+}
+
+@Test func zeroUsableWidthKeepsPositiveTitlesWithoutTrapping() {
+    let engine = TabFlowLayoutEngine(minimumItemWidth: 0)
+    let result = engine.layout(itemWidths: [10, 20], containerWidth: 0)
+
+    #expect(result.rowIndices == [0, 1])
+    #expect(result.frames.map(\.width) == [10, 20])
+    #expect(result.contentWidth == 20)
+}
+
+@Test func legacyMaximumWidthCannotShrinkAFullIntrinsicTitle() {
     let engine = TabFlowLayoutEngine(minimumItemWidth: 90, maximumItemWidth: 180)
     let result = engine.layout(itemWidths: [20, 500], containerWidth: 95)
-    #expect(result.frames.map(\.width) == [90, 180])
-    #expect(result.contentWidth >= 186)
+    #expect(result.frames.map(\.width) == [95, 500])
+    #expect(result.contentWidth >= 500)
     #expect(result.rowCount == 2)
 }
 
@@ -353,7 +477,7 @@ private func flattenedMenuItems(in menu: NSMenu) -> [NSMenuItem] {
     let result = engine.layout(itemWidths: [640], containerWidth: 240)
 
     #expect(result.frames.first?.width == 640)
-    #expect(result.contentWidth >= 646)
+    #expect(result.contentWidth == 640)
     #expect(result.rowCount == 1)
 }
 
@@ -382,6 +506,23 @@ private func flattenedMenuItems(in menu: NSMenu) -> [NSMenuItem] {
     }
 }
 
+@Test func defaultTabGeometryIsCompactAndConnected() {
+    let engine = TabFlowLayoutEngine()
+    let result = engine.layout(itemWidths: [100, 100, 100], containerWidth: 250)
+
+    #expect(engine.rowHeight >= 26)
+    #expect(engine.rowHeight <= 28)
+    #expect(engine.horizontalSpacing == 0)
+    #expect(engine.verticalSpacing == 0)
+    #expect(result.frames[1].minX == result.frames[0].maxX)
+    #expect(result.frames[2].minY == result.frames[0].maxY)
+    #expect(result.contentWidth == 250)
+
+    let splitPaneResult = engine.layout(itemWidths: [100], containerWidth: 50)
+    #expect(splitPaneResult.frames[0].width == 100)
+    #expect(splitPaneResult.contentWidth == 100)
+}
+
 @Test func appKitBeforeDropIndexConvertsToStableFinalIndexInEveryDirection() {
     #expect(TabDropDestination.finalIndex(sourceIndex: 1, insertionIndex: 4, itemCount: 5) == 3)
     #expect(TabDropDestination.finalIndex(sourceIndex: 4, insertionIndex: 1, itemCount: 5) == 1)
@@ -392,6 +533,46 @@ private func flattenedMenuItems(in menu: NSMenu) -> [NSMenuItem] {
 
 @Suite(.serialized)
 struct AppKitHostedTests {
+@Test @MainActor func tabChromeHasNoVisibleDocumentsControlOrScrollbars() {
+    let tabs = makeTabs(count: 30, activeIndex: 29)
+    let (window, _, strip) = hostStrip(width: 320, height: 240, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    #expect(strip.documentSwitcher.superview == nil)
+    #expect(strip.hostedScrollView.frame.maxX == strip.bounds.maxX)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
+    #expect(!strip.hostedScrollView.hasVerticalScroller)
+    #expect(strip.hostedScrollView.horizontalScroller?.alphaValue ?? 0 == 0)
+    #expect(strip.hostedScrollView.verticalScroller?.alphaValue == 0)
+    #expect(strip.rowCount > 1)
+    #expect(strip.selectedTabIsVisible)
+}
+
+@Test @MainActor func compactTabShowsAccentAndCloseOnlyForActiveOrHoveredState() throws {
+    let tabs = makeTabs(count: 3, activeIndex: 1)
+    let (window, _, strip) = hostStrip(width: 420, height: 180, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let inactive = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 0, section: 0)))
+    let active = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 1, section: 0)))
+    let inactiveClose = try #require(descendantButtons(of: inactive.view).first)
+    let activeClose = try #require(descendantButtons(of: active.view).first)
+
+    #expect(inactive.view.layer?.cornerRadius == 0)
+    #expect(active.view.layer?.cornerRadius == 0)
+    #expect(inactiveClose.isHidden)
+    #expect(!activeClose.isHidden)
+    #expect(active.view.layer?.sublayers?.contains(where: {
+        $0.frame.height == 2 && !$0.isHidden
+    }) == true)
+}
 @Test @MainActor func documentSwitcherSearchMatchesTitlePathAndDiacriticsDeterministically() {
     let tabs = [
         TabSnapshot(
@@ -497,7 +678,7 @@ struct AppKitHostedTests {
     window.makeKeyAndOrderFront(nil)
     strip.setInteractionsEnabled(true)
 
-    strip.documentSwitcher.showDocumentSwitcher()
+    strip.showDocumentSwitcher()
     RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     #expect(strip.documentSwitcher.documentPanel.isPresented)
     #expect(strip.documentSwitcher.documentPanel.selectedTabID == tabs[3].id)
@@ -516,12 +697,196 @@ struct AppKitHostedTests {
     #expect(!strip.documentSwitcher.documentPanel.isPresented)
 }
 
+@Test @MainActor func openDocumentSwitcherUpdatesOneFilteredTabWithoutFullScanOrReload() throws {
+    let tabs = makeTabs(count: 500, activeIndex: 499)
+    let (window, _, strip) = hostStrip(width: 560, height: 360, tabs: tabs)
+    defer {
+        strip.documentSwitcher.documentPanel.dismiss()
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+    strip.setInteractionsEnabled(true)
+    strip.showDocumentSwitcher()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    let panel = strip.documentSwitcher.documentPanel
+    #expect(panel.isPresented)
+    panel.setQuery("one-item-match")
+    #expect(panel.filteredTabs.isEmpty)
+    let before = panel.updateMetrics
+    let original = tabs[499]
+    let matching = TabSnapshot(
+        id: original.id,
+        title: "one-item-match",
+        isActive: true,
+        isDirty: true,
+        isPinned: original.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: original.buffer.bufferID, revision: 1),
+        fullPath: original.fullPath
+    )
+
+    #expect(strip.apply(tab: matching, at: 499))
+
+    #expect(panel.filteredTabs.map(\.id) == [matching.id])
+    #expect(panel.selectedTabID == matching.id)
+    #expect(panel.updateMetrics.fullScans == before.fullScans)
+    #expect(panel.updateMetrics.fullReloads == before.fullReloads)
+    #expect(panel.updateMetrics.directItemInspections == before.directItemInspections + 1)
+    #expect(panel.updateMetrics.rowInsertions == before.rowInsertions + 1)
+
+    let hiddenAgain = TabSnapshot(
+        id: matching.id,
+        title: original.title,
+        isActive: true,
+        isDirty: false,
+        isPinned: original.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: original.buffer.bufferID, revision: 2),
+        fullPath: original.fullPath
+    )
+    #expect(strip.apply(tab: hiddenAgain, at: 499))
+    #expect(panel.filteredTabs.isEmpty)
+    #expect(panel.updateMetrics.fullScans == before.fullScans)
+    #expect(panel.updateMetrics.fullReloads == before.fullReloads)
+    #expect(panel.updateMetrics.directItemInspections == before.directItemInspections + 2)
+    #expect(panel.updateMetrics.rowRemovals == before.rowRemovals + 1)
+}
+
+@Test @MainActor func openDocumentSwitcherReloadsSameTierTabWithoutStructuralWork() throws {
+    let tabs = makeTabs(count: 500, activeIndex: 499)
+    let (window, _, strip) = hostStrip(width: 560, height: 360, tabs: tabs)
+    defer {
+        strip.documentSwitcher.documentPanel.dismiss()
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+    strip.setInteractionsEnabled(true)
+    strip.showDocumentSwitcher()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    let panel = strip.documentSwitcher.documentPanel
+    #expect(panel.isPresented)
+    panel.setQuery("new")
+    #expect(panel.filteredTabs.count == 500)
+    panel.selectResult(at: 499)
+    #expect(panel.selectedTabID == tabs[499].id)
+    let before = panel.updateMetrics
+    let original = tabs[0]
+    let updated = TabSnapshot(
+        id: original.id,
+        title: original.title,
+        isActive: false,
+        isDirty: true,
+        isPinned: original.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: original.buffer.bufferID, revision: 1),
+        fullPath: original.fullPath
+    )
+
+    #expect(strip.apply(tab: updated, at: 0))
+
+    #expect(panel.filteredTabs[0].id == updated.id)
+    #expect(panel.filteredTabs[0].isDirty)
+    #expect(panel.filteredTabs[0].buffer.revision == 1)
+    let firstRow = try #require(
+        panel.tableView(NSTableView(), viewFor: nil, row: 0) as? NSTableCellView
+    )
+    #expect(firstRow.textField?.stringValue == "new 1  •")
+    #expect(panel.selectedTabID == tabs[499].id)
+    #expect(panel.updateMetrics.fullScans == before.fullScans)
+    #expect(panel.updateMetrics.fullReloads == before.fullReloads)
+    #expect(panel.updateMetrics.directItemInspections == before.directItemInspections + 1)
+    #expect(panel.updateMetrics.rowUpdates == before.rowUpdates + 1)
+    #expect(panel.updateMetrics.rowInsertions == before.rowInsertions)
+    #expect(panel.updateMetrics.rowRemovals == before.rowRemovals)
+    #expect(panel.updateMetrics.filteredReorders == before.filteredReorders)
+    #expect(panel.updateMetrics.rankSearches == before.rankSearches)
+}
+
+@Test @MainActor func documentSwitcherRepairsRowCacheAfterEveryStructuralUpdate() {
+    let tabs = makeTabs(count: 500, activeIndex: 499)
+    let (window, _, strip) = hostStrip(width: 560, height: 360, tabs: tabs)
+    defer {
+        strip.documentSwitcher.documentPanel.dismiss()
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    window.makeKeyAndOrderFront(nil)
+    strip.setInteractionsEnabled(true)
+    strip.showDocumentSwitcher()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    let panel = strip.documentSwitcher.documentPanel
+    panel.setQuery("new")
+    panel.selectResult(at: 499)
+    let target = tabs[100]
+
+    let reordered = TabSnapshot(
+        id: target.id, title: "new", isActive: false, isDirty: false,
+        isPinned: target.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: target.buffer.bufferID, revision: 1),
+        fullPath: target.fullPath
+    )
+    #expect(strip.apply(tab: reordered, at: 100))
+    #expect(panel.filteredTabs.first?.id == target.id)
+    var before = panel.updateMetrics
+    let reorderedEdit = TabSnapshot(
+        id: target.id, title: "new", isActive: false, isDirty: true,
+        isPinned: target.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: target.buffer.bufferID, revision: 2),
+        fullPath: target.fullPath
+    )
+    #expect(strip.apply(tab: reorderedEdit, at: 100))
+    #expect(panel.updateMetrics.rankSearches == before.rankSearches)
+    #expect(panel.updateMetrics.filteredReorders == before.filteredReorders)
+
+    let removed = TabSnapshot(
+        id: target.id, title: "hidden", isActive: false, isDirty: false,
+        isPinned: target.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: target.buffer.bufferID, revision: 3),
+        fullPath: target.fullPath
+    )
+    #expect(strip.apply(tab: removed, at: 100))
+    #expect(!panel.filteredTabs.contains(where: { $0.id == target.id }))
+    before = panel.updateMetrics
+    let stable = tabs[0]
+    let stableEdit = TabSnapshot(
+        id: stable.id, title: stable.title, isActive: false, isDirty: true,
+        isPinned: stable.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: stable.buffer.bufferID, revision: 1),
+        fullPath: stable.fullPath
+    )
+    #expect(strip.apply(tab: stableEdit, at: 0))
+    #expect(panel.updateMetrics.rankSearches == before.rankSearches)
+    #expect(panel.updateMetrics.filteredReorders == before.filteredReorders)
+
+    let inserted = TabSnapshot(
+        id: target.id, title: target.title, isActive: false, isDirty: false,
+        isPinned: target.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: target.buffer.bufferID, revision: 4),
+        fullPath: target.fullPath
+    )
+    #expect(strip.apply(tab: inserted, at: 100))
+    #expect(panel.filteredTabs.contains(where: { $0.id == target.id }))
+    before = panel.updateMetrics
+    let insertedEdit = TabSnapshot(
+        id: target.id, title: target.title, isActive: false, isDirty: true,
+        isPinned: target.isPinned,
+        buffer: EditorBufferDescriptor(bufferID: target.buffer.bufferID, revision: 5),
+        fullPath: target.fullPath
+    )
+    #expect(strip.apply(tab: insertedEdit, at: 100))
+    #expect(panel.updateMetrics.rankSearches == before.rankSearches)
+    #expect(panel.updateMetrics.filteredReorders == before.filteredReorders)
+    #expect(panel.selectedTabID == tabs[499].id)
+}
+
 @Test @MainActor func documentSwitcherPopoverClosesWithItsHostWindow() {
     let tabs = makeTabs(count: 3, activeIndex: 0)
     let (window, _, strip) = hostStrip(width: 500, height: 300, tabs: tabs)
     window.makeKeyAndOrderFront(nil)
     strip.setInteractionsEnabled(true)
-    strip.documentSwitcher.showDocumentSwitcher()
+    strip.showDocumentSwitcher()
     RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     #expect(strip.documentSwitcher.documentPanel.isPresented)
 
@@ -833,6 +1198,240 @@ struct AppKitHostedTests {
     #expect((activeItem?.view.accessibilityValue() as? String)?.contains("selected") == true)
 }
 
+@Test @MainActor
+func blockCommentMenuIsAccessibleUniqueAndPaletteDiscoverable() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = ["null", "cpp"]
+    editor.prefix = Data("#include <stdio.h>".utf8)
+    editor.canToggleBlockComment = true
+    let service = LanguageWorkspaceUseCase(
+        registry: try blockCommentLanguageRegistry(),
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+
+    let menu = DuckpadMainMenuFactory.make(target: controller)
+    let editMenu = try #require(
+        menu.items.compactMap(\.submenu).first(where: { $0.title == "Edit" })
+    )
+    let blockItems = editMenu.items.filter { $0.title == "Toggle Block Comment" }
+    let blockComment = try #require(blockItems.first)
+    #expect(blockItems.count == 1)
+    #expect(flattenedMenuItems(in: menu).filter { $0.title == "Toggle Block Comment" }.count == 1)
+    #expect(blockComment.action == NSSelectorFromString("performToggleBlockComment:"))
+    #expect(blockComment.keyEquivalent == "/")
+    #expect(blockComment.keyEquivalentModifierMask == [.command, .option])
+    #expect(blockComment.accessibilityLabel() == "Toggle block comment")
+
+    let paletteCommands = CommandPaletteRegistry.commands(
+        in: menu,
+        excludingAction: #selector(DuckpadWindowController.performShowCommandPalette(_:))
+    )
+    let paletteCommand = try #require(
+        paletteCommands.first(where: { $0.title == "Toggle Block Comment" })
+    )
+    #expect(paletteCommand.item === blockComment)
+    #expect(paletteCommand.isEnabled)
+}
+
+@Test @MainActor
+func blockCommentValidationRequiresReadyWorkspaceAndEditorCapability() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = ["null", "cpp"]
+    editor.prefix = Data("#include <stdio.h>".utf8)
+    let service = LanguageWorkspaceUseCase(
+        registry: try blockCommentLanguageRegistry(),
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    let blockComment = try #require(menuItem(
+        "Toggle Block Comment",
+        in: DuckpadMainMenuFactory.make(target: controller)
+    ))
+
+    editor.canToggleBlockComment = true
+    #expect(!controller.validateMenuItem(blockComment))
+    controller.start()
+    await controller.waitForStartup()
+    editor.canToggleBlockComment = false
+    #expect(!controller.validateMenuItem(blockComment))
+    editor.canToggleBlockComment = true
+    #expect(controller.validateMenuItem(blockComment))
+    #expect(editor.blockCommentInvocationCount == 0)
+}
+
+@Test @MainActor
+func blockCommentCommandFocusesEditorOnlyAfterAcceptedMutation() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = ["null", "cpp"]
+    editor.prefix = Data("#include <stdio.h>".utf8)
+    editor.canToggleBlockComment = true
+    let service = LanguageWorkspaceUseCase(
+        registry: try blockCommentLanguageRegistry(),
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    let blockComment = try #require(menuItem(
+        "Toggle Block Comment",
+        in: DuckpadMainMenuFactory.make(target: controller)
+    ))
+    let action = try #require(blockComment.action)
+
+    editor.blockCommentOutcome = .rejected(currentRevision: 0)
+    #expect(NSApplication.shared.sendAction(action, to: controller, from: blockComment))
+    #expect(editor.blockCommentInvocationCount == 1)
+    #expect(editor.focusCount == 0)
+
+    editor.blockCommentOutcome = .accepted(newRevision: 1)
+    #expect(NSApplication.shared.sendAction(action, to: controller, from: blockComment))
+    #expect(editor.blockCommentInvocationCount == 2)
+    #expect(editor.focusCount == 1)
+}
+
+@Test @MainActor
+func everyCoreShortcutIdentityIsUnique() {
+    _ = NSApplication.shared
+    let controller = DuckpadWindowController(
+        workspace: ScratchWorkspaceUseCase(store: PresentationStore()),
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    let menu = DuckpadMainMenuFactory.make(target: controller)
+    let identities = flattenedMenuItems(in: menu).compactMap { item -> String? in
+        guard !item.keyEquivalent.isEmpty else { return nil }
+        let modifiers = item.keyEquivalentModifierMask
+            .intersection([.command, .control, .option, .shift])
+        return "\(modifiers.rawValue):\(item.keyEquivalent.lowercased())"
+    }
+
+    #expect(Set(identities).count == identities.count)
+}
+
+@Test @MainActor
+func languageMenusUseBoundedAlphabetHierarchyWithoutLosingDefinitions() throws {
+    _ = NSApplication.shared
+    let registry = try LanguageManifestLoader().loadBundled()
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = Set(registry.definitions.map(\.lexerName))
+    let service = LanguageWorkspaceUseCase(
+        registry: registry,
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+
+    let mainMenu = DuckpadMainMenuFactory.make(target: controller)
+    let mainLanguageMenu = try #require(
+        mainMenu.items.first { $0.submenu?.title == "Language" }?.submenu
+    )
+    let statusLanguageMenu = controller.makeLanguageStatusMenu()
+
+    for menu in [mainLanguageMenu, statusLanguageMenu] {
+        #expect(menu.items.count <= 30)
+        let a = try #require(menu.items.first { $0.title == "A" })
+        let c = try #require(menu.items.first { $0.title == "C" })
+        #expect(a.submenu != nil)
+        #expect(c.submenu?.items.map(\.title).contains("C") == true)
+        #expect(c.submenu?.items.map(\.title).contains("C#") == true)
+        #expect(c.submenu?.items.map(\.title).contains("C++") == true)
+        #expect(c.submenu?.items.map(\.title).contains("CMake") == true)
+
+        for singletonTitle in ["XML", "YAML"] {
+            let singleton = try #require(menu.items.first { $0.title == singletonTitle })
+            #expect(singleton.submenu == nil)
+            #expect(singleton.indentationLevel == 0)
+        }
+        for formerHeading in ["Build", "C Family", "Config", "Data", "Database"] {
+            #expect(menu.items.contains { $0.title == formerHeading } == false)
+        }
+
+        let languageLeaves = flattenedMenuItems(in: menu).filter {
+            $0.action == #selector(DuckpadWindowController.performChooseLanguage(_:))
+        }
+        let languageIDs = languageLeaves.compactMap { $0.representedObject as? String }
+        let expectedIDs = registry.definitions.map { $0.id.rawValue }
+        #expect(languageIDs.count == expectedIDs.count)
+        #expect(Set(languageIDs) == Set(expectedIDs))
+        #expect(Set(languageIDs).count == languageIDs.count)
+        #expect(languageLeaves.allSatisfy { $0.target === controller })
+    }
+}
+
+@Test @MainActor
+func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async throws {
+    let registry = try LanguageManifestLoader().loadBundled()
+    let selectedID = LanguageID(rawValue: "cpp")
+    var restored = ScratchSession()
+    let tabID = restored.addUntitled()
+    try restored.setLanguageOverride(.manual(selectedID), for: tabID)
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore(session: restored))
+    let editor = HostedLanguageEditorFake()
+    editor.supportedLexers = Set(registry.definitions.map(\.lexerName))
+    let service = LanguageWorkspaceUseCase(
+        registry: registry,
+        workspace: workspace,
+        editor: editor
+    )
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        editorAdapter: editor,
+        editorView: NSView(frame: .zero),
+        languageUseCase: service,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+
+    controller.start()
+    await controller.waitForStartup()
+
+    let menu = controller.makeLanguageStatusMenu()
+    let positioningItem = try #require(LanguageMenuBuilder.positioningItem(in: menu))
+    #expect(positioningItem.title == "C")
+    #expect(positioningItem.submenu?.items.first { $0.state == .on }?.title == "C++")
+}
+
 @Test @MainActor func mainMenuPublishesNativeTabSelectorsAndExactShortcuts() async {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
@@ -956,12 +1555,6 @@ struct AppKitHostedTests {
     for title in ["Indent Line(s)", "Unindent Line(s)", "Make Uppercase", "Make Lowercase", "Trim Trailing Whitespace"] {
         #expect(menuItem(title, in: menu)?.keyEquivalent.isEmpty == true)
     }
-
-    let shortcuts = flattenedMenuItems(in: menu).compactMap { item -> String? in
-        guard !item.keyEquivalent.isEmpty else { return nil }
-        return "\(item.keyEquivalentModifierMask.rawValue):\(item.keyEquivalent.lowercased())"
-    }
-    #expect(Set(shortcuts).count == shortcuts.count)
 
     let findInFolder = menuItem("Find in Folder…", in: menu)
     #expect(findInFolder?.action == #selector(DuckpadWindowController.performFindInFolder(_:)))
@@ -1494,6 +2087,59 @@ struct AppKitHostedTests {
     }
 }
 
+@Test @MainActor func tabContextMenuRoutesGroupCommandsAndAppliesSharedValidation() throws {
+    _ = NSApplication.shared
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 700, height: 220, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    var actions: [TabContextAction] = []
+    strip.onContextAction = { _, action in actions.append(action) }
+    strip.onValidateContextAction = { _, action in
+        action != .moveToEditorGroup(.sideBySide)
+    }
+    let menu = try #require(strip.contextMenu(for: tabs[0].id))
+    let expected: [(String, TabContextAction, Bool)] = [
+        ("Move to Group Right", .moveToEditorGroup(.sideBySide), false),
+        ("Move to Group Down", .moveToEditorGroup(.stacked), true),
+        ("Clone to Group Right", .cloneToEditorGroup(.sideBySide), true),
+        ("Clone to Group Down", .cloneToEditorGroup(.stacked), true),
+        ("Focus Other Group", .focusOtherEditorGroup, true),
+        ("Close Editor Group", .closeEditorGroup, true),
+    ]
+
+    for (title, action, enabled) in expected {
+        let index = try #require(menu.items.firstIndex(where: { $0.title == title }))
+        #expect(menu.items[index].isEnabled == enabled)
+        guard enabled else { continue }
+        menu.performActionForItem(at: index)
+        #expect(actions.last == action)
+    }
+}
+
+@Test @MainActor func tabContextMenuPublishesValidatedOpenDocumentCompare() throws {
+    _ = NSApplication.shared
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 700, height: 220, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    var actions: [TabContextAction] = []
+    strip.onContextAction = { _, action in actions.append(action) }
+    strip.onValidateContextAction = { _, action in action == .compareWithOpenDocument }
+    let menu = try #require(strip.contextMenu(for: tabs[0].id))
+    let item = try #require(menu.items.first(where: { $0.title == "Compare with Open Document…" }))
+
+    #expect(item.isEnabled)
+    menu.performActionForItem(at: try #require(menu.items.firstIndex(of: item)))
+    #expect(actions == [.compareWithOpenDocument])
+}
+
 @Test @MainActor func headlessCollectionPasteboardAcceptsCrossRowDropAtEnd() {
     let tabs = makeTabs(count: 12, activeIndex: 0)
     let (window, _, strip) = hostStrip(width: 300, height: 320, tabs: tabs)
@@ -1520,7 +2166,81 @@ struct AppKitHostedTests {
     #expect(move?.1 == tabs.count - 1)
 }
 
-@Test @MainActor func appKitHostedResizeCapsOverflowAndKeepsSelectedTabVisible() {
+@Test @MainActor func tabDragWriterCarriesItsSourceEditorGroup() throws {
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let strip = MultilineTabStripView(frame: .zero)
+    strip.setEditorGroupID(.secondary)
+    strip.apply(tabs: tabs)
+    defer { strip.tearDownHostedViews() }
+
+    let writer = try #require(strip.collectionView(
+        strip.hostedCollectionView,
+        pasteboardWriterForItemAt: IndexPath(item: 1, section: 0)
+    ) as? NSPasteboardItem)
+    let type = NSPasteboard.PasteboardType(EditorGroupDragPayload.pasteboardType)
+    guard let data = writer.data(forType: type) else {
+        Issue.record("drag writer omitted the editor-group payload")
+        return
+    }
+    let payload = EditorGroupDragPayload(data: data)
+
+    #expect(payload?.tabID == tabs[1].id)
+    #expect(payload?.sourceGroup == .secondary)
+}
+
+@Test @MainActor func localOptionDropStillUsesStableReorderSemantics() {
+    let tabs = makeTabs(count: 4, activeIndex: 0)
+    let strip = MultilineTabStripView(frame: .zero)
+    strip.setEditorGroupID(.primary)
+    strip.apply(tabs: tabs)
+    defer { strip.tearDownHostedViews() }
+    let pasteboard = NSPasteboard(name: .init("duckpad.tab.group.drag.test.\(UUID().uuidString)"))
+    pasteboard.clearContents()
+    let payload = EditorGroupDragPayload(tabID: tabs[0].id, sourceGroup: .primary)
+    pasteboard.setData(payload.encodedData(), forType: .init(EditorGroupDragPayload.pasteboardType))
+    var move: (TabID, Int)?
+    strip.onMove = { move = ($0, $1) }
+
+    #expect(strip.acceptDrop(from: pasteboard, insertionIndex: 3, optionPressed: true))
+    #expect(move?.0 == tabs[0].id)
+    #expect(move?.1 == 2)
+}
+
+@Test @MainActor func crossGroupOptionDropAdvertisesAndPublishesCopy() {
+    let destinationTabs = makeTabs(count: 1, activeIndex: 0)
+    let sourceTabID = TabID()
+    let strip = MultilineTabStripView(frame: .zero)
+    strip.setEditorGroupID(.secondary)
+    strip.apply(tabs: destinationTabs)
+    defer { strip.tearDownHostedViews() }
+    let pasteboard = NSPasteboard(name: .init("duckpad.tab.cross-group.drag.test.\(UUID().uuidString)"))
+    pasteboard.clearContents()
+    let payload = EditorGroupDragPayload(tabID: sourceTabID, sourceGroup: .primary)
+    pasteboard.setData(payload.encodedData(), forType: .init(EditorGroupDragPayload.pasteboardType))
+    var published: (EditorGroupDragPayload, Int, EditorGroupDropOperation)?
+    strip.onValidateGroupDrop = { _, _, operation in operation == .copy }
+    strip.onGroupDrop = {
+        published = ($0, $1, $2)
+        return true
+    }
+
+    #expect(strip.acceptDrop(from: pasteboard, insertionIndex: 1, optionPressed: true))
+    #expect(published?.0 == payload)
+    #expect(published?.1 == 1)
+    #expect(published?.2 == .copy)
+}
+
+@Test @MainActor func tabStripTeardownUnregistersItsCollectionDropTypes() {
+    let strip = MultilineTabStripView(frame: .zero)
+    let groupType = NSPasteboard.PasteboardType(EditorGroupDragPayload.pasteboardType)
+    #expect(strip.hostedCollectionView.registeredDraggedTypes.contains(groupType))
+
+    strip.tearDownHostedViews()
+
+    #expect(strip.hostedCollectionView.registeredDraggedTypes.isEmpty)
+}
+
+@Test @MainActor func appKitHostedResizeExposesEveryRowAtItsCompleteContentHeight() {
     let tabs = makeTabs(count: 500, activeIndex: 499)
     let (window, root, strip) = hostStrip(width: 700, height: 300, tabs: tabs)
     defer {
@@ -1539,10 +2259,85 @@ struct AppKitHostedTests {
     strip.apply(tabs: tabs)
 
     #expect(strip.contentHeight > wideContentHeight)
-    #expect(strip.viewportHeight <= root.bounds.height * strip.viewportPolicy.maximumWorkspaceFraction)
-    #expect(strip.viewportHeight < strip.contentHeight)
+    #expect(strip.viewportHeight == strip.contentHeight)
+    #expect(strip.viewportHeight > root.bounds.height)
     #expect(strip.hostedScrollView.documentView === strip.hostedCollectionView)
     #expect(strip.selectedTabIsVisible)
+    #expect(strip.hostedScrollView.contentView.bounds.origin == .zero)
+}
+
+@Test @MainActor func fiftySixAndFiveHundredTabsNeverCreateAnInternalViewport() {
+    for count in [56, 500] {
+        let tabs = makeTabs(count: count, activeIndex: count - 1)
+        let (window, _, strip) = hostStrip(width: 320, height: 220, tabs: tabs)
+        #expect(strip.rowCount > 4)
+        #expect(strip.viewportHeight == strip.contentHeight)
+        #expect(strip.hostedScrollView.contentView.bounds.height == strip.contentHeight)
+        #expect(!strip.hostedScrollView.hasHorizontalScroller)
+        #expect(!strip.hostedScrollView.hasVerticalScroller)
+        #expect(strip.hostedScrollView.contentView.bounds.origin == .zero)
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+}
+
+@Test @MainActor func activeTabChangesDoNotScrollTheMultilineTabSurface() {
+    let tabs = makeTabs(count: 56, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 320, height: 220, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    var changed = tabs
+    changed[0] = TabSnapshot(
+        id: changed[0].id, title: changed[0].title, isActive: false,
+        isDirty: changed[0].isDirty, isPinned: changed[0].isPinned, buffer: changed[0].buffer
+    )
+    let finalIndex = changed.count - 1
+    changed[finalIndex] = TabSnapshot(
+        id: changed[finalIndex].id, title: changed[finalIndex].title, isActive: true,
+        isDirty: changed[finalIndex].isDirty, isPinned: changed[finalIndex].isPinned,
+        buffer: changed[finalIndex].buffer
+    )
+    strip.hostedScrollView.contentView.scroll(to: NSPoint(x: 12, y: 54))
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(), tabs: changed, activeBuffer: changed[finalIndex].buffer,
+            persistence: .pending, startup: .ready
+        ),
+        kind: .activeTabChanged(previousIndex: 0, currentIndex: finalIndex)
+    ))
+
+    #expect(strip.hostedScrollView.contentView.bounds.origin == .zero)
+    #expect(strip.selectedTabIsVisible)
+}
+
+@Test @MainActor func wheelInputCannotScrollTheMultilineTabSurface() throws {
+    let tabs = makeTabs(count: 56, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 320, height: 220, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let cgEvent = try #require(CGEvent(
+        scrollWheelEvent2Source: nil,
+        units: .pixel,
+        wheelCount: 2,
+        wheel1: 80,
+        wheel2: 40,
+        wheel3: 0
+    ))
+    let event = try #require(NSEvent(cgEvent: cgEvent))
+    strip.hostedScrollView.contentView.scroll(to: NSPoint(x: 20, y: 80))
+
+    strip.hostedScrollView.scrollWheel(with: event)
+
+    #expect(strip.hostedScrollView.contentView.bounds.origin == .zero)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
+    #expect(!strip.hostedScrollView.hasVerticalScroller)
 }
 
 @Test @MainActor func hostedSelectionAndAccessibilityExposeStableStateAndActions() {
@@ -1586,7 +2381,38 @@ struct AppKitHostedTests {
     #expect(closed == tabs[0].id)
 }
 
-@Test @MainActor func tabTitlesNeverUseEllipsisAndLongNamesRemainScrollable() throws {
+@Test @MainActor func fourShortTabsKeepMeasuredWidthsAndCompactTitlePadding() throws {
+    let tabs = makeTabs(count: 4, activeIndex: 3)
+    let (window, _, strip) = hostStrip(width: 890, height: 200, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    let frames = try (0..<tabs.count).map { index in
+        try #require(strip.flowLayout.layoutAttributesForItem(
+            at: IndexPath(item: index, section: 0)
+        )?.frame)
+    }
+    #expect(strip.rowCount == 1)
+    #expect(frames.map(\.width) == strip.flowLayout.itemWidths)
+    #expect(frames.last?.maxX ?? .infinity < strip.hostedScrollView.contentSize.width)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
+    #expect(!strip.hostedScrollView.hasVerticalScroller)
+
+    let item = try #require(strip.hostedCollectionView.item(
+        at: IndexPath(item: 0, section: 0)
+    ))
+    let title = try #require(descendantTextFields(of: item.view).first {
+        $0.stringValue == tabs[0].title
+    })
+    #expect(title.frame.minX <= 24)
+    #expect(item.view.bounds.maxX - title.frame.maxX <= 24)
+    #expect(title.frame.width >= title.intrinsicContentSize.width)
+}
+
+@Test @MainActor func shortAndLongTabTitlesKeepTheirFullIntrinsicLabelWidth() throws {
     let longTitle = "release-notes-" + String(repeating: "complete-name-", count: 30) + ".txt"
     let tab = TabSnapshot(
         id: TabID(),
@@ -1610,11 +2436,23 @@ struct AppKitHostedTests {
 
     #expect(title.lineBreakMode == .byClipping)
     #expect(title.cell?.truncatesLastVisibleLine == false)
+    #expect(title.toolTip == longTitle)
+    #expect(title.frame.width >= title.intrinsicContentSize.width)
     #expect(frame.width > strip.hostedScrollView.contentSize.width)
     #expect(strip.flowLayout.collectionViewContentSize.width >= frame.maxX)
+
+    let shortTabs = makeTabs(count: 2, activeIndex: 0)
+    strip.apply(tabs: shortTabs)
+    strip.layoutSubtreeIfNeeded()
+    strip.hostedCollectionView.layoutSubtreeIfNeeded()
+    let shortItem = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 0, section: 0)))
+    let shortTitle = try #require(
+        descendantTextFields(of: shortItem.view).first { $0.stringValue == "new 1" }
+    )
+    #expect(shortTitle.frame.width >= shortTitle.intrinsicContentSize.width)
 }
 
-@Test @MainActor func liveWindowKeepsLongTitleDocumentWidthAndHorizontalScrolling() throws {
+@Test @MainActor func liveWindowKeepsFullLongTabWidthWithoutVisibleScrollers() throws {
     let longTitle = "release-notes-" + String(repeating: "complete-name-", count: 30) + ".txt"
     let longTab = TabSnapshot(
         id: TabID(), title: longTitle, isActive: true, isDirty: false, isPinned: false,
@@ -1637,14 +2475,10 @@ struct AppKitHostedTests {
     strip.hostedScrollView.layoutSubtreeIfNeeded()
     strip.hostedCollectionView.layoutSubtreeIfNeeded()
 
-    let clipView = strip.hostedScrollView.contentView
     let layoutWidth = strip.flowLayout.collectionViewContentSize.width
-    #expect(strip.hostedCollectionView.frame.width >= layoutWidth)
-    #expect(strip.hostedScrollView.requiresHorizontalScroller)
-
-    strip.hostedCollectionView.scroll(NSPoint(x: 300, y: 0))
-    strip.hostedScrollView.reflectScrolledClipView(clipView)
-    #expect(clipView.bounds.minX > 0)
+    #expect(layoutWidth > strip.hostedScrollView.contentSize.width)
+    #expect(!strip.hostedScrollView.requiresHorizontalScroller)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
 
     let changed = [
         TabSnapshot(
@@ -1664,13 +2498,19 @@ struct AppKitHostedTests {
         kind: .activeTabChanged(previousIndex: 0, currentIndex: 1)
     ))
 
-    #expect(clipView.bounds.minX < 10)
+    #expect(strip.hostedScrollView.contentView.bounds.minX == 0)
     #expect(strip.selectedTabIsVisible)
 }
 
 @Test @MainActor func inactiveTabHoverUpdatesOnlyItsLocalAffordances() throws {
     let tabs = makeTabs(count: 2, activeIndex: 0)
-    let (window, _, strip) = hostStrip(width: 500, height: 200, tabs: tabs)
+    let pointerWindow = makePointerLocationWindow(width: 500, height: 200)
+    let (window, _, strip) = hostStrip(
+        width: 500,
+        height: 200,
+        tabs: tabs,
+        window: pointerWindow
+    )
     defer {
         strip.tearDownHostedViews()
         window.contentView = nil
@@ -1683,17 +2523,7 @@ struct AppKitHostedTests {
         $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
     })
     let before = item.view.layer?.backgroundColor
-    let event = try #require(NSEvent.mouseEvent(
-        with: .mouseMoved,
-        location: .zero,
-        modifierFlags: [],
-        timestamp: 0,
-        windowNumber: window.windowNumber,
-        context: nil,
-        eventNumber: 0,
-        clickCount: 0,
-        pressure: 0
-    ))
+    let event = try mouseMovementEvent(for: window)
 
     item.view.updateTrackingAreas()
     #expect(item.view.trackingAreas.contains {
@@ -1709,7 +2539,239 @@ struct AppKitHostedTests {
     #expect(item.view.layer?.backgroundColor == before)
 }
 
-@Test @MainActor func tabChromeUsesExplicitDocumentDropdownWithoutNewButton() {
+@Test @MainActor func sequentialTabEntersKeepOnlyNewestHoverAndSingleSelection() throws {
+    let tabs = makeTabs(count: 3, activeIndex: 0)
+    let pointerWindow = makePointerLocationWindow(width: 600, height: 200)
+    let (window, _, strip) = hostStrip(
+        width: 600,
+        height: 200,
+        tabs: tabs,
+        window: pointerWindow
+    )
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let firstPath = IndexPath(item: 1, section: 0)
+    let secondPath = IndexPath(item: 2, section: 0)
+    let firstItem = try #require(strip.hostedCollectionView.item(at: firstPath))
+    let secondItem = try #require(strip.hostedCollectionView.item(at: secondPath))
+    let firstID = tabs[1].id.rawValue.uuidString.lowercased()
+    let secondID = tabs[2].id.rawValue.uuidString.lowercased()
+    let firstClose = try #require(descendantButtons(of: firstItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(firstID)"
+    })
+    let secondClose = try #require(descendantButtons(of: secondItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(secondID)"
+    })
+    let firstRestingBackground = firstItem.view.layer?.backgroundColor
+    let secondRestingBackground = secondItem.view.layer?.backgroundColor
+    let event = try mouseMovementEvent(for: window)
+
+    #expect(!strip.hostedCollectionView.allowsMultipleSelection)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+
+    firstItem.view.mouseEntered(with: event)
+    #expect(!firstClose.isHidden)
+    #expect(firstItem.view.layer?.backgroundColor != firstRestingBackground)
+
+    secondItem.view.mouseEntered(with: event)
+    #expect(firstClose.isHidden)
+    #expect(firstItem.view.layer?.backgroundColor == firstRestingBackground)
+    #expect(!secondClose.isHidden)
+    #expect(secondItem.view.layer?.backgroundColor != secondRestingBackground)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+
+    firstItem.view.mouseExited(with: event)
+    #expect(!secondClose.isHidden)
+    secondItem.view.mouseExited(with: event)
+    #expect(secondClose.isHidden)
+    #expect(secondItem.view.layer?.backgroundColor == secondRestingBackground)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+}
+
+@Test @MainActor func trackingAreaRefreshUsesCurrentPointerAndVisibleBounds() throws {
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let pointerWindow = makePointerLocationWindow(width: 500, height: 200)
+    let (window, _, strip) = hostStrip(
+        width: 500,
+        height: 200,
+        tabs: tabs,
+        window: pointerWindow
+    )
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let item = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 1, section: 0)))
+    let stableID = tabs[1].id.rawValue.uuidString.lowercased()
+    let close = try #require(descendantButtons(of: item.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+    let restingBackground = item.view.layer?.backgroundColor
+    let pointerLocation = item.view.convert(
+        NSPoint(x: item.view.bounds.midX, y: item.view.bounds.midY),
+        to: nil
+    )
+    pointerWindow.pointerLocation = pointerLocation
+    let event = try mouseMovementEvent(for: window, location: pointerLocation)
+
+    item.view.updateTrackingAreas()
+    item.view.mouseEntered(with: event)
+    #expect(!close.isHidden)
+
+    item.view.updateTrackingAreas()
+    #expect(!close.isHidden)
+    #expect(item.view.layer?.backgroundColor != restingBackground)
+
+    pointerWindow.pointerLocation = item.view.convert(
+        NSPoint(x: item.view.bounds.maxX + 20, y: item.view.bounds.midY),
+        to: nil
+    )
+    item.view.updateTrackingAreas()
+    #expect(close.isHidden)
+    #expect(item.view.layer?.backgroundColor == restingBackground)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+}
+
+@Test @MainActor func reloadAndRemovalCannotRestoreStaleTabHover() throws {
+    let tabs = makeTabs(count: 3, activeIndex: 0)
+    let pointerWindow = makePointerLocationWindow(width: 600, height: 200)
+    let (window, _, strip) = hostStrip(
+        width: 600,
+        height: 200,
+        tabs: tabs,
+        window: pointerWindow
+    )
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let hoveredPath = IndexPath(item: 1, section: 0)
+    let stableID = tabs[1].id.rawValue.uuidString.lowercased()
+    let event = try mouseMovementEvent(for: window)
+
+    var hoveredItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
+    hoveredItem.view.mouseEntered(with: event)
+    strip.apply(tabs: tabs)
+
+    hoveredItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
+    var hoveredClose = try #require(descendantButtons(of: hoveredItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+    #expect(hoveredClose.isHidden)
+
+    hoveredItem.view.mouseEntered(with: event)
+    #expect(!hoveredClose.isHidden)
+    var remaining = tabs
+    remaining.remove(at: hoveredPath.item)
+    let pendingSnapshot = WorkspaceSnapshot(
+        sessionID: SessionID(),
+        tabs: remaining,
+        activeBuffer: remaining[0].buffer,
+        persistence: .pending,
+        startup: .ready
+    )
+    strip.apply(change: WorkspaceChange(
+        snapshot: pendingSnapshot,
+        kind: .tabRemovalPending(index: hoveredPath.item)
+    ))
+
+    strip.apply(tabs: tabs)
+    hoveredItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
+    hoveredClose = try #require(descendantButtons(of: hoveredItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+    #expect(hoveredClose.isHidden)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+}
+
+@Test @MainActor func programmaticClipMovementCannotTurnTabsIntoAnInternalViewport() throws {
+    let tabs = makeTabs(count: 500, activeIndex: 0)
+    let pointerWindow = makePointerLocationWindow(width: 300, height: 320)
+    let (window, _, strip) = hostStrip(
+        width: 300,
+        height: 320,
+        tabs: tabs,
+        window: pointerWindow
+    )
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let hoveredPath = IndexPath(item: 1, section: 0)
+    let hoveredItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
+    let stableID = tabs[1].id.rawValue.uuidString.lowercased()
+    let close = try #require(descendantButtons(of: hoveredItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+    let pointerLocation = hoveredItem.view.convert(
+        NSPoint(x: hoveredItem.view.bounds.midX, y: hoveredItem.view.bounds.midY),
+        to: nil
+    )
+    let event = try mouseMovementEvent(for: window, location: pointerLocation)
+
+    hoveredItem.view.mouseEntered(with: event)
+    #expect(!close.isHidden)
+
+    strip.hostedScrollView.contentView.scroll(to: NSPoint(x: 40, y: 400))
+    strip.hostedScrollView.reflectScrolledClipView(strip.hostedScrollView.contentView)
+    #expect(strip.hostedScrollView.contentView.bounds.origin == .zero)
+    #expect(strip.hostedCollectionView.item(at: hoveredPath) === hoveredItem)
+    #expect(!close.isHidden)
+    hoveredItem.view.mouseExited(with: event)
+    #expect(close.isHidden)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 0, section: 0)])
+}
+
+@Test @MainActor func retainedTabHoverUsesItsCurrentIndexAfterAnEarlierDeletion() throws {
+    let tabs = makeTabs(count: 500, activeIndex: 499)
+    let (window, _, strip) = hostStrip(width: 700, height: 400, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let originalIndex = 300
+    let originalPath = IndexPath(item: originalIndex, section: 0)
+    let retainedItem = try #require(strip.hostedCollectionView.item(at: originalPath))
+    let stableID = tabs[originalIndex].id.rawValue.uuidString.lowercased()
+    let close = try #require(descendantButtons(of: retainedItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+    #expect(close.isHidden)
+
+    let remaining = Array(tabs.dropFirst())
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(), tabs: remaining,
+            activeBuffer: remaining.last?.buffer,
+            persistence: .pending, startup: .ready
+        ),
+        kind: .tabRemovalPending(index: 0)
+    ))
+    strip.layoutSubtreeIfNeeded()
+    strip.hostedCollectionView.layoutSubtreeIfNeeded()
+    let currentPath = IndexPath(item: originalIndex - 1, section: 0)
+    let currentItem = try #require(strip.hostedCollectionView.item(at: currentPath))
+    #expect(currentItem === retainedItem)
+    let event = try mouseMovementEvent(for: window)
+    let beforeEnter = strip.updateMetrics.itemConfigurations
+
+    currentItem.view.mouseEntered(with: event)
+
+    #expect(!close.isHidden)
+    #expect(strip.updateMetrics.itemConfigurations - beforeEnter == 1)
+    currentItem.view.mouseExited(with: event)
+    #expect(close.isHidden)
+    #expect(strip.updateMetrics.itemConfigurations - beforeEnter == 2)
+}
+
+@Test @MainActor func tabChromeKeepsDocumentSwitcherAsKeyboardOnlyEscapeHatch() {
     let tabs = makeTabs(count: 64, activeIndex: 40)
     let (window, _, strip) = hostStrip(width: 900, height: 620, tabs: tabs)
     defer {
@@ -1719,13 +2781,14 @@ struct AppKitHostedTests {
     }
 
     #expect(strip.documentSwitcher.title == "Documents (64)")
-    #expect(strip.documentSwitcher.imagePosition == .imageTrailing)
     #expect(strip.documentSwitcher.accessibilityLabel() == "Open Documents")
+    #expect(strip.documentSwitcher.superview == nil)
     #expect(descendantButtons(of: strip).contains {
         $0.accessibilityIdentifier() == "duckpad.tab.add"
     } == false)
     #expect(strip.hostedScrollView.scrollerStyle == .overlay)
-    #expect(strip.hostedScrollView.autohidesScrollers)
+    #expect(!strip.hostedScrollView.hasVerticalScroller)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
     #expect(strip.hostedScrollView.verticalScrollElasticity == .none)
     #expect(strip.hostedScrollView.horizontalScrollElasticity == .none)
 }
@@ -2140,6 +3203,104 @@ struct AppKitHostedTests {
     #expect(elapsed < .milliseconds(50))
 }
 
+@Test @MainActor func groupLocalSelectionUpdatesOnlyAuthoritativePreviousAndCurrentItems() {
+    let tabs = makeTabs(count: 500, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 700, height: 400, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let previous = TabSnapshot(
+        id: tabs[0].id, title: tabs[0].title, isActive: false,
+        isDirty: tabs[0].isDirty, isPinned: tabs[0].isPinned,
+        buffer: tabs[0].buffer, fullPath: tabs[0].fullPath
+    )
+    let current = TabSnapshot(
+        id: tabs[249].id, title: tabs[249].title, isActive: true,
+        isDirty: tabs[249].isDirty, isPinned: tabs[249].isPinned,
+        buffer: tabs[249].buffer, fullPath: tabs[249].fullPath
+    )
+    let before = strip.updateMetrics
+
+    #expect(strip.applySelection(previous: previous, at: 0, current: current, at: 249))
+    #expect(strip.updateMetrics.fullReloads == before.fullReloads)
+    #expect(strip.updateMetrics.itemReloads == before.itemReloads + 2)
+    #expect(strip.updateMetrics.directItemInspections == before.directItemInspections + 2)
+    #expect(strip.activeTabID == current.id)
+    #expect(strip.hostedCollectionView.selectionIndexPaths == [IndexPath(item: 249, section: 0)])
+    #expect(strip.documentSwitcher.tabs[0] == previous)
+    #expect(strip.documentSwitcher.tabs[249] == current)
+
+    let after = strip.updateMetrics
+    #expect(!strip.applySelection(previous: previous, at: 0, current: current, at: 500))
+    #expect(strip.updateMetrics == after)
+    #expect(strip.activeTabID == current.id)
+}
+
+@Test @MainActor func fiveHundredTabIncrementalPathsConfigureOnlyKnownItems() throws {
+    var tabs = makeTabs(count: 500, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 700, height: 400, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let index = 250
+    tabs[index] = TabSnapshot(
+        id: tabs[index].id, title: tabs[index].title, isActive: false,
+        isDirty: true, isPinned: tabs[index].isPinned,
+        buffer: EditorBufferDescriptor(bufferID: tabs[index].buffer.bufferID, revision: 1)
+    )
+    let beforeSingle = strip.updateMetrics.itemConfigurations
+    #expect(strip.apply(tab: tabs[index], at: index))
+    let afterSingle = strip.updateMetrics.itemConfigurations
+    #expect(afterSingle - beforeSingle == 1)
+
+    let persistenceBefore = afterSingle
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(), tabs: tabs, activeBuffer: tabs[0].buffer,
+            persistence: .saved, startup: .ready
+        ),
+        kind: .persistence
+    ))
+    let persistenceAfter = strip.updateMetrics.itemConfigurations
+    #expect(persistenceAfter - persistenceBefore == 0)
+
+    let hoveredPath = IndexPath(item: 300, section: 0)
+    let hoveredItem = try #require(strip.hostedCollectionView.item(at: hoveredPath))
+    let event = try mouseMovementEvent(for: window)
+    let hoverBefore = persistenceAfter
+    hoveredItem.view.mouseEntered(with: event)
+    let hoverAfter = strip.updateMetrics.itemConfigurations
+    #expect(hoverAfter - hoverBefore == 1)
+    hoveredItem.view.mouseExited(with: event)
+    let exitAfter = strip.updateMetrics.itemConfigurations
+    #expect(exitAfter - hoverAfter == 1)
+
+    var activated = tabs
+    activated[0] = TabSnapshot(
+        id: activated[0].id, title: activated[0].title, isActive: false,
+        isDirty: activated[0].isDirty, isPinned: activated[0].isPinned,
+        buffer: activated[0].buffer
+    )
+    let finalIndex = activated.count - 1
+    activated[finalIndex] = TabSnapshot(
+        id: activated[finalIndex].id, title: activated[finalIndex].title, isActive: true,
+        isDirty: activated[finalIndex].isDirty, isPinned: activated[finalIndex].isPinned,
+        buffer: activated[finalIndex].buffer
+    )
+    strip.apply(change: WorkspaceChange(
+        snapshot: WorkspaceSnapshot(
+            sessionID: SessionID(), tabs: activated, activeBuffer: activated[finalIndex].buffer,
+            persistence: .saved, startup: .ready
+        ),
+        kind: .activeTabChanged(previousIndex: 0, currentIndex: finalIndex)
+    ))
+    #expect(strip.updateMetrics.itemConfigurations - exitAfter == 2)
+}
+
 @Test @MainActor func blockedActivationPublishesTheSelectedTabBeforeDiskCommitCompletes() async {
     var session = ScratchSession()
     for _ in 0..<50 { session.addUntitled() }
@@ -2298,13 +3459,36 @@ struct AppKitHostedTests {
     let chrome = controller.workspaceChromeSmokeState()
     #expect(chrome.documentCount == 1)
     #expect(chrome.bannerHeight == 0)
-    #expect(chrome.tabStripHeight == 34)
+    #expect(chrome.tabStripHeight == 27)
     #expect(chrome.statusBarHeight == 24)
     #expect(!chrome.editorOverlapsStatusBar)
     #expect(chrome.interactionsEnabled)
     #expect(chrome.languageStatusEnabled)
     #expect(chrome.extensionStatusEnabled)
-    #expect(controller.tabStrip.documentSwitcher.accessibilityIdentifier() == "duckpad.tab.documents")
+    #expect(controller.tabStrip.documentSwitcher.superview == nil)
+}
+
+@Test @MainActor func windowHostsOneCommandBarAboveTheEntireEditorGroupWorkspace() throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    let menu = DuckpadMainMenuFactory.make(target: controller)
+    let fileMenu = try #require(menu.items.first { $0.submenu?.title == "File" }?.submenu)
+
+    controller.applicationMainMenuDidChange(menu)
+    let content = try #require(controller.window?.contentView)
+    content.layoutSubtreeIfNeeded()
+    let commandFrame = controller.commandBar.convert(controller.commandBar.bounds, to: content)
+    let workspaceFrame = controller.editorGroupWorkspace.convert(
+        controller.editorGroupWorkspace.bounds,
+        to: content
+    )
+
+    #expect(controller.commandBar.superview === content)
+    #expect(controller.commandBar.menuTitles == WindowCommandBarView.presentedMenuTitles)
+    #expect(controller.commandBar.menu(named: "File") === fileMenu)
+    #expect(commandFrame.minY >= workspaceFrame.maxY)
 }
 
 @Test @MainActor func realControllerTypingWithFiveHundredTabsPerformsOneItemReload() async {

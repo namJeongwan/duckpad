@@ -1,5 +1,6 @@
 import AppKit
 import DuckpadApplication
+import DuckpadDomain
 
 @MainActor
 public final class WeakWindowReference: @unchecked Sendable {
@@ -43,10 +44,14 @@ public protocol DirtyDocumentDecisionPresenting: AnyObject {
 }
 
 @MainActor
-public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPresenting, DirtyDocumentDecisionPresenting {
+public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPresenting, DirtyDocumentDecisionPresenting, OpenDocumentComparePresenting {
     private var activePanels: [ObjectIdentifier: NSSavePanel] = [:]
+    private let openDocumentComparePresenter: any OpenDocumentComparePresenting
 
-    public init() {}
+    public init(openDocumentComparePresenter: (any OpenDocumentComparePresenting)? = nil) {
+        self.openDocumentComparePresenter = openDocumentComparePresenter
+            ?? NativeOpenDocumentComparePresenter()
+    }
 
     public func chooseOpenURL(attachedTo window: NSWindow?) async -> URL? {
         let panel = NSOpenPanel()
@@ -87,6 +92,7 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
     public func cancelOutstandingPanels() {
         let panels = Array(activePanels.values)
         for panel in panels { panel.cancel(nil) }
+        openDocumentComparePresenter.cancelOutstandingComparisons()
     }
 
     public func resolveExternalConflict(attachedTo window: NSWindow?) async -> FileConflictResolution {
@@ -110,86 +116,54 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
         _ comparison: ExternalFileComparison,
         attachedTo window: NSWindow?
     ) async {
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = "Compare External Changes"
-        alert.informativeText = comparison.path
-        alert.addButton(withTitle: "Done")
-
-        let local = comparisonTextView(
-            title: "Duckpad — revision \(comparison.localRevision)",
-            text: comparison.localText,
-            otherText: comparison.externalText
+        let content = OpenDocumentCompareContent(
+            title: "Compare External Changes — \(comparison.path)",
+            leftTitle: "Duckpad — revision \(comparison.localRevision)",
+            rightTitle: "On Disk",
+            leftText: comparison.localText,
+            rightText: comparison.externalText
         )
-        let external = comparisonTextView(
-            title: "On Disk",
-            text: comparison.externalText,
-            otherText: comparison.localText
+        do {
+            try await openDocumentComparePresenter.present(
+                content,
+                attachedTo: window,
+                isCurrent: { !Task.isCancelled }
+            )
+        } catch let error as OpenDocumentComparison.Error {
+            openDocumentComparePresenter.presentFailure(error, attachedTo: window)
+        } catch { }
+    }
+
+    public func chooseTarget(
+        source: TabSnapshot,
+        candidates: [TabSnapshot],
+        attachedTo window: NSWindow?
+    ) async -> TabID? {
+        await openDocumentComparePresenter.chooseTarget(
+            source: source,
+            candidates: candidates,
+            attachedTo: window
         )
-        let panes = NSStackView(views: [local, external])
-        panes.orientation = .horizontal
-        panes.distribution = .fillEqually
-        panes.spacing = 10
-        panes.frame = NSRect(x: 0, y: 0, width: 820, height: 440)
-        alert.accessoryView = panes
-        _ = await run(alert, attachedTo: window)
     }
 
-    private func comparisonTextView(title: String, text: String, otherText: String) -> NSView {
-        let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 12, weight: .semibold)
-        let textView = NSTextView(frame: .zero)
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.isRichText = false
-        textView.textStorage?.setAttributedString(comparisonText(text, otherText: otherText))
-        textView.textContainerInset = NSSize(width: 8, height: 8)
-        textView.setAccessibilityLabel("\(title), read-only comparison")
-        textView.setAccessibilityHelp("Changed lines are marked with a dot and a highlighted background.")
-        let scroll = NSScrollView(frame: .zero)
-        scroll.documentView = textView
-        scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = true
-        let stack = NSStackView(views: [label, scroll])
-        stack.orientation = .vertical
-        stack.spacing = 4
-        scroll.heightAnchor.constraint(equalToConstant: 410).isActive = true
-        return stack
+    public func present(
+        _ content: OpenDocumentCompareContent,
+        attachedTo window: NSWindow?,
+        isCurrent: @escaping @MainActor () -> Bool
+    ) async throws {
+        try await openDocumentComparePresenter.present(
+            content,
+            attachedTo: window,
+            isCurrent: isCurrent
+        )
     }
 
-    private func comparisonText(_ text: String, otherText: String) -> NSAttributedString {
-        let lines = comparisonLines(text)
-        let otherLines = comparisonLines(otherText)
-        let result = NSMutableAttributedString()
-        let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        for (index, line) in lines.enumerated() {
-            let changed = index >= otherLines.count || line != otherLines[index]
-            let marker = changed ? "●" : " "
-            let rendered = String(format: "%@ %5d  %@%@", marker, index + 1, line, index + 1 < lines.count ? "\n" : "")
-            var attributes: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: NSColor.textColor,
-            ]
-            if changed { attributes[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.18) }
-            result.append(NSAttributedString(string: rendered, attributes: attributes))
-        }
-        return result
+    public func presentFailure(_ error: OpenDocumentComparison.Error, attachedTo window: NSWindow?) {
+        openDocumentComparePresenter.presentFailure(error, attachedTo: window)
     }
 
-    private func comparisonLines(_ text: String) -> [String] {
-        var lines: [String] = []
-        var lineStart = text.startIndex
-        var index = text.startIndex
-        while index < text.endIndex {
-            let next = text.index(after: index)
-            if text[index].isNewline {
-                lines.append(String(text[lineStart..<index]))
-                lineStart = next
-            }
-            index = next
-        }
-        lines.append(String(text[lineStart...]))
-        return lines
+    public func cancelOutstandingComparisons() {
+        openDocumentComparePresenter.cancelOutstandingComparisons()
     }
 
     public func presentFileFailure(

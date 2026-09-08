@@ -124,6 +124,18 @@ final class DocumentSwitcherButton: NSButton {
         updateButtonLabel()
     }
 
+    @discardableResult
+    func apply(tab: TabSnapshot, at index: Int) -> Bool {
+        guard tabs.indices.contains(index), tabs[index].id == tab.id else { return false }
+        if documentPanel.isPresented,
+           !documentPanel.apply(tab: tab, at: index) { return false }
+        tabs[index] = tab
+        updateMetrics.itemUpdates += 1
+        updateMetrics.incrementalItemInspections += 1
+        updateButtonLabel()
+        return true
+    }
+
     func setInteractionsEnabled(_ enabled: Bool) {
         isEnabled = enabled && !tabs.isEmpty
         if !enabled { documentPanel.dismiss() }

@@ -30,6 +30,12 @@
       "unit": "milliseconds",
       "maximum": 750.0,
       "aggregation": "maximum_of_3_searches_over_2000_files_16mb"
+    },
+    {
+      "id": "fold_recovery_10000",
+      "unit": "milliseconds",
+      "maximum": 250.0,
+      "aggregation": "single_contract_capture_restore_of_10000_headers"
     }
   ]
 }

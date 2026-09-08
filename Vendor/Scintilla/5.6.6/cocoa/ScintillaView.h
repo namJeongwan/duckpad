@@ -38,8 +38,17 @@ typedef void(*SciNotifyFunc)(intptr_t windowid, unsigned int iMessage, uintptr_t
 
 extern NSString *const SCIUpdateUINotification;
 
+typedef NS_ENUM(NSInteger, SCITextInputSource) {
+	SCITextInputSourceDirect,
+	SCITextInputSourceTentative,
+	SCITextInputSourceIMECommit,
+};
+
 @protocol ScintillaNotificationProtocol
 - (void) notification: (SCNotification *) notification;
+@optional
+- (void) scintillaWillInsertTextFromSource: (SCITextInputSource) source;
+- (void) scintillaDidInsertText;
 @end
 
 /**

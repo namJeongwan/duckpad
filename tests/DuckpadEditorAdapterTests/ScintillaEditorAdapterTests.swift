@@ -53,6 +53,24 @@ private actor DelayedSearchSessionStore: SessionStore {
 @Suite(.serialized)
 struct ScintillaBridgeTests {
     @Test @MainActor
+    func freshViewPublishesWillModifyBeforeItsFirstEdit() throws {
+        let view = makeHostedView()
+        try view.loadUTF8(Data("base".utf8), revision: 0)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 4, length: 0))
+        var events: [String] = []
+        view.onWillModifyDocument = {
+            events.append("will:\(text(view) ?? "<nil>"):\(view.revision)")
+        }
+        view.onEdit = { _ in
+            events.append("edit:\(text(view) ?? "<nil>"):\(view.revision)")
+        }
+
+        view.insertCommittedText("X")
+
+        #expect(events == ["will:base:0", "edit:baseX:1"])
+    }
+
+    @Test @MainActor
     func realViewUsesUTF8ByteRangesAndRejectsStaleRevision() throws {
         let view = makeHostedView()
         try view.loadUTF8(Data("Duckpad 한글 🦆".utf8), revision: 4)
@@ -769,6 +787,92 @@ struct ScintillaBridgeTests {
     }
 
     @Test @MainActor
+    func smartPairingKeepsCaretInTheSplitPaneThatReceivedInput() throws {
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 2),
+            folding: true,
+            braceMatching: true
+        )))
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+
+        secondary.insertCommittedText("{")
+
+        #expect(String(decoding: primary.contentUTF8, as: UTF8.self) == "{}")
+        #expect(String(decoding: secondary.contentUTF8, as: UTF8.self) == "{}")
+        #expect(secondary.caretUTF8Position == 1)
+    }
+
+    @Test @MainActor
+    func disablingSmartEditingClearsPendingCaretStateInEverySplitPane() throws {
+        _ = NSApplication.shared
+        let adapter = ScintillaEditorAdapter()
+        let bufferID = BufferID()
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        adapter.display(.init(bufferID: bufferID, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        #expect(adapter.applyLanguage(.init(
+            languageID: .init(rawValue: "json"),
+            lexerName: "json",
+            indentation: .init(width: 2),
+            folding: true,
+            braceMatching: true
+        )))
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.contentView = adapter.view
+        secondary.focusEditor()
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.shift],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "{",
+            charactersIgnoringModifiers: "[",
+            isARepeat: false,
+            keyCode: 33
+        ))
+        let application = NSApplication.shared
+        // Smart editing classifies direct input from NSApp.currentEvent. Avoid
+        // nextEvent(_:), which takes over the test runner's main event drain.
+        let setCurrentEvent = NSSelectorFromString("_setCurrentEvent:")
+        try #require(application.responds(to: setCurrentEvent))
+        do {
+            let previousEvent = application.currentEvent
+            _ = application.perform(setCurrentEvent, with: event)
+            defer { _ = application.perform(setCurrentEvent, with: previousEvent) }
+            window.sendEvent(event)
+        }
+        #expect(secondary.caretUTF8Position == 1)
+
+        #expect(adapter.applyLanguage(.init(
+            languageID: .plainText,
+            lexerName: "null",
+            indentation: .init(width: 4),
+            folding: false,
+            braceMatching: false
+        )))
+        primary.setPrimarySelectionUTF8Range(NSRange(location: 1, length: 0))
+        primary.insertCommittedText("{")
+
+        #expect(String(decoding: primary.contentUTF8, as: UTF8.self) == "{{}")
+        #expect(primary.caretUTF8Position == 2)
+    }
+
+    @Test @MainActor
     func closeSplitInvalidatesAndEvictsSecondaryNativeView() throws {
         let adapter = ScintillaEditorAdapter()
         let bufferID = BufferID()
@@ -1111,21 +1215,28 @@ struct ScintillaBridgeTests {
         ))
         adapter.display(second.buffer)
         let originalRecovery = try #require(adapter.recoverySnapshot(for: second.buffer.bufferID))
+        let regexEngine = SearchScanBarrierRegexEngine(base: ICURegexEngine())
+        defer { regexEngine.releaseScan() }
         let search = SearchWorkspaceUseCase(
             workspace: workspace,
             editor: adapter,
-            regexEngine: ICURegexEngine()
+            regexEngine: regexEngine
         )
 
         await store.arm()
+        let replacement = Task {
+            try await search.replaceAll(SearchQuery(
+                pattern: "duck",
+                replacement: "goose",
+                options: SearchOptions(mode: .regularExpression)
+            ))
+        }
+        await regexEngine.waitUntilScanEntered()
         let activation = Task { await workspace.activate(tabID: first.id) }
         await store.waitUntilBlocked()
-        let replacement = Task {
-            try await search.replaceAll(SearchQuery(pattern: "duck", replacement: "goose"))
-        }
-        await Task.yield()
         await store.release()
         #expect(await activation.value == .applied(.saved))
+        regexEngine.releaseScan()
 
         do {
             _ = try await replacement.value

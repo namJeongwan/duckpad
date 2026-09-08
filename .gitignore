@@ -32,6 +32,7 @@ xcuserdata/
 *.moved-aside
 
 # Local editor and tooling state
+/.worktrees/
 .idea/
 .vscode/
 __pycache__/

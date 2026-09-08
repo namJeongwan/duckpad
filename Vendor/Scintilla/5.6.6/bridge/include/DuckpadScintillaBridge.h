@@ -19,6 +19,13 @@ typedef NS_ENUM(NSInteger, DPScintillaEditOrigin) {
     DPScintillaEditOriginRedo = 2,
 };
 
+typedef NS_ENUM(NSInteger, DPScintillaSelectionShape) {
+    DPScintillaSelectionShapeStream = 0,
+    DPScintillaSelectionShapeRectangle = 1,
+    DPScintillaSelectionShapeLines = 2,
+    DPScintillaSelectionShapeThin = 3,
+};
+
 typedef NS_ENUM(NSInteger, DPScintillaPalette) {
     DPScintillaPaletteLight = 0,
     DPScintillaPaletteDark = 1,
@@ -52,8 +59,13 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 
 /// Narrow AppKit facade. No Scintilla message, pointer, or C++ type is public.
 @interface DPScintillaEditorView : NSView
+@property(nonatomic, copy, nullable) void (^onWillModifyDocument)(void);
 @property(nonatomic, copy, nullable) void (^onEdit)(DPScintillaEdit *edit);
 @property(nonatomic, copy, nullable) void (^onError)(NSError *error);
+@property(nonatomic, copy, nullable) void (^onFocus)(void);
+@property(nonatomic, copy, nullable) void (^onFoldStateChange)(void);
+@property(nonatomic, copy, nullable) void (^onFoldRecoveryProgress)(void);
+@property(nonatomic, copy, nullable) void (^onSmartIndentationStateChange)(BOOL isPending);
 @property(nonatomic, readonly, nullable) NSError *lastMutationError;
 @property(nonatomic, readonly) uint64_t revision;
 @property(nonatomic, readonly, copy) NSData *contentUTF8;
@@ -101,6 +113,9 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, readonly) NSUInteger lineCount;
 @property(nonatomic, readonly) NSUInteger caretLine;
 @property(nonatomic, readonly) NSUInteger caretColumn;
+@property(nonatomic, readonly) BOOL canCollapseCurrentFold;
+@property(nonatomic, readonly) BOOL canExpandCurrentFold;
+@property(nonatomic, readonly) BOOL hasContractedFolds;
 
 - (BOOL)loadUTF8:(NSData *)content
          revision:(uint64_t)revision
@@ -136,6 +151,7 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (BOOL)goToUTF8Offset:(NSUInteger)offset;
 - (void)shareDocumentWithView:(DPScintillaEditorView *)source;
 - (void)synchronizeRevision:(uint64_t)revision;
+- (void)cancelPendingSmartIndentation;
 /// Disconnects native callbacks and document watchers before a pane is discarded.
 - (void)invalidate;
 - (BOOL)addSelectionUTF8Range:(NSRange)range;
@@ -171,8 +187,30 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (NSInteger)foldLevelAtLine:(NSUInteger)line;
 - (BOOL)isFoldExpandedAtLine:(NSUInteger)line;
 - (void)toggleFoldAtLine:(NSUInteger)line;
+- (NSArray<NSNumber *> *)contractedFoldHeaderLinesWithMaximumCount:(NSUInteger)maximumCount
+    NS_SWIFT_NAME(contractedFoldHeaderLines(maximumCount:));
+- (NSArray<NSNumber *> *)restoreContractedFoldHeaderLines:(NSArray<NSNumber *> *)lines
+    NS_SWIFT_NAME(restoreContractedFoldHeaderLines(_:));
+- (BOOL)isLineVisibleAtLine:(NSUInteger)line NS_SWIFT_NAME(isLineVisible(at:));
+- (BOOL)collapseCurrentFold;
+- (BOOL)expandCurrentFold;
+- (BOOL)collapseAllFolds;
+- (BOOL)expandAllFolds;
 - (void)updateBraceHighlight;
 - (BOOL)toggleLineCommentsWithPrefixUTF8:(NSData *)prefix;
++ (BOOL)blockCommentSupportsSelectionShape:(DPScintillaSelectionShape)shape
+                                     count:(NSUInteger)count
+                         caretVirtualSpace:(NSUInteger)caretVirtualSpace
+                        anchorVirtualSpace:(NSUInteger)anchorVirtualSpace
+    NS_SWIFT_NAME(blockCommentSupportsSelectionShape(_:count:caretVirtualSpace:anchorVirtualSpace:));
+- (BOOL)canToggleBlockCommentsWithStartUTF8:(NSData *)start
+                                    endUTF8:(NSData *)end
+                             selectionOwner:(DPScintillaEditorView *)selectionOwner
+    NS_SWIFT_NAME(canToggleBlockComments(withStartUTF8:endUTF8:selectionOwner:));
+- (BOOL)toggleBlockCommentsWithStartUTF8:(NSData *)start
+                                 endUTF8:(NSData *)end
+                          selectionOwner:(DPScintillaEditorView *)selectionOwner
+    NS_SWIFT_NAME(toggleBlockComments(withStartUTF8:endUTF8:selectionOwner:));
 - (BOOL)showCompletionItems:(NSArray<NSString *> *)items
    replacingPrefixByteCount:(NSUInteger)prefixByteCount;
 - (void)cancelCompletion;

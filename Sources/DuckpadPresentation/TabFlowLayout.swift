@@ -44,11 +44,11 @@ public struct TabFlowLayoutEngine: Sendable {
     public var maximumItemWidth: CGFloat
 
     public init(
-        rowHeight: CGFloat = 28,
-        horizontalSpacing: CGFloat = 2,
-        verticalSpacing: CGFloat = 2,
-        insets: NSEdgeInsets = NSEdgeInsets(top: 3, left: 6, bottom: 3, right: 6),
-        minimumItemWidth: CGFloat = 88,
+        rowHeight: CGFloat = 27,
+        horizontalSpacing: CGFloat = 0,
+        verticalSpacing: CGFloat = 0,
+        insets: NSEdgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0),
+        minimumItemWidth: CGFloat = 76,
         maximumItemWidth: CGFloat = .greatestFiniteMagnitude
     ) {
         self.rowHeight = rowHeight
@@ -70,61 +70,88 @@ public struct TabFlowLayoutEngine: Sendable {
             )
         }
         let usableWidth = max(minimumItemWidth, containerWidth - insets.left - insets.right)
-        var x = insets.left
-        var y = insets.top
+        // A proposed width includes the complete rendered filename. It is an
+        // inviolable minimum even when a caller still supplies the legacy
+        // maximumItemWidth configuration.
+        let boundedWidths = itemWidths.map { max($0, minimumItemWidth) }
+        func naturalWidth(of range: Range<Int>) -> CGFloat {
+            range.reduce(CGFloat(0)) { $0 + boundedWidths[$1] }
+                + CGFloat(max(0, range.count - 1)) * horizontalSpacing
+        }
+
+        let totalNaturalWidth = naturalWidth(of: boundedWidths.indices)
+        var rowRanges: [Range<Int>] = []
+        if totalNaturalWidth <= usableWidth || boundedWidths.count == 1 {
+            rowRanges = [boundedWidths.indices]
+        } else {
+            // A greedy pass gives the minimum ordered row count without
+            // dividing by a possibly zero usable width. A lone oversized
+            // title is valid by design.
+            var greedyRanges: [Range<Int>] = []
+            var rowStart = 0
+            var rowWidth: CGFloat = 0
+            for (index, width) in boundedWidths.enumerated() {
+                let candidateWidth = rowWidth == 0 ? width : rowWidth + horizontalSpacing + width
+                if index > rowStart, candidateWidth > usableWidth {
+                    greedyRanges.append(rowStart..<index)
+                    rowStart = index
+                    rowWidth = width
+                } else {
+                    rowWidth = candidateWidth
+                }
+            }
+            greedyRanges.append(rowStart..<boundedWidths.count)
+
+            let rowCount = greedyRanges.count
+            let baseItemCount = boundedWidths.count / rowCount
+            let fullerRowCount = boundedWidths.count % rowCount
+            var balancedRanges: [Range<Int>] = []
+            var balancedStart = 0
+            for row in 0..<rowCount {
+                let count = baseItemCount + (row < fullerRowCount ? 1 : 0)
+                let range = balancedStart..<(balancedStart + count)
+                balancedRanges.append(range)
+                balancedStart += count
+            }
+            // Variable-width titles can make the fuller-first candidate
+            // impossible even though the minimum ordered rows are valid.
+            // Keep that minimum contiguous packing in this case.
+            rowRanges = balancedRanges.allSatisfy {
+                $0.count == 1 || naturalWidth(of: $0) <= usableWidth
+            } ? balancedRanges : greedyRanges
+        }
+
         var frames: [CGRect] = []
         var rowIndices: [Int] = []
-        var row = 0
         var maximumFrameX: CGFloat = 0
-        for proposedWidth in itemWidths {
-            let width = min(max(proposedWidth, minimumItemWidth), maximumItemWidth)
-            if x > insets.left, x + width > insets.left + usableWidth {
-                x = insets.left
-                y += rowHeight + verticalSpacing
-                row += 1
+        for (row, range) in rowRanges.enumerated() {
+            var x = insets.left
+            let y = insets.top + CGFloat(row) * (rowHeight + verticalSpacing)
+            let slack = rowRanges.count > 1
+                ? max(0, usableWidth - naturalWidth(of: range))
+                : 0
+            let distributedSlack = slack / CGFloat(range.count)
+            for (offset, index) in range.enumerated() {
+                var width = boundedWidths[index] + distributedSlack
+                if distributedSlack > 0, offset == range.count - 1 {
+                    width = insets.left + usableWidth - x
+                }
+                let frame = CGRect(x: x, y: y, width: width, height: rowHeight)
+                frames.append(frame)
+                rowIndices.append(row)
+                maximumFrameX = max(maximumFrameX, frame.maxX)
+                x += width + horizontalSpacing
             }
-            let frame = CGRect(x: x, y: y, width: width, height: rowHeight)
-            frames.append(frame)
-            rowIndices.append(row)
-            maximumFrameX = max(maximumFrameX, frame.maxX)
-            x += width + horizontalSpacing
         }
         return TabFlowLayoutResult(
             frames: frames,
             rowIndices: rowIndices,
-            rowCount: row + 1,
+            rowCount: rowRanges.count,
             contentWidth: max(containerWidth, maximumFrameX + insets.right),
-            contentHeight: y + rowHeight + insets.bottom
+            contentHeight: insets.top + insets.bottom
+                + CGFloat(rowRanges.count) * rowHeight
+                + CGFloat(max(0, rowRanges.count - 1)) * verticalSpacing
         )
-    }
-}
-
-public struct TabStripViewportPolicy: Equatable, Sendable {
-    public var maximumRows: Int
-    public var maximumWorkspaceFraction: CGFloat
-    public var minimumHeight: CGFloat
-
-    public init(
-        maximumRows: Int = 4,
-        maximumWorkspaceFraction: CGFloat = 0.34,
-        minimumHeight: CGFloat = 34
-    ) {
-        self.maximumRows = maximumRows
-        self.maximumWorkspaceFraction = maximumWorkspaceFraction
-        self.minimumHeight = minimumHeight
-    }
-
-    public func height(
-        contentHeight: CGFloat,
-        workspaceHeight: CGFloat,
-        engine: TabFlowLayoutEngine
-    ) -> CGFloat {
-        let rows = max(1, maximumRows)
-        let rowCap = engine.insets.top + engine.insets.bottom
-            + CGFloat(rows) * engine.rowHeight
-            + CGFloat(rows - 1) * engine.verticalSpacing
-        let fractionCap = max(minimumHeight, workspaceHeight * maximumWorkspaceFraction)
-        return min(contentHeight, max(minimumHeight, min(rowCap, fractionCap)))
     }
 }
 
@@ -160,10 +187,11 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
     private var rowIndices: [Int] = []
     private var rows: [RowCache] = []
     private var cachedRowCount = 0
-    private var calculatedSize = NSSize(width: 0, height: 34)
+    private var calculatedSize = NSSize(width: 0, height: 27)
     private var widthsVersion: UInt64 = 0
     private var preparedWidthsVersion: UInt64 = .max
     private var preparedWidth: CGFloat = -.greatestFiniteMagnitude
+    private var preparedItemCount = -1
     public private(set) var layoutGeneration: UInt64 = 0
     public private(set) var lastElementsQueryVisitedRows = 0
     public private(set) var lastElementsQueryInspectedItems = 0
@@ -173,7 +201,18 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         super.prepare()
         guard let collectionView else { return }
         let width = viewportWidth > 0 ? viewportWidth : collectionView.bounds.width
-        guard preparedWidthsVersion != widthsVersion || preparedWidth != width else { return }
+        let hasDataSource = collectionView.dataSource != nil
+        let itemCount = hasDataSource ? collectionView.numberOfItems(inSection: 0) : itemWidths.count
+        guard !hasDataSource || itemWidths.count == itemCount else {
+            // During a structural collection update, AppKit can prepare the
+            // layout while its internal item count still reflects the old
+            // data source. Keep the last coherent cache until both counts
+            // agree, then the already-invalidated layout will prepare again.
+            return
+        }
+        guard preparedWidthsVersion != widthsVersion
+                || preparedWidth != width
+                || preparedItemCount != itemCount else { return }
         let result = engine.layout(itemWidths: itemWidths, containerWidth: width)
         attributes = result.frames.enumerated().map { index, frame in
             let item = NSCollectionViewLayoutAttributes(forItemWith: IndexPath(item: index, section: 0))
@@ -185,6 +224,7 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         rows = Self.makeRows(frames: result.frames, rowIndices: result.rowIndices)
         preparedWidthsVersion = widthsVersion
         preparedWidth = width
+        preparedItemCount = itemCount
         layoutGeneration &+= 1
         let newSize = NSSize(width: result.contentWidth, height: result.contentHeight)
         if calculatedSize != newSize {
@@ -203,12 +243,12 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         var upper = rows.count
         while lower < upper {
             let middle = (lower + upper) / 2
-            if rows[middle].maxY < rect.minY { lower = middle + 1 }
+            if rows[middle].maxY <= rect.minY { lower = middle + 1 }
             else { upper = middle }
         }
         var visible: [NSCollectionViewLayoutAttributes] = []
         var rowIndex = lower
-        while rowIndex < rows.count, rows[rowIndex].minY <= rect.maxY {
+        while rowIndex < rows.count, rows[rowIndex].minY < rect.maxY {
             let row = rows[rowIndex]
             lastElementsQueryVisitedRows += 1
             for itemIndex in row.itemRange {
@@ -232,6 +272,13 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
     public func updateItemWidth(_ width: CGFloat, at index: Int) {
         guard itemWidths.indices.contains(index), itemWidths[index] != width else { return }
         itemWidths[index] = width
+    }
+
+    @discardableResult
+    public func insertItemWidth(_ width: CGFloat, at index: Int) -> Bool {
+        guard (0...itemWidths.count).contains(index) else { return false }
+        itemWidths.insert(width, at: index)
+        return true
     }
 
     public func destinationIndex(at point: NSPoint) -> Int {

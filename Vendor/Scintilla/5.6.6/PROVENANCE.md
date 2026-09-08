@@ -31,7 +31,29 @@ tar -xzf "$tmp_dir/scintilla566.tgz" -C "$tmp_dir"
 ```
 
 The allowlist is normative in `Package.swift`; files not named by that target
-are not compiled. One local patch changes the two Xcode-generated TIFF cursor
-lookups in `cocoa/ScintillaView.mm` to use Duckpad's configured SwiftPM resource
-directory and the official PNG names. It does not alter editing behavior. The
-four packaged cursor PNGs are byte-identical copies from `cocoa/res`.
+are not compiled. Duckpad carries two narrow Cocoa integration patches:
+
+1. The two Xcode-generated TIFF cursor lookups in `cocoa/ScintillaView.mm` use
+   Duckpad's configured SwiftPM resource directory and the official PNG names.
+2. `ScintillaView.h` and `ScintillaView.mm` notify the existing delegate whether
+   an insertion came from direct input, tentative composition, or an IME commit.
+   This preserves Scintilla's insertion and composition behavior while allowing
+   the Duckpad-owned bridge to keep smart editing out of IME transactions.
+
+The four packaged cursor PNGs are byte-identical copies from `cocoa/res`.
+
+Fold-state capture, restore, commands, and recovery-progress callbacks are
+implemented only in Duckpad-owned `bridge/` code. No byte from the official
+Scintilla 5.6.6 archive was modified for that façade.
+
+Phase 32 block-comment selection validation, aggregate edit publication,
+shared-document publisher routing, and direct-closing-delimiter indentation
+likewise modify only Duckpad-owned files under `bridge/`; no upstream Scintilla
+or Lexilla source file changed.
+
+Editor-group rejection recovery uses a Duckpad-owned, publisher-only
+pre-mutation callback in `bridge/`. The callback is driven by Scintilla's public
+`SC_MOD_BEFOREINSERT` and `SC_MOD_BEFOREDELETE` notifications. Its publisher
+event mask is installed during bridge-view construction and reused for later
+mask reconfiguration. This does not modify any upstream Scintilla or Lexilla
+source file.

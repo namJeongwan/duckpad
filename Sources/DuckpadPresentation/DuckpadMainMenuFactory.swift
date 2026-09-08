@@ -93,6 +93,15 @@ public enum DuckpadMainMenuFactory {
         editMenu.addItem(.separator())
         add("Indent Line(s)", #selector(DuckpadWindowController.performIndent(_:)), "", target, modifiers: [], to: editMenu)
         add("Unindent Line(s)", #selector(DuckpadWindowController.performUnindent(_:)), "", target, modifiers: [], to: editMenu)
+        add(
+            "Toggle Block Comment",
+            #selector(DuckpadWindowController.performToggleBlockComment(_:)),
+            "/",
+            target,
+            modifiers: [.command, .option],
+            accessibilityLabel: "Toggle block comment",
+            to: editMenu
+        )
         add("Make Uppercase", #selector(DuckpadWindowController.performUppercase(_:)), "", target, modifiers: [], to: editMenu)
         add("Make Lowercase", #selector(DuckpadWindowController.performLowercase(_:)), "", target, modifiers: [], to: editMenu)
         add("Trim Trailing Whitespace", #selector(DuckpadWindowController.performTrimTrailingWhitespace(_:)), "", target, modifiers: [], to: editMenu)
@@ -147,15 +156,121 @@ public enum DuckpadMainMenuFactory {
             modifiers: [.command, .option],
             to: viewMenu
         )
+        add(
+            "Compare with Open Document…",
+            #selector(DuckpadWindowController.performCompareWithOpenDocument(_:)),
+            "",
+            target,
+            modifiers: [],
+            accessibilityLabel: "Compare the active document with another open document",
+            to: viewMenu
+        )
         viewMenu.addItem(.separator())
         add("Word Wrap", #selector(DuckpadWindowController.performToggleWordWrap(_:)), "", target, modifiers: [], to: viewMenu)
         add("Show Wrap Symbols", #selector(DuckpadWindowController.performToggleWrapMarker(_:)), "", target, modifiers: [], to: viewMenu)
         add("Show Whitespace", #selector(DuckpadWindowController.performToggleWhitespace(_:)), "", target, modifiers: [], to: viewMenu)
         add("Show Line Endings", #selector(DuckpadWindowController.performToggleLineEndings(_:)), "", target, modifiers: [], to: viewMenu)
+        let foldingItem = NSMenuItem(title: "Folding", action: nil, keyEquivalent: "")
+        let foldingMenu = NSMenu(title: "Folding")
+        add(
+            "Collapse Current Block",
+            #selector(DuckpadWindowController.performCollapseCurrentFold(_:)),
+            "[",
+            target,
+            modifiers: [.command, .option],
+            accessibilityLabel: "Collapse current code block",
+            to: foldingMenu
+        )
+        add(
+            "Expand Current Block",
+            #selector(DuckpadWindowController.performExpandCurrentFold(_:)),
+            "]",
+            target,
+            modifiers: [.command, .option],
+            accessibilityLabel: "Expand current code block",
+            to: foldingMenu
+        )
+        add(
+            "Collapse All",
+            #selector(DuckpadWindowController.performCollapseAllFolds(_:)),
+            "",
+            target,
+            modifiers: [],
+            accessibilityLabel: "Collapse all code blocks",
+            to: foldingMenu
+        )
+        add(
+            "Expand All",
+            #selector(DuckpadWindowController.performExpandAllFolds(_:)),
+            "",
+            target,
+            modifiers: [],
+            accessibilityLabel: "Expand all code blocks",
+            to: foldingMenu
+        )
+        foldingItem.submenu = foldingMenu
+        viewMenu.addItem(foldingItem)
         viewMenu.addItem(.separator())
         add("Zoom In", #selector(DuckpadWindowController.performZoomIn(_:)), "+", target, to: viewMenu)
         add("Zoom Out", #selector(DuckpadWindowController.performZoomOut(_:)), "-", target, to: viewMenu)
         add("Actual Size", #selector(DuckpadWindowController.performResetZoom(_:)), "0", target, to: viewMenu)
+        viewMenu.addItem(.separator())
+        let rightArrow = String(UnicodeScalar(NSRightArrowFunctionKey)!)
+        let downArrow = String(UnicodeScalar(NSDownArrowFunctionKey)!)
+        add(
+            "Move Active Tab to Group Right",
+            #selector(DuckpadWindowController.performMoveActiveTabToGroupRight(_:)),
+            rightArrow,
+            target,
+            modifiers: [.command, .control],
+            accessibilityLabel: "Move active tab to editor group on the right",
+            to: viewMenu
+        )
+        add(
+            "Move Active Tab to Group Down",
+            #selector(DuckpadWindowController.performMoveActiveTabToGroupDown(_:)),
+            downArrow,
+            target,
+            modifiers: [.command, .control],
+            accessibilityLabel: "Move active tab to editor group below",
+            to: viewMenu
+        )
+        add(
+            "Clone Active Tab to Group Right",
+            #selector(DuckpadWindowController.performCloneActiveTabToGroupRight(_:)),
+            rightArrow,
+            target,
+            modifiers: [.command, .control, .option],
+            accessibilityLabel: "Clone active tab to editor group on the right",
+            to: viewMenu
+        )
+        add(
+            "Clone Active Tab to Group Down",
+            #selector(DuckpadWindowController.performCloneActiveTabToGroupDown(_:)),
+            downArrow,
+            target,
+            modifiers: [.command, .control, .option],
+            accessibilityLabel: "Clone active tab to editor group below",
+            to: viewMenu
+        )
+        add(
+            "Focus Other Editor Group",
+            #selector(DuckpadWindowController.performFocusOtherEditorGroup(_:)),
+            "`",
+            target,
+            modifiers: [.command, .control],
+            accessibilityLabel: "Focus the other editor group",
+            to: viewMenu
+        )
+        add(
+            "Close Editor Group",
+            #selector(DuckpadWindowController.performCloseEditorGroup(_:)),
+            "w",
+            target,
+            modifiers: [.command, .option, .shift],
+            accessibilityLabel: "Close the secondary editor group",
+            to: viewMenu
+        )
         viewMenu.addItem(.separator())
         add("Split Editor Right", #selector(DuckpadWindowController.performSplitEditorRight(_:)), "\\", target, to: viewMenu)
         add("Split Editor Down", #selector(DuckpadWindowController.performSplitEditorDown(_:)), "\\", target, modifiers: [.command, .option], to: viewMenu)
@@ -256,23 +371,18 @@ public enum DuckpadMainMenuFactory {
         plain.target = target
         plain.representedObject = LanguageID.plainText.rawValue
         languageMenu.addItem(.separator())
-        var currentGroup: String?
-        for definition in target.languageDefinitions where definition.id != .plainText {
-            if currentGroup != definition.group {
-                if currentGroup != nil { languageMenu.addItem(.separator()) }
-                let heading = NSMenuItem(title: definition.group, action: nil, keyEquivalent: "")
-                heading.isEnabled = false
-                languageMenu.addItem(heading)
-                currentGroup = definition.group
-            }
-            let item = languageMenu.addItem(
-                withTitle: definition.displayName,
+        LanguageMenuBuilder.append(
+            target.languageDefinitions.filter { $0.id != .plainText },
+            to: languageMenu
+        ) { definition in
+            let item = NSMenuItem(
+                title: definition.displayName,
                 action: #selector(DuckpadWindowController.performChooseLanguage(_:)),
                 keyEquivalent: ""
             )
             item.target = target
             item.representedObject = definition.id.rawValue
-            item.indentationLevel = 1
+            return item
         }
         languageMenu.addItem(.separator())
         add("Toggle Line Comment", #selector(DuckpadWindowController.performToggleLineComment(_:)), "/", target, to: languageMenu)
@@ -512,10 +622,12 @@ public enum DuckpadMainMenuFactory {
         _ keyEquivalent: String,
         _ target: AnyObject,
         modifiers: NSEvent.ModifierFlags = [.command],
+        accessibilityLabel: String? = nil,
         to menu: NSMenu
     ) {
         let item = menu.addItem(withTitle: title, action: action, keyEquivalent: keyEquivalent)
         item.keyEquivalentModifierMask = modifiers
         item.target = target
+        if let accessibilityLabel { item.setAccessibilityLabel(accessibilityLabel) }
     }
 }

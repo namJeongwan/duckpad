@@ -28,10 +28,10 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 14 | [Phase 4 session recovery](07-session-recovery.md) | **Content approved; exact receipt pending** | generation별 UTF-8 recovery, corrupt fallback, editor view state, crash autosave와 durable close/termination ordering candidate다. |
 | 15 | [Phase 4 independent code review](reviews/2026-09-02-phase-4-session-recovery-code-review.md) | **Rejected — superseded review evidence** | 최초 P4-01~P4-06 Major 판정과 당시 debug/release/smoke/adversarial evidence다. |
 | 16 | [Phase 4 remediation re-review](reviews/2026-09-02-phase-4-session-recovery-rereview.md) | **Content approved; exact receipt pending — latest Phase 4 evidence** | P4-01~P4-06 closure, focused/debug/release/fresh/smoke evidence와 exact 19-file scope를 기록한다. |
-| 17 | [Phase 5 multiline tab workspace](08-multiline-tabs.md) | **Content approved; exact receipt pending** | native multiline wrapping, pin/MRU/order, shared loss-safe close gate, drag/context/accessibility와 500-tab layout contract를 기록한다. |
+| 17 | [Phase 5 multiline tab workspace](08-multiline-tabs.md) | **Approved, committed and pushed; overflow chrome superseded** | native multiline wrapping, pin/MRU/order, shared loss-safe close gate, drag/context/accessibility와 500-tab layout contract를 기록한다. 당시 overflow chrome은 Phase 33이 대체했다. |
 | 18 | [Phase 5 independent code review](reviews/2026-09-02-phase-5-multiline-tabs-code-review.md) | **Rejected — superseded review evidence** | 최초 P5-01~P5-03 Major와 당시 debug/release/smoke/adversarial evidence를 기록한다. |
 | 19 | [Phase 5 remediation re-review](reviews/2026-09-02-phase-5-multiline-tabs-rereview.md) | **Rejected — superseded review evidence** | P5-01/P5-02 closure와 P5-03 termination Retry 잔여 Major를 기록한다. |
-| 20 | [Phase 5 final remediation re-review](reviews/2026-09-02-phase-5-multiline-tabs-final-rereview.md) | **Content approved; exact receipt pending — latest Phase 5 evidence** | P5-01~P5-03 closure, 새 native terminate cycle/latest revision/final flush와 repeated debug/release/AppKit evidence를 기록한다. |
+| 20 | [Phase 5 final remediation re-review](reviews/2026-09-02-phase-5-multiline-tabs-final-rereview.md) | **Approved — latest Phase 5 evidence** | P5-01~P5-03 closure, 새 native terminate cycle/latest revision/final flush와 repeated debug/release/AppKit evidence를 기록한다. Exact receipt와 `origin/main` delivery가 완료됐다. |
 | 21 | [Phase 6 search and replace](09-search-replace.md) | **Implemented; review pending** | non-modal macOS search UI, ICU hard-budget regex, UTF-8 result model, open-document results, and revision-reserved grouped replacement를 기록한다. |
 | 22 | [Phase 6 independent code review](reviews/2026-09-03-phase-6-search-replace-code-review.md) | **Rejected — superseded review evidence** | regex Whole Word, terminal zero-length progress, fixed selection Replace All의 최초 3 Major와 당시 debug/release/smoke/probe evidence를 기록한다. |
 | 23 | [Phase 6 remediation re-review](reviews/2026-09-03-phase-6-search-replace-rereview.md) | **Rejected — superseded review evidence** | P6-01/P6-02 closure와 당시 selection nil/invalidation이 전체 문서 치환으로 확장되던 P6-03 잔여 Major를 기록한다. |
@@ -53,13 +53,13 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 39 | [Phase 14 independent code review](reviews/2026-09-03-phase-14-tab-lifecycle-code-review.md) | **Content approved — latest Phase 14 evidence** | 초기 accepted-close termination race Major와 LIFO test Minor를 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 40 | [Phase 15 advanced editing commands](18-advanced-editing-commands.md) | **Content approved; exact receipt pending** | 줄 복제/이동/삭제/합치기, 들여쓰기, 대소문자 변환, 후행 공백 제거와 충돌 없는 native shortcut surface를 기록한다. |
 | 41 | [Phase 15 independent code review](reviews/2026-09-03-phase-15-advanced-editing-code-review.md) | **Content approved — latest Phase 15 evidence** | 최초 3 Major의 Join 경계, revision exhaustion 원자성, fallback selection/EOL 결함을 focused remediation 재검증으로 모두 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
-| 42 | [Phase 16 external file Compare](19-external-file-compare.md) | **Content approved; exact receipt pending** | 외부 변경 충돌에서 비파괴 local/external 비교, 32 MiB 표시 한도와 Compare 이후 Reload/Overwrite/Cancel 재결정을 기록한다. |
+| 42 | [Phase 16 external file Compare](19-external-file-compare.md) | **Approved, committed and pushed; renderer superseded** | 외부 변경 충돌에서 비파괴 local/external 비교, 32 MiB 표시 한도와 Compare 이후 Reload/Overwrite/Cancel 재결정을 기록한다. Renderer는 Phase 33의 aligned Compare가 대체했다. |
 | 43 | [Phase 16 independent code review](reviews/2026-09-03-phase-16-external-file-compare-code-review.md) | **Content approved — latest Phase 16 evidence** | 최초 2 Major의 comparison-read stale snapshot과 post-panel/reload-read data-loss race를 authoritative revision/binding transaction으로 닫아 최종 0 Blocker/Major/Minor로 승인한다. |
 | 44 | [Phase 17 folder search](20-folder-search.md) | **Content approved; exact receipt pending** | `Command-Shift-F` user-selected recursive search, structured results, bounded/cancellable descriptor-relative scan과 identity-checked result activation을 기록한다. |
 | 45 | [Phase 17 independent code review](reviews/2026-09-03-phase-17-folder-search-code-review.md) | **Content approved — latest Phase 17 evidence** | 최초 5 Major/2 Minor의 TOCTOU, regex validation, result-memory/MainActor, directory-metadata, termination activation race를 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 46 | [Phase 18 persistent bookmarks](21-persistent-bookmarks.md) | **Implemented; review pending** | 문서별 line bookmark, 편집/undo 추적, 복구 검증, 순환 탐색과 `Command/F2` 단축키를 기록한다. |
 | 47 | [Phase 18 independent code review](reviews/2026-09-03-phase-18-persistent-bookmarks-code-review.md) | **Content approved — latest Phase 18 evidence** | 최초 4 Major의 first-line backward wrap, fallback temporary-attribute ownership, CRLF mapping, maximum-marker MainActor budget을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
-| 48 | [Phase 19 shared-document split editing](22-split-editing.md) | **Implemented; review pending** | 같은 Scintilla document/undo를 공유하면서 cursor·selection·scroll은 독립적인 좌우/상하 pane, 복구와 native 단축키를 기록한다. |
+| 48 | [Phase 19 shared-document split editing](22-split-editing.md) | **Approved, committed and pushed; distinct from editor groups** | 같은 Scintilla document/undo를 공유하면서 cursor·selection·scroll은 독립적인 좌우/상하 pane, 복구와 native 단축키를 기록한다. Phase 33 editor groups와는 별도 기능이다. |
 | 49 | [Phase 19 independent code review](reviews/2026-09-03-phase-19-split-editing-code-review.md) | **Content approved — latest Phase 19 evidence** | 최초 3 Major/1 Minor의 rejected-edit 전환, per-buffer exhaustion, 양 pane language, secondary eviction 결함을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
 | 50 | [Phase 20 saved workspace file browser](23-workspace-file-browser.md) | **Content approved; exact receipt pending** | security-scoped folder roots, native outline browser, navigation restoration, drag/drop, Finder reveal과 `Command-Control-O`/`Command-Shift-E` 명령을 기록한다. |
 | 51 | [Phase 20 independent code review](reviews/2026-09-03-phase-20-workspace-file-browser-code-review.md) | **Content approved — latest Phase 20 evidence** | descriptor-relative file authority, serialized/reconciled root mutation, security-scope lifetime, accepted file-open termination ordering과 corrupt-state preservation을 remediation 후 재검증해 최종 0 Blocker/Major/Minor로 승인한다. |
@@ -82,9 +82,11 @@ Duckpad의 제품 결정, 아키텍처, 개발 규칙과 에이전트 작업 근
 | 68 | [Phase 28 native performance budgets](32-performance-budgets.md) | **Approved, committed and pushed** | Release warm launch, typing p95, 100 MiB open, 200-tab reflow와 2,000-file folder search의 동결 budget 및 JSON gate를 commit `9389f46`으로 `origin/main`에 반영했다. |
 | 69 | [Phase 28 independent code review](reviews/2026-09-04-phase-28-performance-budgets-code-review.md) | **Content approved — 0 findings** | 최초 direct-only 100 MiB 측정, unbounded warm launch, bookmark/system-recents 격리 4 Major를 end-to-end pipeline/watchdog/temp authority로 닫았다. |
 | 70 | [Phase 29 frozen parity release evidence](33-parity-release-evidence.md) | **In progress — reviewer onboarding** | 94개 feature와 G1–G10을 exact release candidate 증거에 연결하기 전에 parent-pinned 독립 parity reviewer 역할을 별도 선행 candidate로 등록한다. |
-| 71 | [Phase 29A tab responsiveness and scratch UI](34-tab-responsiveness-and-scratch-ui.md) | **Approved, committed and pushed** | 탭 제목 축약 제거, 긴 제목의 가로 overflow, 500-tab O(1) 활성 표시 갱신, 즉시 선택 반영, hover affordance와 기본 Workspace UI 제거를 기록한다. commit `804a1c4`. |
+| 71 | [Phase 29A tab responsiveness and scratch UI](34-tab-responsiveness-and-scratch-ui.md) | **Approved, committed and pushed; tab overflow chrome superseded** | 탭 제목 축약 제거와 500-tab O(1) 갱신은 유지된다. 당시 긴 제목의 visible 가로 overflow/scroller 계약은 Phase 33의 full-width item wrapping/no-visible-scroller 계약으로 대체됐다. commit `804a1c4`. |
 | 72 | [Phase 29B parity gap assessment and extension shortcuts](35-parity-gap-assessment.md) | **Approved, committed and pushed** | 94개 feature를 보수적으로 전수 분류하고 manifest 단축키를 native menu에 연결하며 Extended 검색 escape를 확장했다. commit `f33c4e8`. |
-| 73 | [Phase 29C document dropdown and immediate tab interaction](36-document-dropdown-and-close-latency.md) | **Implemented; review pending** | 명시적인 전체 문서 dropdown, plus 제거, overlay scrollbar와 강한 hover, 새 문서 focus, optimistic durable close와 collection 단위 갱신을 기록한다. |
+| 73 | [Phase 29C document dropdown and immediate tab interaction](36-document-dropdown-and-close-latency.md) | **Close behavior retained; visible chrome superseded** | Optimistic durable close, hover, 새 문서 focus와 collection 단위 갱신은 유지된다. 당시 visible `Documents (N)` dropdown과 overlay tab scroller는 Phase 33에서 제거됐다. |
+| 74 | [Phase 30 lightweight smart editing](37-lightweight-smart-editing.md) | **Approved, committed and pushed** | Scintilla의 native insertion contract로 `{[(` 자동 닫기, JSON/Python Enter 들여쓰기, 단일 undo/recovery revision과 Plain Text·paste·IME 비개입 경계를 기록한다. 최종 독립 re-review는 0 Critical / 0 Important / 0 Minor로 승인했고 commit `3c718ef`을 audit 후 원격 브랜치에 반영했다. |
+| 75 | [Phase 33 editor groups, Compare, and native tab chrome](38-editor-groups-compare-and-native-tabs.md) | **Implementation complete; code/test reviewed and remote-verified** | 두 editor group, Compare, exact-`NSMenu` command bar와 no-scroll tab chrome를 기록한다. Follow-up은 단일 행 natural width/trailing space, balanced multiline row와 positive-slack distribution, valid `tabInserted`의 단일 native insertion, receiving-group local routing, same-buffer/same-host Scintilla focus 보존을 추가한다. Serial 653/653, Debug/Release, Universal hidden smoke, exact audits와 remote SHA `ca97721`을 확인했다. |
 
 상태 정의:
 
@@ -140,6 +142,108 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - reference tree의 upstream commit을 바꾸려면 baseline version, checksum, mapping audit, 문서 및 독립 review를 함께 갱신한다.
 
 ## Agent Work Log
+
+### 2026-09-08 — Native multiline and incremental-insertion follow-up
+
+- **Scope:** 새 번호 문서를 만들지 않고 [Phase 5 multiline
+  tabs](08-multiline-tabs.md), [Phase 29C close latency](36-document-dropdown-and-close-latency.md),
+  [Phase 33 delivery record](38-editor-groups-compare-and-native-tabs.md)와
+  dashboard의 현재 계약을 함께 갱신했다.
+- **Layout:** 단일 행은 complete natural widths와 trailing space를 유지한다.
+  Wrapping 후에는 full-title minima가 허용하는 stable-order contiguous row를
+  균형 있게 나누고 각 multiline row의 positive slack을 분배한다. Title은
+  legacy maximum이나 viewport 때문에 truncate/shrink하지 않는다. 이전
+  ragged-right 해석은 superseded다.
+- **Incremental insertion:** valid `tabInserted(index:)`는 이전 stable-ID
+  sequence에 item 하나만 더한 snapshot에서 native collection insertion을
+  정확히 한 번 수행한다. Malformed delta는 full-snapshot fallback을 사용한다.
+  Split mode는 receiving group의 local index만 갱신하며 다른 strip은 불변이다.
+- **Editor stability:** 같은 buffer/same host Scintilla redisplay는 idempotent해
+  attached native view와 first-responder focus를 보존한다.
+- **Reference boundary:** Notepad++는 `WC_TABCONTROL`/`TCS_MULTILINE`를 사용하고
+  multiline mode에서 ordinary wheel scrolling을 비활성화한다. Source 자체가
+  row balancing을 증명한다고 주장하지 않으며 Duckpad는 승인된 관찰 결과를
+  clean-room Swift/AppKit으로 재현한다.
+- **Validation:** TabFlow 93/93, insertion 5/5, editor-group commands 29/29,
+  Scintilla groups 24/24, Language editor 56/56가 통과했다. Monolithic serial은
+  653 tests/12 suites를 완주했고 Debug/Release build도 통과했다. 테스트 helper의
+  AppKit event drain과 raw `NSWindow` animation lifetime 두 문제는 제품 동작을
+  바꾸지 않는 test-only 커밋으로 고정하고 `NSZombieEnabled` predecessor/victim
+  순서를 각각 36/36, 2/2로 검증했다.
+- **Package smoke:** `ca97721`에서 만든 Universal `x86_64 + arm64` bundle이
+  resource/XPC/signature 검증과 hidden Finder/Open With, security-scope
+  relaunch/save, extension, XPC-isolation, 50-tab smoke를 통과했다. Tab smoke는
+  `50 tabs, 6 rows`였고 남은 process가 없었다.
+- **Review/delivery:** `0dc85b7`, `1a45f15`, `f63d1e2`, `7012327`, `1a9f8fe`,
+  `ca97721`은 모두 exact signed receipt/audit를 통과했다. Cumulative pre-push
+  review는 0 Critical / 0 Important / 0 Minor이다. 문서 커밋 전 code/test
+  checkpoint는 local history와 remote feature 양쪽에서
+  `ca97721d8795a647c8677ab339cdfd5b49ff4182`로 검증됐다. 이 문서 후보 자체의
+  receipt/commit 및 이후 main 병합은 순환 자기주장 대신 Git metadata로 검증한다.
+- **Safety:** 루트 worktree의 사용자 소유
+  `docs/wiki/04-implementation-foundation.md` 수정과 untracked
+  `scripts/vendor_scintilla_5_6_6.sh`는 그대로 보존했다.
+
+### 2026-09-07 — Phase 33 editor groups, Compare, and native tab chrome
+
+- **Scope:** 최대 두 editor group의 독립 selection/focus와 separate routed
+  Scintilla host, tab drag reorder/right-down Split/cross-group move 및
+  Option-clone, group close normalization을 구현했다. 기존 Phase 19의 같은
+  document/공유 Undo 내부 Split은 별도 기능으로 유지하고 group mode에서
+  reversible하게 suspend한다.
+- **Compare:** 두 open document를 활성화하지 않고 exact revision의 immutable
+  snapshot으로 capture한다. Side별 32 MiB/50,000 logical-line input과 비교
+  전체의 Myers 2,000,000 steps/aligned 100,000 rows bound를 적용하고 cancellable detached
+  alignment, stale suppression, shared external-conflict renderer, read-only
+  fixed rows, semantic `+`/`-`/`~`, normalized vertical sync와 independent
+  horizontal scroll을 제공한다.
+- **Chrome:** native macOS main menu를 유지하고 exact original `NSMenu`를
+  명시적으로 bar 바로 아래에 여는 command bar를 tab 위에 추가했다.
+  Identity/tree/action/validation과 hidden/supermenu state를 그대로 보존하고
+  Aqua/Dark Aqua hover/open state를 제공한다.
+  Visible `Documents (N)` control/reserved width, row cap, internal viewport와
+  scroller를 제거했다. 56-tab/500-tab layout의 모든 row는 full height이며 wheel/activation/
+  resize/programmatic clip origin은 zero다. Full intrinsic title은 legacy
+  maximum에도 줄지 않는다. 당시 기록의 ragged-right/greedy-wrap 해석은 위
+  2026-09-08 follow-up의 balanced multiline/positive-slack 계약이 대체한다.
+- **Incremental state:** 500-tab path에서 single update 1, persistence 0,
+  hover enter/exit 1 each, active old/new 2 configuration만 수행한다. Stable
+  `TabID` current-index map이 앞 tab 삭제 뒤 retained hover/close state를
+  보존한다.
+- **Notepad++ evidence:** ignored local reference `dda973d2b`의
+  `DocTabView.cpp:72-96,196-238`과
+  `TabBar.cpp:260-310,700-805,1420-1815`를 read-only로 확인했다. Full
+  label/intrinsic-width multiline/no-scroll/selected-hover-pin-close semantics만
+  Swift/AppKit으로 옮겼고 Win32 owner-draw UI는 복제하지 않았다.
+- **Focus remediation:** packaged UI가 발견한 recursive Scintilla focus는
+  already-focused callback을 transition boundary에서 거부하는 `9ecdd588`로
+  수정했다. Deterministic synchronous callback proof와 group 21/21, 관련
+  Compare/AppKit/workspace/Scintilla suites, independent 0/0/0 review가 통과했다.
+- **Routing remediation:** cumulative review에서 발견한 native move source-editor
+  공백과 500-tab activation/reconcile full reload는 `c0a0083`으로 수정했다.
+  Cache-validated normal paths는 선형 scan/reconcile/full reload 없이 affected
+  group의 old/current item과 pane focus/접근성만 갱신하며, invalid cache는 기존
+  authoritative full reconcile로 안전하게 fallback한다.
+- **Validation:** Task 10 layout 7/7, command bar 5/5, editor-group commands
+  27/27, TabFlow/AppKit 85/85, layout model 15/15, workspace 16/16, Compare
+  21/21, Scintilla group 23/23; fresh full serial suite 640 discovered tests,
+  Debug/Release builds가 통과했다. 현재 source로 native `.app`을 다시
+  package한 뒤 bundle/resource/XPC/signature verification과 Finder/Open With,
+  two-launch security-scoped bookmark recovery/save, extension 및 XPC-isolation
+  smoke도 통과했다. 최초 smoke가 멈춘 원인은 9월 3일 stale bundle에 현재
+  security-scope smoke entry point가 없었기 때문이며, source/runtime 결함이
+  아니었다. Default parallel whole suite의 AppKit `signal 11`은 known
+  baseline이며 pass가 아니다.
+- **Delivery state:** 사용자가 2026-09-07 최종 gate로 잠금 화면의 수동 UI
+  조작 대신 non-interactive packaged smoke를 명시적으로 선택했다. 따라서
+  pixel-by-pixel visual inspection은 주장하지 않으며, drag Split/Move/Copy와
+  Compare 동작은 위 focused AppKit/command/drag/Compare 자동화와 현재-source
+  packaged smoke의 조합으로 닫는다. Implementation commit `50905ca`부터
+  `c0a0083`까지와 기존 documentation `c517cc8`은 independent 0/0/0 review,
+  local commit audit 및 `origin/feature/editor-groups-compare` SHA equality를
+  통과했다. Fresh package와 smoke는 그 remote-verified source 이후에
+  실행됐다. 이 문단은 현재 3-doc closeout 자체의 review/audit/push 완료를
+  미리 주장하지 않는다.
 
 ### 2026-09-04 — Phase 28 independent content review
 
