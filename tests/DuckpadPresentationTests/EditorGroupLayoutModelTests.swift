@@ -112,15 +112,15 @@ private func workspace(
     #expect(model.snapshot.orientation == nil)
 }
 
-@Test @MainActor func directMoveRejectsAFinalUniqueSourceReference() {
+@Test @MainActor func directMoveOfLastTabCollapsesTheEmptySourcePane() {
     let tabs = [TabID(), TabID()]
     let model = EditorGroupLayoutModel()
     model.reconcile(workspace: workspace(tabs))
     #expect(model.split(tabID: tabs[1], source: .primary, orientation: .sideBySide, operation: .move))
-    let snapshot = model.snapshot
-
-    #expect(!model.move(tabs[1], from: .secondary, to: .primary))
-    #expect(model.snapshot == snapshot)
+    #expect(model.move(tabs[1], from: .secondary, to: .primary))
+    #expect(model.snapshot.primaryTabIDs == tabs)
+    #expect(model.snapshot.visibleGroups == [.primary])
+    #expect(model.snapshot.primarySelectedTabID == tabs[1])
 }
 
 @Test @MainActor func optionCopyClonesATabIntoTheSecondaryGroup() {

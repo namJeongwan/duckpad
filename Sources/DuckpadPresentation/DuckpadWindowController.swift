@@ -929,6 +929,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 operation: .copy,
                 destination: destination
             )
+        case .transfer(let tabID, let source, let destination, let index, let operation):
+            performGroupTransfer(tabID: tabID, source: source, orientation: editorGroupLayout.snapshot.orientation,
+                                 operation: operation, destination: destination, insertionIndex: index)
         case .focus(let group):
             performEditorGroupFocus(group)
         case .close(let tabID, let group):
@@ -3484,7 +3487,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         source: EditorGroupID,
         orientation: EditorGroupSplitOrientation?,
         operation: EditorGroupDropOperation,
-        destination: EditorGroupID? = nil
+        destination: EditorGroupID? = nil,
+        insertionIndex: Int? = nil
     ) {
         var destination = destination ?? otherEditorGroup(than: source)
         let workspaceSnapshot = workspace.snapshot()
@@ -3499,6 +3503,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               let buffer = cachedWorkspaceTab(for: tabID, workspace: workspaceSnapshot)?.buffer
                 ?? linearWorkspaceTab(for: tabID, workspace: workspaceSnapshot)?.buffer else { return }
         let previousLayout = editorGroupLayout.snapshot
+        let destinationInsertionIndex = insertionIndex.map { index in
+            if let existing = previousLayout.tabIDs(in: destination).firstIndex(of: tabID), existing < index {
+                return index - 1
+            }
+            return index
+        }
         let changed: Bool
         if editorGroupLayout.snapshot.orientation == nil {
             changed = editorGroupLayout.split(
@@ -3541,6 +3551,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         renderLayoutAndActivate(tabID: tabID, group: destination)
         recoveryUseCase?.editorViewStateDidChange()
+        if let insertionIndex = destinationInsertionIndex {
+            let count = editorGroupLayout.snapshot.tabIDs(in: destination).count
+            performGroupReorder(tabID: tabID, group: destination, groupIndex: min(insertionIndex, max(0, count - 1)))
+        }
     }
 
     private func canPerformActiveTabGroupTransfer(
@@ -3579,7 +3593,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case .copy:
             return !destinationContainsTab
         case .move:
-            return layout.tabIDs(in: source).count > 1 || destinationContainsTab
+            return layout.visibleGroups.contains(destination) || layout.tabIDs(in: source).count > 1
         }
     }
 

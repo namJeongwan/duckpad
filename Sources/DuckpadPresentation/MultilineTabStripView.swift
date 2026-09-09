@@ -270,6 +270,10 @@ private final class DuckpadTabItem: NSCollectionViewItem {
 
     private func updateVisualState() {
         guard isViewLoaded else { return }
+        view.effectiveAppearance.performAsCurrentDrawingAppearance { updateResolvedVisualState() }
+    }
+
+    private func updateResolvedVisualState() {
         let active = configuredTab?.isActive == true || isSelected
         if let tab = configuredTab {
             let icon = MaterialFileIconTheme.shared.icon(
@@ -1204,7 +1208,9 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     private func applyAppearance() {
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        bottomSeparator.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.72).cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+            bottomSeparator.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.72).cgColor
+        }
     }
 }

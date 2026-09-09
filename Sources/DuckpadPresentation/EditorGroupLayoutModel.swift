@@ -192,7 +192,7 @@ public final class EditorGroupLayoutModel {
     private func canMove(_ tabID: TabID, from source: EditorGroupID, to destination: EditorGroupID) -> Bool {
         source != destination
             && tabIDs(in: source).contains(tabID)
-            && (tabIDs(in: source).count > 1 || tabIDs(in: destination).contains(tabID))
+            && (tree.groups.contains(destination) || tabIDs(in: source).count > 1)
     }
 
     private func tabIDs(in group: EditorGroupID) -> [TabID] {

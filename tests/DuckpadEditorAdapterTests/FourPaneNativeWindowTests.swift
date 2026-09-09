@@ -8,6 +8,35 @@ import Testing
 
 @Suite(.serialized)
 struct FourPaneNativeWindowTests {
+    @Test @MainActor func draggingTheLastTabBackUsesTheDropIndexAndKeepsItsNativeDocument() async throws {
+        _ = NSApplication.shared
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        let adapter = ScintillaEditorAdapter()
+        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: adapter, editorView: adapter.view,
+            secondaryEditorView: adapter.secondaryGroupView, additionalEditorViews: adapter.additionalEditorGroupViews,
+            editorGroupRouter: adapter, automaticallyStarts: false)
+        defer { controller.close(); adapter.invalidate() }
+        controller.start()
+        await controller.waitForStartup()
+        for value in ["first", "second", "third"] {
+            if value != "first" { _ = await workspace.addScratch() }
+            adapter.activeScintillaView?.insertCommittedText(value)
+        }
+        let tabs = workspace.snapshot().tabs
+        controller.editorGroupWorkspace.onAction?(.splitAdjacent(tabs[2].id, .primary, .primary, .right, .move))
+        controller.editorGroupWorkspace.onAction?(.transfer(tabs[2].id, .secondary, .primary, 0, .move))
+        for _ in 0..<100 { await Task.yield() }
+        #expect(controller.editorGroupLayoutSnapshot.visibleGroups == [.primary])
+        #expect(controller.editorGroupLayoutSnapshot.primaryTabIDs == [tabs[2].id, tabs[0].id, tabs[1].id])
+        #expect(adapter.activeScintillaView?.contentUTF8 == Data("third".utf8))
+        controller.editorGroupWorkspace.onAction?(.splitAdjacent(tabs[2].id, .primary, .primary, .right, .copy))
+        controller.editorGroupWorkspace.onAction?(.transfer(tabs[2].id, .secondary, .primary, 2, .move))
+        for _ in 0..<100 { await Task.yield() }
+        #expect(controller.editorGroupLayoutSnapshot.primaryTabIDs == [tabs[0].id, tabs[2].id, tabs[1].id])
+        #expect(controller.editorGroupLayoutSnapshot.visibleGroups == [.primary])
+        #expect(adapter.activeScintillaView?.contentUTF8 == Data("third".utf8))
+    }
+
     @Test @MainActor func movingTheLastPrimaryCloneActivatesThePromotedVisiblePane() async throws {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let adapter = ScintillaEditorAdapter()
@@ -78,6 +107,12 @@ struct FourPaneNativeWindowTests {
             window.contentView?.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(50))
             window.contentView?.display()
+            for group in layout.visibleGroups {
+                let strip = try #require(controller.editorGroupWorkspace.pane(for: group)?.tabStrip)
+                let background = try #require(strip.layer?.backgroundColor)
+                let color = try #require(NSColor(cgColor: background)?.usingColorSpace(.deviceRGB))
+                #expect(appearance == .aqua ? color.redComponent > 0.8 : color.redComponent < 0.3)
+            }
             if let directory = ProcessInfo.processInfo.environment["DUCKPAD_CHROME_TEST_IMAGES"] {
                 let root = try #require(window.contentView)
                 let bitmap = try #require(root.bitmapImageRepForCachingDisplay(in: root.bounds))

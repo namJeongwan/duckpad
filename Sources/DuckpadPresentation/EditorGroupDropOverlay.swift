@@ -56,11 +56,13 @@ public final class EditorGroupDropOverlay: NSView {
             (.up, (bounds.maxY - point.y) / bounds.height),
             (.down, (point.y - bounds.minY) / bounds.height),
         ]
-        guard let nearest = distances.min(by: { $0.1 < $1.1 }), nearest.1 < 0.30 else { return nil }
+        guard let nearest = distances.min(by: { $0.1 < $1.1 }), nearest.1 < 0.40 else { return nil }
         return nearest.0
     }
 
     public func present(highlighting zone: Zone?) {
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.borderWidth = 0
         isHidden = false
         highlightedZone = zone
         for (candidate, view) in zoneViews {
@@ -69,7 +71,20 @@ public final class EditorGroupDropOverlay: NSView {
         }
     }
 
+    public func presentTransfer() {
+        isHidden = false
+        highlightedZone = nil
+        for view in zoneViews.values { view.isHidden = true }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor
+            layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.7).cgColor
+        }
+        layer?.borderWidth = 1
+    }
+
     public func dismiss() {
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.borderWidth = 0
         highlightedZone = nil
         for view in zoneViews.values { view.setHighlighted(false) }
         isHidden = true

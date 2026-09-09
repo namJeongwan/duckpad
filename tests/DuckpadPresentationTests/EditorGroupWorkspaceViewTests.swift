@@ -71,7 +71,8 @@ struct EditorGroupWorkspaceViewTests {
         #expect(overlay.zone(at: NSPoint(x: 590, y: 10)) == .right)
         #expect(overlay.zone(at: NSPoint(x: 10, y: 200)) == .left)
         #expect(overlay.zone(at: NSPoint(x: 300, y: 390)) == .up)
-        #expect(overlay.zone(at: NSPoint(x: 300, y: 250)) == nil)
+        #expect(overlay.zone(at: NSPoint(x: 300, y: 200)) == nil)
+        #expect(overlay.zone(at: NSPoint(x: 210, y: 200)) == .left)
     }
 
     @Test @MainActor func dropZoneDividerAxisComesFromZoneIdentityNotAspectRatio() throws {
@@ -168,8 +169,8 @@ struct EditorGroupWorkspaceViewTests {
 
         #expect(actions == [
             .reorder(fixture.tabs[0].id, .primary, 1),
-            .move(fixture.tabs[1].id, .primary, .secondary),
-            .clone(fixture.tabs[0].id, .primary, .secondary),
+            .transfer(fixture.tabs[1].id, .primary, .secondary, 1, .move),
+            .transfer(fixture.tabs[0].id, .primary, .secondary, 0, .copy),
         ])
     }
 
@@ -302,6 +303,30 @@ struct EditorGroupWorkspaceViewTests {
         #expect(!fixture.view.dropOverlay.isPresenting)
     }
 
+    @Test @MainActor func nativeCenterDropMovesTheLastTabIntoTheTargetPane() {
+        let fixture = makeFixture()
+        let window = hostInWindow(fixture.view)
+        defer { fixture.view.tearDown(); window.contentView = nil; window.close() }
+        fixture.view.apply(workspace: workspace(tabs: fixture.tabs), layout: layout(
+            primary: [fixture.tabs[0].id, fixture.tabs[1].id], secondary: [fixture.tabs[2].id],
+            primarySelection: fixture.tabs[0].id, secondarySelection: fixture.tabs[2].id,
+            orientation: .sideBySide))
+        let host = fixture.view.primaryPane.editorHostView
+        let sender = DraggingInfoStub(window: window,
+            pasteboard: pasteboard(.init(tabID: fixture.tabs[2].id, sourceGroup: .secondary)),
+            location: host.convert(NSPoint(x: host.bounds.midX, y: host.bounds.midY), to: nil),
+            sourceOperationMask: .move)
+        var action: EditorGroupWorkspaceView.Action?
+        fixture.view.onAction = { action = $0 }
+        #expect(fixture.view.draggingEntered(sender) == .move)
+        #expect(fixture.view.dropOverlay.isPresenting)
+        #expect(fixture.view.dropOverlay.highlightedZone == nil)
+        #expect(fixture.view.prepareForDragOperation(sender))
+        #expect(fixture.view.performDragOperation(sender))
+        #expect(action == .transfer(fixture.tabs[2].id, .secondary, .primary, 2, .move))
+        #expect(!fixture.view.dropOverlay.isPresenting)
+    }
+
     @Test @MainActor func nativeEdgeDragCanCreateAThirdGroup() {
         let fixture = makeFixture()
         let window = hostInWindow(fixture.view)
@@ -376,7 +401,7 @@ struct EditorGroupWorkspaceViewTests {
         #expect(fixture.view.primaryPane.tabStrip.hostedCollectionView.registeredDraggedTypes.isEmpty)
     }
 
-    @Test @MainActor func crossGroupLastSourceMoveRequiresAnExistingDestinationClone() throws {
+    @Test @MainActor func crossGroupLastSourceMoveAcceptsUniqueAndClonedDestinations() throws {
         let fixture = makeFixture()
         let uniqueDestination = layout(
             primary: [fixture.tabs[0].id],
@@ -388,7 +413,7 @@ struct EditorGroupWorkspaceViewTests {
         fixture.view.apply(workspace: workspace(tabs: fixture.tabs), layout: uniqueDestination)
         let payload = EditorGroupDragPayload(tabID: fixture.tabs[0].id, sourceGroup: .primary)
         let board = pasteboard(payload)
-        #expect(!(try #require(fixture.view.secondaryPane)).tabStrip.acceptDrop(
+        #expect((try #require(fixture.view.secondaryPane)).tabStrip.acceptDrop(
             from: board,
             insertionIndex: 1,
             optionPressed: false
@@ -409,7 +434,7 @@ struct EditorGroupWorkspaceViewTests {
             insertionIndex: 1,
             optionPressed: false
         ))
-        #expect(action == .move(fixture.tabs[0].id, .primary, .secondary))
+        #expect(action == .transfer(fixture.tabs[0].id, .primary, .secondary, 1, .move))
     }
 
     @Test @MainActor func secondaryCollapseAndReopenReusesHostWithFreshCallbacksAndDragRouting() throws {
@@ -450,7 +475,7 @@ struct EditorGroupWorkspaceViewTests {
         ))
         #expect(actions == [
             .select(fixture.tabs[2].id, .secondary),
-            .clone(fixture.tabs[1].id, .primary, .secondary),
+            .transfer(fixture.tabs[1].id, .primary, .secondary, 1, .copy),
         ])
     }
 }

@@ -11,6 +11,7 @@ public final class EditorGroupWorkspaceView: NSView {
         case splitAdjacent(TabID, EditorGroupID, EditorGroupID, EditorGroupDropOverlay.Zone, EditorGroupDropOperation)
         case move(TabID, EditorGroupID, EditorGroupID)
         case clone(TabID, EditorGroupID, EditorGroupID)
+        case transfer(TabID, EditorGroupID, EditorGroupID, Int, EditorGroupDropOperation)
         case focus(EditorGroupID)
         case close(TabID, EditorGroupID)
         case context(TabID, EditorGroupID, TabContextAction)
@@ -240,11 +241,6 @@ public final class EditorGroupWorkspaceView: NSView {
         let operation = EditorGroupDragPayload.dropOperation(optionPressed: optionPressed)
         let destinationContainsTab = layoutSnapshot.tabIDs(in: destinationGroup).contains(payload.tabID)
         if operation == .copy, destinationContainsTab { return nil }
-        if operation == .move,
-           layoutSnapshot.tabIDs(in: payload.sourceGroup).count <= 1,
-           !destinationContainsTab {
-            return nil
-        }
         return operation
     }
 
@@ -271,10 +267,8 @@ public final class EditorGroupWorkspaceView: NSView {
                       itemCount: sourceTabs.count
                   ) else { return false }
             onAction?(.reorder(payload.tabID, destinationGroup, destination))
-        } else if operation == .copy {
-            onAction?(.clone(payload.tabID, payload.sourceGroup, destinationGroup))
         } else {
-            onAction?(.move(payload.tabID, payload.sourceGroup, destinationGroup))
+            onAction?(.transfer(payload.tabID, payload.sourceGroup, destinationGroup, insertionIndex, operation))
         }
         return true
     }
@@ -293,21 +287,34 @@ public final class EditorGroupWorkspaceView: NSView {
 
     public override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         guard let payload = nativePayload(from: sender) else { return false }
+        let location = dropLocation(from: sender)
+        if isTransferDrop(payload, at: location) {
+            return validateTabDrop(payload: payload, destinationGroup: dropTarget,
+                                   insertionIndex: layoutSnapshot?.tabIDs(in: dropTarget).count ?? 0,
+                                   optionPressed: sourceRequestsCopy(sender)) != nil
+        }
         return validateEdgeDrop(
             payload: payload,
-            location: dropLocation(from: sender),
+            location: location,
             optionPressed: sourceRequestsCopy(sender)
         ) != nil
     }
 
     public override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        defer { cancelDrop() }
         guard let payload = nativePayload(from: sender) else {
             cancelDrop()
             return false
         }
+        let location = dropLocation(from: sender)
+        if isTransferDrop(payload, at: location) {
+            return performTabDrop(payload: payload, destinationGroup: dropTarget,
+                                  insertionIndex: layoutSnapshot?.tabIDs(in: dropTarget).count ?? 0,
+                                  optionPressed: sourceRequestsCopy(sender))
+        }
         return performEdgeDrop(
             payload: payload,
-            location: dropLocation(from: sender),
+            location: location,
             optionPressed: sourceRequestsCopy(sender)
         )
     }
@@ -427,12 +434,28 @@ public final class EditorGroupWorkspaceView: NSView {
             return []
         }
         let optionPressed = sourceRequestsCopy(sender)
+        let location = dropLocation(from: sender)
+        if isTransferDrop(payload, at: location) {
+            guard let operation = validateTabDrop(payload: payload, destinationGroup: dropTarget,
+                                                 insertionIndex: layoutSnapshot?.tabIDs(in: dropTarget).count ?? 0,
+                                                 optionPressed: optionPressed) else {
+                cancelDrop()
+                return []
+            }
+            dropOverlay.presentTransfer()
+            return operation == .copy ? .copy : .move
+        }
         guard let operation = updateEdgeDrop(
             payload: payload,
-            location: dropLocation(from: sender),
+            location: location,
             optionPressed: optionPressed
         ) else { return [] }
         return operation == .copy ? .copy : .move
+    }
+
+    private func isTransferDrop(_ payload: EditorGroupDragPayload, at point: NSPoint) -> Bool {
+        payload.sourceGroup != dropTarget && dropOverlay.bounds.contains(point)
+            && (dropOverlay.zone(at: point) == nil || (layoutSnapshot?.visibleGroups.count ?? 0) >= 4)
     }
 
     private func nativePayload(from sender: any NSDraggingInfo) -> EditorGroupDragPayload? {
