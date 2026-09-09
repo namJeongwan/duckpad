@@ -519,21 +519,15 @@ Parity release manifest는 검증 시점의 exact Git `HEAD`를 `source_commit_o
 - **Review:** unresolved Blocker/Major가 0건이고 독립 reviewer의 canonical local receipt가 exact candidate identity를 승인했다.
 - **Commit:** verifier가 승인 identity와 일치함을 확인한 tree/message만 전용 wrapper로 local commit하고 post-commit audit를 통과한다.
 
-## 8. README-free wiki index 전략
+## 8. 제품 README와 wiki index
 
-현재 milestone에서는 README를 작성하지 않는다. root README와 과거 wiki README 이름을 모두 생성하지 않으며, 문서 진입점은 `docs/wiki/00-wiki-index.md` 하나다.
+0.1.0 릴리스 준비 요청(2026-09-09)에 따라 root `README.md`를 공개한다.
+제품 소개, Notepad++에서 받은 영감, 다운로드와 직접 실행 방법을 간결하게 담는다.
+긴 설계 기록이나 일별 진행 로그는 README에 넣지 않는다.
 
-### Root README 보류
-
-Root README 작성은 명시적인 후속 결정 전까지 금지한다. 다음 항목은 향후 승인 시 검토할 내용일 뿐 현재 파일을 만들 근거가 아니다.
-
-- 한 문장의 제품 약속과 macOS 지원 범위
-- 현재 milestone 및 실제로 동작하는 기능
-- build/test 시작 명령
-- 라이선스와 third-party attribution 링크
-- 상세 설계, parity, roadmap을 wiki index로 연결
-
-README에 긴 설계 기록이나 일별 진행 로그를 넣지 않는다.
+README 공개 허용 범위는 정확히 root `README.md` 하나다. 참고용 checkout,
+wiki README alias와 gitlink 제외 규칙, 독립 리뷰와 exact-candidate 검증은 유지한다.
+상세 문서 진입점은 계속 `docs/wiki/00-wiki-index.md`다.
 
 ### Wiki Home / index
 

@@ -15,6 +15,7 @@ FINDER_STDOUT="$TEMP_ROOT/finder-stdout.log"
 FINDER_STDERR="$TEMP_ROOT/finder-stderr.log"
 
 open -n -W -g -a "$APP" \
+    --env "DUCKPAD_SECURITY_SCOPE_SMOKE_NAMESPACE=$SCOPE_NAMESPACE-finder" \
     --env "DUCKPAD_FINDER_SMOKE_EXPECT=$DOCUMENT" \
     --stdout "$FINDER_STDOUT" \
     --stderr "$FINDER_STDERR" \
@@ -37,10 +38,12 @@ grep -q 'Duckpad security-scope smoke restored bookmark and saved after relaunch
     "$TEMP_ROOT/scope-verify-stdout.log"
 grep -qx 'bookmark-relaunch' "$SCOPE_DOCUMENT"
 
+DUCKPAD_SECURITY_SCOPE_SMOKE_NAMESPACE="$SCOPE_NAMESPACE-xpc" \
 DUCKPAD_EXTENSION_SMOKE=1 "$APP/Contents/MacOS/Duckpad" \
     > "$TEMP_ROOT/xpc-stdout.log" 2> "$TEMP_ROOT/xpc-stderr.log"
 grep -q 'Duckpad extension smoke ready' "$TEMP_ROOT/xpc-stdout.log"
 
+DUCKPAD_SECURITY_SCOPE_SMOKE_NAMESPACE="$SCOPE_NAMESPACE-isolation" \
 DUCKPAD_EXTENSION_ISOLATION_SMOKE=1 "$APP/Contents/MacOS/Duckpad" \
     > "$TEMP_ROOT/xpc-isolation-stdout.log" 2> "$TEMP_ROOT/xpc-isolation-stderr.log"
 grep -q 'Duckpad XPC isolation smoke ready' "$TEMP_ROOT/xpc-isolation-stdout.log"

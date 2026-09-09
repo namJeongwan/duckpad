@@ -295,7 +295,16 @@ class ReviewGateTests(unittest.TestCase):
         self.assertNotEqual(verified.returncode, 0)
         self.assertIn("forbidden Notepad++ reference path", verified.stderr)
 
-    def test_every_readme_name_is_rejected_during_prepare(self) -> None:
+    def test_authorized_root_readme_can_be_reviewed_committed_and_audited(self) -> None:
+        path = self.repo / "README.md"
+        path.write_text("# Duckpad\n\nA macOS text editor.\n", encoding="utf-8")
+        subprocess.run(["git", "add", str(path)], cwd=self.repo, check=True)
+        candidate, _ = self.prepare_and_sign()
+        commit = self.run_script("local_commit.py", "--candidate-id", candidate).stdout.strip()
+        audited = self.run_script("verify_candidate.py", "audit", "--commit", commit)
+        self.assertIn("PASS", audited.stdout)
+
+    def test_nested_readme_names_are_rejected_during_prepare(self) -> None:
         for name in ("README", "README.md", "readme.txt", "ReAdMe-Candidate.md"):
             path = self.repo / "nested" / name
             path.parent.mkdir(exist_ok=True)
