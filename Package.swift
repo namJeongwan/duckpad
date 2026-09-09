@@ -174,7 +174,8 @@ let package = Package(
         ),
         .target(
             name: "DuckpadPresentation",
-            dependencies: ["DuckpadApplication", "DuckpadDomain"]
+            dependencies: ["DuckpadApplication", "DuckpadDomain"],
+            resources: [.copy("Resources/MaterialIconTheme")]
         ),
         .target(
             name: "DuckpadEditorAdapter",
