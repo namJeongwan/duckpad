@@ -76,7 +76,7 @@ install -m 0644 "$REPOSITORY_ROOT/Packaging/Info.plist" "$APP/Contents/Info.plis
 install -m 0644 "$REPOSITORY_ROOT/Packaging/PluginRuntime-Info.plist" "$XPC/Contents/Info.plist"
 install -m 0644 "$REPOSITORY_ROOT/Sources/DuckpadApp/Resources/Duckpad.icns" "$APP/Contents/Resources/Duckpad.icns"
 
-for RESOURCE_BUNDLE in Duckpad_DuckpadApp.bundle Duckpad_DuckpadEditorAdapter.bundle Duckpad_DuckpadInfrastructure.bundle; do
+for RESOURCE_BUNDLE in Duckpad_DuckpadApp.bundle Duckpad_DuckpadEditorAdapter.bundle Duckpad_DuckpadInfrastructure.bundle Duckpad_DuckpadPresentation.bundle; do
     if [[ ! -d "$BIN_PATH/$RESOURCE_BUNDLE" ]]; then
         echo "Missing SwiftPM resource bundle: $RESOURCE_BUNDLE" >&2
         exit 66

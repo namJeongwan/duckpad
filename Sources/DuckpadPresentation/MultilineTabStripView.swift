@@ -73,9 +73,14 @@ private final class AccessibleTabView: NSView {
 @MainActor
 private final class DuckpadTabItem: NSCollectionViewItem {
     static let identifier = NSUserInterfaceItemIdentifier("DuckpadTabItem")
+    private let fileIconImage = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
-    private let dirtyLabel = NSTextField(labelWithString: "●")
-    private let pinImage = NSImageView()
+    private let dirtyIndicator = NSView()
+    private let pinButton = NSButton(
+        image: NSImage(systemSymbolName: "pin", accessibilityDescription: "Pin") ?? NSImage(),
+        target: nil,
+        action: nil
+    )
     private let closeButton = NSButton(
         image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close") ?? NSImage(),
         target: nil,
@@ -101,7 +106,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         didSet {
             guard isSelected != oldValue else { return }
             updateVisualState()
-            updateCloseVisibility()
+            updateActionVisibility()
         }
     }
 
@@ -131,13 +136,19 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         titleLabel.cell?.usesSingleLineMode = true
         titleLabel.font = .systemFont(ofSize: 12, weight: .regular)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        dirtyLabel.font = .systemFont(ofSize: 8, weight: .semibold)
-        dirtyLabel.textColor = .controlAccentColor
-        dirtyLabel.translatesAutoresizingMaskIntoConstraints = false
-        pinImage.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Pinned")
-        pinImage.contentTintColor = .tertiaryLabelColor
-        pinImage.imageScaling = .scaleProportionallyDown
-        pinImage.translatesAutoresizingMaskIntoConstraints = false
+        fileIconImage.imageScaling = .scaleProportionallyDown
+        fileIconImage.setAccessibilityElement(false)
+        fileIconImage.translatesAutoresizingMaskIntoConstraints = false
+        dirtyIndicator.identifier = NSUserInterfaceItemIdentifier("duckpad.tab.dirty-indicator")
+        dirtyIndicator.setAccessibilityElement(false)
+        dirtyIndicator.wantsLayer = true
+        dirtyIndicator.layer?.cornerRadius = 2.5
+        dirtyIndicator.translatesAutoresizingMaskIntoConstraints = false
+        pinButton.isBordered = false
+        pinButton.imageScaling = .scaleProportionallyDown
+        pinButton.target = self
+        pinButton.action = #selector(pinPressed)
+        pinButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.isBordered = false
         closeButton.imageScaling = .scaleProportionallyDown
         closeButton.contentTintColor = .secondaryLabelColor
@@ -146,25 +157,31 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         closeButton.target = self
         closeButton.action = #selector(closePressed)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(dirtyLabel)
-        view.addSubview(pinImage)
+        view.addSubview(fileIconImage)
+        view.addSubview(dirtyIndicator)
         view.addSubview(titleLabel)
+        view.addSubview(pinButton)
         view.addSubview(closeButton)
         NSLayoutConstraint.activate([
-            pinImage.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 3),
-            pinImage.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            pinImage.widthAnchor.constraint(equalToConstant: 10),
-            pinImage.heightAnchor.constraint(equalToConstant: 10),
-            dirtyLabel.leadingAnchor.constraint(equalTo: pinImage.trailingAnchor, constant: 1),
-            dirtyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            dirtyLabel.widthAnchor.constraint(equalToConstant: 8),
-            titleLabel.leadingAnchor.constraint(equalTo: dirtyLabel.trailingAnchor, constant: 1.5),
+            fileIconImage.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 3),
+            fileIconImage.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            fileIconImage.widthAnchor.constraint(equalToConstant: 13),
+            fileIconImage.heightAnchor.constraint(equalToConstant: 13),
+            dirtyIndicator.leadingAnchor.constraint(equalTo: fileIconImage.trailingAnchor, constant: 1),
+            dirtyIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 1.5),
+            dirtyIndicator.widthAnchor.constraint(equalToConstant: 5),
+            dirtyIndicator.heightAnchor.constraint(equalToConstant: 5),
+            titleLabel.leadingAnchor.constraint(equalTo: dirtyIndicator.trailingAnchor, constant: 1),
             titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            closeButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 2),
-            closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -2),
+            pinButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 1),
+            pinButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            pinButton.widthAnchor.constraint(equalToConstant: 16),
+            pinButton.heightAnchor.constraint(equalToConstant: 16),
+            closeButton.leadingAnchor.constraint(equalTo: pinButton.trailingAnchor),
+            closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -1),
             closeButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 20),
-            closeButton.heightAnchor.constraint(equalToConstant: 20),
+            closeButton.widthAnchor.constraint(equalToConstant: 16),
+            closeButton.heightAnchor.constraint(equalToConstant: 16),
         ])
     }
 
@@ -187,7 +204,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
                 || self.ownsTrailingSeparator != ownsTrailingSeparator
                 || self.ownsBottomSeparator != ownsBottomSeparator else {
             updateVisualState()
-            updateCloseVisibility()
+            updateActionVisibility()
             return
         }
         configuredTab = tab
@@ -196,12 +213,11 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         self.ownsTrailingSeparator = ownsTrailingSeparator
         self.ownsBottomSeparator = ownsBottomSeparator
         titleLabel.stringValue = tab.title
-        dirtyLabel.isHidden = !tab.isDirty
-        pinImage.isHidden = !tab.isPinned
+        dirtyIndicator.isHidden = !tab.isDirty
         titleLabel.toolTip = tab.fullPath ?? tab.title
         view.toolTip = tab.fullPath ?? tab.title
         updateVisualState()
-        updateCloseVisibility()
+        updateActionVisibility()
 
         let stableID = tab.id.rawValue.uuidString.lowercased()
         let state = [
@@ -220,6 +236,10 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         closeButton.setAccessibilityIdentifier("duckpad.tab.close.\(stableID)")
         closeButton.setAccessibilityLabel("Close \(tab.title)")
         closeButton.setAccessibilityValue(tab.isDirty ? "modified tab" : "unmodified tab")
+        pinButton.setAccessibilityIdentifier("duckpad.tab.pin.\(stableID)")
+        pinButton.setAccessibilityLabel(tab.isPinned ? "Unpin \(tab.title)" : "Pin \(tab.title)")
+        pinButton.setAccessibilityValue(tab.isPinned ? "pinned" : "unpinned")
+        pinButton.toolTip = tab.isPinned ? "Unpin Tab" : "Pin Tab"
         view.setAccessibilityCustomActions([
             NSAccessibilityCustomAction(name: "Close \(tab.title)") { [weak self] in
                 self?.onClose?()
@@ -236,14 +256,31 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         onClose?()
     }
 
-    private func updateCloseVisibility() {
+    @objc private func pinPressed() {
+        guard let tab = configuredTab else { return }
+        onContextAction?(.setPinned(!tab.isPinned))
+    }
+
+    private func updateActionVisibility() {
         closeButton.isHidden = !(configuredTab?.isActive == true || isSelected || isHovered)
+        pinButton.isHidden = !(configuredTab?.isPinned == true || isHovered)
     }
 
     private func updateVisualState() {
         guard isViewLoaded else { return }
         let active = configuredTab?.isActive == true || isSelected
+        if let tab = configuredTab {
+            let icon = MaterialFileIconTheme.shared.icon(
+                for: tab.fullPath ?? tab.title,
+                appearance: view.effectiveAppearance
+            )
+            fileIconImage.image = icon.image
+            fileIconImage.identifier = NSUserInterfaceItemIdentifier(
+                "duckpad.tab.file-icon.\(icon.name)"
+            )
+        }
         activeIndicator.backgroundColor = NSColor.controlAccentColor.cgColor
+        dirtyIndicator.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
         titleLabel.textColor = active || isHovered ? .labelColor : .secondaryLabelColor
         let separatorColor: NSColor
         if active {
@@ -265,6 +302,12 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         trailingSeparator.isHidden = !ownsTrailingSeparator
         bottomSeparator.isHidden = !ownsBottomSeparator
         updateSeparatorFrames()
+        let isPinned = configuredTab?.isPinned == true
+        pinButton.image = NSImage(
+            systemSymbolName: isPinned ? "pin.fill" : "pin",
+            accessibilityDescription: isPinned ? "Unpin" : "Pin"
+        )
+        pinButton.contentTintColor = isPinned ? .controlAccentColor : .secondaryLabelColor
         closeButton.contentTintColor = isHovered ? .controlAccentColor : .secondaryLabelColor
         closeButton.layer?.backgroundColor = isHovered
             ? NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
@@ -301,7 +344,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         validateContextAction = nil
         onHoverChanged = nil
         updateVisualState()
-        updateCloseVisibility()
+        updateActionVisibility()
     }
 
     private func makeContextMenu() -> NSMenu? {
@@ -1146,9 +1189,8 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         let width = (tab.title as NSString).size(
             withAttributes: [.font: NSFont.systemFont(ofSize: 12)]
         ).width
-        // Keep fixed signal/close hit targets while halving only the surrounding
-        // whitespace. The reserved width prevents hover-induced title movement.
-        return ceil(width) + 51
+        // Reserve icon, status, pin, and close slots so hover never moves the title.
+        return ceil(width) + 61
     }
 
     public override func viewDidChangeEffectiveAppearance() {

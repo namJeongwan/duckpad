@@ -602,8 +602,14 @@ struct AppKitHostedTests {
     }
     let inactive = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 0, section: 0)))
     let active = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 1, section: 0)))
-    let inactiveClose = try #require(descendantButtons(of: inactive.view).first)
-    let activeClose = try #require(descendantButtons(of: active.view).first)
+    let inactiveID = tabs[0].id.rawValue.uuidString.lowercased()
+    let activeID = tabs[1].id.rawValue.uuidString.lowercased()
+    let inactiveClose = try #require(descendantButtons(of: inactive.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(inactiveID)"
+    })
+    let activeClose = try #require(descendantButtons(of: active.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(activeID)"
+    })
 
     #expect(inactive.view.layer?.cornerRadius == 0)
     #expect(active.view.layer?.cornerRadius == 0)
@@ -2421,6 +2427,173 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     #expect(closed == tabs[0].id)
 }
 
+@Test @MainActor func tabFileIconsUseMaterialExtensionMappingAndFallback() throws {
+    let expectedIcons = [
+        (title: "main.SWIFT", icon: "swift"),
+        (title: "api.schema.json", icon: "json_schema"),
+        (title: "notes.unknown", icon: "file"),
+        (title: "new 15", icon: "file"),
+    ]
+    let tabs = expectedIcons.enumerated().map { index, expected in
+        TabSnapshot(
+            id: TabID(),
+            title: expected.title,
+            isActive: index == 0,
+            isDirty: false,
+            isPinned: false,
+            buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        )
+    }
+    let (window, _, strip) = hostStrip(width: 720, height: 200, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+
+    for (index, expected) in expectedIcons.enumerated() {
+        let item = try #require(strip.hostedCollectionView.item(
+            at: IndexPath(item: index, section: 0)
+        ))
+        let iconView = try #require(item.view.subviews.compactMap { $0 as? NSImageView }.first {
+            $0.identifier?.rawValue.hasPrefix("duckpad.tab.file-icon.") == true
+        })
+        #expect(iconView.identifier?.rawValue == "duckpad.tab.file-icon.\(expected.icon)")
+        #expect(iconView.image != nil)
+    }
+}
+
+@Test @MainActor func tabFileIconUsesMaterialAppearanceOverride() throws {
+    let tab = TabSnapshot(
+        id: TabID(),
+        title: "settings.toml",
+        isActive: true,
+        isDirty: false,
+        isPinned: false,
+        buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+    )
+    let appearanceWindow = makePointerLocationWindow(width: 300, height: 200)
+    appearanceWindow.appearance = NSAppearance(named: .darkAqua)
+    let (window, _, strip) = hostStrip(
+        width: 300,
+        height: 200,
+        tabs: [tab],
+        window: appearanceWindow
+    )
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let item = try #require(strip.hostedCollectionView.item(
+        at: IndexPath(item: 0, section: 0)
+    ))
+    let icon = try #require(item.view.subviews.compactMap { $0 as? NSImageView }.first {
+        $0.identifier?.rawValue.hasPrefix("duckpad.tab.file-icon.") == true
+    })
+    #expect(icon.identifier?.rawValue == "duckpad.tab.file-icon.toml")
+
+    appearanceWindow.appearance = NSAppearance(named: .aqua)
+    strip.viewDidChangeEffectiveAppearance()
+
+    #expect(icon.identifier?.rawValue == "duckpad.tab.file-icon.toml_light")
+}
+
+@Test @MainActor func tabPinButtonTogglesTheExistingPinAction() throws {
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let pointerWindow = makePointerLocationWindow(width: 500, height: 200)
+    let (window, _, strip) = hostStrip(
+        width: 500,
+        height: 200,
+        tabs: tabs,
+        window: pointerWindow
+    )
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    var actions: [(TabID, TabContextAction)] = []
+    strip.onContextAction = { actions.append(($0, $1)) }
+    let pinnedItem = try #require(strip.hostedCollectionView.item(
+        at: IndexPath(item: 0, section: 0)
+    ))
+    let regularItem = try #require(strip.hostedCollectionView.item(
+        at: IndexPath(item: 1, section: 0)
+    ))
+    let pinnedID = tabs[0].id.rawValue.uuidString.lowercased()
+    let regularID = tabs[1].id.rawValue.uuidString.lowercased()
+    let pinnedButton = try #require(descendantButtons(of: pinnedItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.pin.\(pinnedID)"
+    })
+    let regularButton = try #require(descendantButtons(of: regularItem.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.pin.\(regularID)"
+    })
+
+    #expect(!pinnedButton.isHidden)
+    #expect(pinnedButton.accessibilityLabel() == "Unpin new 1")
+    #expect(regularButton.isHidden)
+    regularItem.view.mouseEntered(with: try mouseMovementEvent(for: window))
+    #expect(!regularButton.isHidden)
+    #expect(regularButton.accessibilityLabel() == "Pin new 2")
+
+    regularButton.performClick(nil)
+    pinnedButton.performClick(nil)
+
+    #expect(actions.count == 2)
+    #expect(actions[0].0 == tabs[1].id)
+    #expect(actions[0].1 == .setPinned(true))
+    #expect(actions[1].0 == tabs[0].id)
+    #expect(actions[1].1 == .setPinned(false))
+}
+
+@Test @MainActor func tabSignalsUseCompactMaterialIconPinAndDirtyGeometry() throws {
+    let tab = TabSnapshot(
+        id: TabID(),
+        title: "main.swift",
+        isActive: true,
+        isDirty: true,
+        isPinned: true,
+        buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 1)
+    )
+    let (window, _, strip) = hostStrip(width: 300, height: 200, tabs: [tab])
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let item = try #require(strip.hostedCollectionView.item(
+        at: IndexPath(item: 0, section: 0)
+    ))
+    let stableID = tab.id.rawValue.uuidString.lowercased()
+    let icon = try #require(item.view.subviews.compactMap { $0 as? NSImageView }.first {
+        $0.identifier?.rawValue == "duckpad.tab.file-icon.swift"
+    })
+    let dirty = try #require(item.view.subviews.first {
+        $0.identifier?.rawValue == "duckpad.tab.dirty-indicator"
+    })
+    let title = try #require(descendantTextFields(of: item.view).first { $0.stringValue == tab.title })
+    let pin = try #require(descendantButtons(of: item.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.pin.\(stableID)"
+    })
+    let close = try #require(descendantButtons(of: item.view).first {
+        $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
+    })
+
+    #expect(icon.frame.size == NSSize(width: 13, height: 13))
+    #expect(dirty.frame.width == 5)
+    #expect(dirty.frame.midY < icon.frame.midY)
+    let titleAlignment = title.alignmentRect(forFrame: title.frame)
+    let pinAlignment = pin.alignmentRect(forFrame: pin.frame)
+    let closeAlignment = close.alignmentRect(forFrame: close.frame)
+    #expect(pinAlignment.width == 16)
+    #expect(closeAlignment.width == 16)
+    #expect(icon.frame.maxX <= dirty.frame.minX)
+    #expect(dirty.frame.maxX <= titleAlignment.minX)
+    #expect(titleAlignment.maxX <= pinAlignment.minX)
+    #expect(pinAlignment.maxX <= closeAlignment.minX)
+}
+
 @Test @MainActor func fourShortTabsKeepMeasuredWidthsAndCompactTitlePadding() throws {
     let tabs = makeTabs(count: 4, activeIndex: 3)
     let (window, _, strip) = hostStrip(width: 890, height: 200, tabs: tabs)
@@ -2448,7 +2621,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
         $0.stringValue == tabs[0].title
     })
     #expect(title.frame.minX <= 24)
-    #expect(item.view.bounds.maxX - title.frame.maxX <= 24)
+    #expect(item.view.bounds.maxX - title.frame.maxX <= 35)
     #expect(title.frame.width >= title.intrinsicContentSize.width)
 }
 
@@ -2711,7 +2884,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     #expect(item.view.trackingAreas.contains {
         $0.options.contains(.inVisibleRect) && $0.options.contains(.activeAlways)
     })
-    #expect(close.frame.width >= 20)
+    #expect(close.alignmentRect(forFrame: close.frame).width == 16)
     #expect(close.isHidden)
     item.view.mouseEntered(with: event)
     #expect(!close.isHidden)
