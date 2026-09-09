@@ -132,6 +132,27 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 fflush(stdout)
                 Darwin._exit(0)
             }
+        } else if environment["DUCKPAD_WINDOW_LAYOUT_SMOKE"] == "1", securityScopeSmokeNamespace != nil {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                for _ in 0..<23 { _ = await workspace.addScratch() }
+                guard let window = controller.window else { preconditionFailure("layout smoke has no window") }
+                for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                    window.appearance = NSAppearance(named: appearance)
+                    for _ in 0..<3 {
+                        for width in [420.0, 893.5, 640.0, 1200.0, 421.0, 892.5, 639.0, 1199.0] {
+                            window.setContentSize(NSSize(width: width, height: 680))
+                            window.contentView?.layoutSubtreeIfNeeded()
+                            try? await Task.sleep(for: .milliseconds(20))
+                            window.contentView?.layoutSubtreeIfNeeded()
+                        }
+                    }
+                }
+                precondition(workspace.snapshot().tabs.count == 24, "layout smoke lost tabs")
+                print("Duckpad window layout smoke ready: 48 resizes with wrapped tabs in Light and Dark")
+                fflush(stdout)
+                Darwin._exit(0)
+            }
         } else if let expectedPath = environment["DUCKPAD_SECURITY_SCOPE_SMOKE_WRITE"] {
             Task { @MainActor in
                 await controller.waitForStartup()

@@ -1158,6 +1158,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_STYLESETBACK wParam:STYLE_DEFAULT lParam:background];
     [_scintilla message:SCI_STYLESETFONT wParam:STYLE_DEFAULT lParam:reinterpret_cast<sptr_t>("Menlo")];
     [_scintilla message:SCI_STYLESETSIZE wParam:STYLE_DEFAULT lParam:13];
+    // Let Scintilla verify fixed-width ASCII once per font instead of shaping
+    // every character of a long line with CoreText on each edit. Unicode and
+    // fonts that fail the width check retain the normal shaping path.
+    [_scintilla message:SCI_STYLESETCHECKMONOSPACED wParam:STYLE_DEFAULT lParam:1];
     [_scintilla message:SCI_STYLECLEARALL];
     [_scintilla message:SCI_STYLESETFORE wParam:STYLE_LINENUMBER lParam:gutterForeground];
     [_scintilla message:SCI_STYLESETBACK wParam:STYLE_LINENUMBER lParam:gutterBackground];

@@ -2716,6 +2716,31 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     #expect(!strip.hostedScrollView.hasHorizontalScroller)
 }
 
+@Test @MainActor func repeatedWindowResizingSettlesWrappedTabLayout() {
+    let (window, root, strip) = hostStrip(width: 893, height: 320, tabs: makeTabs(count: 24, activeIndex: 0))
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    window.orderFront(nil)
+    for width in [420, 893, 640, 1200, 421, 892, 639, 1199] {
+        window.setContentSize(NSSize(width: width, height: 500))
+        root.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.03))
+        root.layoutSubtreeIfNeeded()
+        let generation = strip.flowLayout.layoutGeneration
+        let height = strip.viewportHeight
+        RunLoop.current.run(until: Date().addingTimeInterval(0.03))
+        root.layoutSubtreeIfNeeded()
+        #expect(strip.flowLayout.layoutGeneration == generation)
+        #expect(strip.viewportHeight == height)
+        #expect(strip.viewportHeight == strip.contentHeight)
+        #expect(!strip.hostedScrollView.hasHorizontalScroller)
+        #expect(!strip.hostedScrollView.hasVerticalScroller)
+    }
+}
+
 @Test @MainActor func tabItemsOwnOnlyInternalTrailingAndInterRowSeparators() throws {
     let tabs = makeTabs(count: 12, activeIndex: 0)
     let (window, root, strip) = hostStrip(width: 893, height: 320, tabs: tabs)

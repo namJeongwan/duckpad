@@ -470,10 +470,11 @@ final class TabDocumentCollectionView: NSCollectionView {
     }
 
     override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(NSSize(
+        let size = NSSize(
             width: max(newSize.width, requiredDocumentSize.width),
             height: max(newSize.height, requiredDocumentSize.height)
-        ))
+        )
+        if frame.size != size { super.setFrameSize(size) }
     }
 }
 
@@ -486,7 +487,7 @@ final class TabOverflowScrollView: NSScrollView {
 
     override func layout() {
         super.layout()
-        forceScrollersOffAfterStyleSettlement()
+        suppressUnwantedScrollers()
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -514,22 +515,26 @@ final class TabOverflowScrollView: NSScrollView {
     }
 
     func forceScrollersOffAfterStyleSettlement() {
-        autohidesScrollers = true
-        requiresHorizontalScroller = false
-        hasVerticalScroller = false
-        hasHorizontalScroller = false
-        suppressScrollerChrome()
+        let needsSettlement = !autohidesScrollers || requiresHorizontalScroller
+            || hasVerticalScroller || hasHorizontalScroller
+        suppressUnwantedScrollers()
+        guard needsSettlement else { return }
         guard !scrollerSuppressionScheduled else { return }
         scrollerSuppressionScheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.scrollerSuppressionScheduled = false
-            self.autohidesScrollers = true
-            self.requiresHorizontalScroller = false
-            self.hasVerticalScroller = false
-            self.hasHorizontalScroller = false
+            self.suppressUnwantedScrollers()
             self.pinContentOrigin()
         }
+    }
+
+    private func suppressUnwantedScrollers() {
+        if !autohidesScrollers { autohidesScrollers = true }
+        if requiresHorizontalScroller { requiresHorizontalScroller = false }
+        if hasVerticalScroller { hasVerticalScroller = false }
+        if hasHorizontalScroller { hasHorizontalScroller = false }
+        suppressScrollerChrome()
     }
 
     private func synchronizeHorizontalScroller() {
@@ -539,8 +544,8 @@ final class TabOverflowScrollView: NSScrollView {
 
     private func suppressScrollerChrome() {
         for scroller in [verticalScroller, horizontalScroller].compactMap({ $0 }) {
-            scroller.alphaValue = 0
-            scroller.isHidden = true
+            if scroller.alphaValue != 0 { scroller.alphaValue = 0 }
+            if !scroller.isHidden { scroller.isHidden = true }
             scroller.setAccessibilityHidden(true)
         }
     }
@@ -638,9 +643,9 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             guard let self else { return }
             measuredContentWidth = size.width
             measuredContentHeight = size.height
-            updateDocumentFrame()
-            updateViewportHeight()
-            pinTabSurfaceOrigin()
+            // Collection layout must not invalidate its ancestor constraints
+            // while AppKit is still solving the window's current layout pass.
+            if heightConstraint.constant != size.height { needsUpdateConstraints = true }
         }
         flowLayout.onLayoutRegenerated = { [weak self] in
             guard let self else { return }
@@ -671,7 +676,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         flowLayout.viewportWidth = max(1, hostedScrollView.contentSize.width)
         hostedCollectionView.layoutSubtreeIfNeeded()
         updateDocumentFrame()
-        updateViewportHeight()
+        if heightConstraint.constant != measuredContentHeight { needsUpdateConstraints = true }
         refreshVisibleItems()
         pinTabSurfaceOrigin()
     }
@@ -1094,7 +1099,14 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     private func updateViewportHeight() {
-        heightConstraint.constant = measuredContentHeight
+        if heightConstraint.constant != measuredContentHeight {
+            heightConstraint.constant = measuredContentHeight
+        }
+    }
+
+    public override func updateConstraints() {
+        updateViewportHeight()
+        super.updateConstraints()
     }
 
     private func pinTabSurfaceOrigin() {

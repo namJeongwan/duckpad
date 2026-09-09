@@ -89,17 +89,18 @@ struct WindowCommandBarViewTests {
         window.pointerLocation = file.convert(NSPoint(x: file.bounds.midX, y: file.bounds.midY), to: nil)
         var sawEdit = false
         var ticks = 0
-        let timer = Timer(timeInterval: 0.02, repeats: true) { _ in
-            MainActor.assumeIsolated {
-                ticks += 1
-                if bar.activeMenuTitle == "Edit" {
-                    sawEdit = true
-                    bar.dismissMenu()
-                } else if bar.activeMenuTitle == "File" {
-                    window.pointerLocation = edit.convert(NSPoint(x: edit.bounds.midX, y: edit.bounds.midY), to: nil)
-                }
-                if ticks >= 25 { bar.dismissMenu() }
+        let tick: @MainActor @Sendable () -> Void = {
+            ticks += 1
+            if bar.activeMenuTitle == "Edit" {
+                sawEdit = true
+                bar.dismissMenu()
+            } else if bar.activeMenuTitle == "File" {
+                window.pointerLocation = edit.convert(NSPoint(x: edit.bounds.midX, y: edit.bounds.midY), to: nil)
             }
+            if ticks >= 25 { bar.dismissMenu() }
+        }
+        let timer = Timer(timeInterval: 0.02, repeats: true) { _ in
+            MainActor.assumeIsolated { tick() }
         }
         RunLoop.main.add(timer, forMode: .eventTracking)
         defer { timer.invalidate() }

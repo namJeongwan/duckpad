@@ -38,6 +38,11 @@ grep -q 'Duckpad security-scope smoke restored bookmark and saved after relaunch
     "$TEMP_ROOT/scope-verify-stdout.log"
 grep -qx 'bookmark-relaunch' "$SCOPE_DOCUMENT"
 
+DUCKPAD_SECURITY_SCOPE_SMOKE_NAMESPACE="$SCOPE_NAMESPACE-layout" \
+DUCKPAD_WINDOW_LAYOUT_SMOKE=1 "$APP/Contents/MacOS/Duckpad" \
+    > "$TEMP_ROOT/layout-stdout.log" 2> "$TEMP_ROOT/layout-stderr.log"
+grep -q 'Duckpad window layout smoke ready' "$TEMP_ROOT/layout-stdout.log"
+
 DUCKPAD_SECURITY_SCOPE_SMOKE_NAMESPACE="$SCOPE_NAMESPACE-xpc" \
 DUCKPAD_EXTENSION_SMOKE=1 "$APP/Contents/MacOS/Duckpad" \
     > "$TEMP_ROOT/xpc-stdout.log" 2> "$TEMP_ROOT/xpc-stderr.log"
@@ -48,4 +53,4 @@ DUCKPAD_EXTENSION_ISOLATION_SMOKE=1 "$APP/Contents/MacOS/Duckpad" \
     > "$TEMP_ROOT/xpc-isolation-stdout.log" 2> "$TEMP_ROOT/xpc-isolation-stderr.log"
 grep -q 'Duckpad XPC isolation smoke ready' "$TEMP_ROOT/xpc-isolation-stdout.log"
 
-echo "PASS: Finder/Open With and sandboxed XPC extension/isolation smokes"
+echo "PASS: Finder/Open With, window resizing, and sandboxed XPC extension/isolation smokes"

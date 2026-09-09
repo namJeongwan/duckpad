@@ -1451,7 +1451,7 @@ struct FileLifecycleTests {
         await firstStore.blockCommit()
         var reply: Bool?
         #expect(coordinator.applicationShouldTerminate { reply = $0 } == .terminateLater)
-        for _ in 0..<200 where !(await firstStore.hasEnteredCommit()) { await Task.yield() }
+        for _ in 0..<200 where !(await firstStore.hasEnteredCommit()) { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(await firstStore.hasEnteredCommit())
         #expect(reply == nil)
         let secondStore = RoutingRecoveryStore()
