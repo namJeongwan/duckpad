@@ -16,7 +16,7 @@ public final class WindowCommandBarView: NSVisualEffectView {
     public private(set) var activeMenuTitle: String?
 
     private let stackView = NSStackView()
-    private let bottomSeparator = CALayer()
+    private let bottomSeparator = NSBox()
     private var menusByTitle: [String: NSMenu] = [:]
     private var rootItemsByTitle: [String: NSMenuItem] = [:]
     private var buttonsByTitle: [String: NSPopUpButton] = [:]
@@ -35,7 +35,11 @@ public final class WindowCommandBarView: NSVisualEffectView {
         material = .headerView
         blendingMode = .withinWindow
         state = .followsWindowActiveState
-        layer?.addSublayer(bottomSeparator)
+        // A native separator stays above the visual-effect material and
+        // resolves its color in this window's effective appearance.
+        bottomSeparator.boxType = .separator
+        bottomSeparator.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(bottomSeparator)
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityIdentifier("duckpad.window.command-bar")
@@ -53,7 +57,11 @@ public final class WindowCommandBarView: NSVisualEffectView {
             stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
             stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             stackView.topAnchor.constraint(equalTo: topAnchor),
-            stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stackView.bottomAnchor.constraint(equalTo: bottomSeparator.topAnchor),
+            bottomSeparator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bottomSeparator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bottomSeparator.bottomAnchor.constraint(equalTo: bottomAnchor),
+            bottomSeparator.heightAnchor.constraint(equalToConstant: 1),
         ])
         applyAppearance()
     }
@@ -111,13 +119,6 @@ public final class WindowCommandBarView: NSVisualEffectView {
         stopPointerTracking()
         removeMenuButtons()
         stopObservingMenuTracking()
-    }
-
-    public override func layout() {
-        super.layout()
-        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-        let thickness = 1 / scale
-        bottomSeparator.frame = NSRect(x: 0, y: 0, width: bounds.width, height: thickness)
     }
 
     public override func updateTrackingAreas() {
@@ -389,7 +390,6 @@ public final class WindowCommandBarView: NSVisualEffectView {
 
     private func applyAppearance() {
         layer?.backgroundColor = NSColor.clear.cgColor
-        bottomSeparator.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.62).cgColor
         for title in menuTitles {
             guard let button = buttonsByTitle[title] else { continue }
             applyVisualState(to: button, title: title)
