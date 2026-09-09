@@ -50,3 +50,17 @@ import Testing
         #expect(selected.lineEnding == .crlf)
     }
 }
+
+@Test func arbitraryBytesRemainVisibleWithoutRelaxingStrictDecoding() throws {
+    for bytes in [Data([0x00, 0x80, 0xFF, 0x41, 0x0A]), Data([0xFF, 0xFE, 0x61]),
+                  Data([0xEF, 0xBB, 0xBF, 0x80])] {
+        let preview = TextFileCodec.decodeForDisplay(bytes)
+        #expect(!preview.text.isEmpty)
+        #expect(preview.text.contains("\u{FFFD}"))
+        #expect(preview.encoding == .utf8)
+    }
+    let bytes = TextFileCodec.encode("한글🙂", encoding: .utf16LittleEndian, byteOrderMark: .present)
+    #expect(TextFileCodec.decodeForDisplay(bytes).text == "한글🙂")
+    #expect(TextFileCodec.decodeForDisplay(bytes).encoding == .utf16LittleEndian)
+    #expect(throws: TextFileCodecError.invalidUTF8) { try TextFileCodec.decode(Data([0x80])) }
+}

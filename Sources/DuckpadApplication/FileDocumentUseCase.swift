@@ -325,9 +325,7 @@ public final class FileDocumentUseCase {
         if let prepared { read = prepared }
         else { read = try await store.read(from: canonical) }
         guard !Task.isCancelled else { return .failed(.cancelled) }
-        let decoded: DecodedTextFile
-        do { decoded = try TextFileCodec.decode(read.data, assuming: encodingHint) }
-        catch let error { return .failed(.codec(error)) }
+        let decoded = TextFileCodec.decodeForDisplay(read.data, assuming: encodingHint)
         let binding = FileBinding(
             canonicalPath: read.identity.canonicalPath,
             encoding: decoded.encoding,
@@ -392,6 +390,12 @@ public final class FileDocumentUseCase {
             return .failed(.comparisonInvalidated)
         }
         guard let binding = context.binding else { return .requiresDestination(context.tabID) }
+        // Merely viewing a permissively decoded file must not rewrite its
+        // original bytes when Save is pressed without an edit or conversion.
+        if conversion == nil,
+           workspace.snapshot().tabs.first(where: { $0.id == context.tabID })?.isDirty == false {
+            return .saved(context.tabID)
+        }
         return await save(context: context, to: URL(fileURLWithPath: binding.canonicalPath), conversion: conversion, overwrite: false)
     }
 
@@ -498,9 +502,7 @@ public final class FileDocumentUseCase {
         case .reload:
             do {
                 let read = try await store.read(from: pendingConflict.url)
-                let decoded: DecodedTextFile
-                do { decoded = try TextFileCodec.decode(read.data) }
-                catch let error { return .failed(.codec(error)) }
+                let decoded = TextFileCodec.decodeForDisplay(read.data)
                 let updated = FileBinding(
                     canonicalPath: read.identity.canonicalPath,
                     encoding: decoded.encoding,
@@ -575,15 +577,10 @@ public final class FileDocumentUseCase {
                     limit: maximumComparisonBytes
                 ))
             }
-            let decoded: DecodedTextFile
-            do {
-                decoded = try TextFileCodec.decode(
-                    read.data,
-                    assuming: context.binding?.encoding
-                )
-            } catch let error {
-                return .failed(.codec(error))
-            }
+            let decoded = TextFileCodec.decodeForDisplay(
+                read.data,
+                assuming: context.binding?.encoding
+            )
             return .ready(ExternalFileComparison(
                 tabID: context.tabID,
                 path: read.identity.canonicalPath,

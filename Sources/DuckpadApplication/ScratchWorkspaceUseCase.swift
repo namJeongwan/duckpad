@@ -210,6 +210,7 @@ public final class ScratchWorkspaceUseCase {
     private var pendingEditTask: Task<Void, Never>?
     private var hasStarted = false
     private var transactionBusy = false
+    private var acceptsEditsDuringAutosave = false
     private var editorBatchReservationID: UUID?
     private var transactionWaiters: [CheckedContinuation<Void, Never>] = []
     private var closeRecoveryCommitter: (@MainActor (ScratchSession) async -> RecoveryOutcome)?
@@ -701,7 +702,7 @@ public final class ScratchWorkspaceUseCase {
     }
 
     public func acceptEditorEdit(_ edit: EditorIncrementalEdit) -> EditorEditOutcome {
-        guard startupState == .ready, !transactionBusy else {
+        guard startupState == .ready, !transactionBusy || acceptsEditsDuringAutosave else {
             return .rejected(currentRevision: edit.expectedRevision)
         }
         guard let index = session.tabs.firstIndex(where: { (try? session.buffer(for: $0.id).id) == edit.bufferID }) else {
@@ -1011,13 +1012,24 @@ public final class ScratchWorkspaceUseCase {
         return outcome
     }
 
-    private func saveCurrentAndPublish(retry: PersistenceRetry) async -> PersistenceOutcome {
+    private func saveCurrentAndPublish(
+        retry: PersistenceRetry,
+        acceptingEditorEdits: Bool = false
+    ) async -> PersistenceOutcome {
         await acquireTransaction()
-        defer { releaseTransaction() }
-        let outcome = await save(session)
+        acceptsEditsDuringAutosave = acceptingEditorEdits
+        defer {
+            acceptsEditsDuringAutosave = false
+            releaseTransaction()
+        }
+        // A newer edit may supersede an autosave while it waits for a
+        // structural transaction. Only the latest pending save needs to run.
+        if acceptingEditorEdits, Task.isCancelled { return .saved }
+        let capturedSession = session
+        let outcome = await save(capturedSession)
         switch outcome {
         case .saved:
-            persistenceState = .saved
+            persistenceState = session == capturedSession ? .saved : .pending
             publish(.persistence)
         case .failed(let failure):
             persistenceState = .failed(failure)
@@ -1035,13 +1047,14 @@ public final class ScratchWorkspaceUseCase {
     }
 
     private func schedulePersistence() {
+        pendingEditTask?.cancel()
         let token = UUID()
         pendingEditToken = token
         pendingEditTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(20))
-            guard let self, self.pendingEditToken == token else { return }
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self, self.pendingEditToken == token else { return }
             self.pendingEditToken = nil
-            _ = await self.saveCurrentAndPublish(retry: .saveCurrent)
+            _ = await self.saveCurrentAndPublish(retry: .saveCurrent, acceptingEditorEdits: true)
         }
     }
 

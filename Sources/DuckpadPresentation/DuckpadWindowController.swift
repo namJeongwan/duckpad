@@ -75,7 +75,7 @@ private enum CloseRetryContext {
 }
 
 @MainActor
-private final class FileDropView: NSView {
+final class FileDropView: NSView {
     var onFiles: (([URL]) -> Void)?
     var onFolders: (([URL]) -> Void)?
     var onEffectiveAppearanceChange: (() -> Void)?
@@ -94,12 +94,22 @@ private final class FileDropView: NSView {
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingSourceOperationMask.contains(.copy) else { return [] }
         let content = partition(fileURLs(from: sender))
         return (onFiles != nil && !content.files.isEmpty)
             || (onFolders != nil && !content.folders.isEmpty) ? .copy : []
     }
 
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        draggingEntered(sender)
+    }
+
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        !draggingEntered(sender).isEmpty
+    }
+
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard prepareForDragOperation(sender) else { return false }
         let urls = fileURLs(from: sender)
         guard !urls.isEmpty else { return false }
         let content = partition(urls)

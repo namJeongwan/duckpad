@@ -20,9 +20,10 @@
                 <string>html</string><string>css</string><string>sh</string><string>zsh</string>
                 <string>bash</string><string>sql</string><string>rs</string><string>go</string>
                 <string>java</string><string>kt</string>
+                <string>*</string>
             </array>
             <key>CFBundleTypeName</key>
-            <string>Text and Source Documents</string>
+            <string>Files</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>LSHandlerRank</key>
@@ -32,6 +33,7 @@
                 <string>public.plain-text</string>
                 <string>public.source-code</string>
                 <string>public.text</string>
+                <string>public.data</string>
             </array>
         </dict>
     </array>

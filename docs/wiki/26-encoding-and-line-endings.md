@@ -10,7 +10,7 @@ Encoding and line-ending commands intentionally have no default shortcuts, avoid
 
 ## Open and conversion behavior
 
-Format > Open Using Encoding allows an explicit UTF-8, UTF-16 LE, or UTF-16 BE hint for BOM-less input. Automatic Open remains BOM-first and strict UTF-8 without a BOM. Invalid UTF-8, truncated UTF-16, and invalid surrogate sequences continue to surface typed failures rather than replacement characters.
+Format > Open Using Encoding allows an explicit UTF-8, UTF-16 LE, or UTF-16 BE hint for BOM-less input. Automatic Open tries BOM detection and UTF-8 first. File opening, reload, and external comparison now fall back to a UTF-8 text preview with replacement characters for arbitrary or malformed bytes, including binary files. The strict codec API still reports typed validation failures. Opening does not change disk bytes; Save without edits or a format conversion is a no-op. Editing and saving a fallback preview writes UTF-8 text, not the original binary representation.
 
 Choosing an encoding or EOL conversion saves the active document using the chosen durable format. A scratch tab first uses the native Save panel. Encoding conversion preserves the current EOL choice; EOL conversion preserves the current encoding and BOM. Selecting the already-active format is a no-op. Existing identity-checked atomic save, external-conflict compare/reload/overwrite, cancellation, and retry paths carry the exact conversion through to completion.
 

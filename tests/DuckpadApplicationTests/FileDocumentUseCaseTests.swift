@@ -57,6 +57,12 @@ private actor FileStoreFake: TextFileStore {
         files[path] = FileReadResult(data: data, identity: makeIdentity(path: path, data: data, serial: serial))
     }
 
+    func seedBytes(_ data: Data, at url: URL) {
+        serial += 1
+        let path = url.standardizedFileURL.path
+        files[path] = FileReadResult(data: data, identity: makeIdentity(path: path, data: data, serial: serial))
+    }
+
     func externalReplace(_ text: String, at url: URL) { seed(text, at: url) }
     func text(at url: URL) -> String? { files[url.standardizedFileURL.path].flatMap { String(data: $0.data, encoding: .utf8) } }
     func data(at url: URL) -> Data? { files[url.standardizedFileURL.path]?.data }
@@ -878,5 +884,30 @@ private actor FileSessionStoreFake: SessionStore {
         if let stored, stored.generation >= generation { return .superseded(durableGeneration: stored.generation) }
         stored = StoredSession(session: session, generation: generation)
         return .committed
+    }
+}
+
+@Test @MainActor func arbitraryExtensionsAndBinaryFilesOpenWithoutChangingDiskBytes() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let bytes = Data([0x00, 0x80, 0xFF, 0x41, 0x0A])
+    for name in ["sample.bin", "sample.png", "sample.unrecognized", "no-extension"] {
+        let url = URL(fileURLWithPath: "/tmp/" + name)
+        await files.seedBytes(bytes, at: url)
+        guard case .opened = await useCase.open(url) else {
+            Issue.record("Failed to open arbitrary file")
+            continue
+        }
+        let buffer = try #require(workspace.snapshot().activeBuffer)
+        #expect(editor.snapshot(for: buffer.bufferID)?.text == String(decoding: bytes, as: UTF8.self))
+        #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == false)
+        #expect(await files.data(at: url) == bytes)
+        #expect(await useCase.saveActive() == .saved(workspace.activeFileContext()!.tabID))
+        #expect(await files.data(at: url) == bytes)
     }
 }

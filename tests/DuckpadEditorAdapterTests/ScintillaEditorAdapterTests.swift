@@ -53,6 +53,55 @@ private actor DelayedSearchSessionStore: SessionStore {
 @Suite(.serialized)
 struct ScintillaBridgeTests {
     @Test @MainActor
+    func nativeRepeatedBackspaceRemainsAcceptedDuringSlowAutosave() async throws {
+        _ = NSApplication.shared
+        let store = DelayedSearchSessionStore()
+        let workspace = ScratchWorkspaceUseCase(store: store)
+        _ = await workspace.start()
+        let buffer = try #require(workspace.snapshot().activeBuffer)
+        let editor = ScintillaEditorAdapter()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+        workspace.onChange = { binding.render($0) }
+        editor.install(.init(bufferID: buffer.bufferID, revision: 0, text: "abc"))
+        binding.render(workspace.snapshot())
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = editor.view
+        defer {
+            editor.invalidate()
+            window.contentView = nil
+            window.close()
+        }
+        let native = try #require(editor.activeScintillaView)
+        native.focusEditor()
+        native.setPrimarySelectionUTF8Range(NSRange(location: 3, length: 0))
+        await store.arm()
+        native.insertCommittedText("d")
+        await store.waitUntilBlocked()
+        let readsBeforeDeletion = native.snapshotReadCount
+        let responder = try #require(window.firstResponder)
+        let backspace = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil,
+            characters: "\u{7F}", charactersIgnoringModifiers: "\u{7F}",
+            isARepeat: true, keyCode: 51
+        ))
+        responder.keyDown(with: backspace)
+        responder.keyDown(with: backspace)
+        #expect(workspace.snapshot().activeBuffer?.revision == 3)
+        #expect(native.revision == 3)
+        #expect(native.snapshotReadCount == readsBeforeDeletion)
+        #expect(String(decoding: native.contentUTF8, as: UTF8.self) == "ab")
+        await store.release()
+        #expect(await workspace.flushPersistence() == .saved)
+        #expect(String(decoding: native.contentUTF8, as: UTF8.self) == "ab")
+    }
+
+    @Test @MainActor
     func freshViewPublishesWillModifyBeforeItsFirstEdit() throws {
         let view = makeHostedView()
         try view.loadUTF8(Data("base".utf8), revision: 0)

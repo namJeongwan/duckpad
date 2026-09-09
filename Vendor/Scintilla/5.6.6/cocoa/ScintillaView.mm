@@ -891,7 +891,19 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 /**
  * Called when an external drag operation enters the view.
  */
+- (NSView *) fileDropDestination: (id <NSDraggingInfo>) sender {
+	if (![sender.draggingPasteboard.types containsObject:NSPasteboardTypeFileURL]) return nil;
+	// The workspace owns file opening. A native editor child must not swallow
+	// Finder drops as an unhandled SCN_URIDROPPED notification or insert paths.
+	for (NSView *view = self.superview; view != nil; view = view.superview) {
+		if ([view.registeredDraggedTypes containsObject:NSPasteboardTypeFileURL]) return view;
+	}
+	return nil;
+}
+
 - (NSDragOperation) draggingEntered: (id <NSDraggingInfo>) sender {
+	NSView *destination = [self fileDropDestination:sender];
+	if (destination != nil) return [destination draggingEntered:sender];
 	return mOwner.backend->DraggingEntered(sender);
 }
 
@@ -901,6 +913,8 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * Called frequently during an external drag operation if we are the target.
  */
 - (NSDragOperation) draggingUpdated: (id <NSDraggingInfo>) sender {
+	NSView *destination = [self fileDropDestination:sender];
+	if (destination != nil) return [destination draggingUpdated:sender];
 	return mOwner.backend->DraggingUpdated(sender);
 }
 
@@ -910,19 +924,27 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * Drag image left the view. Clean up if necessary.
  */
 - (void) draggingExited: (id <NSDraggingInfo>) sender {
+	NSView *destination = [self fileDropDestination:sender];
+	if (destination != nil) {
+		[destination draggingExited:sender];
+		return;
+	}
 	mOwner.backend->DraggingExited(sender);
 }
 
 //--------------------------------------------------------------------------------------------------
 
 - (BOOL) prepareForDragOperation: (id <NSDraggingInfo>) sender {
-#pragma unused(sender)
+	NSView *destination = [self fileDropDestination:sender];
+	if (destination != nil) return [destination prepareForDragOperation:sender];
 	return YES;
 }
 
 //--------------------------------------------------------------------------------------------------
 
 - (BOOL) performDragOperation: (id <NSDraggingInfo>) sender {
+	NSView *destination = [self fileDropDestination:sender];
+	if (destination != nil) return [destination performDragOperation:sender];
 	return mOwner.backend->PerformDragOperation(sender);
 }
 
@@ -932,6 +954,11 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * Drag operation is done. Notify editor.
  */
 - (void) concludeDragOperation: (id <NSDraggingInfo>) sender {
+	NSView *destination = [self fileDropDestination:sender];
+	if (destination != nil) {
+		[destination concludeDragOperation:sender];
+		return;
+	}
 	// Clean up is the same as if we are no longer the drag target.
 	mOwner.backend->DraggingExited(sender);
 }
