@@ -35,6 +35,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     private var updateTask: Task<Void, Never>?
     public var acceptsUpdates: (() -> Bool)?
     public var onUpdateTaskStarted: ((Task<Void, Never>) -> Void)?
+    public var isUpdating: Bool { updateTask != nil }
 
     public init() {
         let window = NSWindow(
@@ -57,12 +58,25 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         settings: AppSettings,
         update: @escaping (AppSettings) async -> AppSettingsUpdateOutcome
     ) {
-        self.update = update
-        render(settings)
+        configure(settings: settings, update: update)
         showWindow(nil)
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    public func configure(
+        settings: AppSettings,
+        update: @escaping (AppSettings) async -> AppSettingsUpdateOutcome
+    ) {
+        self.update = update
+        if !isUpdating { render(settings) }
+    }
+
+    public func selectAppearance(_ mode: AppAppearanceMode) {
+        var proposed = settings
+        proposed.appearanceMode = mode
+        startUpdate(proposed)
     }
 
     public func smokeState() -> DuckpadSettingsSmokeState {
@@ -158,16 +172,16 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     }
 
     private func startUpdate(_ proposed: AppSettings) {
-        guard acceptsUpdates?() ?? true else {
+        guard !isUpdating, acceptsUpdates?() ?? true else {
             NSSound.beep()
             return
         }
         setControlsEnabled(false)
-        updateTask?.cancel()
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.apply(proposed)
             self.setControlsEnabled(true)
+            self.updateTask = nil
         }
         updateTask = task
         onUpdateTaskStarted?(task)
@@ -186,6 +200,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             render(settings)
             status.stringValue = "Could not save settings: \(failure)"
             NSSound.beep()
+            showWindow(nil)
         }
     }
 

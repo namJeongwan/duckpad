@@ -205,6 +205,13 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                     preconditionFailure("settings smoke could not persist preferences")
                 }
                 apply(saved)
+                let themeItem = NSMenuItem(title: "Light", action: #selector(performChangeTheme(_:)), keyEquivalent: "")
+                themeItem.representedObject = AppAppearanceMode.light.rawValue
+                performChangeTheme(themeItem)
+                while settingsWindowController?.isUpdating == true { await Task.yield() }
+                precondition(settingsUseCase.state.settings.appearanceMode == .light, "theme menu did not persist preference")
+                precondition(NSApplication.shared.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua, "theme menu did not apply Light")
+                precondition(settingsWindowController?.window?.isVisible == false, "theme menu unexpectedly opened Settings")
                 controller.close()
                 precondition(windowControllers.isEmpty, "last document window remained retained")
                 performShowSettings()
@@ -217,7 +224,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 await reopened.waitForStartup()
                 precondition(!reopenedEditor.isWordWrapEnabled, "reopened window missed word-wrap default")
                 precondition(reopenedEditor.isWrapMarkerVisible, "reopened window missed wrap-marker default")
-                print("Duckpad settings smoke ready: durable defaults + zero-window Settings + reopened window")
+                precondition(reopened.window?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua, "reopened window missed theme")
+                print("Duckpad settings smoke ready: theme menu + durable defaults + zero-window Settings + reopened window")
                 fflush(stdout)
                 Darwin._exit(0)
             }
@@ -752,6 +760,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         windowRecoveryRoots[identifier] = recoveryRoot.standardizedFileURL
         controller.onNewWindowRequested = { [weak self] in self?.createAdditionalWindow() }
         controller.onSettingsRequested = { [weak self] in self?.showSettings() }
+        controller.onThemeRequested = { [weak self] mode in self?.changeTheme(mode) }
+        controller.currentAppearanceMode = { [weak self] in self?.settingsUseCase.state.settings.appearanceMode ?? .system }
         controller.onBecameKey = { [weak self, weak controller] in
             guard let self, let controller else { return }
             self.installMainMenu(target: controller)
@@ -917,7 +927,23 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         showSettings()
     }
 
+    @objc func performChangeTheme(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = AppAppearanceMode(rawValue: raw) else { return }
+        changeTheme(mode)
+    }
+
+    private func changeTheme(_ mode: AppAppearanceMode) {
+        guard terminationCoordinator.permitsApplicationCommands,
+              settingsWindowController?.isUpdating != true else { return }
+        configuredSettingsWindow().selectAppearance(mode)
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(performChangeTheme(_:)) {
+            menuItem.state = menuItem.representedObject as? String == settingsUseCase.state.settings.appearanceMode.rawValue ? .on : .off
+            return terminationCoordinator.permitsApplicationCommands && settingsWindowController?.isUpdating != true
+        }
         if menuItem.action == #selector(performShowSettings(_:)) {
             return terminationCoordinator.permitsApplicationCommands
         }
@@ -929,6 +955,14 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     }
 
     private func showSettings() {
+        let settingsWindow = configuredSettingsWindow()
+        settingsWindow.showWindow(nil)
+        settingsWindow.window?.center()
+        settingsWindow.window?.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func configuredSettingsWindow() -> DuckpadSettingsWindowController {
         let settingsWindow = settingsWindowController ?? DuckpadSettingsWindowController()
         settingsWindowController = settingsWindow
         settingsWindow.acceptsUpdates = { [weak self] in
@@ -937,7 +971,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         settingsWindow.onUpdateTaskStarted = { [weak self] task in
             self?.terminationCoordinator.trackApplicationTask(task)
         }
-        settingsWindow.present(settings: settingsUseCase.state.settings) { [weak self] settings in
+        settingsWindow.configure(settings: settingsUseCase.state.settings) { [weak self] settings in
             guard let self else { return .failed(.writeFailed("application unavailable")) }
             let outcome = await self.settingsUseCase.update(settings)
             switch outcome {
@@ -946,6 +980,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             }
             return outcome
         }
+        return settingsWindow
     }
 
     private func apply(_ settings: AppSettings) {

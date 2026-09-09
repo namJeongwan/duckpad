@@ -166,6 +166,17 @@ public enum DuckpadMainMenuFactory {
             to: viewMenu
         )
         viewMenu.addItem(.separator())
+        let themeItem = NSMenuItem(title: "Theme", action: nil, keyEquivalent: "")
+        let themeMenu = NSMenu(title: "Theme")
+        for (title, mode) in [("System", AppAppearanceMode.system), ("Light", .light), ("Dark", .dark)] {
+            let item = NSMenuItem(title: title, action: #selector(DuckpadWindowController.performChangeTheme(_:)), keyEquivalent: "")
+            item.target = settingsTarget
+            item.representedObject = mode.rawValue
+            themeMenu.addItem(item)
+        }
+        themeItem.submenu = themeMenu
+        viewMenu.addItem(themeItem)
+        viewMenu.addItem(.separator())
         add("Word Wrap", #selector(DuckpadWindowController.performToggleWordWrap(_:)), "", target, modifiers: [], to: viewMenu)
         add("Show Wrap Symbols", #selector(DuckpadWindowController.performToggleWrapMarker(_:)), "", target, modifiers: [], to: viewMenu)
         add("Show Whitespace", #selector(DuckpadWindowController.performToggleWhitespace(_:)), "", target, modifiers: [], to: viewMenu)
@@ -586,23 +597,11 @@ public enum DuckpadMainMenuFactory {
         let formatMenu = NSMenu(title: "Format")
 
         let encodingItem = NSMenuItem(title: "Convert and Save Encoding", action: nil, keyEquivalent: "")
-        let encodingMenu = NSMenu(title: "Convert and Save Encoding")
-        add("UTF-8 without BOM", #selector(DuckpadWindowController.performConvertToUTF8(_:)), "", target, modifiers: [], to: encodingMenu)
-        add("UTF-8 with BOM", #selector(DuckpadWindowController.performConvertToUTF8BOM(_:)), "", target, modifiers: [], to: encodingMenu)
-        encodingMenu.addItem(.separator())
-        add("UTF-16 LE with BOM", #selector(DuckpadWindowController.performConvertToUTF16LittleEndian(_:)), "", target, modifiers: [], to: encodingMenu)
-        add("UTF-16 LE without BOM", #selector(DuckpadWindowController.performConvertToUTF16LittleEndianWithoutBOM(_:)), "", target, modifiers: [], to: encodingMenu)
-        add("UTF-16 BE with BOM", #selector(DuckpadWindowController.performConvertToUTF16BigEndian(_:)), "", target, modifiers: [], to: encodingMenu)
-        add("UTF-16 BE without BOM", #selector(DuckpadWindowController.performConvertToUTF16BigEndianWithoutBOM(_:)), "", target, modifiers: [], to: encodingMenu)
-        encodingItem.submenu = encodingMenu
+        encodingItem.submenu = makeEncodingMenu(target: target)
         formatMenu.addItem(encodingItem)
 
         let endingsItem = NSMenuItem(title: "Convert and Save Line Endings", action: nil, keyEquivalent: "")
-        let endingsMenu = NSMenu(title: "Convert and Save Line Endings")
-        add("Unix (LF)", #selector(DuckpadWindowController.performConvertToLF(_:)), "", target, modifiers: [], to: endingsMenu)
-        add("Windows (CRLF)", #selector(DuckpadWindowController.performConvertToCRLF(_:)), "", target, modifiers: [], to: endingsMenu)
-        add("Classic Mac (CR)", #selector(DuckpadWindowController.performConvertToCR(_:)), "", target, modifiers: [], to: endingsMenu)
-        endingsItem.submenu = endingsMenu
+        endingsItem.submenu = makeLineEndingMenu(target: target)
         formatMenu.addItem(endingsItem)
 
         formatMenu.addItem(.separator())
@@ -614,6 +613,26 @@ public enum DuckpadMainMenuFactory {
         openItem.submenu = openMenu
         formatMenu.addItem(openItem)
         return formatMenu
+    }
+
+    static func makeEncodingMenu(target: DuckpadWindowController) -> NSMenu {
+        let encodingMenu = NSMenu(title: "Convert and Save Encoding")
+        add("UTF-8 without BOM", #selector(DuckpadWindowController.performConvertToUTF8(_:)), "", target, modifiers: [], to: encodingMenu)
+        add("UTF-8 with BOM", #selector(DuckpadWindowController.performConvertToUTF8BOM(_:)), "", target, modifiers: [], to: encodingMenu)
+        encodingMenu.addItem(.separator())
+        add("UTF-16 LE with BOM", #selector(DuckpadWindowController.performConvertToUTF16LittleEndian(_:)), "", target, modifiers: [], to: encodingMenu)
+        add("UTF-16 LE without BOM", #selector(DuckpadWindowController.performConvertToUTF16LittleEndianWithoutBOM(_:)), "", target, modifiers: [], to: encodingMenu)
+        add("UTF-16 BE with BOM", #selector(DuckpadWindowController.performConvertToUTF16BigEndian(_:)), "", target, modifiers: [], to: encodingMenu)
+        add("UTF-16 BE without BOM", #selector(DuckpadWindowController.performConvertToUTF16BigEndianWithoutBOM(_:)), "", target, modifiers: [], to: encodingMenu)
+        return encodingMenu
+    }
+
+    static func makeLineEndingMenu(target: DuckpadWindowController) -> NSMenu {
+        let endingsMenu = NSMenu(title: "Convert and Save Line Endings")
+        add("Unix (LF)", #selector(DuckpadWindowController.performConvertToLF(_:)), "", target, modifiers: [], to: endingsMenu)
+        add("Windows (CRLF)", #selector(DuckpadWindowController.performConvertToCRLF(_:)), "", target, modifiers: [], to: endingsMenu)
+        add("Classic Mac (CR)", #selector(DuckpadWindowController.performConvertToCR(_:)), "", target, modifiers: [], to: endingsMenu)
+        return endingsMenu
     }
 
     private static func add(

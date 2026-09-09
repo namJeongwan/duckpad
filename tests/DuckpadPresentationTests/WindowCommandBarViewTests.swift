@@ -351,6 +351,16 @@ struct WindowCommandBarViewTests {
             #expect(file.layer?.backgroundColor == restingFile)
             #expect(edit.layer?.backgroundColor != restingEdit)
 
+            if let directory = ProcessInfo.processInfo.environment["DUCKPAD_CHROME_TEST_IMAGES"] {
+                let bitmap = try #require(bar.bitmapImageRepForCachingDisplay(in: bar.bounds))
+                bar.cacheDisplay(in: bar.bounds, to: bitmap)
+                let destination = URL(fileURLWithPath: directory, isDirectory: true)
+                try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                try #require(bitmap.representation(using: .png, properties: [:])).write(
+                    to: destination.appendingPathComponent("menus-\(appearance == .aqua ? "light" : "dark").png")
+                )
+            }
+
             _ = bar.prepareMenuForPresentation(named: "File")
             #expect(bar.activeMenuTitle == "File")
             #expect(file.layer?.backgroundColor != restingFile)

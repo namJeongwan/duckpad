@@ -5,9 +5,9 @@ import DuckpadApplication
 @MainActor
 final class DocumentStatusBarView: NSView {
     let lengthLabel = NSTextField(labelWithString: "Length: 0   Lines: 1")
-    let positionButton = NSButton(title: "Ln: 1   Col: 1   Sel: 0 | 0", target: nil, action: nil)
-    let lineEndingButton = NSButton(title: "Unix (LF)", target: nil, action: nil)
-    let modeButton = NSButton(title: "INS", target: nil, action: nil)
+    let positionButton = StatusBarButton(title: "Ln: 1   Col: 1   Sel: 0 | 0", target: nil, action: nil)
+    let lineEndingButton = StatusBarButton(title: "Unix (LF)", target: nil, action: nil)
+    let modeButton = StatusBarButton(title: "INS", target: nil, action: nil)
     private var fields: [NSView] = []
     private var statistics: EditorStatusSnapshot?
 

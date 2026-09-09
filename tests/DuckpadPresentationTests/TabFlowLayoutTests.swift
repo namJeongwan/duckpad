@@ -148,11 +148,16 @@ private func makePointerLocationWindow(width: CGFloat, height: CGFloat) -> Point
 @MainActor
 private final class ApplicationMenuTargetSpy: NSObject, DuckpadApplicationCommandTarget {
     private(set) var settingsRequests = 0
+    private(set) var themeRequests: [String] = []
     private(set) var openedRecentURLs: [URL] = []
     private(set) var clearRecentRequests = 0
 
     @objc func performShowSettings(_ sender: Any?) {
         settingsRequests += 1
+    }
+
+    @objc func performChangeTheme(_ sender: NSMenuItem) {
+        if let mode = sender.representedObject as? String { themeRequests.append(mode) }
     }
 
     @objc func performOpenRecentDocument(_ sender: Any?) {
@@ -1194,6 +1199,13 @@ struct AppKitHostedTests {
         from: settings
     ))
     #expect(applicationTarget.settingsRequests == 1)
+    let theme = try #require(menuItem("Theme", in: menu)?.submenu)
+    #expect(theme.items.map(\.title) == ["System", "Light", "Dark"])
+    for item in theme.items {
+        #expect(item.target === applicationTarget)
+        #expect(NSApplication.shared.sendAction(try #require(item.action), to: item.target, from: item))
+    }
+    #expect(applicationTarget.themeRequests == ["system", "light", "dark"])
 }
 
 @Test @MainActor func failedActivationRestoresAuthoritativeSelectionWithoutRecursion() async {
@@ -2582,7 +2594,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 
     #expect(icon.frame.size == NSSize(width: 13, height: 13))
     #expect(dirty.frame.width == 5)
-    #expect(dirty.frame.midY > icon.frame.midY)
+    #expect(dirty.frame.midY == icon.frame.midY)
     let titleAlignment = title.alignmentRect(forFrame: title.frame)
     let pinAlignment = pin.alignmentRect(forFrame: pin.frame)
     let closeAlignment = close.alignmentRect(forFrame: close.frame)

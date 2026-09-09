@@ -44,7 +44,7 @@ public final class WindowCommandBarView: NSVisualEffectView {
         stackView.orientation = .horizontal
         stackView.alignment = .centerY
         stackView.distribution = .gravityAreas
-        stackView.spacing = 2
+        stackView.spacing = 2 * 1.3
         stackView.edgeInsets = NSEdgeInsets(top: 0, left: 5, bottom: 0, right: 5)
         stackView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stackView)
@@ -337,6 +337,7 @@ public final class WindowCommandBarView: NSVisualEffectView {
     }
 
     private func applyVisualState(to button: NSPopUpButton, title: String) {
+        button.needsDisplay = true
         let isOpen = activeMenuTitle == title
         let isHovered = hoveredMenuTitle == title
         if isOpen {

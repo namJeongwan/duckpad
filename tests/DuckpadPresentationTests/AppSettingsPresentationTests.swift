@@ -4,6 +4,57 @@ import DuckpadDomain
 import DuckpadPresentation
 import Testing
 
+private actor ThemeSettingsStore: AppSettingsStore {
+    private var settings = AppSettings(defaultWordWrapEnabled: false, defaultWrapMarkerVisible: true)
+    func load() async throws(AppSettingsStoreError) -> AppSettings? { settings }
+    func save(_ settings: AppSettings) async throws(AppSettingsStoreError) { self.settings = settings }
+}
+
+@Test @MainActor func themeMenuChoicePersistsWithoutOpeningSettingsOrChangingEditorDefaults() async throws {
+    _ = NSApplication.shared
+    let store = ThemeSettingsStore()
+    let useCase = AppSettingsUseCase(store: store)
+    await useCase.start()
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    controller.configure(settings: useCase.state.settings) { await useCase.update($0) }
+    var updateTask: Task<Void, Never>?
+    controller.onUpdateTaskStarted = { updateTask = $0 }
+    for mode in [AppAppearanceMode.dark, .light, .system] {
+        controller.selectAppearance(mode)
+        #expect(controller.isUpdating)
+        await updateTask?.value
+        #expect(!controller.isUpdating)
+        #expect(controller.window?.isVisible == false)
+        let restored = await AppSettingsUseCase(store: store).start().settings
+        #expect(restored.appearanceMode == mode)
+        #expect(!restored.defaultWordWrapEnabled)
+        #expect(restored.defaultWrapMarkerVisible)
+        #expect(controller.smokeState().appearanceMode == mode)
+    }
+}
+
+@Test @MainActor func themeChoiceCannotRaceAnAcceptedSettingsSave() async {
+    _ = NSApplication.shared
+    let gate = SettingsSaveGate()
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var saved: [AppAppearanceMode] = []
+    var updateTask: Task<Void, Never>?
+    controller.configure(settings: .defaults) { settings in
+        await gate.wait()
+        saved.append(settings.appearanceMode)
+        return .saved(settings)
+    }
+    controller.onUpdateTaskStarted = { updateTask = $0 }
+    controller.selectAppearance(.dark)
+    controller.selectAppearance(.light)
+    await gate.open()
+    await updateTask?.value
+    #expect(saved == [.dark])
+    #expect(controller.smokeState().appearanceMode == .dark)
+}
+
 private actor SettingsSaveGate {
     private var isOpen = false
 

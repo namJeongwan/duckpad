@@ -21,7 +21,17 @@ Native content/selection notifications update the counters without copying the
 document. Unchanged selection counts are cached, and scrolling does not rescan
 the selection.
 
+Actionable status fields show hover, pressed, and disabled feedback in the
+window's own appearance. Line endings open LF / CRLF / CR choices at that field;
+encoding opens its own choices. Both retain the existing convert-and-save actions.
+
+**View → Theme → System / Light / Dark** switches all windows and editors using
+the same saved preference as Settings. Quick theme changes preserve editor
+defaults, serialize with Settings edits, and finish before application termination.
+
 The window command bar uses native visual-effect material and menu typography.
+Titles are centered in equal left/right padding; title padding and the gaps
+between menu buttons are 1.3 times the previous compact spacing.
 While a dropdown is tracking, moving across another title immediately switches
 the native menu without requiring another click. A short-lived timer runs only
 in AppKit's menu-tracking run-loop mode, because ordinary view tracking events
@@ -56,7 +66,7 @@ visible or internal tab viewport; every row remains in the window at full
 content height, and wheel/selection/resize cannot move the clip origin or
 expose scroller chrome.
 
-The modified-document dot sits four points higher beside the file icon. Pin
+The modified-document dot is vertically centered beside the file icon. Pin
 controls reserve a 20 × 20 click target without moving the title on hover.
 Hovering a pinned tab's pin shows the unpin symbol and a local rounded highlight;
 pressing strengthens that feedback. Pin clicks do not activate or close the tab,

@@ -237,9 +237,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     let commandBar = WindowCommandBarView(frame: .zero)
     let statusBar = DocumentStatusBarView(frame: .zero)
     private let persistenceBanner = PersistenceErrorBanner(frame: .zero)
-    private let languageStatus = NSButton(title: "Plain Text", target: nil, action: nil)
+    private let languageStatus = StatusBarButton(title: "Plain Text", target: nil, action: nil)
     private let symbolStatus = NSButton(title: "Symbols", target: nil, action: nil)
-    private let fileFormatStatus = NSButton(title: "UTF-8 · No EOL", target: nil, action: nil)
+    private let fileFormatStatus = StatusBarButton(title: "UTF-8", target: nil, action: nil)
     private let extensionStatus = NSButton(title: "Extensions loading…", target: nil, action: nil)
     private let extensionsPanel = ExtensionsManagerPanel()
     let commandPalettePanel = CommandPalettePanel()
@@ -259,6 +259,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     public var onExtensionCommandsChanged: (() -> Void)?
     public var onNewWindowRequested: (() -> Void)?
     public var onSettingsRequested: (() -> Void)?
+    public var onThemeRequested: ((AppAppearanceMode) -> Void)?
+    public var currentAppearanceMode: (() -> AppAppearanceMode)?
     public var onBecameKey: (() -> Void)?
     public var onClosed: (() -> Void)?
     public var onDocumentURLUsed: ((URL) -> Void)?
@@ -811,6 +813,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         onSettingsRequested?()
     }
 
+    @objc public func performChangeTheme(_ sender: NSMenuItem) {
+        guard !terminationReviewInProgress,
+              let raw = sender.representedObject as? String,
+              let mode = AppAppearanceMode(rawValue: raw) else { return }
+        onThemeRequested?(mode)
+    }
+
     func performActivate(_ id: TabID) {
         guard workspaceInteractionsAreActionable,
               provisionalEditorGroupLayout == nil else { return }
@@ -1301,11 +1310,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performShowFileFormatMenu(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable, fileUseCase != nil else { return }
-        let menu = DuckpadMainMenuFactory.makeFormatMenu(target: self)
+        let menu = DuckpadMainMenuFactory.makeEncodingMenu(target: self)
         menu.popUp(
             positioning: nil,
             at: NSPoint(x: 0, y: fileFormatStatus.bounds.height + 2),
             in: fileFormatStatus
+        )
+    }
+
+    @objc public func performShowLineEndingMenu(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, fileUseCase != nil else { return }
+        let button = statusBar.lineEndingButton
+        DuckpadMainMenuFactory.makeLineEndingMenu(target: self).popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: button.bounds.height + 2),
+            in: button
         )
     }
 
@@ -1648,6 +1667,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         if menuItem.action == #selector(performShowSettings(_:)) {
             return !terminationReviewInProgress && onSettingsRequested != nil
+        }
+        if menuItem.action == #selector(performChangeTheme(_:)) {
+            menuItem.state = menuItem.representedObject as? String == currentAppearanceMode?().rawValue ? .on : .off
+            return !terminationReviewInProgress && onThemeRequested != nil
         }
         if menuItem.action == #selector(performRestoreLastClosedTab(_:)) {
             return workspaceInteractionsAreActionable && workspace.canRestoreRecentlyClosedTab
@@ -2671,7 +2694,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         statusBar.positionButton.target = self
         statusBar.positionButton.action = #selector(performGoToLine(_:))
         statusBar.lineEndingButton.target = self
-        statusBar.lineEndingButton.action = #selector(performShowFileFormatMenu(_:))
+        statusBar.lineEndingButton.action = #selector(performShowLineEndingMenu(_:))
         statusBar.modeButton.target = self
         statusBar.modeButton.action = #selector(performToggleOvertype(_:))
         NSLayoutConstraint.activate([
@@ -4007,12 +4030,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         setStatus(fileFormatStatus, text: encoding, warning: false)
         switch format.lineEnding {
         case .lf, .none: statusBar.lineEndingButton.title = "Unix (LF)"
-        case .crlf: statusBar.lineEndingButton.title = "Windows (CR LF)"
+        case .crlf: statusBar.lineEndingButton.title = "Windows (CRLF)"
         case .cr: statusBar.lineEndingButton.title = "Macintosh (CR)"
         case .mixed: statusBar.lineEndingButton.title = "Mixed EOL"
         }
         statusBar.lineEndingButton.toolTip = "Line endings: \(ending). Choose to convert and save."
-        fileFormatStatus.toolTip = "Encoding: \(encoding); line endings: \(ending). Choose to convert and save."
+        fileFormatStatus.toolTip = "Encoding: \(encoding). Choose to convert and save."
         fileFormatStatus.setAccessibilityValue("\(encoding), \(ending)")
     }
 

@@ -932,6 +932,15 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     #expect(controller.validateMenuItem(endingItem))
     #expect(encodingItem.state == .on)
     #expect(endingItem.state == .on)
+    let endingsMenu = DuckpadMainMenuFactory.makeLineEndingMenu(target: controller)
+    endingsMenu.update()
+    #expect(endingsMenu.items.map(\.title) == ["Unix (LF)", "Windows (CRLF)", "Classic Mac (CR)"])
+    #expect(endingsMenu.items.allSatisfy { $0.submenu == nil && $0.target === controller })
+    #expect(endingsMenu.items.filter { $0.state == .on }.map(\.action) == [endingItem.action])
+    let encodingsMenu = DuckpadMainMenuFactory.makeEncodingMenu(target: controller)
+    encodingsMenu.update()
+    #expect(encodingsMenu.items.allSatisfy { $0.submenu == nil })
+    #expect(encodingsMenu.items.filter { $0.state == .on }.map(\.action) == [encodingItem.action])
 }
 
 @Test @MainActor func scratchFormatConversionUsesSaveAsAndPreservesChosenBytes() async throws {

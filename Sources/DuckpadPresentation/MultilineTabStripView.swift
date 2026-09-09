@@ -164,7 +164,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
             fileIconImage.widthAnchor.constraint(equalToConstant: 13),
             fileIconImage.heightAnchor.constraint(equalToConstant: 13),
             dirtyIndicator.leadingAnchor.constraint(equalTo: fileIconImage.trailingAnchor, constant: 1),
-            dirtyIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -2.5),
+            dirtyIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             dirtyIndicator.widthAnchor.constraint(equalToConstant: 5),
             dirtyIndicator.heightAnchor.constraint(equalToConstant: 5),
             titleLabel.leadingAnchor.constraint(equalTo: dirtyIndicator.trailingAnchor, constant: 1),
