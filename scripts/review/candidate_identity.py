@@ -64,7 +64,9 @@ def validate_candidate_tree(repo: Path, treeish: str) -> None:
             raise ReviewError(f"staged tree contains forbidden gitlink: {path}")
         if any(component.casefold() == FORBIDDEN_REFERENCE_COMPONENT for component in path.split("/")):
             raise ReviewError(f"staged tree contains forbidden Notepad++ reference path: {path}")
-        if path.rsplit("/", 1)[-1].casefold().startswith(FORBIDDEN_README_PREFIX):
+        # The user authorized the root product README for the 0.1.0 release.
+        # Reference/wiki READMEs remain excluded from the product tree.
+        if path != "README.md" and path.rsplit("/", 1)[-1].casefold().startswith(FORBIDDEN_README_PREFIX):
             raise ReviewError(f"staged tree contains forbidden README name: {path}")
 
 

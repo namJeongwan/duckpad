@@ -76,6 +76,12 @@ install -m 0644 "$REPOSITORY_ROOT/Packaging/Info.plist" "$APP/Contents/Info.plis
 install -m 0644 "$REPOSITORY_ROOT/Packaging/PluginRuntime-Info.plist" "$XPC/Contents/Info.plist"
 install -m 0644 "$REPOSITORY_ROOT/Sources/DuckpadApp/Resources/Duckpad.icns" "$APP/Contents/Resources/Duckpad.icns"
 
+# Binary distributions retain the notices required by the bundled engines.
+mkdir -p "$APP/Contents/Resources/ThirdPartyLicenses"
+install -m 0644 "$REPOSITORY_ROOT/Vendor/Scintilla/5.6.6/License.txt" "$APP/Contents/Resources/ThirdPartyLicenses/Scintilla.txt"
+install -m 0644 "$REPOSITORY_ROOT/Vendor/Lexilla/5.5.3/License.txt" "$APP/Contents/Resources/ThirdPartyLicenses/Lexilla.txt"
+install -m 0644 "$REPOSITORY_ROOT/Vendor/WAMR/2.4.5/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/WAMR.txt"
+
 for RESOURCE_BUNDLE in Duckpad_DuckpadApp.bundle Duckpad_DuckpadEditorAdapter.bundle Duckpad_DuckpadInfrastructure.bundle Duckpad_DuckpadPresentation.bundle; do
     if [[ ! -d "$BIN_PATH/$RESOURCE_BUNDLE" ]]; then
         echo "Missing SwiftPM resource bundle: $RESOURCE_BUNDLE" >&2

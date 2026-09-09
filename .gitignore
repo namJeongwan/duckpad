@@ -1,8 +1,9 @@
 # Reference source (keeps its own Git history)
 /notepad-plus-plus/
 
-# README names are intentionally withheld until explicitly authorized
+# Keep reference READMEs untracked; publish the project overview.
 [Rr][Ee][Aa][Dd][Mm][Ee]*
+!/README.md
 
 # macOS metadata
 .DS_Store

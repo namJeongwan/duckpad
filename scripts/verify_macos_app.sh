@@ -12,6 +12,9 @@ test -x "$APP/Contents/MacOS/Duckpad"
 test -x "$XPC/Contents/MacOS/DuckpadPluginRuntime"
 test ! -e "$APP/Contents/MacOS/DuckpadPluginHost"
 test -f "$APP/Contents/Resources/Duckpad.icns"
+for ENGINE in Scintilla Lexilla WAMR; do
+    test -s "$APP/Contents/Resources/ThirdPartyLicenses/$ENGINE.txt"
+done
 test -f "$APP/Contents/Resources/Duckpad_DuckpadInfrastructure.bundle/Languages.json"
 test -d "$APP/Contents/Resources/Duckpad_DuckpadEditorAdapter.bundle/ScintillaCursors"
 test -d "$APP/Contents/Resources/Duckpad_DuckpadInfrastructure.bundle/BundledExtensions"
