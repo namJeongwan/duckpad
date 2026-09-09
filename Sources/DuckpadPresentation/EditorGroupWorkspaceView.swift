@@ -455,7 +455,7 @@ public final class EditorGroupWorkspaceView: NSView {
 
     private func isTransferDrop(_ payload: EditorGroupDragPayload, at point: NSPoint) -> Bool {
         payload.sourceGroup != dropTarget && dropOverlay.bounds.contains(point)
-            && (dropOverlay.zone(at: point) == nil || (layoutSnapshot?.visibleGroups.count ?? 0) >= 4)
+            && (dropOverlay.zone(at: point, edgeFraction: 0.12) == nil || (layoutSnapshot?.visibleGroups.count ?? 0) >= 4)
     }
 
     private func nativePayload(from sender: any NSDraggingInfo) -> EditorGroupDragPayload? {

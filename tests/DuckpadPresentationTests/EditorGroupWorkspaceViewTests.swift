@@ -6,6 +6,34 @@ import Testing
 
 @Suite(.serialized)
 struct EditorGroupWorkspaceViewTests {
+    @Test @MainActor func tabStripCorrectsNativeDropProposalAndClearsItsMarker() throws {
+        let fixture = makeFixture()
+        let window = hostInWindow(fixture.view)
+        defer { fixture.view.tearDown(); window.contentView = nil; window.close() }
+        fixture.view.apply(workspace: workspace(tabs: fixture.tabs), layout: layout(
+            primary: [fixture.tabs[0].id, fixture.tabs[1].id], secondary: [fixture.tabs[2].id],
+            primarySelection: fixture.tabs[0].id, secondarySelection: fixture.tabs[2].id,
+            orientation: .sideBySide))
+        let strip = fixture.view.primaryPane.tabStrip
+        let collection = strip.hostedCollectionView
+        let first = try #require(strip.flowLayout.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))).frame
+        let sender = DraggingInfoStub(window: window,
+            pasteboard: pasteboard(.init(tabID: fixture.tabs[2].id, sourceGroup: .secondary)),
+            location: collection.convert(NSPoint(x: first.minX + 3, y: first.midY), to: nil),
+            sourceOperationMask: .move)
+        var proposed = NSIndexPath(forItem: 99, inSection: 0)
+        var operation = NSCollectionView.DropOperation.on
+        #expect(strip.collectionView(collection, validateDrop: sender, proposedIndexPath: &proposed,
+                                     dropOperation: &operation) == .move)
+        #expect(proposed.item == 0)
+        #expect(operation == .before)
+        let marker = try #require(collection.layer?.sublayers?.first { $0.name == "duckpad.tab.drop-insertion" })
+        #expect(!marker.isHidden)
+        #expect(marker.frame.midY == first.midY)
+        strip.setInteractionsEnabled(false)
+        #expect(marker.isHidden)
+    }
+
     @Test @MainActor func unsplitWorkspaceHostsOnePaneAndFiltersItsTabs() {
         let fixture = makeFixture()
         let view = fixture.view
@@ -303,7 +331,7 @@ struct EditorGroupWorkspaceViewTests {
         #expect(!fixture.view.dropOverlay.isPresenting)
     }
 
-    @Test @MainActor func nativeCenterDropMovesTheLastTabIntoTheTargetPane() {
+    @Test @MainActor func nativeBodyDropMovesIntoTheTargetOutsideTheNarrowCenter() {
         let fixture = makeFixture()
         let window = hostInWindow(fixture.view)
         defer { fixture.view.tearDown(); window.contentView = nil; window.close() }
@@ -314,7 +342,7 @@ struct EditorGroupWorkspaceViewTests {
         let host = fixture.view.primaryPane.editorHostView
         let sender = DraggingInfoStub(window: window,
             pasteboard: pasteboard(.init(tabID: fixture.tabs[2].id, sourceGroup: .secondary)),
-            location: host.convert(NSPoint(x: host.bounds.midX, y: host.bounds.midY), to: nil),
+            location: host.convert(NSPoint(x: host.bounds.width * 0.25, y: host.bounds.midY), to: nil),
             sourceOperationMask: .move)
         var action: EditorGroupWorkspaceView.Action?
         fixture.view.onAction = { action = $0 }

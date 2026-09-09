@@ -551,6 +551,26 @@ private func blockCommentLanguageRegistry() throws -> LanguageRegistry {
     }
 }
 
+@Test @MainActor func tabDropSlotsFollowMidpointsAndRowEndWhitespace() throws {
+    let layout = MultilineTabCollectionLayout()
+    let collection = NSCollectionView(frame: NSRect(x: 0, y: 0, width: 250, height: 100))
+    collection.collectionViewLayout = layout
+    layout.itemWidths = [100, 100, 100]
+    layout.prepare()
+    let first = try #require(layout.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))).frame
+    let second = try #require(layout.layoutAttributesForItem(at: IndexPath(item: 1, section: 0))).frame
+    let third = try #require(layout.layoutAttributesForItem(at: IndexPath(item: 2, section: 0))).frame
+    #expect(layout.dropInsertion(at: NSPoint(x: first.midX - 1, y: first.midY)).index == 0)
+    #expect(layout.dropInsertion(at: NSPoint(x: first.midX + 1, y: first.midY)).index == 1)
+    let endFirstRow = layout.dropInsertion(at: NSPoint(x: 249, y: second.midY))
+    let startSecondRow = layout.dropInsertion(at: NSPoint(x: 1, y: third.midY))
+    #expect(endFirstRow.index == 2)
+    #expect(startSecondRow.index == 2)
+    #expect(endFirstRow.marker.midY == first.midY)
+    #expect(startSecondRow.marker.midY == third.midY)
+    #expect(layout.dropInsertion(at: NSPoint(x: 249, y: third.midY)).index == 3)
+}
+
 @Test func defaultTabGeometryIsCompactAndConnected() {
     let engine = TabFlowLayoutEngine()
     let result = engine.layout(itemWidths: [100, 100, 100], containerWidth: 250)

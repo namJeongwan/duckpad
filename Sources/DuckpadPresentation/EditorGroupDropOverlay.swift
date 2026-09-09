@@ -48,7 +48,7 @@ public final class EditorGroupDropOverlay: NSView {
 
     public override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    public func zone(at point: NSPoint) -> Zone? {
+    public func zone(at point: NSPoint, edgeFraction: CGFloat = 0.40) -> Zone? {
         guard bounds.contains(point), bounds.width > 0, bounds.height > 0 else { return nil }
         let distances: [(Zone, CGFloat)] = [
             (.left, (point.x - bounds.minX) / bounds.width),
@@ -56,7 +56,7 @@ public final class EditorGroupDropOverlay: NSView {
             (.up, (bounds.maxY - point.y) / bounds.height),
             (.down, (point.y - bounds.minY) / bounds.height),
         ]
-        guard let nearest = distances.min(by: { $0.1 < $1.1 }), nearest.1 < 0.40 else { return nil }
+        guard let nearest = distances.min(by: { $0.1 < $1.1 }), nearest.1 < edgeFraction else { return nil }
         return nearest.0
     }
 

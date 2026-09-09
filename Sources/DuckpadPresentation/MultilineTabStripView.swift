@@ -428,6 +428,41 @@ private final class DuckpadTabItem: NSCollectionViewItem {
 @MainActor
 final class TabDocumentCollectionView: NSCollectionView {
     private var requiredDocumentSize = NSSize(width: 1, height: 1)
+    private let insertionMarker = CALayer()
+
+    func showInsertionMarker(_ rect: NSRect?) {
+        guard let rect else { insertionMarker.isHidden = true; return }
+        wantsLayer = true
+        if insertionMarker.superlayer == nil {
+            insertionMarker.name = "duckpad.tab.drop-insertion"
+            insertionMarker.zPosition = 100
+            insertionMarker.cornerRadius = 1.5
+            layer?.addSublayer(insertionMarker)
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        insertionMarker.frame = rect
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            insertionMarker.backgroundColor = NSColor.controlAccentColor.cgColor
+        }
+        insertionMarker.isHidden = false
+        CATransaction.commit()
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        showInsertionMarker(nil)
+        super.draggingExited(sender)
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        defer { showInsertionMarker(nil) }
+        return super.performDragOperation(sender)
+    }
+
+    override func concludeDragOperation(_ sender: (any NSDraggingInfo)?) {
+        showInsertionMarker(nil)
+        super.concludeDragOperation(sender)
+    }
 
     func setRequiredDocumentSize(_ size: NSSize) {
         requiredDocumentSize = size
@@ -813,6 +848,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     public func setInteractionsEnabled(_ isEnabled: Bool) {
         guard interactionsEnabled != isEnabled else { return }
         interactionsEnabled = isEnabled
+        if !isEnabled { hostedCollectionView.showInsertionMarker(nil) }
         hostedCollectionView.isSelectable = isEnabled
         documentSwitcher.setInteractionsEnabled(isEnabled)
         for case let item as DuckpadTabItem in hostedCollectionView.visibleItems() {
@@ -831,6 +867,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     func tearDownHostedViews() {
+        hostedCollectionView.showInsertionMarker(nil)
         hoveredTabID = nil
         hoveredTabIndex = nil
         tabIndexByID.removeAll(keepingCapacity: false)
@@ -955,18 +992,25 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>
     ) -> NSDragOperation {
         guard interactionsEnabled,
-              let payload = dragPayload(from: draggingInfo.draggingPasteboard) else { return [] }
+              let payload = dragPayload(from: draggingInfo.draggingPasteboard) else {
+            hostedCollectionView.showInsertionMarker(nil)
+            return []
+        }
+        let insertion = flowLayout.dropInsertion(at: collectionView.convert(draggingInfo.draggingLocation, from: nil))
         proposedDropOperation.pointee = .before
-        let index = min(proposedDropIndexPath.pointee.item, tabs.count)
+        let index = min(insertion.index, tabs.count)
+        proposedDropIndexPath.pointee = NSIndexPath(forItem: index, inSection: 0)
         if payload.sourceGroup == editorGroupID {
-            return tabs.contains(where: { $0.id == payload.tabID }) ? .move : []
+            let allowed = tabs.contains(where: { $0.id == payload.tabID })
+            hostedCollectionView.showInsertionMarker(allowed ? insertion.marker : nil)
+            return allowed ? .move : []
         }
         let operation = EditorGroupDragPayload.dropOperation(
             optionPressed: NSEvent.modifierFlags.contains(.option)
         )
-        return onValidateGroupDrop?(payload, index, operation) == true
-            ? (operation == .copy ? .copy : .move)
-            : []
+        let allowed = onValidateGroupDrop?(payload, index, operation) == true
+        hostedCollectionView.showInsertionMarker(allowed ? insertion.marker : nil)
+        return allowed ? (operation == .copy ? .copy : .move) : []
     }
 
     public func collectionView(

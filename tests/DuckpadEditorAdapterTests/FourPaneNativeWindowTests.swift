@@ -8,6 +8,40 @@ import Testing
 
 @Suite(.serialized)
 struct FourPaneNativeWindowTests {
+    @Test @MainActor func draggingBetweenThreeAndOneTabsProducesTwoAndTwo() async throws {
+        _ = NSApplication.shared
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        let adapter = ScintillaEditorAdapter()
+        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: adapter, editorView: adapter.view,
+            secondaryEditorView: adapter.secondaryGroupView, additionalEditorViews: adapter.additionalEditorGroupViews,
+            editorGroupRouter: adapter, automaticallyStarts: false)
+        defer { controller.close(); adapter.invalidate() }
+        controller.start()
+        await controller.waitForStartup()
+        for value in ["first", "second", "third", "fourth"] {
+            if value != "first" { _ = await workspace.addScratch() }
+            adapter.activeScintillaView?.insertCommittedText(value)
+        }
+        let ids = workspace.snapshot().tabs.map(\.id)
+        controller.editorGroupWorkspace.onAction?(.splitAdjacent(ids[3], .primary, .primary, .right, .move))
+        #expect(controller.editorGroupLayoutSnapshot.primaryTabIDs.count == 3)
+        #expect(controller.editorGroupLayoutSnapshot.secondaryTabIDs.count == 1)
+        #expect(controller.editorGroupWorkspace.performTabDrop(payload: .init(tabID: ids[1], sourceGroup: .primary),
+            destinationGroup: .secondary, insertionIndex: 1, optionPressed: false))
+        for _ in 0..<100 { await Task.yield() }
+        #expect(controller.editorGroupLayoutSnapshot.primaryTabIDs == [ids[0], ids[2]])
+        #expect(controller.editorGroupLayoutSnapshot.secondaryTabIDs == [ids[3], ids[1]])
+        #expect(adapter.activeEditorGroup == .secondary)
+        #expect(adapter.activeScintillaView?.contentUTF8 == Data("second".utf8))
+        #expect(controller.editorGroupWorkspace.performTabDrop(payload: .init(tabID: ids[1], sourceGroup: .secondary),
+            destinationGroup: .primary, insertionIndex: 1, optionPressed: false))
+        for _ in 0..<100 { await Task.yield() }
+        #expect(controller.editorGroupLayoutSnapshot.primaryTabIDs == [ids[0], ids[1], ids[2]])
+        #expect(controller.editorGroupLayoutSnapshot.secondaryTabIDs == [ids[3]])
+        #expect(adapter.activeEditorGroup == .primary)
+        #expect(adapter.activeScintillaView?.contentUTF8 == Data("second".utf8))
+    }
+
     @Test @MainActor func draggingTheLastTabBackUsesTheDropIndexAndKeepsItsNativeDocument() async throws {
         _ = NSApplication.shared
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
@@ -109,6 +143,7 @@ struct FourPaneNativeWindowTests {
             window.contentView?.display()
             for group in layout.visibleGroups {
                 let strip = try #require(controller.editorGroupWorkspace.pane(for: group)?.tabStrip)
+                #expect(controller.editorGroupWorkspace.pane(for: group)?.layer?.borderWidth == 0)
                 let background = try #require(strip.layer?.backgroundColor)
                 let color = try #require(NSColor(cgColor: background)?.usingColorSpace(.deviceRGB))
                 #expect(appearance == .aqua ? color.redComponent > 0.8 : color.redComponent < 0.3)

@@ -21,7 +21,7 @@ public final class EditorGroupPaneView: NSView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
-        layer?.borderWidth = 1
+        layer?.borderWidth = 0
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityIdentifier("duckpad.editor-group.\(groupID.rawValue)")
@@ -47,7 +47,6 @@ public final class EditorGroupPaneView: NSView {
             editorHostView.topAnchor.constraint(equalTo: tabStrip.bottomAnchor),
             editorHostView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        applyFocusAppearance()
     }
 
     @available(*, unavailable)
@@ -77,7 +76,6 @@ public final class EditorGroupPaneView: NSView {
         isFocused = focused
         focusUpdateCount += 1
         setAccessibilityValue(focused ? "focused" : "not focused")
-        applyFocusAppearance()
     }
 
     public func tearDown() {
@@ -85,14 +83,4 @@ public final class EditorGroupPaneView: NSView {
         editorHostView.removeFromSuperview()
     }
 
-    public override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        applyFocusAppearance()
-    }
-
-    private func applyFocusAppearance() {
-        layer?.borderColor = (isFocused
-            ? NSColor.controlAccentColor.withAlphaComponent(0.58)
-            : NSColor.separatorColor.withAlphaComponent(0.30)).cgColor
-    }
 }

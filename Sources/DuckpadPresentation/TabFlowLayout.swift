@@ -313,6 +313,25 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         return sameOrNextRow?.offset ?? attributes.count - 1
     }
 
+    /// Match the pointer to a row and a title midpoint, including empty space
+    /// after its final tab. The marker and committed insertion use one result.
+    func dropInsertion(at point: NSPoint) -> (index: Int, marker: NSRect) {
+        guard !rows.isEmpty else {
+            return (0, NSRect(x: 0, y: 2, width: 3, height: 23))
+        }
+        var lower = 0
+        var upper = rows.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if rows[middle].maxY <= point.y { lower = middle + 1 } else { upper = middle }
+        }
+        let row = rows[min(lower, rows.count - 1)]
+        let index = row.itemRange.first { point.x < attributes[$0].frame.midX } ?? row.itemRange.upperBound
+        let x = index == row.itemRange.upperBound
+            ? attributes[index - 1].frame.maxX : attributes[index].frame.minX
+        return (index, NSRect(x: max(0, x - 1.5), y: row.minY + 2, width: 3, height: max(1, row.maxY - row.minY - 4)))
+    }
+
     public override func shouldInvalidateLayout(forBoundsChange newBounds: NSRect) -> Bool {
         newBounds.width != collectionView?.bounds.width
     }

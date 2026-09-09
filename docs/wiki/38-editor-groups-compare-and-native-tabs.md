@@ -1,10 +1,14 @@
 # Phase 33 — Editor groups, open-document Compare, and native tab chrome
 
-Current drag behavior: editor edges accept splits across the nearest 40% region.
-Dropping on another pane's center merges into that pane; when four panes are
-visible, its editor body accepts transfers throughout. Tab-strip drops preserve
-the requested insertion slot, including shared-tab clones. Moving the last tab
-out closes the empty pane and keeps the document in the destination.
+Current drag behavior: the source pane accepts splits across its nearest 40%
+edge region. Over another pane, most of its body moves the tab into that pane;
+only the outer 12% offers a new split. When four panes are visible, another
+pane's editor body accepts transfers throughout. Tab-strip drops preserve
+the requested insertion slot, including shared-tab clones. A live insertion
+marker follows title midpoints and row-end whitespace in multiline tab strips. Moving the last tab
+out closes the empty pane and keeps the document in the destination. Pane
+focus no longer draws an accent border around toolbar/status edges; the
+selected tab underline and native separators remain in both appearances.
 
 
 Status: **Implementation complete; code/test reviewed and remote-verified**
