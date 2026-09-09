@@ -11,13 +11,12 @@ import Testing
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["DUCKPAD_LARGE_DOCUMENT_PROBE"] == "1"))
 @MainActor
 struct LargeDocumentResponsivenessTests {
-    @Test(arguments: [false, true])
-    func fiveMiBFileOpenTypingBackspaceAndUndo(singleLine: Bool) async throws {
+    @Test(arguments: ["abcdefghijklmnopqrs\n", "abcdefghijklmnopqrst", "ㅁ", "한글🦆éאבג"])
+    func fiveMiBFileOpenTypingBackspaceAndUndo(unit: String) async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let unit = singleLine ? "abcdefghijklmnopqrst" : "abcdefghijklmnopqrs\n"
         let text = String(repeating: unit, count: 5 * 1_024 * 1_024 / unit.utf8.count)
         let file = root.appendingPathComponent("five-mib.txt")
         try Data(text.utf8).write(to: file)
@@ -37,7 +36,8 @@ struct LargeDocumentResponsivenessTests {
         let window = try #require(controller.window)
         window.contentView?.layoutSubtreeIfNeeded()
         let openTime = begin.duration(to: .now)
-        let midpoint = text.utf8.count / 2
+        let insertionIndex = text.index(text.startIndex, offsetBy: text.count / 2)
+        let midpoint = text.utf8.distance(from: text.utf8.startIndex, to: insertionIndex)
         native.setPrimarySelectionUTF8Range(NSRange(location: midpoint, length: 0))
         native.focusEditor()
         let responder = try #require(window.firstResponder)
@@ -65,12 +65,12 @@ struct LargeDocumentResponsivenessTests {
         #expect(String(decoding: native.contentUTF8, as: UTF8.self) == text)
         native.undo()
         var restored = text
-        restored.insert("x", at: restored.index(restored.startIndex, offsetBy: midpoint))
+        restored.insert("x", at: insertionIndex)
         #expect(String(decoding: native.contentUTF8, as: UTF8.self) == restored)
         native.redo()
         #expect(String(decoding: native.contentUTF8, as: UTF8.self) == text)
         #expect(try Data(contentsOf: file) == Data(text.utf8))
-        print("5MiB singleLine=\(singleLine): open=\(openTime), typing median=\(typing.sorted()[5]), backspace median=\(deletion.sorted()[5])")
+        print("5MiB unit=\(String(reflecting: unit)): open=\(openTime), typing median=\(typing.sorted()[5]), backspace median=\(deletion.sorted()[5])")
     }
 
     @Test func mixedUnicodeAndTabsSurviveFontOptimizationAndUndo() throws {
@@ -89,6 +89,50 @@ struct LargeDocumentResponsivenessTests {
             #expect(String(decoding: native.contentUTF8, as: UTF8.self) == text + "한🙂")
             native.undo()
             #expect(String(decoding: native.contentUTF8, as: UTF8.self) == text)
+        }
+    }
+
+    @Test func cachedUnicodePositionsMatchFreshLayoutAfterZoomAndThemeChanges() throws {
+        _ = NSApplication.shared
+        let text = String(repeating: "한글🦆éאבג", count: 30)
+        func makeEditor() -> (ScintillaEditorAdapter, NSWindow) {
+            let editor = ScintillaEditorAdapter()
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 300),
+                styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = editor.view
+            let buffer = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+            editor.install(.init(bufferID: buffer.bufferID, revision: 0, text: text))
+            editor.display(buffer)
+            return (editor, window)
+        }
+        func positions(_ editor: ScintillaEditorAdapter, _ window: NSWindow) throws -> [CGFloat] {
+            window.contentView?.layoutSubtreeIfNeeded()
+            let native = try #require(editor.activeScintillaView)
+            native.focusEditor()
+            let input = try #require(window.firstResponder as? any NSTextInputClient)
+            let origin = input.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil).minX
+            // UTF-16 grapheme boundaries spanning several cached subdivisions.
+            return text.indices.dropFirst().enumerated().filter { $0.offset % 7 == 0 }.map { _, index in
+                let offset = index.utf16Offset(in: text)
+                return input.firstRect(forCharacterRange: NSRange(location: offset, length: 0), actualRange: nil).minX - origin
+            }
+        }
+        let (warm, window) = makeEditor()
+        defer { window.close(); warm.invalidate() }
+        let original = try positions(warm, window)
+        for zoom in [5, -2, 0] {
+            for palette in [EditorThemePalette.light, .dark] {
+                warm.applyTheme(palette)
+                warm.activeScintillaView?.zoomLevel = zoom
+                let measured = try positions(warm, window)
+                let (fresh, freshWindow) = makeEditor()
+                defer { freshWindow.close(); fresh.invalidate() }
+                fresh.applyTheme(palette)
+                fresh.activeScintillaView?.zoomLevel = zoom
+                #expect(measured == (try positions(fresh, freshWindow)))
+                if zoom != 0 { #expect(measured != original) }
+            }
         }
     }
 

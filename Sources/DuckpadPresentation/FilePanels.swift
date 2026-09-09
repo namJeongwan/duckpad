@@ -180,6 +180,16 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
         alert.alertStyle = .warning
         alert.messageText = "Duckpad could not complete the file operation."
         alert.informativeText = String(describing: failure)
+        switch failure {
+        case .store(.permissionDenied(let path)):
+            alert.messageText = "Duckpad cannot access this file."
+            alert.informativeText = "\(path)\n\nUse File > Open to grant access again. To keep a recovered tab's contents in another location, use File > Save As."
+        case .store(.notFound(let path)):
+            alert.messageText = "This file is no longer available."
+            alert.informativeText = "\(path)\n\nThe file may have been moved or deleted. Use File > Save As to keep a recovered tab's contents in another location."
+        default:
+            break
+        }
         alert.addButton(withTitle: "Retry")
         alert.addButton(withTitle: "Cancel")
         if let window {

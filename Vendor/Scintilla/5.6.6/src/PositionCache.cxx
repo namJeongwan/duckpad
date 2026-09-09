@@ -1101,9 +1101,12 @@ void PositionCache::MeasureWidths(Surface *surface, const ViewStyle &vstyle, uns
 	}
 
 	size_t probe = pces.size();	// Out of bounds
-	if ((!pces.empty()) && (sv.length() < 30)) {
-		// Only store short strings in the cache so it doesn't churn with
-		// long comments with only a single comment.
+	if ((!pces.empty()) && ((sv.length() < 30) ||
+		(unicode && sv.length() <= BreakFinder::lengthEachSubdivision))) {
+		// Reuse shaped Unicode subdivisions of long lines as well as short
+		// words. The existing bounded cache stores exact byte strings and
+		// style IDs, and is cleared when font metrics change. Do not cache
+		// arbitrarily long runs or approximate Unicode character widths.
 
 		// Two way associative: try two probe positions.
 		const size_t hashValue = PositionCacheEntry::Hash(styleNumber, unicode, sv);
