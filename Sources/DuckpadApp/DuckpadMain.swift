@@ -722,7 +722,12 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             workspaceBrowserUseCase: workspaceBrowserUseCase,
             languageUseCase: languageUseCase,
             documentIntelligenceUseCase: documentIntelligenceUseCase,
-            extensionUseCase: extensionUseCase
+            extensionUseCase: extensionUseCase,
+            framePersistence: WindowFramePersistence(
+                defaults: UserDefaults(suiteName: "com.namjeongwan.duckpad.window-frames")!,
+                frameKey: recoveryRoot.standardizedFileURL.path,
+                fallbackKey: recoveryBase.standardizedFileURL.path + ".last-window"
+            )
         )
         return WindowRuntime(
             controller: controller,

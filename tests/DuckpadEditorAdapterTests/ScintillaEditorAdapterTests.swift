@@ -1169,6 +1169,7 @@ struct ScintillaBridgeTests {
         )
         controller.showAndFocus()
         #expect(adapter.view.window === controller.window)
+        #expect(controller.window?.contentLayoutRect.size == NSSize(width: 900, height: 620))
         #expect(adapter.view.isDescendant(of: controller.window!.contentView!))
         adapter.focus()
         #expect(adapter.activeScintillaView?.hasEditorFocus == true)

@@ -76,11 +76,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     private let fileIconImage = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let dirtyIndicator = NSView()
-    private let pinButton = NSButton(
-        image: NSImage(systemSymbolName: "pin", accessibilityDescription: "Pin") ?? NSImage(),
-        target: nil,
-        action: nil
-    )
+    private let pinButton = TabPinButton(frame: .zero)
     private let closeButton = NSButton(
         image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close") ?? NSImage(),
         target: nil,
@@ -168,15 +164,15 @@ private final class DuckpadTabItem: NSCollectionViewItem {
             fileIconImage.widthAnchor.constraint(equalToConstant: 13),
             fileIconImage.heightAnchor.constraint(equalToConstant: 13),
             dirtyIndicator.leadingAnchor.constraint(equalTo: fileIconImage.trailingAnchor, constant: 1),
-            dirtyIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: 1.5),
+            dirtyIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -2.5),
             dirtyIndicator.widthAnchor.constraint(equalToConstant: 5),
             dirtyIndicator.heightAnchor.constraint(equalToConstant: 5),
             titleLabel.leadingAnchor.constraint(equalTo: dirtyIndicator.trailingAnchor, constant: 1),
             titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             pinButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 1),
             pinButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            pinButton.widthAnchor.constraint(equalToConstant: 16),
-            pinButton.heightAnchor.constraint(equalToConstant: 16),
+            pinButton.widthAnchor.constraint(equalToConstant: 20),
+            pinButton.heightAnchor.constraint(equalToConstant: 20),
             closeButton.leadingAnchor.constraint(equalTo: pinButton.trailingAnchor),
             closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -1),
             closeButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
@@ -242,12 +238,12 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         pinButton.toolTip = tab.isPinned ? "Unpin Tab" : "Pin Tab"
         view.setAccessibilityCustomActions([
             NSAccessibilityCustomAction(name: "Close \(tab.title)") { [weak self] in
-                self?.onClose?()
+                guard let self, self.closeButton.isEnabled else { return false }
+                self.onClose?()
                 return true
             },
             NSAccessibilityCustomAction(name: tab.isPinned ? "Unpin \(tab.title)" : "Pin \(tab.title)") { [weak self] in
-                self?.onContextAction?(.setPinned(!tab.isPinned))
-                return true
+                self?.pinButton.accessibilityPerformPress() ?? false
             },
         ])
     }
@@ -257,13 +253,19 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     }
 
     @objc private func pinPressed() {
-        guard let tab = configuredTab else { return }
+        guard pinButton.isEnabled, let tab = configuredTab else { return }
         onContextAction?(.setPinned(!tab.isPinned))
+    }
+
+    func setInteractionsEnabled(_ enabled: Bool) {
+        pinButton.isEnabled = enabled
+        closeButton.isEnabled = enabled
     }
 
     private func updateActionVisibility() {
         closeButton.isHidden = !(configuredTab?.isActive == true || isSelected || isHovered)
         pinButton.isHidden = !(configuredTab?.isPinned == true || isHovered)
+        if !isHovered { pinButton.resetPointerState() }
     }
 
     private func updateVisualState() {
@@ -303,11 +305,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         bottomSeparator.isHidden = !ownsBottomSeparator
         updateSeparatorFrames()
         let isPinned = configuredTab?.isPinned == true
-        pinButton.image = NSImage(
-            systemSymbolName: isPinned ? "pin.fill" : "pin",
-            accessibilityDescription: isPinned ? "Unpin" : "Pin"
-        )
-        pinButton.contentTintColor = isPinned ? .controlAccentColor : .secondaryLabelColor
+        pinButton.isPinned = isPinned
         closeButton.contentTintColor = isHovered ? .controlAccentColor : .secondaryLabelColor
         closeButton.layer?.backgroundColor = isHovered
             ? NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
@@ -338,6 +336,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         ownsTrailingSeparator = false
         ownsBottomSeparator = false
         isHovered = false
+        pinButton.resetPointerState()
         onActivate = nil
         onClose = nil
         onContextAction = nil
@@ -808,9 +807,13 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     public func setInteractionsEnabled(_ isEnabled: Bool) {
+        guard interactionsEnabled != isEnabled else { return }
         interactionsEnabled = isEnabled
         hostedCollectionView.isSelectable = isEnabled
         documentSwitcher.setInteractionsEnabled(isEnabled)
+        for case let item as DuckpadTabItem in hostedCollectionView.visibleItems() {
+            item.setInteractionsEnabled(isEnabled)
+        }
     }
 
     public func setEditorGroupID(_ groupID: EditorGroupID) {
@@ -1139,6 +1142,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         guard tabs.indices.contains(index) else { return }
         let tab = tabs[index]
         let row = flowLayout.row(forItemAt: index) ?? 0
+        item.setInteractionsEnabled(interactionsEnabled)
         item.configure(
             tab: tab,
             index: index,
@@ -1190,7 +1194,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             withAttributes: [.font: NSFont.systemFont(ofSize: 12)]
         ).width
         // Reserve icon, status, pin, and close slots so hover never moves the title.
-        return ceil(width) + 61
+        return ceil(width) + 65
     }
 
     public override func viewDidChangeEffectiveAppearance() {

@@ -254,6 +254,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var workspaceBrowserUseCase: WorkspaceBrowserUseCase?
     private var extensionState = ExtensionRegistryState(items: [])
     private var hasTornDownWindow = false
+    private let framePersistence: WindowFramePersistence?
+    private var hasPreparedWindowFrame = false
     public var onExtensionCommandsChanged: (() -> Void)?
     public var onNewWindowRequested: (() -> Void)?
     public var onSettingsRequested: (() -> Void)?
@@ -339,9 +341,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         documentIntelligenceUseCase: DocumentIntelligenceUseCase? = nil,
         extensionUseCase: ExtensionWorkspaceUseCase? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
+        framePersistence: WindowFramePersistence? = nil,
         automaticallyStarts: Bool = true
     ) {
         self.workspace = workspace
+        self.framePersistence = framePersistence
         let fallback = editorAdapter == nil ? TextViewEditorAdapter() : nil
         precondition(
             (editorAdapter == nil) == (editorView == nil),
@@ -486,6 +490,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             self?.reviewCapabilities(for: item, allow: false)
         }
         renderInitial(workspace.snapshot())
+        if !((framePersistence?.restore(window)) ?? false) { window.center() }
+        hasPreparedWindowFrame = true
         terminationCoordinator?.attach(windowController: self)
         if automaticallyStarts { start() }
     }
@@ -507,6 +513,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public override func close() {
         guard !hasTornDownWindow else { return }
+        saveWindowFrame()
         window?.delegate = nil
         super.close()
         tearDownWindow()
@@ -576,7 +583,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public func showAndFocus() {
         showWindow(nil)
-        window?.center()
         window?.makeKeyAndOrderFront(nil)
         renderEditorGroups(workspace.snapshot(), requestFocus: true)
     }
@@ -2483,12 +2489,22 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         onBecameKey?()
     }
 
+    private func saveWindowFrame() {
+        guard hasPreparedWindowFrame, let window, window.isVisible, !window.inLiveResize else { return }
+        framePersistence?.save(window)
+    }
+
+    public func windowDidResize(_ notification: Notification) { saveWindowFrame() }
+    public func windowDidEndLiveResize(_ notification: Notification) { saveWindowFrame() }
+    public func windowDidMove(_ notification: Notification) { saveWindowFrame() }
+
     public func refreshAppearance() {
         appliedThemePalette = nil
         updateLanguageTheme()
     }
 
     public func windowWillClose(_ notification: Notification) {
+        saveWindowFrame()
         tearDownWindow()
     }
 
@@ -2585,7 +2601,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         injectedPresenter: (any PersistenceErrorPresenting)?
     ) -> any PersistenceErrorPresenting {
         let root = NSViewController()
-        let dropView = FileDropView()
+        let dropView = FileDropView(frame: window?.contentLayoutRect ?? NSRect(
+            x: 0, y: 0, width: 900, height: 620
+        ))
         dropView.onFiles = { [weak self] urls in
             self?.openExternalURLs(urls)
         }

@@ -2582,16 +2582,44 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 
     #expect(icon.frame.size == NSSize(width: 13, height: 13))
     #expect(dirty.frame.width == 5)
-    #expect(dirty.frame.midY < icon.frame.midY)
+    #expect(dirty.frame.midY > icon.frame.midY)
     let titleAlignment = title.alignmentRect(forFrame: title.frame)
     let pinAlignment = pin.alignmentRect(forFrame: pin.frame)
     let closeAlignment = close.alignmentRect(forFrame: close.frame)
-    #expect(pinAlignment.width == 16)
+    #expect(pinAlignment.width == 20)
+    #expect(pinAlignment.height == 20)
     #expect(closeAlignment.width == 16)
     #expect(icon.frame.maxX <= dirty.frame.minX)
     #expect(dirty.frame.maxX <= titleAlignment.minX)
     #expect(titleAlignment.maxX <= pinAlignment.minX)
     #expect(pinAlignment.maxX <= closeAlignment.minX)
+    if let directory = ProcessInfo.processInfo.environment["DUCKPAD_TAB_CHROME_TEST_IMAGES"] {
+        let destination = URL(fileURLWithPath: directory, isDirectory: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        func capture(_ name: String) throws {
+            let bitmap = try #require(item.view.bitmapImageRepForCachingDisplay(in: item.view.bounds))
+            item.view.cacheDisplay(in: item.view.bounds, to: bitmap)
+            let composite = NSImage(size: item.view.bounds.size)
+            composite.lockFocus()
+            NSColor.windowBackgroundColor.setFill()
+            NSBezierPath(rect: item.view.bounds).fill()
+            let foreground = NSImage(size: item.view.bounds.size)
+            foreground.addRepresentation(bitmap)
+            foreground.draw(in: item.view.bounds, from: .zero, operation: .sourceOver, fraction: 1)
+            composite.unlockFocus()
+            let tiff = try #require(composite.tiffRepresentation)
+            let opaque = try #require(NSBitmapImageRep(data: tiff))
+            try #require(opaque.representation(using: .png, properties: [:]))
+                .write(to: destination.appendingPathComponent(name + ".png"))
+        }
+        try capture("tab-normal")
+        item.view.mouseEntered(with: try mouseMovementEvent(for: window))
+        pin.mouseEntered(with: try mouseMovementEvent(for: window))
+        try capture("tab-pin-hover")
+        pin.highlight(true)
+        try capture("tab-pin-pressed")
+        pin.highlight(false)
+    }
 }
 
 @Test @MainActor func fourShortTabsKeepMeasuredWidthsAndCompactTitlePadding() throws {
@@ -2621,7 +2649,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
         $0.stringValue == tabs[0].title
     })
     #expect(title.frame.minX <= 24)
-    #expect(item.view.bounds.maxX - title.frame.maxX <= 35)
+    #expect(item.view.bounds.maxX - title.frame.maxX <= 39)
     #expect(title.frame.width >= title.intrinsicContentSize.width)
 }
 
@@ -3981,4 +4009,65 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     #expect(controllerBox.value == nil)
     #expect(windowBox.value == nil)
 }
+}
+
+@Test @MainActor func pinHoverAndPressStayLocalAndDisabledPinsCannotAct() throws {
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let pointerWindow = makePointerLocationWindow(width: 500, height: 200)
+    let (window, _, strip) = hostStrip(width: 500, height: 200, tabs: tabs, window: pointerWindow)
+    defer { strip.tearDownHostedViews(); window.contentView = nil; window.close() }
+    let item = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 0, section: 0)))
+    let pin = try #require(descendantButtons(of: item.view).compactMap { $0 as? TabPinButton }.first)
+    let title = try #require(descendantTextFields(of: item.view).first)
+    let titleFrame = title.frame
+    let event = try mouseMovementEvent(for: window)
+    item.view.mouseEntered(with: event)
+    let configurations = strip.updateMetrics.itemConfigurations
+    let restingImage = pin.image
+    pin.mouseEntered(with: event)
+    #expect(pin.isPointerInside)
+    #expect(pin.image !== restingImage)
+    #expect(pin.acceptsFirstMouse(for: event))
+    #expect(strip.updateMetrics.itemConfigurations == configurations)
+    #expect(title.frame == titleFrame)
+    #expect(pin.trackingAreas.contains { $0.options.contains(.activeAlways) })
+    var actions: [TabContextAction] = []
+    strip.onContextAction = { _, action in actions.append(action) }
+    #expect(pin.accessibilityPerformPress())
+    #expect(actions == [.setPinned(false)])
+    pin.mouseExited(with: event)
+    #expect(!pin.isPointerInside)
+    #expect(title.frame == titleFrame)
+    strip.setInteractionsEnabled(false)
+    #expect(!pin.isEnabled)
+    pin.performClick(nil)
+    #expect(!pin.accessibilityPerformPress())
+    #expect(actions.count == 1)
+    strip.setInteractionsEnabled(true)
+    #expect(pin.isEnabled)
+}
+
+@Test @MainActor func clickingThePinDoesNotActivateOrCloseTheTab() throws {
+    let tabs = makeTabs(count: 2, activeIndex: 0)
+    let pointerWindow = makePointerLocationWindow(width: 500, height: 200)
+    let (window, _, strip) = hostStrip(width: 500, height: 200, tabs: tabs, window: pointerWindow)
+    defer { strip.tearDownHostedViews(); window.contentView = nil; window.close() }
+    let item = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 1, section: 0)))
+    item.view.mouseEntered(with: try mouseMovementEvent(for: window))
+    let pin = try #require(descendantButtons(of: item.view).compactMap { $0 as? TabPinButton }.first)
+    var activated: [TabID] = []
+    var closed: [TabID] = []
+    var actions: [(TabID, TabContextAction)] = []
+    strip.onActivate = { activated.append($0) }
+    strip.onClose = { closed.append($0) }
+    strip.onContextAction = { actions.append(($0, $1)) }
+    let root = try #require(window.contentView)
+    let point = pin.convert(NSPoint(x: pin.bounds.midX, y: pin.bounds.midY), to: root)
+    #expect(root.hitTest(point) === pin)
+    pin.performClick(nil)
+    #expect(actions.count == 1)
+    #expect(actions.first?.0 == tabs[1].id)
+    #expect(actions.first?.1 == .setPinned(true))
+    #expect(activated.isEmpty)
+    #expect(closed.isEmpty)
 }

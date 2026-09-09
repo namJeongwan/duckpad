@@ -31,6 +31,26 @@ visible or internal tab viewport; every row remains in the window at full
 content height, and wheel/selection/resize cannot move the clip origin or
 expose scroller chrome.
 
+The modified-document dot sits four points higher beside the file icon. Pin
+controls reserve a 20 × 20 click target without moving the title on hover.
+Hovering a pinned tab's pin shows the unpin symbol and a local rounded highlight;
+pressing strengthens that feedback. Pin clicks do not activate or close the tab,
+and mouse/accessibility actions respect the workspace interaction lock.
+
+## Window geometry
+
+The root content view starts at the window's 900 × 620 content size; installing
+an empty, zero-sized content controller must not shrink the window to its
+minimum height. Centering happens only when no saved frame exists, so reopening
+or refocusing an existing window keeps its position.
+
+Move and completed resize events persist each recovery window's frame to the
+explicit `com.namjeongwan.duckpad.window-frames` defaults suite. This does not
+rely on the executable bundle identity when launched with `swift run DuckpadApp`.
+New windows can use the last frame from the same recovery namespace; restored
+windows retain their own frames. Invalid stored geometry uses the initial size,
+and frames from disconnected displays are constrained to an available screen.
+
 ## Historical Phase 11 goal
 
 The first functional UI exposed the editor engine, but it did not yet present a
