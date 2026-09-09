@@ -343,6 +343,9 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
     var conflictResolutions: [FileConflictResolution] = []
     private(set) var comparisons: [ExternalFileComparison] = []
     var decisions: [CloseDecision] = []
+    var allDecision: CloseDecision?
+    var onAllDecision: (@MainActor () async -> Void)?
+    private(set) var allDecisionTabs: [[TabSnapshot]] = []
     var blocksDecisions = false
     var blocksSavePanel = false
     private var savePanelEntered = false
@@ -380,6 +383,12 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
             await withCheckedContinuation { decisionWaiters.append($0) }
         }
         return decisions.isEmpty ? .cancel : decisions.removeFirst()
+    }
+    func decisionForAll(_ tabs: [TabSnapshot], saveAvailable: Bool, attachedTo window: NSWindow?) async -> CloseDecision? {
+        guard let allDecision else { return nil }
+        allDecisionTabs.append(tabs)
+        await onAllDecision?()
+        return allDecision
     }
     func releaseDecisions() {
         blocksDecisions = false
@@ -1317,6 +1326,200 @@ struct FileLifecycleTests {
             in: NSRange(location: 0, length: (editor.textView.string as NSString).length),
             with: text
         )
+    }
+
+    @Test @MainActor func terminationDiscardAllUsesOnePromptAcrossWindowsAndKeepsCleanTabs() async {
+        let coordinator = ApplicationTerminationCoordinator()
+        let (first, firstWorkspace, firstEditor, firstPanels, _) = await makeController(decisions: [], terminationCoordinator: coordinator)
+        let (second, secondWorkspace, secondEditor, secondPanels, _) = await makeController(decisions: [], terminationCoordinator: coordinator)
+        defer { first.close(); second.close() }
+        dirty(firstEditor, with: "first")
+        _ = await firstWorkspace.addScratch()
+        let cleanID = firstWorkspace.snapshot().tabs.first(where: \.isActive)!.id
+        dirty(secondEditor, with: "second")
+        firstPanels.allDecision = .discard
+        let approved = await withCheckedContinuation { continuation in
+            #expect(coordinator.applicationShouldTerminate { continuation.resume(returning: $0) } == .terminateLater)
+        }
+        #expect(approved)
+        #expect(firstPanels.allDecisionTabs.map(\.count) == [2])
+        #expect(secondPanels.allDecisionTabs.isEmpty)
+        #expect(firstPanels.decisionTabs.isEmpty && secondPanels.decisionTabs.isEmpty)
+        #expect(firstWorkspace.snapshot().tabs.map(\.id) == [cleanID])
+        #expect(!secondWorkspace.snapshot().tabs.contains(where: { $0.isDirty }))
+    }
+
+    @Test @MainActor func terminationSaveAllSavesEveryUntitledDocument() async {
+        let (controller, workspace, editor, panels, files) = await makeController(decisions: [])
+        defer { controller.close() }
+        dirty(editor, with: "first saved text")
+        _ = await workspace.addScratch()
+        dirty(editor, with: "second saved text")
+        let firstURL = URL(fileURLWithPath: "/tmp/duckpad-bulk-first.txt")
+        let secondURL = URL(fileURLWithPath: "/tmp/duckpad-bulk-second.txt")
+        panels.saveURLs = [firstURL, secondURL]
+        panels.allDecision = .save
+        #expect(await controller.reviewDirtyDocumentsForTermination())
+        #expect(panels.allDecisionTabs.map(\.count) == [2])
+        #expect(panels.decisionTabs.isEmpty)
+        #expect(panels.saveRequests == 2)
+        #expect(workspace.snapshot().tabs.count == 2)
+        #expect(!controller.hasDirtyDocuments)
+        #expect(await files.text(at: firstURL) == "first saved text")
+        #expect(await files.text(at: secondURL) == "second saved text")
+    }
+
+    @Test @MainActor func terminationSaveAllCancellationOrFailureStopsAndAsksAgainOnRetry() async {
+        for failsWrite in [false, true] {
+            let (controller, workspace, editor, panels, _) = await makeController(
+                decisions: [],
+                saveURL: failsWrite ? URL(fileURLWithPath: "/tmp/duckpad-bulk-failure.txt") : nil,
+                writeError: failsWrite ? .io("injected bulk save failure") : nil
+            )
+            dirty(editor, with: "first")
+            _ = await workspace.addScratch()
+            dirty(editor, with: "second")
+            panels.allDecision = .save
+            #expect(!(await controller.reviewDirtyDocumentsForTermination()))
+            #expect(workspace.snapshot().tabs.filter(\.isDirty).count == 2)
+            #expect(panels.saveRequests == 1)
+            #expect(panels.failures.count == (failsWrite ? 1 : 0))
+            #expect(editor.textView.isEditable)
+            panels.allDecision = .cancel
+            #expect(!(await controller.reviewDirtyDocumentsForTermination()))
+            #expect(panels.allDecisionTabs.count == 2)
+            #expect(workspace.snapshot().tabs.filter(\.isDirty).count == 2)
+            controller.close()
+        }
+    }
+
+    @Test @MainActor func terminationBulkCancelClearsFailedSaveRetryIntent() async {
+        let (controller, workspace, editor, panels, files) = await makeController(
+            decisions: [.cancel],
+            saveURL: URL(fileURLWithPath: "/tmp/duckpad-bulk-cancel-retry.txt"),
+            writeError: .io("first attempt fails")
+        )
+        defer { controller.close() }
+        dirty(editor, with: "first")
+        _ = await workspace.addScratch()
+        dirty(editor, with: "second")
+        panels.allDecision = .save
+        let coordinator = controller.terminationCoordinator!
+        let first = await withCheckedContinuation { continuation in
+            #expect(coordinator.applicationShouldTerminate { continuation.resume(returning: $0) } == .terminateLater)
+        }
+        #expect(!first)
+        #expect(panels.saveRequests == 1)
+        await files.setWriteError(nil)
+        panels.allDecision = .cancel
+        let retry = await withCheckedContinuation { continuation in
+            coordinator.installApplicationRetryHandler { [weak coordinator] in
+                #expect(coordinator?.applicationShouldTerminate { continuation.resume(returning: $0) } == .terminateLater)
+            }
+            panels.retryLastFileFailure()
+        }
+        #expect(!retry)
+        panels.allDecision = nil
+        let next = await withCheckedContinuation { continuation in
+            #expect(coordinator.applicationShouldTerminate { continuation.resume(returning: $0) } == .terminateLater)
+        }
+        #expect(!next)
+        #expect(panels.saveRequests == 1)
+        #expect(panels.decisionTabs == [workspace.snapshot().tabs[0].title])
+        #expect(workspace.snapshot().tabs.filter(\.isDirty).count == 2)
+    }
+
+    @Test @MainActor func terminationSaveAllKeepsEarlierSaveWhenLaterDestinationIsCancelled() async {
+        let (controller, workspace, editor, panels, files) = await makeController(decisions: [])
+        defer { controller.close() }
+        dirty(editor, with: "saved first")
+        _ = await workspace.addScratch()
+        dirty(editor, with: "keep second")
+        let url = URL(fileURLWithPath: "/tmp/duckpad-bulk-partial.txt")
+        panels.saveURLs = [url]
+        panels.allDecision = .save
+        #expect(!(await controller.reviewDirtyDocumentsForTermination()))
+        #expect(panels.saveRequests == 2)
+        #expect(await files.text(at: url) == "saved first")
+        #expect(workspace.snapshot().tabs.map(\.isDirty) == [false, true])
+        #expect(editor.textView.string == "keep second")
+        #expect(editor.textView.isEditable)
+    }
+
+    @Test @MainActor func terminationBulkCancelReopensEveryWindowWithoutDiscarding() async {
+        let coordinator = ApplicationTerminationCoordinator()
+        let (first, _, firstEditor, firstPanels, _) = await makeController(decisions: [], terminationCoordinator: coordinator)
+        let (second, _, secondEditor, secondPanels, _) = await makeController(decisions: [], terminationCoordinator: coordinator)
+        defer { first.close(); second.close() }
+        dirty(firstEditor, with: "first")
+        dirty(secondEditor, with: "second")
+        firstPanels.allDecision = .cancel
+        let approved = await withCheckedContinuation { continuation in
+            #expect(coordinator.applicationShouldTerminate { continuation.resume(returning: $0) } == .terminateLater)
+        }
+        #expect(!approved)
+        #expect(first.hasDirtyDocuments && second.hasDirtyDocuments)
+        #expect(firstEditor.textView.isEditable && secondEditor.textView.isEditable)
+        #expect(firstPanels.allDecisionTabs.count == 1)
+        #expect(firstPanels.decisionTabs.isEmpty && secondPanels.decisionTabs.isEmpty)
+        #expect(coordinator.permitsApplicationCommands)
+    }
+
+    @Test @MainActor func terminationDiscardAllDoesNotApproveEditsMadeDuringPrompt() async {
+        let (controller, workspace, editor, panels, _) = await makeController(decisions: [.cancel])
+        defer { controller.close() }
+        dirty(editor, with: "first")
+        _ = await workspace.addScratch()
+        dirty(editor, with: "second")
+        let changedID = workspace.snapshot().tabs.first(where: \.isActive)!.id
+        panels.allDecision = .discard
+        panels.onAllDecision = { dirty(editor, with: "changed during review") }
+        #expect(!(await controller.reviewDirtyDocumentsForTermination()))
+        #expect(panels.allDecisionTabs.count == 1)
+        #expect(panels.decisionTabs.count == 1)
+        #expect(workspace.snapshot().tabs.contains { $0.id == changedID && $0.isDirty })
+        #expect(editor.textView.string == "changed during review")
+    }
+
+    @Test @MainActor func terminationDiscardAllDoesNotApproveWindowAttachedDuringPrompt() async {
+        let coordinator = ApplicationTerminationCoordinator()
+        let (first, workspace, editor, panels, _) = await makeController(decisions: [], terminationCoordinator: coordinator)
+        dirty(editor, with: "first")
+        _ = await workspace.addScratch()
+        dirty(editor, with: "second")
+        var late: DuckpadWindowController?
+        var latePanels: PanelFake?
+        panels.allDecision = .discard
+        panels.onAllDecision = {
+            let (controller, _, lateEditor, presenter, _) = await makeController(decisions: [.cancel], terminationCoordinator: coordinator)
+            late = controller
+            latePanels = presenter
+            dirty(lateEditor, with: "new window needs review")
+        }
+        defer { first.close(); late?.close() }
+        let approved = await withCheckedContinuation { continuation in
+            #expect(coordinator.applicationShouldTerminate { continuation.resume(returning: $0) } == .terminateLater)
+        }
+        #expect(!approved)
+        #expect(panels.allDecisionTabs.count == 1)
+        #expect(latePanels?.decisionTabs.count == 1)
+        #expect(late?.hasDirtyDocuments == true)
+    }
+
+    @Test @MainActor func bulkQuitAlertHasSafeActionsAndBoundedDocumentList() async {
+        let (controller, workspace, _, _, _) = await makeController(decisions: [])
+        defer { controller.close() }
+        for _ in 0..<6 { _ = await workspace.addScratch() }
+        let tabs = workspace.snapshot().tabs
+        let alert = NativeFilePanelAdapter.allDocumentsAlert(tabs, saveAvailable: true)
+        #expect(alert.buttons.map(\.title) == ["Save All", "Cancel", "Discard All"])
+        #expect(alert.buttons[1].keyEquivalent == "\u{1b}")
+        #expect(alert.buttons[2].keyEquivalent != "\r")
+        #expect(alert.informativeText.contains("…and 2 more."))
+        let noSave = NativeFilePanelAdapter.allDocumentsAlert(tabs, saveAvailable: false)
+        #expect(noSave.buttons.map(\.title) == ["Cancel", "Discard All"])
+        #expect(noSave.buttons[0].keyEquivalent == "\u{1b}")
+        #expect(noSave.buttons[1].keyEquivalent != "\r")
     }
 
     @Test @MainActor func redCloseCancelKeepsWindowAndDiscardAllowsClose() async {

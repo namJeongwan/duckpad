@@ -2441,15 +2441,32 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         return true
     }
 
-    func continuePreparedTerminationReview() async -> Bool {
-        guard terminationReviewInProgress else { return false }
-        return await performPreparedTerminationReview()
+    func prepareTerminationDocuments() async -> [TabSnapshot] {
+        guard terminationReviewInProgress else { return [] }
+        await waitForAcceptedWorkspaceTasks()
+        await extensionUseCase?.suspendInvocationsAndWait()
+        return workspace.snapshot().tabs.filter(\.isDirty)
     }
 
-    private func performPreparedTerminationReview() async -> Bool {
+    var canSaveTerminationDocuments: Bool { fileUseCase != nil }
+
+    func requestTerminationBatchDecision(_ tabs: [TabSnapshot], saveAvailable: Bool) async -> CloseDecision? {
+        await dirtyDecisionPresenter?.decisionForAll(tabs, saveAvailable: saveAvailable, attachedTo: window)
+    }
+
+    func continuePreparedTerminationReview(
+        batchDecision: TerminationBatchDecision? = nil,
+        documentsPrepared: Bool = false
+    ) async -> Bool {
+        guard terminationReviewInProgress else { return false }
+        return await performPreparedTerminationReview(batchDecision: batchDecision, documentsPrepared: documentsPrepared)
+    }
+
+    private func performPreparedTerminationReview(batchDecision: TerminationBatchDecision? = nil, documentsPrepared: Bool = false) async -> Bool {
         var approved = false
         defer {
             if !approved {
+                terminationRetrySaveTabID = nil
                 terminationReviewInProgress = false
                 extensionUseCase?.resumeInvocations()
                 Task { @MainActor [weak workspaceBrowserUseCase] in
@@ -2460,14 +2477,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 editorBinding.render(snapshot)
             }
         }
-        await waitForAcceptedWorkspaceTasks()
-        await extensionUseCase?.suspendInvocationsAndWait()
+        if !documentsPrepared { _ = await prepareTerminationDocuments() }
         guard dirtyDecisionPresenter != nil || !hasDirtyDocuments else { return false }
+        var batchDecision = batchDecision
+        let dirtyTabs = workspace.snapshot().tabs.filter(\.isDirty)
+        if batchDecision == nil, dirtyTabs.count > 1,
+           let choice = await requestTerminationBatchDecision(dirtyTabs, saveAvailable: fileUseCase != nil) {
+            if choice == .cancel { return false }
+            batchDecision = TerminationBatchDecision(tabs: dirtyTabs, choice: choice)
+        }
         let retrySaveTabID = terminationRetrySaveTabID
         terminationRetrySaveTabID = nil
         let outcome = await tabCloseCoordinator.reviewDirtyForTermination(
             saveAvailable: fileUseCase != nil,
             decision: { [weak self] tab, saveAvailable in
+                if let choice = batchDecision?.decision(for: tab) { return choice }
                 if tab.id == retrySaveTabID { return .save }
                 return await self?.closeDecision(for: tab, saveAvailable: saveAvailable) ?? .cancel
             },
@@ -2489,6 +2513,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     func cancelPreparedTerminationReview() {
+        terminationRetrySaveTabID = nil
         guard terminationReviewInProgress else { return }
         terminationReviewInProgress = false
         extensionUseCase?.resumeInvocations()

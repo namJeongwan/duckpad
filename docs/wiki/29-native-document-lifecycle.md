@@ -90,3 +90,24 @@ in-process lifecycle they exercise. Open tabs remain unlimited. The separate
 recently-closed-tab recovery stack remains bounded to 100 entries and is not an
 open-tab cap. Macro features remain excluded. README, the ignored Notepad++
 checkout, and user-owned doc04/vendor-script changes remain untouched.
+
+## Bulk close and quit confirmation
+
+Closing a window or quitting with multiple dirty documents presents one native
+**Save All / Cancel / Discard All** sheet. Application quit gathers dirty
+documents across admitted windows after accepted document operations finish.
+A single dirty document retains the existing individual confirmation.
+
+Save All uses the existing revision-checked save and conflict handling. Untitled
+documents still ask for individual destinations; cancelling a destination or a
+failed save cancels close/quit and preserves remaining dirty documents. Cancel
+keeps the windows editable. Discard All applies only to the document identities
+and buffer revisions shown in that sheet; subsequent edits and newly attached
+windows require fresh approval. Cancelling or failing a review never carries its
+bulk choice into the next attempt. The destructive button is never the default
+Return action, and Escape cancels.
+
+Regression coverage includes a single prompt across windows, preserving clean
+tabs, saving multiple untitled documents, cancellation and write failure,
+re-prompting after a failed attempt, edits during the sheet, and windows attached
+after the bulk snapshot.

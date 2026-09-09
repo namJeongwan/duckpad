@@ -41,6 +41,11 @@ public extension FileConflictPresenting {
 @MainActor
 public protocol DirtyDocumentDecisionPresenting: AnyObject {
     func decision(for tab: TabSnapshot, saveAvailable: Bool, attachedTo window: NSWindow?) async -> CloseDecision
+    func decisionForAll(_ tabs: [TabSnapshot], saveAvailable: Bool, attachedTo window: NSWindow?) async -> CloseDecision?
+}
+
+public extension DirtyDocumentDecisionPresenting {
+    func decisionForAll(_ tabs: [TabSnapshot], saveAvailable: Bool, attachedTo window: NSWindow?) async -> CloseDecision? { nil }
 }
 
 @MainActor
@@ -202,6 +207,31 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
             return .discard
         }
         return .cancel
+    }
+
+    static func allDocumentsAlert(_ tabs: [TabSnapshot], saveAvailable: Bool) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Save changes to \(tabs.count) documents before closing?"
+        let names = tabs.prefix(5).map { $0.fullPath ?? $0.title }.joined(separator: "\n")
+        let remaining = tabs.count > 5 ? "\n…and \(tabs.count - 5) more." : ""
+        alert.informativeText = names + remaining + "\n\nDiscard All loses the unsaved changes in these documents."
+        if saveAvailable {
+            alert.informativeText += " Documents without a saved location will ask where to save."
+            alert.addButton(withTitle: "Save All")
+        }
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Discard All")
+        // Return never discards a batch, including when saving is unavailable.
+        alert.buttons[saveAvailable ? 1 : 0].keyEquivalent = "\u{1b}"
+        return alert
+    }
+
+    public func decisionForAll(_ tabs: [TabSnapshot], saveAvailable: Bool, attachedTo window: NSWindow?) async -> CloseDecision? {
+        let response = await run(Self.allDocumentsAlert(tabs, saveAvailable: saveAvailable), attachedTo: window)
+        if saveAvailable, response == .alertFirstButtonReturn { return .save }
+        let discard: NSApplication.ModalResponse = saveAvailable ? .alertThirdButtonReturn : .alertSecondButtonReturn
+        return response == discard ? .discard : .cancel
     }
 
     private func run(_ panel: NSSavePanel, attachedTo window: NSWindow?) async -> NSApplication.ModalResponse {

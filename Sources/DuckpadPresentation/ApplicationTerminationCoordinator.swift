@@ -1,4 +1,6 @@
 import AppKit
+import DuckpadApplication
+import DuckpadDomain
 
 @MainActor
 public final class ApplicationTerminationCoordinator {
@@ -201,10 +203,26 @@ public final class ApplicationTerminationCoordinator {
     private func reviewAdmittedWindows() async {
         while true {
             while !reviewQueue.isEmpty {
-                let controller = reviewQueue.removeFirst()
-                guard await controller.continuePreparedTerminationReview() else {
-                    finishReview(approved: false)
-                    return
+                var prepared: [(DuckpadWindowController, [TabSnapshot])] = []
+                // Drain accepted work in every admitted window before asking
+                // about a single snapshot spanning those windows.
+                while !reviewQueue.isEmpty {
+                    let controller = reviewQueue.removeFirst()
+                    prepared.append((controller, await controller.prepareTerminationDocuments()))
+                }
+                let dirtyTabs = prepared.flatMap { $0.1 }
+                var batchChoice: CloseDecision?
+                if dirtyTabs.count > 1, let presenter = prepared.first(where: { !$0.1.isEmpty })?.0 {
+                    batchChoice = await presenter.requestTerminationBatchDecision(dirtyTabs,
+                        saveAvailable: prepared.filter { !$0.1.isEmpty }.allSatisfy { $0.0.canSaveTerminationDocuments })
+                    if batchChoice == .cancel { finishReview(approved: false); return }
+                }
+                for (controller, tabs) in prepared {
+                    let batch = batchChoice.map { TerminationBatchDecision(tabs: tabs, choice: $0) }
+                    guard await controller.continuePreparedTerminationReview(batchDecision: batch, documentsPrepared: true) else {
+                        finishReview(approved: false)
+                        return
+                    }
                 }
             }
             await finishTrackedApplicationTasks()
