@@ -210,15 +210,16 @@ public final class ApplicationTerminationCoordinator {
                     let controller = reviewQueue.removeFirst()
                     prepared.append((controller, await controller.prepareTerminationDocuments()))
                 }
-                let dirtyTabs = prepared.flatMap { $0.1 }
+                let decisionWindows = prepared.filter { $0.0.requiresTerminationDecision }
+                let dirtyTabs = decisionWindows.flatMap { $0.1 }
                 var batchChoice: CloseDecision?
-                if dirtyTabs.count > 1, let presenter = prepared.first(where: { !$0.1.isEmpty })?.0 {
-                    batchChoice = await presenter.requestTerminationBatchDecision(dirtyTabs,
-                        saveAvailable: prepared.filter { !$0.1.isEmpty }.allSatisfy { $0.0.canSaveTerminationDocuments })
+                if dirtyTabs.count > 1, let presenter = decisionWindows.first(where: { !$0.1.isEmpty })?.0 {
+                    batchChoice = await presenter.requestDirtyTabBatchDecision(dirtyTabs,
+                        saveAvailable: decisionWindows.filter { !$0.1.isEmpty }.allSatisfy { $0.0.canSaveTerminationDocuments })
                     if batchChoice == .cancel { finishReview(approved: false); return }
                 }
                 for (controller, tabs) in prepared {
-                    let batch = batchChoice.map { TerminationBatchDecision(tabs: tabs, choice: $0) }
+                    let batch = batchChoice.map { DirtyTabBatchDecision(tabs: tabs, choice: $0) }
                     guard await controller.continuePreparedTerminationReview(batchDecision: batch, documentsPrepared: true) else {
                         finishReview(approved: false)
                         return

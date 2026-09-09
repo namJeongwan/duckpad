@@ -2,7 +2,7 @@ import DuckpadApplication
 import DuckpadDomain
 
 /// A bulk choice is valid only for the exact dirty revisions presented.
-struct TerminationBatchDecision {
+struct DirtyTabBatchDecision {
     let tabs: [TabSnapshot]
     let choice: CloseDecision
 

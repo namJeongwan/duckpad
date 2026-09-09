@@ -277,6 +277,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let tabCloseCoordinator: TabCloseCoordinator
     let terminationCoordinator: ApplicationTerminationCoordinator?
     private let approvedWindowClose: @MainActor (NSWindow) -> Void
+    private let keepsClosedWindowForReopen: Bool
     private var editorBinding: EditorBindingUseCase!
     private var errorPresenter: (any PersistenceErrorPresenting)!
     private var handledFailureIDs: Set<UUID> = []
@@ -400,6 +401,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         tabCloseCoordinator = TabCloseCoordinator(workspace: workspace)
         self.terminationCoordinator = terminationCoordinator
         self.approvedWindowClose = approvedWindowClose ?? { $0.performClose(nil) }
+        self.keepsClosedWindowForReopen = recoveryUseCase != nil && approvedWindowClose == nil
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -539,7 +541,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         if let terminationCoordinator {
             terminationCoordinator.trackWindowCloseCleanup {
                 let recoverySaved: Bool
-                if let recoveryUseCase = self.recoveryUseCase {
+                if let recoveryUseCase = self.recoveryUseCase, !self.preservesRecoveryOnClose {
                     if case .saved = await recoveryUseCase.reset() { recoverySaved = true }
                     else { recoverySaved = false }
                 } else {
@@ -786,6 +788,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     func performAdd() {
         guard workspace.snapshot().startup == .ready, !terminationReviewInProgress else { return }
+        if keepsClosedWindowForReopen, window?.isVisible == false { showAndFocus() }
         let token = UUID()
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1994,6 +1997,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func routeOpenFile(encodingHint: TextFileEncoding? = nil) async {
+        if workspaceInteractionsAreActionable, keepsClosedWindowForReopen, window?.isVisible == false { showAndFocus() }
         guard workspaceInteractionsAreActionable,
               fileUseCase != nil,
               let url = await filePanels?.chooseOpenURL(attachedTo: window),
@@ -2388,6 +2392,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspace.snapshot().tabs.contains(where: \.isDirty)
     }
 
+    // Production windows always have durable recovery. Hosts without it keep
+    // the explicit save/discard gate instead of silently losing their buffers.
+    var requiresTerminationDecision: Bool { recoveryUseCase == nil }
+
+    private var preservesRecoveryOnClose = false
+
     public var requiresTerminationReview: Bool {
         hasDirtyDocuments || recoveryUseCase != nil || extensionUseCase != nil
             || !pendingFileCommandTasks.isEmpty
@@ -2397,6 +2407,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @discardableResult
     public func flushRecovery(final: Bool = false) async -> Bool {
         guard let recoveryUseCase else { return true }
+        guard workspace.snapshot().startup == .ready else { return false }
         let outcome = final
             ? await recoveryUseCase.flushForTermination()
             : await recoveryUseCase.flush()
@@ -2415,8 +2426,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    /// Shared red-close/Cmd-Q gate. Discard is remembered only for this review;
-    /// a concurrently dirtied, previously saved tab is reviewed again.
+    /// Red-close, Quit, and system shutdown preserve the session without
+    /// writing source files or asking for save/discard decisions.
     public func reviewDirtyDocumentsForTermination() async -> Bool {
         guard beginTerminationReviewAdmission() else { return false }
         return await performPreparedTerminationReview()
@@ -2443,6 +2454,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     func prepareTerminationDocuments() async -> [TabSnapshot] {
         guard terminationReviewInProgress else { return [] }
+        await waitForStartup()
         await waitForAcceptedWorkspaceTasks()
         await extensionUseCase?.suspendInvocationsAndWait()
         return workspace.snapshot().tabs.filter(\.isDirty)
@@ -2450,19 +2462,19 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     var canSaveTerminationDocuments: Bool { fileUseCase != nil }
 
-    func requestTerminationBatchDecision(_ tabs: [TabSnapshot], saveAvailable: Bool) async -> CloseDecision? {
+    func requestDirtyTabBatchDecision(_ tabs: [TabSnapshot], saveAvailable: Bool) async -> CloseDecision? {
         await dirtyDecisionPresenter?.decisionForAll(tabs, saveAvailable: saveAvailable, attachedTo: window)
     }
 
     func continuePreparedTerminationReview(
-        batchDecision: TerminationBatchDecision? = nil,
+        batchDecision: DirtyTabBatchDecision? = nil,
         documentsPrepared: Bool = false
     ) async -> Bool {
         guard terminationReviewInProgress else { return false }
         return await performPreparedTerminationReview(batchDecision: batchDecision, documentsPrepared: documentsPrepared)
     }
 
-    private func performPreparedTerminationReview(batchDecision: TerminationBatchDecision? = nil, documentsPrepared: Bool = false) async -> Bool {
+    private func performPreparedTerminationReview(batchDecision: DirtyTabBatchDecision? = nil, documentsPrepared: Bool = false) async -> Bool {
         var approved = false
         defer {
             if !approved {
@@ -2478,13 +2490,24 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
         }
         if !documentsPrepared { _ = await prepareTerminationDocuments() }
+        if recoveryUseCase != nil {
+            guard workspace.snapshot().startup == .ready else { return false }
+            approved = await flushRecovery(final: true)
+            if approved {
+                preservesRecoveryOnClose = true
+                // The recovery use case restores input for ordinary flush callers.
+                // Keep this window locked while other windows finish quitting.
+                activeEditor.setInputEnabled(false)
+            }
+            return approved
+        }
         guard dirtyDecisionPresenter != nil || !hasDirtyDocuments else { return false }
         var batchDecision = batchDecision
         let dirtyTabs = workspace.snapshot().tabs.filter(\.isDirty)
         if batchDecision == nil, dirtyTabs.count > 1,
-           let choice = await requestTerminationBatchDecision(dirtyTabs, saveAvailable: fileUseCase != nil) {
+           let choice = await requestDirtyTabBatchDecision(dirtyTabs, saveAvailable: fileUseCase != nil) {
             if choice == .cancel { return false }
-            batchDecision = TerminationBatchDecision(tabs: dirtyTabs, choice: choice)
+            batchDecision = DirtyTabBatchDecision(tabs: dirtyTabs, choice: choice)
         }
         let retrySaveTabID = terminationRetrySaveTabID
         terminationRetrySaveTabID = nil
@@ -2513,6 +2536,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     func cancelPreparedTerminationReview() {
+        preservesRecoveryOnClose = false
         terminationRetrySaveTabID = nil
         guard terminationReviewInProgress else { return }
         terminationReviewInProgress = false
@@ -2547,8 +2571,19 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         terminationCoordinator.requestWindowClose(windowController: self) { [weak self, weak sender] approved in
             guard let self else { return }
             guard approved, let sender else { return }
-            self.permitsNextWindowClose = true
-            self.approvedWindowClose(sender)
+            if self.keepsClosedWindowForReopen {
+                // Keep the registered workspace available to Dock reopen and
+                // within the live-window cap. Repeated red-close must not create
+                // orphan archives beyond the bounded restore inventory.
+                self.saveWindowFrame()
+                sender.orderOut(nil)
+                if self.terminationCoordinator?.permitsApplicationCommands == true {
+                    self.cancelPreparedTerminationReview()
+                }
+            } else {
+                self.permitsNextWindowClose = true
+                self.approvedWindowClose(sender)
+            }
         }
         return false
     }
@@ -3382,12 +3417,27 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         retryingSaveTabID: TabID?,
         forcedDecision: CloseDecision? = nil
     ) async {
+        var batchDecision: DirtyTabBatchDecision?
+        var requestedBatchDecision = false
         let outcome = await tabCloseCoordinator.close(
             tabIDs: tabIDs,
             saveAvailable: fileUseCase != nil,
             decision: { [weak self] tab, saveAvailable in
                 if tab.id == retryingSaveTabID { return .save }
                 if let forcedDecision { return forcedDecision }
+                if !requestedBatchDecision {
+                    requestedBatchDecision = true
+                    if let self {
+                        let targets = Set(tabIDs)
+                        let dirtyTabs = self.workspace.snapshot().tabs.filter { targets.contains($0.id) && $0.isDirty }
+                        if dirtyTabs.count > 1,
+                           let choice = await self.requestDirtyTabBatchDecision(dirtyTabs, saveAvailable: saveAvailable) {
+                            batchDecision = DirtyTabBatchDecision(tabs: dirtyTabs, choice: choice)
+                        }
+                    }
+                }
+                if batchDecision?.choice == .cancel { return .cancel }
+                if let choice = batchDecision?.decision(for: tab) { return choice }
                 return await self?.closeDecision(for: tab, saveAvailable: saveAvailable) ?? .cancel
             },
             save: { [weak self] id, revision in

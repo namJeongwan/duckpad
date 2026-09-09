@@ -91,23 +91,34 @@ recently-closed-tab recovery stack remains bounded to 100 entries and is not an
 open-tab cap. Macro features remain excluded. README, the ignored Notepad++
 checkout, and user-owned doc04/vendor-script changes remain untouched.
 
-## Bulk close and quit confirmation
+## Session-preserving quit and explicit tab close
 
-Closing a window or quitting with multiple dirty documents presents one native
-**Save All / Cancel / Discard All** sheet. Application quit gathers dirty
-documents across admitted windows after accepted document operations finish.
-A single dirty document retains the existing individual confirmation.
+Quit, window close, and macOS logout/restart/shutdown preserve the current
+session without Save/Discard prompts. Production windows always have a recovery
+store. They wait for startup, accepted document operations and extensions, then
+flush the latest session before approving termination. Dirty scratch tabs and
+unsaved edits to existing files retain their dirty state and file bindings;
+source files are not overwritten. The red close button flushes and hides the registered workspace; Dock reopen
+reuses it, and hidden windows stay within the bounded live-window inventory.
+Its recovery archive also survives app quit for the next launch. Startup or recovery-write failure denies quit and
+keeps the existing archive; a later quit attempts the latest contents again.
 
-Save All uses the existing revision-checked save and conflict handling. Untitled
-documents still ask for individual destinations; cancelling a destination or a
-failed save cancels close/quit and preserves remaining dirty documents. Cancel
-keeps the windows editable. Discard All applies only to the document identities
-and buffer revisions shown in that sheet; subsequent edits and newly attached
-windows require fresh approval. Cancelling or failing a review never carries its
-bulk choice into the next attempt. The destructive button is never the default
-Return action, and Escape cancels.
+Explicitly closing tabs still asks for a save/discard decision. Closing multiple
+dirty tabs uses one **Save All / Cancel / Discard All** sheet inside the serialized
+tab-close workflow. Bulk approval covers only the reviewed identities and buffer
+revisions. Untitled Save All still needs destinations, cancellation or failure
+stops the operation, and explicit discard is durable before tabs disappear.
+Recovery-less embedded/test hosts retain the save/discard safeguard because they
+have no way to retain unsaved contents across termination.
 
-Regression coverage includes a single prompt across windows, preserving clean
-tabs, saving multiple untitled documents, cancellation and write failure,
-re-prompting after a failed attempt, edits during the sheet, and windows attached
-after the bulk snapshot.
+Validation includes real restore of dirty scratch/file buffers, unchanged source
+bytes, red-close archive retention, late windows, multiwindow input admission,
+blocked/failed startup, recovery-write failure/retry, and explicit Close All.
+`scripts/smoke_session_quit.py` launches isolated native app processes and sends
+only those processes Quit Apple events with ordinary/shutdown/restart/logout
+reasons. It relaunches each session and verifies both dirty buffers and original
+file bytes. It never asks loginwindow to shut down the machine. This exercises
+the app's system-quit event path, not an actual machine shutdown or force kill.
+
+Apple documents that Cocoa applications receive `applicationShouldTerminate:`
+during logout/restart/shutdown in [Terminating Processes](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/Lifecycle.html#//apple_ref/doc/uid/20002130-SW4).

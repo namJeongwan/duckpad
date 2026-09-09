@@ -581,6 +581,29 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                     Darwin._exit(0)
                 }
             }
+        } else if let path = environment["DUCKPAD_SESSION_QUIT_SMOKE_FILE"] {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                guard let view = editor.activeScintillaView else { preconditionFailure("missing smoke editor") }
+                if environment["DUCKPAD_SESSION_QUIT_SMOKE_VERIFY"] == "1" {
+                    let tabs = workspace.snapshot().tabs
+                    precondition(tabs.count == 2 && tabs.allSatisfy(\.isDirty), "quit lost dirty tabs")
+                    precondition(tabs[0].fullPath == nil && tabs[1].fullPath == path, "quit lost file binding")
+                    precondition(editor.recoverySnapshot(for: tabs[0].buffer.bufferID)?.utf8 == Data("unsaved scratch 한글 🙂".utf8))
+                    precondition(editor.recoverySnapshot(for: tabs[1].buffer.bufferID)?.utf8 == Data("edited file without saving".utf8))
+                    print("Duckpad session quit smoke restored both dirty documents")
+                    fflush(stdout)
+                    Darwin._exit(0)
+                }
+                view.insertCommittedText("unsaved scratch 한글 🙂")
+                guard case .opened = await fileUseCase.open(URL(fileURLWithPath: path)) else {
+                    preconditionFailure("session smoke file did not open")
+                }
+                editor.activeScintillaView?.selectAll()
+                editor.activeScintillaView?.insertCommittedText("edited file without saving")
+                print("Duckpad session quit smoke ready")
+                fflush(stdout)
+            }
         } else if let expected = environment["DUCKPAD_RECOVERY_SMOKE_VERIFY"] {
             Task { @MainActor in
                 await controller.waitForStartup()

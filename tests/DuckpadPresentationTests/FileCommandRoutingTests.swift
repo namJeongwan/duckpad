@@ -82,16 +82,33 @@ private actor DelayedStartupSessionStore: SessionStore {
 
 private actor RoutingRecoveryStore: RecoveryStore {
     private var stored: StoredRecoveryArchive?
+    private var commitError: SessionStoreError?
+    private var blocksCommit = false
+    private var commitEntered = false
+    func setCommitError(_ error: SessionStoreError?) { commitError = error }
+    func blockCommit() { blocksCommit = true; commitEntered = false }
+    func hasEnteredCommit() -> Bool { commitEntered }
+    func releaseCommit() { blocksCommit = false }
     private var loadError: SessionStoreError?
     private(set) var commitCount = 0
     private var blockNextReset = false
     private var resetEntered = false
     private var releaseReset = false
+    private var blocksLoad = false
+    private var loadEntered = false
+    func blockLoad() { blocksLoad = true; loadEntered = false }
+    func hasEnteredLoad() -> Bool { loadEntered }
+    func releaseLoad() { blocksLoad = false }
     func loadLatest() async throws(SessionStoreError) -> StoredRecoveryArchive? {
+        loadEntered = true
+        while blocksLoad { await Task.yield() }
         if let loadError { throw loadError }
         return stored
     }
     func commit(_ archive: RecoveryArchive, generation: PersistenceGeneration) async throws(SessionStoreError) -> SessionCommitResult {
+        commitEntered = true
+        while blocksCommit { await Task.yield() }
+        if let commitError { throw commitError }
         stored = StoredRecoveryArchive(archive: archive, generation: generation)
         commitCount += 1
         return .committed
@@ -1280,7 +1297,8 @@ struct FileLifecycleTests {
         errorPresenter: (any PersistenceErrorPresenting)? = nil,
         recoveryStore: RoutingRecoveryStore? = nil,
         terminationCoordinator: ApplicationTerminationCoordinator? = nil,
-        approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil
+        approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
+        waitForStartup: Bool = true
     ) async -> (DuckpadWindowController, ScratchWorkspaceUseCase, TextViewEditorAdapter, PanelFake, RoutingFileStore) {
         _ = NSApplication.shared
         let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
@@ -1316,7 +1334,7 @@ struct FileLifecycleTests {
             automaticallyStarts: false
         )
         controller.start()
-        await controller.waitForStartup()
+        if waitForStartup { await controller.waitForStartup() }
         return (controller, workspace, editor, panels, files)
     }
 
@@ -1326,6 +1344,188 @@ struct FileLifecycleTests {
             in: NSRange(location: 0, length: (editor.textView.string as NSString).length),
             with: text
         )
+    }
+
+    @Test @MainActor func sessionQuitRestoresUntitledAndDirtyFileWithoutWritingOriginal() async throws {
+        let recovery = RoutingRecoveryStore()
+        let (controller, workspace, editor, panels, files) = await makeController(decisions: [], recoveryStore: recovery)
+        dirty(editor, with: "untitled 한글 🙂")
+        let url = URL(fileURLWithPath: "/tmp/duckpad-preserved-source.txt")
+        await files.seed("original on disk", at: url)
+        let opened = await withCheckedContinuation { continuation in
+            controller.openExternalURLs([url]) { continuation.resume(returning: $0) }
+        }
+        try #require(opened)
+        dirty(editor, with: "edited without saving")
+        let before = workspace.snapshot().tabs
+        try #require(before.count == 2)
+        let coordinator = controller.terminationCoordinator!
+        let approved = await withCheckedContinuation { continuation in
+            #expect(coordinator.applicationShouldTerminate { continuation.resume(returning: $0) } == .terminateLater)
+        }
+        #expect(approved)
+        #expect(workspace.snapshot().tabs == before)
+        #expect(panels.decisionTabs.isEmpty && panels.allDecisionTabs.isEmpty)
+        #expect(panels.saveRequests == 0)
+        #expect(await files.text(at: url) == "original on disk")
+        controller.close()
+        let (reopened, restored, restoredEditor, _, _) = await makeController(decisions: [], recoveryStore: recovery)
+        defer { reopened.close() }
+        #expect(restored.snapshot().tabs == before)
+        #expect(restoredEditor.snapshot(for: before[0].buffer.bufferID)?.text == "untitled 한글 🙂")
+        #expect(restoredEditor.snapshot(for: before[1].buffer.bufferID)?.text == "edited without saving")
+    }
+
+    @Test @MainActor func redCloseJoinedByQuitKeepsPreservedWindowLockedThroughReply() async {
+        let recovery = RoutingRecoveryStore()
+        let (controller, _, editor, panels, _) = await makeController(decisions: [], recoveryStore: recovery)
+        defer { controller.close() }
+        dirty(editor, with: "locked until quit")
+        controller.showWindow(nil)
+        await recovery.blockCommit()
+        #expect(!controller.windowShouldClose(controller.window!))
+        for _ in 0..<200 where !(await recovery.hasEnteredCommit()) { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(await recovery.hasEnteredCommit())
+        let coordinator = controller.terminationCoordinator!
+        var reply: Bool?
+        let disposition = coordinator.applicationShouldTerminate {
+            #expect(!editor.textView.isEditable)
+            #expect(!coordinator.permitsApplicationCommands)
+            reply = $0
+        }
+        #expect(disposition == .terminateLater)
+        await recovery.releaseCommit()
+        for _ in 0..<200 where reply == nil { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(reply == true)
+        #expect(controller.window?.isVisible == false)
+        #expect(!editor.textView.isEditable)
+        #expect(controller.hasDirtyDocuments)
+        #expect(panels.decisionTabs.isEmpty && panels.allDecisionTabs.isEmpty)
+    }
+
+    @Test @MainActor func redCloseKeepsSameRegisteredWorkspaceForRepeatedReopen() async {
+        let recovery = RoutingRecoveryStore()
+        let (controller, workspace, editor, panels, _) = await makeController(decisions: [], recoveryStore: recovery)
+        defer { controller.close() }
+        dirty(editor, with: "reopen this workspace")
+        let before = workspace.snapshot().tabs
+        for _ in 0..<34 {
+            controller.showWindow(nil)
+            #expect(!controller.windowShouldClose(controller.window!))
+            for _ in 0..<200 where controller.window?.isVisible == true { try? await Task.sleep(for: .milliseconds(5)) }
+            #expect(controller.window?.isVisible == false)
+            #expect(controller.terminationCoordinator?.attachedWindowCount == 1)
+            #expect(workspace.snapshot().tabs == before)
+        }
+        controller.performNewScratch()
+        for _ in 0..<200 where workspace.snapshot().tabs.count == before.count { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(controller.window?.isVisible == true)
+        #expect(workspace.snapshot().tabs.count == before.count + 1)
+        #expect(editor.snapshot(for: before[0].buffer.bufferID)?.text == "reopen this workspace")
+        #expect(editor.textView.isEditable)
+        #expect(panels.decisionTabs.isEmpty && panels.allDecisionTabs.isEmpty)
+    }
+
+    @Test @MainActor func redClosePreservesDirtySessionWithoutConfirmingOrResetting() async {
+        let recovery = RoutingRecoveryStore()
+        let (controller, workspace, editor, panels, _) = await makeController(
+            decisions: [], recoveryStore: recovery, approvedWindowClose: { $0.windowController?.close() }
+        )
+        dirty(editor, with: "survives red close")
+        let before = workspace.snapshot().tabs
+        #expect(!controller.windowShouldClose(controller.window!))
+        for _ in 0..<200 where controller.window != nil { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(controller.window == nil)
+        #expect(panels.decisionTabs.isEmpty && panels.allDecisionTabs.isEmpty)
+        let (reopened, restored, restoredEditor, _, _) = await makeController(decisions: [], recoveryStore: recovery)
+        defer { reopened.close() }
+        #expect(restored.snapshot().tabs == before)
+        #expect(restoredEditor.textView.string == "survives red close")
+    }
+
+    @Test @MainActor func sessionQuitJoinsLateWindowAndKeepsEarlierWindowLocked() async {
+        let coordinator = ApplicationTerminationCoordinator()
+        let firstStore = RoutingRecoveryStore()
+        let (first, _, firstEditor, firstPanels, _) = await makeController(decisions: [], recoveryStore: firstStore, terminationCoordinator: coordinator)
+        dirty(firstEditor, with: "first retained")
+        await firstStore.blockCommit()
+        var reply: Bool?
+        #expect(coordinator.applicationShouldTerminate { reply = $0 } == .terminateLater)
+        for _ in 0..<200 where !(await firstStore.hasEnteredCommit()) { await Task.yield() }
+        #expect(await firstStore.hasEnteredCommit())
+        #expect(reply == nil)
+        let secondStore = RoutingRecoveryStore()
+        let (second, _, secondEditor, secondPanels, _) = await makeController(decisions: [], recoveryStore: secondStore, terminationCoordinator: coordinator)
+        defer { first.close(); second.close() }
+        dirty(secondEditor, with: "late retained")
+        await secondStore.blockCommit()
+        await firstStore.releaseCommit()
+        for _ in 0..<200 where !(await secondStore.hasEnteredCommit()) { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(await secondStore.hasEnteredCommit())
+        #expect(!firstEditor.textView.isEditable && !secondEditor.textView.isEditable)
+        #expect(reply == nil)
+        await secondStore.releaseCommit()
+        for _ in 0..<200 where reply == nil { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(reply == true)
+        #expect(first.hasDirtyDocuments && second.hasDirtyDocuments)
+        #expect(firstPanels.decisionTabs.isEmpty && secondPanels.decisionTabs.isEmpty)
+        #expect(firstPanels.allDecisionTabs.isEmpty && secondPanels.allDecisionTabs.isEmpty)
+    }
+
+    @Test @MainActor func sessionQuitWaitsForStartupAndNeverOverwritesFailedRecovery() async {
+        for failsLoad in [false, true] {
+            let recovery = RoutingRecoveryStore()
+            let (seed, _, editor, _, _) = await makeController(decisions: [], recoveryStore: recovery)
+            dirty(editor, with: "previous launch unsaved data")
+            #expect(await seed.reviewDirtyDocumentsForTermination())
+            seed.close()
+            let before = await recovery.commitCount
+            await recovery.blockLoad()
+            if failsLoad { await recovery.setLoadError(.corrupt("injected load failure")) }
+            let errors = RecoveryErrorPresenterSpy()
+            let (controller, _, _, panels, _) = await makeController(decisions: [], errorPresenter: errors, recoveryStore: recovery, waitForStartup: false)
+            let coordinator = controller.terminationCoordinator!
+            var reply: Bool?
+            #expect(coordinator.applicationShouldTerminate { reply = $0 } == .terminateLater)
+            for _ in 0..<200 where !(await recovery.hasEnteredLoad()) { await Task.yield() }
+            #expect(!(await controller.flushRecovery())) // focus-loss flush during startup
+            #expect(reply == nil)
+            #expect(await recovery.commitCount == before)
+            await recovery.releaseLoad()
+            for _ in 0..<200 where reply == nil { try? await Task.sleep(for: .milliseconds(5)) }
+            #expect(reply == !failsLoad)
+            if failsLoad {
+                #expect(!(await controller.flushRecovery()))
+                #expect(await recovery.commitCount == before)
+            }
+            #expect(panels.decisionTabs.isEmpty && panels.allDecisionTabs.isEmpty)
+            await recovery.setLoadError(nil)
+            let stored = try? await recovery.loadLatest()
+            #expect(stored?.archive.buffers.values.first?.utf8 == Data("previous launch unsaved data".utf8))
+            controller.close()
+        }
+    }
+
+    @Test @MainActor func explicitCloseAllUsesBulkDecisionAndQuitDoesNotRestoreDiscardedTabs() async {
+        let recovery = RoutingRecoveryStore()
+        let (controller, workspace, editor, panels, _) = await makeController(decisions: [], recoveryStore: recovery)
+        dirty(editor, with: "discard first")
+        _ = await workspace.addScratch()
+        dirty(editor, with: "discard second")
+        let oldIDs = Set(workspace.snapshot().tabs.map(\.id))
+        panels.allDecision = .discard
+        controller.performCloseAllTabs()
+        for _ in 0..<200 where workspace.snapshot().tabs.contains(where: { oldIDs.contains($0.id) }) {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(!workspace.snapshot().tabs.contains { oldIDs.contains($0.id) })
+        #expect(panels.allDecisionTabs.map(\.count) == [2])
+        #expect(panels.decisionTabs.isEmpty)
+        #expect(await controller.reviewDirtyDocumentsForTermination())
+        controller.close()
+        let (reopened, restored, _, _, _) = await makeController(decisions: [], recoveryStore: recovery)
+        defer { reopened.close() }
+        #expect(!restored.snapshot().tabs.contains { oldIDs.contains($0.id) })
     }
 
     @Test @MainActor func terminationDiscardAllUsesOnePromptAcrossWindowsAndKeepsCleanTabs() async {
@@ -1664,8 +1864,8 @@ struct FileLifecycleTests {
         }
 
         #expect(approved)
-        #expect(firstPanels.decisionTabs.count == 1)
-        #expect(secondPanels.decisionTabs.count == 1)
+        #expect(firstPanels.decisionTabs.isEmpty)
+        #expect(secondPanels.decisionTabs.isEmpty)
         #expect(await firstRecovery.commitCount >= 1)
         #expect(await secondRecovery.commitCount >= 1)
         #expect(await firstRecovery.latestTabCount() == 1)
@@ -1763,7 +1963,7 @@ struct FileLifecycleTests {
         for _ in 0..<2_000 where applicationReply == nil { await Task.yield() }
 
         #expect(applicationReply == true)
-        #expect(secondPanels.decisionTabs.count == 1)
+        #expect(secondPanels.decisionTabs.isEmpty)
         #expect(await secondRecovery.commitCount >= 1)
     }
 
@@ -1778,7 +1978,7 @@ struct FileLifecycleTests {
             approvedWindowClose: { $0.windowController?.close() }
         )
 
-        #expect(controller.windowShouldClose(controller.window!) == false)
+        controller.close() // Explicit teardown still joins its recovery reset.
         for _ in 0..<200 where !(await recoveryStore.hasEnteredBlockedReset()) {
             try? await Task.sleep(for: .milliseconds(5))
         }
@@ -1807,7 +2007,7 @@ struct FileLifecycleTests {
         for _ in 0..<2_000 where applicationReply == nil { await Task.yield() }
         #expect(applicationReply == true)
         #expect(await recoveryStore.latestTabCount() == nil)
-        #expect(latePanels.decisionTabs.count == 1)
+        #expect(latePanels.decisionTabs.isEmpty)
         #expect(await lateRecovery.commitCount >= 1)
     }
 
@@ -1876,81 +2076,36 @@ struct FileLifecycleTests {
         #expect(genericPresenter.failures.isEmpty)
     }
 
-    @Test @MainActor func terminationFileRetryResumesReviewFlushAndNewTerminateReply() async {
-        let saveURL = URL(fileURLWithPath: "/tmp/duckpad-termination-retry.txt")
-        let recoveryStore = RoutingRecoveryStore()
-        let genericPresenter = RecoveryErrorPresenterSpy()
-        let (controller, workspace, editor, panels, files) = await makeController(
-            decisions: [.save, .discard],
-            saveURL: saveURL,
-            writeError: .io("first termination save fails"),
-            errorPresenter: genericPresenter,
-            recoveryStore: recoveryStore
+    @Test @MainActor func recoveryFailureCancelsQuitAndNextAttemptPreservesLatestEdits() async {
+        let recovery = RoutingRecoveryStore()
+        let errors = RecoveryErrorPresenterSpy()
+        let (controller, workspace, editor, panels, _) = await makeController(
+            decisions: [], errorPresenter: errors, recoveryStore: recovery
         )
         defer { controller.close() }
-
-        dirty(editor, with: "first reviewed revision")
-        let firstTabID = workspace.snapshot().tabs[0].id
-        _ = await workspace.addScratch()
-        let secondTabID = workspace.snapshot().tabs.first(where: \.isActive)!.id
-        dirty(editor, with: "second tab remains to review")
-
+        dirty(editor, with: "keep original")
+        await recovery.setCommitError(.unavailable("recovery disk unavailable"))
         let coordinator = controller.terminationCoordinator!
-        var retryRequests = 0
-        var retryGateReply: NSApplication.TerminateReply?
-
-        var initialReplyCount = 0
-        let initialReply = await withCheckedContinuation { continuation in
-            #expect(coordinator.applicationShouldTerminate {
-                initialReplyCount += 1
-                continuation.resume(returning: $0)
-            } == .terminateLater)
+        let denied = await withCheckedContinuation { continuation in
+            #expect(coordinator.applicationShouldTerminate { continuation.resume(returning: $0) } == .terminateLater)
         }
-        #expect(!initialReply)
-        #expect(initialReplyCount == 1)
-        #expect(panels.failures.count == 1)
-        #expect(panels.fileFailureRetries.count == 1)
-        #expect(genericPresenter.failures.isEmpty)
-        #expect(workspace.snapshot().tabs.contains(where: { $0.id == firstTabID }))
-        #expect(workspace.snapshot().tabs.contains(where: { $0.id == secondTabID }))
-
-        // saveBeforeClosing activated the failed tab. Edit it after the first
-        // reply to prove Retry reviews and persists the latest revision. Drain
-        // the explicit workspace persistence seam first: an edit attempted
-        // during that transaction is correctly rejected and cannot be made
-        // reliable by polling after the fact.
+        #expect(!denied)
+        #expect(editor.textView.isEditable)
+        #expect(controller.hasDirtyDocuments)
+        #expect(!errors.failures.isEmpty)
+        #expect(panels.decisionTabs.isEmpty && panels.allDecisionTabs.isEmpty)
+        #expect(panels.saveRequests == 0)
         await workspace.waitForPendingPersistence()
-        #expect(workspace.snapshot().tabs.first(where: \.isActive)?.id == firstTabID)
-        #expect(editor.textView.string == "first reviewed revision")
-        let failedRevision = workspace.snapshot().tabs.first(where: { $0.id == firstTabID })!.buffer.revision
-        dirty(editor, with: "newest termination revision 🙂")
-        #expect(workspace.snapshot().tabs.first(where: { $0.id == firstTabID })!.buffer.revision == failedRevision + 1)
-        #expect(editor.textView.string == "newest termination revision 🙂")
-        await files.setWriteError(nil)
-        let recoveryCommitsBeforeRetry = await recoveryStore.commitCount
-        let retriedTerminationReply = await withCheckedContinuation { continuation in
-            coordinator.installApplicationRetryHandler { [weak coordinator] in
-                guard let coordinator else { return }
-                retryRequests += 1
-                retryGateReply = coordinator.applicationShouldTerminate {
-                    continuation.resume(returning: $0)
-                }
-            }
-            panels.retryLastFileFailure()
+        dirty(editor, with: "newest unsaved content 🙂")
+        await recovery.setCommitError(nil)
+        let approved = await withCheckedContinuation { continuation in
+            #expect(coordinator.applicationShouldTerminate { continuation.resume(returning: $0) } == .terminateLater)
         }
-
-        #expect(retryRequests == 1)
-        #expect(retryGateReply == .terminateLater)
-        #expect(retriedTerminationReply)
-        #expect(await files.text(at: saveURL) == "newest termination revision 🙂")
-        #expect(workspace.snapshot().tabs.contains(where: { $0.id == firstTabID }))
-        #expect(!workspace.snapshot().tabs.contains(where: { $0.id == secondTabID }))
-        #expect(!controller.hasDirtyDocuments)
-        #expect(panels.decisionTabs.count == 2)
-        #expect(Set(panels.decisionTabs).count == 2)
-        #expect(await recoveryStore.commitCount == recoveryCommitsBeforeRetry + 2)
-        #expect(panels.failures.count == 1)
-        #expect(genericPresenter.failures.isEmpty)
+        #expect(approved)
+        #expect(controller.hasDirtyDocuments)
+        let archive = try? await recovery.loadLatest()
+        #expect(archive?.archive.buffers.values.first?.utf8 == Data("newest unsaved content 🙂".utf8))
+        #expect(panels.saveRequests == 0)
     }
 
     @Test @MainActor func appTerminationReviewsEveryDirtyTabSerially() async {
