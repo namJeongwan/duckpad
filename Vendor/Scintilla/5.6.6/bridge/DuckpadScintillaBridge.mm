@@ -240,6 +240,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     BOOL _foldRecoveryProgressPending;
     BOOL _foldRecoveryProgressScheduled;
     NSUInteger _focusEventGeneration;
+    uint64_t _statusContentGeneration;
+    uint64_t _selectedCountGeneration;
+    NSUInteger _selectedCharacterCount;
+    std::vector<std::pair<NSInteger, NSInteger>> _countedSelections;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -314,6 +318,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     self.onEdit = nil;
     self.onError = nil;
     self.onFocus = nil;
+    self.onStatusChange = nil;
     self.onFoldStateChange = nil;
     self.onFoldRecoveryProgress = nil;
     self.onSmartIndentationStateChange = nil;
@@ -643,6 +648,42 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETZOOM wParam:(uptr_t)MAX(-10, MIN(20, level))];
 }
 - (NSUInteger)lineCount { return (NSUInteger)MAX(1, [_scintilla message:SCI_GETLINECOUNT]); }
+- (BOOL)overtype { return [_scintilla message:SCI_GETOVERTYPE] != 0; }
+- (void)setOvertype:(BOOL)value {
+    [_scintilla message:SCI_SETOVERTYPE wParam:value];
+    if (self.onStatusChange) self.onStatusChange();
+}
+- (NSUInteger)selectedCharacterCount {
+    std::vector<std::pair<NSInteger, NSInteger>> ranges;
+    const NSInteger selections = [_scintilla message:SCI_GETSELECTIONS];
+    for (NSInteger index = 0; index < selections; ++index) {
+        const NSInteger start = [_scintilla message:SCI_GETSELECTIONNSTART wParam:index];
+        const NSInteger end = [_scintilla message:SCI_GETSELECTIONNEND wParam:index];
+        if (end > start) ranges.emplace_back(start, end);
+    }
+    if (_selectedCountGeneration != _statusContentGeneration || ranges != _countedSelections) {
+        _selectedCharacterCount = 0;
+        for (const auto &range : ranges) {
+            _selectedCharacterCount += [_scintilla message:SCI_COUNTCHARACTERS wParam:range.first lParam:range.second];
+        }
+        _selectedCountGeneration = _statusContentGeneration;
+        _countedSelections = std::move(ranges);
+    }
+    return _selectedCharacterCount;
+}
+- (NSUInteger)selectedLineCount {
+    NSUInteger count = 0;
+    const NSInteger selections = [_scintilla message:SCI_GETSELECTIONS];
+    for (NSInteger index = 0; index < selections; ++index) {
+        const NSInteger start = [_scintilla message:SCI_GETSELECTIONNSTART wParam:index];
+        const NSInteger end = [_scintilla message:SCI_GETSELECTIONNEND wParam:index];
+        if (end > start) {
+            count += [_scintilla message:SCI_LINEFROMPOSITION wParam:end - 1]
+                   - [_scintilla message:SCI_LINEFROMPOSITION wParam:start] + 1;
+        }
+    }
+    return count;
+}
 - (NSUInteger)caretLine {
     return (NSUInteger)MAX(0, [_scintilla message:SCI_LINEFROMPOSITION wParam:self.caretUTF8Position]);
 }
@@ -2064,9 +2105,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     if (notification->nmhdr.code == SCN_UPDATEUI) {
         [self updateBraceHighlight];
         [self scheduleFoldRecoveryProgress];
+        if (self.onStatusChange && (notification->updated & (SC_UPDATE_CONTENT | SC_UPDATE_SELECTION))) {
+            self.onStatusChange();
+        }
     }
     if (notification->nmhdr.code != SCN_MODIFIED) return;
     const int flags = notification->modificationType;
+    if (flags & (SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT)) ++_statusContentGeneration;
     if (!_suppressEdit
         && (flags & (SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE)) != 0) {
         if (_publishesDocumentEdits && self.onWillModifyDocument) {

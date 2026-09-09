@@ -62,13 +62,15 @@ struct EditorGroupWorkspaceViewTests {
         #expect(!view.splitView.isVertical)
     }
 
-    @Test @MainActor func overlayHitTestingKeepsRightAndDownEdgesUnambiguous() {
+    @Test @MainActor func overlayHitTestingUsesTheNearestOfFourEdges() {
         let overlay = EditorGroupDropOverlay(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
         overlay.layoutSubtreeIfNeeded()
 
         #expect(overlay.zone(at: NSPoint(x: 590, y: 300)) == .right)
         #expect(overlay.zone(at: NSPoint(x: 300, y: 10)) == .down)
-        #expect(overlay.zone(at: NSPoint(x: 590, y: 10)) == .down)
+        #expect(overlay.zone(at: NSPoint(x: 590, y: 10)) == .right)
+        #expect(overlay.zone(at: NSPoint(x: 10, y: 200)) == .left)
+        #expect(overlay.zone(at: NSPoint(x: 300, y: 390)) == .up)
         #expect(overlay.zone(at: NSPoint(x: 300, y: 250)) == nil)
     }
 
@@ -226,13 +228,13 @@ struct EditorGroupWorkspaceViewTests {
             workspace: workspace(tabs: fixture.tabs),
             layout: layout(primary: fixture.tabs.map(\.id), primarySelection: fixture.tabs[0].id)
         )
-        fixture.view.dropOverlay.present(highlighting: nil)
+        fixture.view.dropOverlay.present(highlighting: .right)
 
         #expect(fixture.view.primaryPane.accessibilityLabel() == "Primary editor group")
         #expect(fixture.view.primaryPane.tabStrip.hostedCollectionView.accessibilityLabel() == "Primary editor group tabs")
         let children = fixture.view.dropOverlay.accessibilityChildren() as? [NSView]
         let labels = try #require(children?.compactMap { $0.accessibilityLabel() })
-        #expect(Set(labels) == ["Split editor to the right", "Split editor down"])
+        #expect(Set(labels) == ["Split editor to the right"])
     }
 
     @Test @MainActor func tabCollectionsKeepUniqueGroupIdentifiersAcrossCollapseAndReopen() throws {
@@ -279,7 +281,7 @@ struct EditorGroupWorkspaceViewTests {
         let payload = EditorGroupDragPayload(tabID: fixture.tabs[1].id, sourceGroup: .primary)
         let localRight = NSPoint(
             x: fixture.view.dropOverlay.bounds.maxX - 2,
-            y: fixture.view.dropOverlay.bounds.maxY - 2
+            y: fixture.view.dropOverlay.bounds.midY
         )
         let windowRight = fixture.view.dropOverlay.convert(localRight, to: nil)
         let sender = DraggingInfoStub(
@@ -300,7 +302,7 @@ struct EditorGroupWorkspaceViewTests {
         #expect(!fixture.view.dropOverlay.isPresenting)
     }
 
-    @Test @MainActor func nativeEdgeDragCannotCreateAThirdGroup() {
+    @Test @MainActor func nativeEdgeDragCanCreateAThirdGroup() {
         let fixture = makeFixture()
         let window = hostInWindow(fixture.view)
         defer {
@@ -323,15 +325,18 @@ struct EditorGroupWorkspaceViewTests {
             window: window,
             pasteboard: pasteboard(.init(tabID: fixture.tabs[1].id, sourceGroup: .primary)),
             location: fixture.view.dropOverlay.convert(
-                NSPoint(x: fixture.view.dropOverlay.bounds.maxX - 2, y: fixture.view.dropOverlay.bounds.maxY - 2),
+                NSPoint(x: fixture.view.dropOverlay.bounds.maxX - 2, y: fixture.view.dropOverlay.bounds.midY),
                 to: nil
             ),
             sourceOperationMask: .move
         )
 
-        #expect(fixture.view.draggingEntered(sender).isEmpty)
-        #expect(!fixture.view.prepareForDragOperation(sender))
-        #expect(!fixture.view.performDragOperation(sender))
+        var action: EditorGroupWorkspaceView.Action?
+        fixture.view.onAction = { action = $0 }
+        #expect(fixture.view.draggingEntered(sender) == .move)
+        #expect(fixture.view.prepareForDragOperation(sender))
+        #expect(fixture.view.performDragOperation(sender))
+        #expect(action == .splitAdjacent(fixture.tabs[1].id, .primary, .primary, .right, .move))
         #expect(!fixture.view.dropOverlay.isPresenting)
     }
 
@@ -350,7 +355,7 @@ struct EditorGroupWorkspaceViewTests {
             window: window,
             pasteboard: pasteboard(.init(tabID: fixture.tabs[1].id, sourceGroup: .primary)),
             location: fixture.view.dropOverlay.convert(
-                NSPoint(x: fixture.view.dropOverlay.bounds.maxX - 2, y: fixture.view.dropOverlay.bounds.maxY - 2),
+                NSPoint(x: fixture.view.dropOverlay.bounds.maxX - 2, y: fixture.view.dropOverlay.bounds.midY),
                 to: nil
             ),
             sourceOperationMask: .move

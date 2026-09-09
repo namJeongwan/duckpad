@@ -7,6 +7,31 @@
 
 ## Current chrome contract
 
+Duckpad preserves the familiar Notepad workflow: command ordering, document
+tabs, and status fields stay recognizable; improvements focus on interaction
+quality and native macOS behavior.
+
+The bottom bar follows the reference order: language, `Length` / `Lines`,
+`Ln` / `Col` / `Sel`, line endings, encoding, and `INS` / `OVR`. Subtle separators
+divide the fields in both appearances. Language, line endings, encoding, caret
+navigation, and insert mode remain actionable. Extension and symbol commands
+remain in their menus rather than occupying the document-status row. Length is
+the editor's byte length; selection counts Unicode characters and selected lines.
+Native content/selection notifications update the counters without copying the
+document. Unchanged selection counts are cached, and scrolling does not rescan
+the selection.
+
+The window command bar uses native visual-effect material and menu typography.
+While a dropdown is tracking, moving across another title immediately switches
+the native menu without requiring another click. A short-lived timer runs only
+in AppKit's menu-tracking run-loop mode, because ordinary view tracking events
+are not reliably dispatched there. Dismissal and teardown stop the timer.
+The real native menu probe runs in an isolated test process:
+`DUCKPAD_NATIVE_MENU_PROBE=1 swift test --no-parallel --filter nativeMenuTrackingLoop`.
+The regular suite covers the same switching and dismissal states with menu
+spies; isolation prevents AppKit's process-wide menu loop from terminating an
+unrelated later test.
+
 [Phase 33](38-editor-groups-compare-and-native-tabs.md) removes the visible
 Open Documents/`Documents (N)` control and every width reservation for it. The
 searchable switcher remains available through **Tabs → Open Document…** and

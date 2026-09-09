@@ -916,7 +916,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     #expect(binding.encoding == .utf8)
     #expect(binding.byteOrderMark == .present)
     #expect(binding.lineEnding == .crlf)
-    #expect(controller.fileFormatStatusSmokeState().text == "UTF-8 BOM · CRLF")
+    #expect(controller.fileFormatStatusSmokeState().text == "UTF-8 BOM")
     #expect(controller.fileFormatStatusSmokeState().isEnabled)
     let encodingItem = NSMenuItem(
         title: "UTF-8 with BOM",
@@ -971,7 +971,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     #expect(binding.encoding == .utf16BigEndian)
     #expect(binding.byteOrderMark == .absent)
     #expect(binding.lineEnding == .lf)
-    #expect(controller.fileFormatStatusSmokeState().text == "UTF-16 BE · LF")
+    #expect(controller.fileFormatStatusSmokeState().text == "UTF-16 BE")
 }
 
 @Test @MainActor func formatSaveAsRejectsTabSwitchWhilePanelIsOpen() async throws {

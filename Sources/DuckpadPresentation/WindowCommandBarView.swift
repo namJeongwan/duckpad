@@ -6,7 +6,7 @@ import AppKit
 /// the bar. AppKit validation, state, shortcuts, targets, and actions therefore
 /// remain authoritative in the application's native main menu.
 @MainActor
-public final class WindowCommandBarView: NSView {
+public final class WindowCommandBarView: NSVisualEffectView {
     public static let presentedMenuTitles = [
         "File", "Edit", "Search", "View", "Format",
         "Language", "Tabs", "Extensions", "Window",
@@ -23,11 +23,18 @@ public final class WindowCommandBarView: NSView {
     private var trackingAreasByTitle: [String: NSTrackingArea] = [:]
     private var hoveredMenuTitle: String?
     private var observesMenuTracking = false
+    private var isPresentingMenu = false
+    private var pendingMenuTitle: String?
+    private var trackingTimer: Timer?
+    private var lastTrackingPointer: NSPoint?
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
+        material = .headerView
+        blendingMode = .withinWindow
+        state = .followsWindowActiveState
         layer?.addSublayer(bottomSeparator)
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
@@ -93,6 +100,7 @@ public final class WindowCommandBarView: NSView {
     }
 
     public func dismissMenu() {
+        pendingMenuTitle = nil
         guard let title = activeMenuTitle else { return }
         menusByTitle[title]?.cancelTracking()
         setActiveMenuTitle(nil)
@@ -100,6 +108,7 @@ public final class WindowCommandBarView: NSView {
 
     public func tearDown() {
         dismissMenu()
+        stopPointerTracking()
         removeMenuButtons()
         stopObservingMenuTracking()
     }
@@ -130,6 +139,7 @@ public final class WindowCommandBarView: NSView {
     public override func mouseEntered(with event: NSEvent) {
         guard let title = event.trackingArea?.userInfo?["menuTitle"] as? String else { return }
         setHoveredMenuTitle(title)
+        switchTrackingMenu(to: title)
     }
 
     public override func mouseExited(with event: NSEvent) {
@@ -160,9 +170,9 @@ public final class WindowCommandBarView: NSView {
         button.bezelStyle = .inline
         button.isBordered = false
         button.controlSize = .small
-        button.font = .systemFont(ofSize: 12, weight: .regular)
+        button.font = .menuBarFont(ofSize: 13)
         button.wantsLayer = true
-        button.layer?.cornerRadius = 5
+        button.layer?.cornerRadius = 7
         button.setAccessibilityRole(.popUpButton)
         button.setAccessibilityIdentifier("duckpad.window.command.\(title.lowercased())")
         button.setAccessibilityLabel("\(title) menu")
@@ -174,18 +184,70 @@ public final class WindowCommandBarView: NSView {
     }
 
     @objc private func showMenu(_ sender: NSButton) {
-        let title = sender.title
-        guard let menu = prepareMenuForPresentation(named: title) else { return }
-        let buttonFrame = sender.convert(sender.bounds, to: self)
-        menu.popUp(
-            positioning: nil,
-            at: NSPoint(x: buttonFrame.minX, y: bounds.minY - 1),
-            in: self
-        )
-        if activeMenuTitle == title {
+        guard !isPresentingMenu, sender.isEnabled else { return }
+        isPresentingMenu = true
+        startPointerTracking()
+        defer {
+            isPresentingMenu = false
+            pendingMenuTitle = nil
+            stopPointerTracking()
             setActiveMenuTitle(nil)
             synchronizeHoverWithPointer()
         }
+        var nextTitle: String? = sender.title
+        while let title = nextTitle, let button = buttonsByTitle[title],
+              button.isEnabled, let menu = prepareMenuForPresentation(named: title) {
+            pendingMenuTitle = nil
+            let buttonFrame = button.convert(button.bounds, to: self)
+            menu.popUp(
+                positioning: nil,
+                at: NSPoint(x: buttonFrame.minX, y: bounds.minY - 1),
+                in: self
+            )
+            nextTitle = pendingMenuTitle
+        }
+    }
+
+    // NSMenu runs its own event-tracking loop, where view mouseEntered events
+    // aren't reliably delivered. Poll only during that short native menu session.
+    private func startPointerTracking() {
+        lastTrackingPointer = window?.mouseLocationOutsideOfEventStream
+        let timer = Timer(timeInterval: 1 / 60, target: self,
+                          selector: #selector(pollMenuPointer), userInfo: nil, repeats: true)
+        trackingTimer = timer
+        RunLoop.main.add(timer, forMode: .eventTracking)
+    }
+
+    private func stopPointerTracking() {
+        trackingTimer?.invalidate()
+        trackingTimer = nil
+        lastTrackingPointer = nil
+    }
+
+    @objc private func pollMenuPointer() {
+        guard let window else { dismissMenu(); return }
+        trackMenuPointer(at: window.mouseLocationOutsideOfEventStream)
+    }
+
+    func trackMenuPointer(at point: NSPoint) {
+        guard point != lastTrackingPointer else { return }
+        lastTrackingPointer = point
+        guard let title = menuTitles.first(where: { title in
+            guard let button = buttonsByTitle[title], button.isEnabled,
+                  !button.isHiddenOrHasHiddenAncestor else { return false }
+            let local = button.convert(point, from: nil)
+            return button.bounds.contains(local) && button.visibleRect.contains(local)
+        }) else { return }
+        setHoveredMenuTitle(title)
+        switchTrackingMenu(to: title)
+    }
+
+    private func switchTrackingMenu(to title: String) {
+        guard isPresentingMenu, let activeMenuTitle,
+              activeMenuTitle != title, pendingMenuTitle != title,
+              buttonsByTitle[title]?.isEnabled == true else { return }
+        pendingMenuTitle = title
+        menusByTitle[activeMenuTitle]?.cancelTrackingWithoutAnimation()
     }
 
     private func startObservingMenuTracking() {
@@ -325,7 +387,7 @@ public final class WindowCommandBarView: NSView {
     }
 
     private func applyAppearance() {
-        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96).cgColor
+        layer?.backgroundColor = NSColor.clear.cgColor
         bottomSeparator.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.62).cgColor
         for title in menuTitles {
             guard let button = buttonsByTitle[title] else { continue }

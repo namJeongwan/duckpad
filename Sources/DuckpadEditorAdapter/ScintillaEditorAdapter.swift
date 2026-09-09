@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -53,6 +53,20 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     public private(set) var lastRecoveryJournalWorkByteCount = 0
     public private(set) var recoveryJournalAppendCount = 0
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
+    public var onEditorStatusChange: (() -> Void)?
+    public var editorStatus: EditorStatusSnapshot? {
+        guard let view = activeScintillaView else { return nil }
+        return EditorStatusSnapshot(
+            length: Int(clamping: view.documentByteLength), lines: Int(clamping: view.lineCount),
+            line: Int(clamping: view.caretLine) + 1, column: Int(clamping: view.caretColumn) + 1,
+            selectedCharacters: Int(clamping: view.selectedCharacterCount),
+            selectedLines: Int(clamping: view.selectedLineCount), isOvertype: view.overtype
+        )
+    }
+    public func toggleOvertype() {
+        guard inputEnabled, let view = activeScintillaView else { return }
+        view.overtype.toggle()
+    }
     public var onFoldStateChange: (() -> Void)?
     public var onEditorGroupFocus: ((EditorGroupID) -> Void)?
 
@@ -63,7 +77,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private var acceptedEdits: [BufferID: [EditorIncrementalEdit]] = [:]
     private var bufferViews: [BufferID: DPScintillaEditorView] = [:]
     private var secondaryBufferViews: [BufferID: DPScintillaEditorView] = [:]
-    private var groupPeerViews: [BufferID: DPScintillaEditorView] = [:]
+    private var groupPeerViews: [BufferID: [DPScintillaEditorView]] = [:]
     private var bufferGroupViews: [BufferID: [EditorGroupID: DPScintillaEditorView]] = [:]
     private var displayedGroupBuffers: [EditorGroupID: EditorBufferDescriptor] = [:]
     private var displayedGroupViews: [EditorGroupID: DPScintillaEditorView] = [:]
@@ -78,6 +92,9 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private let primaryHost = NSView(frame: .zero)
     private let internalSecondaryHost = NSView(frame: .zero)
     private let secondaryGroupHost = NSView(frame: .zero)
+    private let additionalGroupHosts: [EditorGroupID: NSView] = [.tertiary: NSView(), .quaternary: NSView()]
+
+    public var additionalEditorGroupViews: [EditorGroupID: NSView] { additionalGroupHosts }
     private var primaryActiveView: DPScintillaEditorView?
     private var secondaryActiveView: DPScintillaEditorView?
     public private(set) var splitOrientation: EditorSplitOrientation?
@@ -190,6 +207,16 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         editorGroupOrientation = orientation
     }
 
+    public func retainEditorGroups(_ groups: Set<EditorGroupID>) {
+        for group in EditorGroupID.allCases where !groups.contains(group) {
+            displayedGroupViews.removeValue(forKey: group)?.removeFromSuperview()
+            displayedGroupBuffers.removeValue(forKey: group)
+            for bufferID in Array(bufferGroupViews.keys) {
+                bufferGroupViews[bufferID]?[group] = nil
+            }
+        }
+    }
+
     public func activateEditorGroup(_ group: EditorGroupID) {
         guard !isInvalidated,
               group == .primary || hasVisibleGroups,
@@ -204,6 +231,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         if let editorView = displayedGroupViews[group] {
             lastFocusedViewID = ObjectIdentifier(editorView)
         }
+        onEditorStatusChange?()
     }
 
     public func display(_ buffer: EditorBufferDescriptor, in group: EditorGroupID) {
@@ -403,19 +431,21 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         retiredSecondary?.onSmartIndentationStateChange = nil
         retiredSecondary?.removeFromSuperview()
         retiredSecondary?.invalidate()
-        let retiredGroupPeer = groupPeerViews.removeValue(forKey: bufferID)
-        retiredGroupPeer?.cancelPendingSmartIndentation()
-        if let retiredGroupPeer { discardViewIdentity(retiredGroupPeer) }
-        retiredGroupPeer?.onEdit = nil
-        retiredGroupPeer?.onWillModifyDocument = nil
-        retiredGroupPeer?.onError = nil
-        retiredGroupPeer?.onFocus = nil
-        retiredGroupPeer?.onFoldStateChange = nil
-        retiredGroupPeer?.onFoldRecoveryProgress = nil
-        retiredGroupPeer?.onSmartIndentationStateChange = nil
-        retiredGroupPeer?.removeFromSuperview()
-        retiredGroupPeer?.invalidate()
-        let retiredViews = [retiredView, retiredSecondary, retiredGroupPeer].compactMap { $0 }
+        let retiredGroupPeers = groupPeerViews.removeValue(forKey: bufferID) ?? []
+        for peer in retiredGroupPeers {
+            peer.cancelPendingSmartIndentation()
+            discardViewIdentity(peer)
+            peer.onEdit = nil
+            peer.onWillModifyDocument = nil
+            peer.onError = nil
+            peer.onFocus = nil
+            peer.onFoldStateChange = nil
+            peer.onFoldRecoveryProgress = nil
+            peer.onSmartIndentationStateChange = nil
+            peer.removeFromSuperview()
+            peer.invalidate()
+        }
+        let retiredViews = [retiredView, retiredSecondary].compactMap { $0 } + retiredGroupPeers
         if retiredViews.contains(where: { primaryActiveView === $0 }) {
             primaryActiveView = nil
         }
@@ -432,7 +462,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         lifecycleGeneration &+= 1
         let editorViews = Array(bufferViews.values)
             + Array(secondaryBufferViews.values)
-            + Array(groupPeerViews.values)
+            + groupPeerViews.values.flatMap { $0 }
         for editorView in editorViews {
             editorView.cancelPendingSmartIndentation()
             editorView.onWillModifyDocument = nil
@@ -480,6 +510,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         scheduledEditorGroupCloseRequestGeneration = nil
         onEdit = nil
         onFoldStateChange = nil
+        onEditorStatusChange = nil
         onEditorGroupFocus = nil
     }
 
@@ -496,11 +527,12 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         for (bufferID, editorView) in secondaryBufferViews {
             editorView.isInputEnabled = isInputEnabled(for: bufferID)
         }
-        for (bufferID, editorView) in groupPeerViews {
-            editorView.isInputEnabled = isInputEnabled(for: bufferID)
+        for (bufferID, peers) in groupPeerViews {
+            peers.forEach { $0.isInputEnabled = isInputEnabled(for: bufferID) }
         }
         view.alphaValue = isEnabled ? 1 : 0.65
         secondaryGroupView.alphaValue = isEnabled ? 1 : 0.65
+        additionalGroupHosts.values.forEach { $0.alphaValue = isEnabled ? 1 : 0.65 }
     }
 
     public func focus() { activeScintillaView?.focusEditor() }
@@ -836,7 +868,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     public func cancelCompletion() {
         bufferViews.values.forEach { $0.cancelCompletion() }
         secondaryBufferViews.values.forEach { $0.cancelCompletion() }
-        groupPeerViews.values.forEach { $0.cancelCompletion() }
+        groupPeerViews.values.flatMap { $0 }.forEach { $0.cancelCompletion() }
     }
 
     public func detectionPrefix(maximumBytes: Int) -> Data {
@@ -880,7 +912,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         let native = nativePalette(palette)
         bufferViews.values.forEach { $0.apply(native) }
         secondaryBufferViews.values.forEach { $0.apply(native) }
-        groupPeerViews.values.forEach { $0.apply(native) }
+        groupPeerViews.values.flatMap { $0 }.forEach { $0.apply(native) }
     }
 
     public func toggleLineComment(prefix: String) -> EditorEditOutcome {
@@ -1264,7 +1296,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         pendingRecoveryBuffers.insert(bufferID)
         bufferViews[bufferID]?.isInputEnabled = false
         secondaryBufferViews[bufferID]?.isInputEnabled = false
-        groupPeerViews[bufferID]?.isInputEnabled = false
+        groupPeerViews[bufferID]?.forEach { $0.isInputEnabled = false }
         Task { @MainActor [weak self] in
             await Task.yield()
             guard let self, self.isCurrentLifecycle(generation) else { return }
@@ -1338,11 +1370,13 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         } ?? false
         let editorView: DPScintillaEditorView
         if publisherIsAssigned {
-            if let existing = groupPeerViews[bufferID] {
+            if let existing = groupPeerViews[bufferID]?.first(where: { peer in
+                !(bufferGroupViews[bufferID]?.values.contains { $0 === peer } ?? false)
+            }) {
                 editorView = existing
             } else {
                 editorView = makeSharedGroupPeer(for: bufferID, publisher: publisher)
-                groupPeerViews[bufferID] = editorView
+                groupPeerViews[bufferID, default: []].append(editorView)
             }
         } else {
             editorView = publisher
@@ -1367,7 +1401,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     private func attach(_ editorView: DPScintillaEditorView, to group: EditorGroupID) {
-        let host = group == .primary ? primaryHost : secondaryGroupHost
+        let host = group == .primary ? primaryHost : (additionalGroupHosts[group] ?? secondaryGroupHost)
         guard displayedGroupViews[group] !== editorView || editorView.superview !== host else {
             return
         }
@@ -1396,8 +1430,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
 
     private func allViews(for bufferID: BufferID) -> [DPScintillaEditorView] {
         var identifiers: Set<ObjectIdentifier> = []
-        return [bufferViews[bufferID], secondaryBufferViews[bufferID], groupPeerViews[bufferID]]
-            .compactMap { $0 }
+        return ([bufferViews[bufferID], secondaryBufferViews[bufferID]].compactMap { $0 } + (groupPeerViews[bufferID] ?? []))
             .filter { identifiers.insert(ObjectIdentifier($0)).inserted }
     }
 
@@ -1517,7 +1550,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         editorGroupOrientation = nil
         activeEditorGroup = .primary
 
-        for peer in groupPeerViews.values {
+        for peer in groupPeerViews.values.flatMap({ $0 }) {
             peer.cancelPendingSmartIndentation()
             discardViewIdentity(peer)
             peer.onWillModifyDocument = nil
@@ -1596,6 +1629,10 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         editorView.onError = { [weak self] error in
             self?.receiveBridgeError(error, bufferID: bufferID)
         }
+        editorView.onStatusChange = { [weak self, weak editorView] in
+            guard let self, let editorView, self.activeScintillaView === editorView else { return }
+            self.onEditorStatusChange?()
+        }
         editorView.onFocus = { [weak self, weak editorView] in
             guard let self, let editorView,
                   self.isLive(editorView, for: bufferID) else { return }
@@ -1604,6 +1641,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
                 self.activateEditorGroup(group)
                 self.onEditorGroupFocus?(group)
             }
+            self.onEditorStatusChange?()
         }
         editorView.onFoldStateChange = { [weak self, weak editorView] in
             guard let self, let editorView,
@@ -1638,7 +1676,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private func isLive(_ editorView: DPScintillaEditorView, for bufferID: BufferID) -> Bool {
         bufferViews[bufferID] === editorView
             || secondaryBufferViews[bufferID] === editorView
-            || groupPeerViews[bufferID] === editorView
+            || (groupPeerViews[bufferID]?.contains { $0 === editorView } ?? false)
     }
 
     private func pendingSmartIndentationView(for bufferID: BufferID) -> DPScintillaEditorView? {
@@ -1649,7 +1687,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         if let secondary = secondaryBufferViews[bufferID], ObjectIdentifier(secondary) == identifier {
             return secondary
         }
-        if let peer = groupPeerViews[bufferID], ObjectIdentifier(peer) == identifier {
+        if let peer = groupPeerViews[bufferID]?.first(where: { ObjectIdentifier($0) == identifier }) {
             return peer
         }
         pendingSmartIndentationViewIDs.removeValue(forKey: bufferID)
@@ -1761,7 +1799,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             revisionExhaustedBuffers.insert(bufferID)
             bufferViews[bufferID]?.isInputEnabled = false
             secondaryBufferViews[bufferID]?.isInputEnabled = false
-            groupPeerViews[bufferID]?.isInputEnabled = false
+            groupPeerViews[bufferID]?.forEach { $0.isInputEnabled = false }
         }
     }
 

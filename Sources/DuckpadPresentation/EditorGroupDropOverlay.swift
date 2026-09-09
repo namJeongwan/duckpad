@@ -3,14 +3,18 @@ import DuckpadApplication
 
 @MainActor
 public final class EditorGroupDropOverlay: NSView {
-    public enum Zone: Equatable, Sendable {
+    public enum Zone: CaseIterable, Hashable, Sendable {
+        case left
         case right
+        case up
         case down
+
+        public var precedesTarget: Bool { self == .left || self == .up }
 
         public var orientation: EditorGroupSplitOrientation {
             switch self {
-            case .right: .sideBySide
-            case .down: .stacked
+            case .left, .right: .sideBySide
+            case .up, .down: .stacked
             }
         }
     }
@@ -18,8 +22,7 @@ public final class EditorGroupDropOverlay: NSView {
     public private(set) var highlightedZone: Zone?
     public var isPresenting: Bool { !isHidden }
 
-    private let rightDropZone = EditorGroupDropZoneView(zone: .right)
-    private let downDropZone = EditorGroupDropZoneView(zone: .down)
+    private var zoneViews: [Zone: EditorGroupDropZoneView] = [:]
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -27,8 +30,11 @@ public final class EditorGroupDropOverlay: NSView {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
         setAccessibilityElement(false)
-        addSubview(rightDropZone)
-        addSubview(downDropZone)
+        for zone in Zone.allCases {
+            let view = EditorGroupDropZoneView(zone: zone)
+            zoneViews[zone] = view
+            addSubview(view)
+        }
         isHidden = true
     }
 
@@ -37,50 +43,44 @@ public final class EditorGroupDropOverlay: NSView {
 
     public override func layout() {
         super.layout()
-        let frames = zoneFrames
-        rightDropZone.frame = frames.right
-        downDropZone.frame = frames.down
+        for (zone, view) in zoneViews { view.frame = previewFrame(for: zone) }
     }
 
     public override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     public func zone(at point: NSPoint) -> Zone? {
-        let frames = zoneFrames
-        if frames.down.contains(point) { return .down }
-        if frames.right.contains(point) { return .right }
-        return nil
+        guard bounds.contains(point), bounds.width > 0, bounds.height > 0 else { return nil }
+        let distances: [(Zone, CGFloat)] = [
+            (.left, (point.x - bounds.minX) / bounds.width),
+            (.right, (bounds.maxX - point.x) / bounds.width),
+            (.up, (bounds.maxY - point.y) / bounds.height),
+            (.down, (point.y - bounds.minY) / bounds.height),
+        ]
+        guard let nearest = distances.min(by: { $0.1 < $1.1 }), nearest.1 < 0.30 else { return nil }
+        return nearest.0
     }
 
     public func present(highlighting zone: Zone?) {
         isHidden = false
         highlightedZone = zone
-        rightDropZone.setHighlighted(zone == .right)
-        downDropZone.setHighlighted(zone == .down)
+        for (candidate, view) in zoneViews {
+            view.isHidden = candidate != zone
+            view.setHighlighted(candidate == zone)
+        }
     }
 
     public func dismiss() {
         highlightedZone = nil
-        rightDropZone.setHighlighted(false)
-        downDropZone.setHighlighted(false)
+        for view in zoneViews.values { view.setHighlighted(false) }
         isHidden = true
     }
 
-    private var zoneFrames: (right: NSRect, down: NSRect) {
-        guard bounds.width > 0, bounds.height > 0 else { return (.zero, .zero) }
-        let edgeWidth = min(bounds.width * 0.5, max(72, bounds.width * 0.30))
-        let edgeHeight = min(bounds.height * 0.5, max(72, bounds.height * 0.30))
-        let right = NSRect(
-            x: bounds.maxX - edgeWidth,
-            y: bounds.minY + edgeHeight,
-            width: edgeWidth,
-            height: max(0, bounds.height - edgeHeight)
-        )
-        let down = NSRect(
-            x: bounds.minX,
-            y: bounds.minY,
-            width: bounds.width,
-            height: edgeHeight
-        )
-        return (right, down)
+    public func previewFrame(for zone: Zone) -> NSRect {
+        switch zone {
+        case .left: NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width / 2, height: bounds.height)
+        case .right: NSRect(x: bounds.midX, y: bounds.minY, width: bounds.width / 2, height: bounds.height)
+        case .up: NSRect(x: bounds.minX, y: bounds.midY, width: bounds.width, height: bounds.height / 2)
+        case .down: NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: bounds.height / 2)
+        }
     }
 }

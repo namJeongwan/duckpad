@@ -8,6 +8,7 @@ public final class EditorGroupWorkspaceView: NSView {
         case select(TabID, EditorGroupID)
         case reorder(TabID, EditorGroupID, Int)
         case split(TabID, EditorGroupID, EditorGroupSplitOrientation, EditorGroupDropOperation)
+        case splitAdjacent(TabID, EditorGroupID, EditorGroupID, EditorGroupDropOverlay.Zone, EditorGroupDropOperation)
         case move(TabID, EditorGroupID, EditorGroupID)
         case clone(TabID, EditorGroupID, EditorGroupID)
         case focus(EditorGroupID)
@@ -22,24 +23,41 @@ public final class EditorGroupWorkspaceView: NSView {
     public var onAction: ((Action) -> Void)?
 
     private let secondaryEditorHost: NSView
+    private let additionalEditorHosts: [EditorGroupID: NSView]
+    private var additionalPanes: [EditorGroupID: EditorGroupPaneView] = [:]
+    private var renderedTree: EditorGroupLayoutTree?
+    private var needsInitialDividerLayout = false
+    private var dividerFractions: [(EditorGroupLayoutTree, CGFloat)] = []
+    private var dropTarget: EditorGroupID = .primary
+
+    public func pane(for group: EditorGroupID) -> EditorGroupPaneView? {
+        switch group {
+        case .primary: primaryPane
+        case .secondary: secondaryPane
+        case .tertiary, .quaternary: additionalPanes[group]
+        }
+    }
     private let modifierFlagsProvider: () -> NSEvent.ModifierFlags
     private var layoutSnapshot: EditorGroupLayoutSnapshot?
     private let groupPasteboardType = NSPasteboard.PasteboardType(EditorGroupDragPayload.pasteboardType)
 
-    public convenience init(primaryEditorHost: NSView, secondaryEditorHost: NSView) {
+    public convenience init(primaryEditorHost: NSView, secondaryEditorHost: NSView, additionalEditorHosts: [EditorGroupID: NSView] = [:]) {
         self.init(
             primaryEditorHost: primaryEditorHost,
             secondaryEditorHost: secondaryEditorHost,
-            modifierFlagsProvider: { NSEvent.modifierFlags }
+            modifierFlagsProvider: { NSEvent.modifierFlags },
+            additionalEditorHosts: additionalEditorHosts
         )
     }
 
     init(
         primaryEditorHost: NSView,
         secondaryEditorHost: NSView,
-        modifierFlagsProvider: @escaping () -> NSEvent.ModifierFlags
+        modifierFlagsProvider: @escaping () -> NSEvent.ModifierFlags,
+        additionalEditorHosts: [EditorGroupID: NSView] = [:]
     ) {
         self.secondaryEditorHost = secondaryEditorHost
+        self.additionalEditorHosts = additionalEditorHosts
         self.modifierFlagsProvider = modifierFlagsProvider
         primaryPane = EditorGroupPaneView(groupID: .primary, editorHostView: primaryEditorHost)
         super.init(frame: .zero)
@@ -52,17 +70,13 @@ public final class EditorGroupWorkspaceView: NSView {
         splitView.addArrangedSubview(primaryPane)
         addSubview(splitView)
 
-        dropOverlay.translatesAutoresizingMaskIntoConstraints = false
+        dropOverlay.translatesAutoresizingMaskIntoConstraints = true
         addSubview(dropOverlay, positioned: .above, relativeTo: splitView)
         NSLayoutConstraint.activate([
             splitView.leadingAnchor.constraint(equalTo: leadingAnchor),
             splitView.trailingAnchor.constraint(equalTo: trailingAnchor),
             splitView.topAnchor.constraint(equalTo: topAnchor),
             splitView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            dropOverlay.leadingAnchor.constraint(equalTo: primaryPane.editorHostView.leadingAnchor),
-            dropOverlay.trailingAnchor.constraint(equalTo: primaryPane.editorHostView.trailingAnchor),
-            dropOverlay.topAnchor.constraint(equalTo: primaryPane.editorHostView.topAnchor),
-            dropOverlay.bottomAnchor.constraint(equalTo: primaryPane.editorHostView.bottomAnchor),
         ])
         registerForDraggedTypes([groupPasteboardType])
         bind(primaryPane)
@@ -75,41 +89,64 @@ public final class EditorGroupWorkspaceView: NSView {
         layoutSnapshot = layout
         cancelDrop()
 
-        if let orientation = layout.orientation {
-            ensureSecondaryPane()
-            splitView.isVertical = orientation == .sideBySide
-        } else {
-            removeSecondaryPane()
+        if renderedTree != layout.tree {
+            rebuildPanes(for: layout.tree)
+            renderedTree = layout.tree
         }
 
         let tabsByID = Dictionary(uniqueKeysWithValues: workspace.tabs.map { ($0.id, $0) })
-        primaryPane.apply(
-            tabs: layout.primaryTabIDs.compactMap { tabsByID[$0] },
-            selectedTabID: layout.primarySelectedTabID,
-            focused: layout.focusedGroup == .primary
-        )
-        secondaryPane?.apply(
-            tabs: layout.secondaryTabIDs.compactMap { tabsByID[$0] },
-            selectedTabID: layout.secondarySelectedTabID,
-            focused: layout.focusedGroup == .secondary
-        )
+        for group in layout.visibleGroups {
+            pane(for: group)?.apply(
+                tabs: layout.tabIDs(in: group).compactMap { tabsByID[$0] },
+                selectedTabID: layout.selectedTabID(in: group),
+                focused: layout.focusedGroup == group
+            )
+        }
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+    }
+
+    public override func layout() {
+        super.layout()
+        if needsInitialDividerLayout, splitView.bounds.width > 0, splitView.bounds.height > 0 {
+            needsInitialDividerLayout = false
+            balanceDividers(in: splitView, tree: renderedTree ?? .leaf(.primary))
+        }
+        positionDropOverlay(in: dropTarget)
+    }
+
+    private func balanceDividers(in split: NSSplitView, tree: EditorGroupLayoutTree) {
+        if case .split(let orientation, let first, let second) = tree, split.arrangedSubviews.count == 2 {
+            let length = split.isVertical ? split.bounds.width : split.bounds.height
+            let fraction = dividerFractions.first { old, _ in
+                guard case .split(let axis, let a, let b) = old, axis == orientation else { return false }
+                return Set(first.groups).isSuperset(of: a.groups) && Set(second.groups).isSuperset(of: b.groups)
+            }?.1 ?? 0.5
+            split.setPosition((length - split.dividerThickness) * fraction, ofDividerAt: 0)
+            split.layoutSubtreeIfNeeded()
+            for (node, child) in zip([first, second], split.arrangedSubviews) {
+                if let nested = child as? NSSplitView { balanceDividers(in: nested, tree: node) }
+            }
+        } else { split.adjustSubviews() }
+    }
+
+    private func positionDropOverlay(in group: EditorGroupID) {
+        guard let host = pane(for: group)?.editorHostView else { return }
+        dropTarget = group
+        dropOverlay.frame = host.convert(host.bounds, to: self)
+        dropOverlay.layoutSubtreeIfNeeded()
     }
 
     public func requestFocus(_ group: EditorGroupID) {
-        guard group == .primary || secondaryPane != nil else { return }
+        guard visibleGroups.contains(group) else { return }
         onAction?(.focus(group))
     }
 
     @discardableResult
     public func applyFocus(layout: EditorGroupLayoutSnapshot) -> Bool {
-        if layout.orientation == nil {
-            guard layout.focusedGroup == .primary, secondaryPane == nil else { return false }
-        } else {
-            guard secondaryPane != nil else { return false }
-        }
+        guard renderedTree == layout.tree else { return false }
         layoutSnapshot = layout
-        primaryPane.setFocused(layout.focusedGroup == .primary)
-        secondaryPane?.setFocused(layout.focusedGroup == .secondary)
+        for group in layout.visibleGroups { pane(for: group)?.setFocused(layout.focusedGroup == group) }
         return true
     }
 
@@ -119,7 +156,8 @@ public final class EditorGroupWorkspaceView: NSView {
         optionPressed: Bool
     ) -> EditorGroupDropOperation? {
         guard let layoutSnapshot,
-              layoutSnapshot.orientation == nil,
+              layoutSnapshot.visibleGroups.count < 4,
+              layoutSnapshot.visibleGroups.contains(dropTarget),
               layoutSnapshot.tabIDs(in: payload.sourceGroup).contains(payload.tabID),
               dropOverlay.zone(at: location) != nil else { return nil }
         let operation = EditorGroupDragPayload.dropOperation(optionPressed: optionPressed)
@@ -136,7 +174,8 @@ public final class EditorGroupWorkspaceView: NSView {
         optionPressed: Bool
     ) -> EditorGroupDropOperation? {
         guard let layoutSnapshot,
-              layoutSnapshot.orientation == nil,
+              layoutSnapshot.visibleGroups.count < 4,
+              layoutSnapshot.visibleGroups.contains(dropTarget),
               layoutSnapshot.tabIDs(in: payload.sourceGroup).contains(payload.tabID) else {
             cancelDrop()
             return nil
@@ -162,7 +201,11 @@ public final class EditorGroupWorkspaceView: NSView {
             location: location,
             optionPressed: optionPressed
         ), let zone = dropOverlay.zone(at: location) else { return false }
-        onAction?(.split(payload.tabID, payload.sourceGroup, zone.orientation, operation))
+        if layoutSnapshot?.orientation == nil, zone == .right || zone == .down {
+            onAction?(.split(payload.tabID, payload.sourceGroup, zone.orientation, operation))
+        } else {
+            onAction?(.splitAdjacent(payload.tabID, payload.sourceGroup, dropTarget, zone, operation))
+        }
         return true
     }
 
@@ -174,6 +217,8 @@ public final class EditorGroupWorkspaceView: NSView {
         unregisterDraggedTypes()
         cancelDrop()
         removeSecondaryPane()
+        for pane in additionalPanes.values { pane.tearDown(); pane.removeFromSuperview() }
+        additionalPanes.removeAll()
         primaryPane.tearDown()
         layoutSnapshot = nil
         onAction = nil
@@ -272,20 +317,79 @@ public final class EditorGroupWorkspaceView: NSView {
     }
 
     private var visibleGroups: Set<EditorGroupID> {
-        secondaryPane == nil ? [.primary] : Set(EditorGroupID.allCases)
+        Set(layoutSnapshot?.visibleGroups ?? [.primary])
     }
 
-    private func ensureSecondaryPane() {
-        guard secondaryPane == nil else { return }
-        let pane = EditorGroupPaneView(groupID: .secondary, editorHostView: secondaryEditorHost)
-        secondaryPane = pane
-        bind(pane)
-        splitView.addArrangedSubview(pane)
+    private func rebuildPanes(for tree: EditorGroupLayoutTree) {
+        dividerFractions.removeAll(keepingCapacity: true)
+        func capture(_ node: EditorGroupLayoutTree, from split: NSSplitView) {
+            guard case .split(_, let first, let second) = node,
+                  split.arrangedSubviews.count == 2 else { return }
+            let length = (split.isVertical ? split.bounds.width : split.bounds.height) - split.dividerThickness
+            let firstFrame = split.arrangedSubviews[0].frame
+            if length > 0 {
+                let fraction = (split.isVertical ? firstFrame.width : firstFrame.height) / length
+                dividerFractions.append((node, min(0.9, max(0.1, fraction))))
+            }
+            for (child, view) in zip([first, second], split.arrangedSubviews) {
+                if let nested = view as? NSSplitView { capture(child, from: nested) }
+            }
+        }
+        if let renderedTree { capture(renderedTree, from: splitView) }
+        let groups = Set(tree.groups)
+        if groups.contains(.secondary), secondaryPane == nil {
+            let pane = EditorGroupPaneView(groupID: .secondary, editorHostView: secondaryEditorHost)
+            secondaryPane = pane
+            bind(pane)
+        }
+        for group in [EditorGroupID.tertiary, .quaternary] {
+            if groups.contains(group), additionalPanes[group] == nil {
+                let pane = EditorGroupPaneView(groupID: group, editorHostView: additionalEditorHosts[group] ?? NSView())
+                additionalPanes[group] = pane
+                bind(pane)
+            } else if !groups.contains(group), let pane = additionalPanes.removeValue(forKey: group) {
+                pane.tearDown()
+                pane.removeFromSuperview()
+            }
+        }
+        if !groups.contains(.secondary) { removeSecondaryPane() }
+        for pane in [primaryPane, secondaryPane].compactMap({ $0 }) + Array(additionalPanes.values) {
+            if let parent = pane.superview as? NSSplitView { parent.removeArrangedSubview(pane) }
+            pane.removeFromSuperview()
+        }
+        for view in splitView.arrangedSubviews { splitView.removeArrangedSubview(view); view.removeFromSuperview() }
+        func populate(_ tree: EditorGroupLayoutTree, in split: NSSplitView) {
+            switch tree {
+            case .leaf(let group):
+                if let pane = pane(for: group) {
+                    pane.translatesAutoresizingMaskIntoConstraints = true
+                    pane.frame = split.bounds
+                    split.addArrangedSubview(pane)
+                }
+            case .split(let orientation, let first, let second):
+                split.isVertical = orientation == .sideBySide
+                for node in [first, second] {
+                    if case .leaf(let group) = node, let pane = pane(for: group) {
+                        pane.translatesAutoresizingMaskIntoConstraints = true
+                        pane.frame = split.bounds
+                        split.addArrangedSubview(pane)
+                    } else {
+                        let nested = NSSplitView(frame: split.bounds)
+                        nested.dividerStyle = .thin
+                        split.addArrangedSubview(nested)
+                        populate(node, in: nested)
+                    }
+                }
+            }
+            split.adjustSubviews()
+        }
+        populate(tree, in: splitView)
+        needsInitialDividerLayout = true
     }
 
     private func removeSecondaryPane() {
         guard let pane = secondaryPane else { return }
-        splitView.removeArrangedSubview(pane)
+        (pane.superview as? NSSplitView)?.removeArrangedSubview(pane)
         pane.removeFromSuperview()
         pane.tearDown()
         secondaryPane = nil
@@ -337,7 +441,12 @@ public final class EditorGroupWorkspaceView: NSView {
     }
 
     private func dropLocation(from sender: any NSDraggingInfo) -> NSPoint {
-        dropOverlay.convert(sender.draggingLocation, from: nil)
+        let point = convert(sender.draggingLocation, from: nil)
+        if let group = layoutSnapshot?.visibleGroups.first(where: { group in
+            guard let host = pane(for: group)?.editorHostView else { return false }
+            return host.convert(host.bounds, to: self).contains(point)
+        }) { positionDropOverlay(in: group) }
+        return dropOverlay.convert(sender.draggingLocation, from: nil)
     }
 
     private func sourceRequestsCopy(_ sender: any NSDraggingInfo) -> Bool {

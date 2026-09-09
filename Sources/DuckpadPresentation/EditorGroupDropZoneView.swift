@@ -16,6 +16,12 @@ final class EditorGroupDropZoneView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         switch zone {
+        case .left:
+            setAccessibilityIdentifier("duckpad.editor-group.drop.left")
+            setAccessibilityLabel("Split editor to the left")
+        case .up:
+            setAccessibilityIdentifier("duckpad.editor-group.drop.up")
+            setAccessibilityLabel("Split editor up")
         case .right:
             setAccessibilityIdentifier("duckpad.editor-group.drop.right")
             setAccessibilityLabel("Split editor to the right")
@@ -35,6 +41,10 @@ final class EditorGroupDropZoneView: NSView {
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         let thickness = 2 / scale
         switch zone {
+        case .left:
+            divider.frame = NSRect(x: bounds.width - thickness, y: 0, width: thickness, height: bounds.height)
+        case .up:
+            divider.frame = NSRect(x: 0, y: 0, width: bounds.width, height: thickness)
         case .right:
             divider.frame = NSRect(x: 0, y: 0, width: thickness, height: bounds.height)
         case .down:

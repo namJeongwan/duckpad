@@ -63,6 +63,7 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, copy, nullable) void (^onEdit)(DPScintillaEdit *edit);
 @property(nonatomic, copy, nullable) void (^onError)(NSError *error);
 @property(nonatomic, copy, nullable) void (^onFocus)(void);
+@property(nonatomic, copy, nullable) void (^onStatusChange)(void);
 @property(nonatomic, copy, nullable) void (^onFoldStateChange)(void);
 @property(nonatomic, copy, nullable) void (^onFoldRecoveryProgress)(void);
 @property(nonatomic, copy, nullable) void (^onSmartIndentationStateChange)(BOOL isPending);
@@ -113,6 +114,9 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, readonly) NSUInteger lineCount;
 @property(nonatomic, readonly) NSUInteger caretLine;
 @property(nonatomic, readonly) NSUInteger caretColumn;
+@property(nonatomic, readonly) NSUInteger selectedCharacterCount;
+@property(nonatomic, readonly) NSUInteger selectedLineCount;
+@property(nonatomic) BOOL overtype;
 @property(nonatomic, readonly) BOOL canCollapseCurrentFold;
 @property(nonatomic, readonly) BOOL canExpandCurrentFold;
 @property(nonatomic, readonly) BOOL hasContractedFolds;

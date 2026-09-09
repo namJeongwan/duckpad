@@ -235,7 +235,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let editorGroupRouter: (any EditorGroupRoutingPort)?
     private let searchPanel = SearchPanelView(frame: .zero)
     let commandBar = WindowCommandBarView(frame: .zero)
-    private let statusBar = WorkspaceBarView(edge: .top)
+    let statusBar = DocumentStatusBarView(frame: .zero)
     private let persistenceBanner = PersistenceErrorBanner(frame: .zero)
     private let languageStatus = NSButton(title: "Plain Text", target: nil, action: nil)
     private let symbolStatus = NSButton(title: "Symbols", target: nil, action: nil)
@@ -323,6 +323,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         editorAdapter: (any EditorPort)? = nil,
         editorView: NSView? = nil,
         secondaryEditorView: NSView? = nil,
+        additionalEditorViews: [EditorGroupID: NSView] = [:],
         editorGroupRouter: (any EditorGroupRoutingPort)? = nil,
         errorPresenter: (any PersistenceErrorPresenting)? = nil,
         fileUseCase: FileDocumentUseCase? = nil,
@@ -371,7 +372,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         editorHostView = editorView ?? fallback!.scrollView
         editorGroupWorkspace = EditorGroupWorkspaceView(
             primaryEditorHost: editorView ?? fallback!.scrollView,
-            secondaryEditorHost: secondaryEditorView ?? NSView()
+            secondaryEditorHost: secondaryEditorView ?? NSView(),
+            additionalEditorHosts: additionalEditorViews
         )
         self.fileUseCase = fileUseCase
         self.filePanels = filePanels
@@ -421,6 +423,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             token: accessibilityToken
         )
         editorBinding = EditorBindingUseCase(workspace: workspace, editor: activeEditor)
+        if let statusEditor = activeEditor as? any EditorStatusReportingPort {
+            statusEditor.onEditorStatusChange = { [weak self] in self?.renderEditorStatus() }
+        }
         if let foldingEditor = activeEditor as? any FoldingEditorPort {
             foldingEditor.onFoldStateChange = { [weak recoveryUseCase] in
                 recoveryUseCase?.editorViewStateDidChange()
@@ -556,6 +561,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspace.onChange = nil
         editorGroupRouter?.onEditorGroupFocus = nil
         activeEditor.onEdit = nil
+        (activeEditor as? any EditorStatusReportingPort)?.onEditorStatusChange = nil
         if let foldingEditor = activeEditor as? any FoldingEditorPort {
             foldingEditor.onFoldStateChange = nil
             foldingEditor.invalidate()
@@ -896,6 +902,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             performGroupReorder(tabID: tabID, group: group, groupIndex: index)
         case .split(let tabID, let source, let orientation, let operation):
             performGroupTransfer(tabID: tabID, source: source, orientation: orientation, operation: operation)
+        case .splitAdjacent(let tabID, let source, let target, let zone, let operation):
+            performAdjacentGroupSplit(tabID: tabID, source: source, target: target, zone: zone, operation: operation)
         case .move(let tabID, let source, let destination):
             performGroupTransfer(
                 tabID: tabID,
@@ -1031,9 +1039,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performShowDocumentSwitcher(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable else { return }
         let layout = editorGroupLayout.snapshot
-        let strip = layout.focusedGroup == .secondary
-            ? editorGroupWorkspace.secondaryPane?.tabStrip
-            : tabStrip
+        let strip = tabStrip(for: layout.focusedGroup)
         (strip ?? tabStrip).showDocumentSwitcher()
     }
 
@@ -1210,7 +1216,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                     warning: false
                 )
                 self.symbolStatus.setAccessibilityValue("\(outline.symbols.count) current document symbols")
-                self.symbolOutlinePanel.present(symbols: outline.symbols, relativeTo: self.symbolStatus)
+                self.symbolOutlinePanel.present(symbols: outline.symbols, relativeTo: self.statusBar)
             case .overBudget(let actual, let maximum):
                 self.setStatus(
                     self.symbolStatus,
@@ -1560,18 +1566,29 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performFocusOtherEditorGroup(_ sender: Any? = nil) {
         guard editorGroupLayout.snapshot.orientation != nil else { return }
-        performEditorGroupFocus(editorGroupLayout.snapshot.focusedGroup.other)
+        let layout = editorGroupLayout.snapshot
+        let groups = layout.visibleGroups
+        guard let index = groups.firstIndex(of: layout.focusedGroup) else { return }
+        performEditorGroupFocus(groups[(index + 1) % groups.count])
     }
 
     @objc public func performCloseEditorGroup(_ sender: Any? = nil) {
+        let layout = editorGroupLayout.snapshot
+        closeEditorGroup(layout.focusedGroup == .primary && layout.visibleGroups.count == 2 ? .secondary : layout.focusedGroup)
+    }
+
+    private func closeEditorGroup(_ group: EditorGroupID) {
         guard workspaceInteractionsAreActionable,
               provisionalEditorGroupLayout == nil,
               editorGroupRouter != nil,
+              editorGroupLayout.snapshot.visibleGroups.contains(group),
               editorGroupLayout.snapshot.orientation != nil else { return }
         editorGroupActivationTask?.cancel()
         requestedEditorGroupSelection = nil
-        editorGroupLayout.closeSecondaryGroup()
+        let previousLayout = editorGroupLayout.snapshot
+        editorGroupLayout.closeGroup(group)
         let snapshot = workspace.snapshot()
+        reconcileEditorGroupRoutes(from: previousLayout, to: editorGroupLayout.snapshot, workspace: snapshot)
         reconcileEditorGroups(snapshot)
         rebuildEditorGroupIndexCache(editorGroupLayout.snapshot, workspace: snapshot)
         editorGroupWorkspace.apply(workspace: snapshot, layout: editorGroupLayout.snapshot)
@@ -2650,10 +2667,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             action: #selector(performShowFileFormatMenu(_:)),
             accessibilityIdentifier: "duckpad.file-format.status"
         )
-        statusBar.addSubview(extensionStatus)
-        statusBar.addSubview(symbolStatus)
-        statusBar.addSubview(fileFormatStatus)
-        statusBar.addSubview(languageStatus)
+        statusBar.install(language: languageStatus, encoding: fileFormatStatus)
+        statusBar.positionButton.target = self
+        statusBar.positionButton.action = #selector(performGoToLine(_:))
+        statusBar.lineEndingButton.target = self
+        statusBar.lineEndingButton.action = #selector(performShowFileFormatMenu(_:))
+        statusBar.modeButton.target = self
+        statusBar.modeButton.action = #selector(performToggleOvertype(_:))
         NSLayoutConstraint.activate([
             persistenceBanner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             persistenceBanner.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
@@ -2672,20 +2692,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             statusBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             statusBar.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
             statusBar.heightAnchor.constraint(equalToConstant: 24),
-            extensionStatus.leadingAnchor.constraint(equalTo: statusBar.leadingAnchor, constant: 6),
-            extensionStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
-            extensionStatus.heightAnchor.constraint(equalToConstant: 20),
-            symbolStatus.leadingAnchor.constraint(equalTo: extensionStatus.trailingAnchor, constant: 8),
-            symbolStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
-            symbolStatus.heightAnchor.constraint(equalToConstant: 20),
-            symbolStatus.trailingAnchor.constraint(lessThanOrEqualTo: fileFormatStatus.leadingAnchor, constant: -8),
-            fileFormatStatus.trailingAnchor.constraint(equalTo: languageStatus.leadingAnchor, constant: -8),
-            fileFormatStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
-            fileFormatStatus.heightAnchor.constraint(equalToConstant: 20),
-            languageStatus.trailingAnchor.constraint(equalTo: statusBar.trailingAnchor, constant: -6),
-            languageStatus.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
-            languageStatus.heightAnchor.constraint(equalToConstant: 20),
-            extensionStatus.trailingAnchor.constraint(lessThanOrEqualTo: languageStatus.leadingAnchor, constant: -12),
         ])
         if let mainMenu = NSApplication.shared.mainMenu {
             commandBar.apply(mainMenu: mainMenu)
@@ -2700,6 +2706,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         updateWorkspaceInteractionAdmission(snapshot)
         updateWindowTitle(snapshot)
         renderFileFormatStatus()
+        renderEditorStatus()
     }
 
     private func renderEditorGroups(_ snapshot: WorkspaceSnapshot, requestFocus: Bool = false) {
@@ -2714,7 +2721,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func reconcileEditorGroups(_ snapshot: WorkspaceSnapshot) {
         editorGroupReconcileCount += 1
         editorGroupReconcileTabInspectionCount += snapshot.tabs.count
+        let previousLayout = editorGroupLayout.snapshot
         editorGroupLayout.reconcile(workspace: snapshot)
+        reconcileEditorGroupRoutes(from: previousLayout, to: editorGroupLayout.snapshot, workspace: snapshot)
         if let editorGroupRouter,
            let activeTabID = snapshot.tabs.first(where: \.isActive)?.id {
             let layout = editorGroupLayout.snapshot
@@ -2737,63 +2746,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         durable: EditorGroupLayoutSnapshot,
         workspace: WorkspaceSnapshot
     ) -> EditorGroupLayoutSnapshot {
-        let workspaceTabIDs = workspace.tabs.map(\.id)
-        let workspaceTabIDSet = Set(workspaceTabIDs)
-        func retained(_ tabIDs: [TabID]) -> [TabID] {
-            let retainedIDs = Set(tabIDs).intersection(workspaceTabIDSet)
-            return workspaceTabIDs.filter { retainedIDs.contains($0) }
-        }
-
-        var primary = retained(durable.primaryTabIDs)
-        var secondary = retained(durable.secondaryTabIDs)
-        var primarySelection = durable.primarySelectedTabID.flatMap {
-            primary.contains($0) ? $0 : nil
-        } ?? primary.first
-        var secondarySelection = durable.secondarySelectedTabID.flatMap {
-            secondary.contains($0) ? $0 : nil
-        } ?? secondary.first
-        var focusedGroup = durable.focusedGroup
-        var orientation = durable.orientation
-
-        if primary.isEmpty || secondary.isEmpty {
-            if primary.isEmpty {
-                primary = secondary
-                primarySelection = secondarySelection
-            }
-            secondary = []
-            secondarySelection = nil
-            focusedGroup = .primary
-            orientation = nil
-        }
-
-        if let activeTabID = workspace.tabs.first(where: \.isActive)?.id {
-            let inPrimary = primary.contains(activeTabID)
-            let inSecondary = secondary.contains(activeTabID)
-            switch (inPrimary, inSecondary) {
-            case (true, false):
-                primarySelection = activeTabID
-                focusedGroup = .primary
-            case (false, true):
-                secondarySelection = activeTabID
-                focusedGroup = .secondary
-            case (true, true):
-                if focusedGroup == .primary { primarySelection = activeTabID }
-                else { secondarySelection = activeTabID }
-            case (false, false):
-                primary.append(activeTabID)
-                primarySelection = activeTabID
-                focusedGroup = .primary
-            }
-        }
-
-        return EditorGroupLayoutSnapshot(
-            primaryTabIDs: primary,
-            secondaryTabIDs: secondary,
-            primarySelectedTabID: primarySelection,
-            secondarySelectedTabID: secondarySelection,
-            focusedGroup: focusedGroup,
-            orientation: orientation
-        )
+        let projected = EditorGroupLayoutModel(snapshot: durable)
+        projected.reconcile(workspace: workspace)
+        return projected.snapshot
     }
 
     private func applyEditorGroupOrientation(
@@ -2852,7 +2807,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case .tabUpdated(let workspaceIndex), .bufferEdited(let workspaceIndex):
             guard change.snapshot.tabs.indices.contains(workspaceIndex) else { return false }
             let changedTab = change.snapshot.tabs[workspaceIndex]
-            for group in EditorGroupID.allCases {
+            for group in currentLayout.visibleGroups {
                 editorGroupIncrementalLookupCount += 1
                 guard let groupIndex = editorGroupTabIndices[group]?[changedTab.id],
                       let strip = tabStrip(for: group) else { continue }
@@ -2934,7 +2889,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         var retainedIDs = currentIDs
         retainedIDs.remove(at: localIndex)
         guard retainedIDs == previousIDs else { return false }
-        for other in EditorGroupID.allCases where other != group {
+        for other in currentLayout.visibleGroups where other != group {
             let previousOtherIDs = previousLayout.tabIDs(in: other)
             guard currentLayout.tabIDs(in: other) == previousOtherIDs,
                   let previousOtherSelection = previousLayout.selectedTabID(in: other),
@@ -2986,10 +2941,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func tabStrip(for group: EditorGroupID) -> MultilineTabStripView? {
-        switch group {
-        case .primary: tabStrip
-        case .secondary: editorGroupWorkspace.secondaryPane?.tabStrip
-        }
+        editorGroupWorkspace.pane(for: group)?.tabStrip
     }
 
     private func rebuildEditorGroupIndexCache(
@@ -3123,9 +3075,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard let editorGroupRouter else { return }
         let layout = layout ?? editorGroupLayout.snapshot
         let tabsByID = Dictionary(uniqueKeysWithValues: snapshot.tabs.map { ($0.id, $0) })
-        let visibleGroups: [EditorGroupID] = layout.orientation == nil
-            ? [.primary]
-            : EditorGroupID.allCases
+        let visibleGroups = layout.visibleGroups
         for group in visibleGroups {
             guard let selected = layout.selectedTabID(in: group),
                   let buffer = tabsByID[selected]?.buffer else { continue }
@@ -3257,6 +3207,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         updateWindowTitle(change.snapshot)
         renderFileFormatStatus()
+        renderEditorStatus()
         recoveryUseCase?.workspaceDidChange(change)
         if change.snapshot.startup == .ready, case .bufferEdited = change.kind {
             languageDetectionTask?.cancel()
@@ -3282,11 +3233,16 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         let enabled = snapshot.startup == .ready && !terminationReviewInProgress
         let tabInteractionsEnabled = enabled && provisionalEditorGroupLayout == nil
         tabStrip.setInteractionsEnabled(tabInteractionsEnabled)
-        editorGroupWorkspace.secondaryPane?.tabStrip.setInteractionsEnabled(tabInteractionsEnabled)
+        for group in editorGroupLayoutSnapshot.visibleGroups where group != .primary {
+            tabStrip(for: group)?.setInteractionsEnabled(tabInteractionsEnabled)
+        }
         workspaceSidebar.setInteractionsEnabled(enabled && workspaceBrowserUseCase?.acceptsCommands == true)
         languageStatus.isEnabled = enabled
         symbolStatus.isEnabled = enabled && documentIntelligenceUseCase != nil
         fileFormatStatus.isEnabled = enabled && fileUseCase != nil
+        statusBar.lineEndingButton.isEnabled = fileFormatStatus.isEnabled
+        statusBar.positionButton.isEnabled = enabled && actionableNavigationEditor != nil
+        statusBar.modeButton.isEnabled = enabled && activeEditor is any EditorStatusReportingPort
         extensionStatus.isEnabled = enabled
     }
 
@@ -3460,6 +3416,46 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         )
     }
 
+    private func otherEditorGroup(than source: EditorGroupID) -> EditorGroupID {
+        editorGroupLayout.snapshot.visibleGroups.first(where: { $0 != source }) ?? source.other
+    }
+
+    private func reconcileEditorGroupRoutes(
+        from previous: EditorGroupLayoutSnapshot, to current: EditorGroupLayoutSnapshot,
+        workspace: WorkspaceSnapshot
+    ) {
+        let disappeared = Set(previous.visibleGroups).subtracting(current.visibleGroups)
+        guard !disappeared.isEmpty else { return }
+        let buffers = Dictionary(uniqueKeysWithValues: workspace.tabs.map { ($0.id, $0.buffer) })
+        for source in disappeared {
+            for tabID in previous.tabIDs(in: source) {
+                guard let destination = current.visibleGroups.first(where: { current.tabIDs(in: $0).contains(tabID) }),
+                      let buffer = buffers[tabID] else { continue }
+                editorGroupRouter?.assign(buffer, from: source, to: destination, cloning: false)
+            }
+        }
+        editorGroupRouter?.retainEditorGroups(Set(current.visibleGroups))
+    }
+
+    private func performAdjacentGroupSplit(
+        tabID: TabID, source: EditorGroupID, target: EditorGroupID,
+        zone: EditorGroupDropOverlay.Zone, operation: EditorGroupDropOperation
+    ) {
+        guard editorGroupRouter != nil, workspaceInteractionsAreActionable,
+              provisionalEditorGroupLayout == nil,
+              let buffer = workspace.snapshot().tabs.first(where: { $0.id == tabID })?.buffer,
+              let destination = editorGroupLayout.splitAdjacent(
+                  tabID: tabID, source: source, target: target, zone: zone, operation: operation
+              ) else { return }
+        applyEditorGroupOrientation()
+        editorGroupRouter?.assign(buffer, from: source, to: destination, cloning: operation == .copy)
+        let snapshot = workspace.snapshot()
+        rebuildEditorGroupIndexCache(editorGroupLayout.snapshot, workspace: snapshot)
+        routeSelectedEditorGroups(snapshot)
+        renderLayoutAndActivate(tabID: tabID, group: destination)
+        recoveryUseCase?.editorViewStateDidChange()
+    }
+
     private func performGroupTransfer(
         tabID: TabID,
         source: EditorGroupID,
@@ -3467,7 +3463,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         operation: EditorGroupDropOperation,
         destination: EditorGroupID? = nil
     ) {
-        let destination = destination ?? source.other
+        var destination = destination ?? otherEditorGroup(than: source)
         let workspaceSnapshot = workspace.snapshot()
         guard let orientation,
               canPerformGroupTransfer(
@@ -3479,6 +3475,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               ),
               let buffer = cachedWorkspaceTab(for: tabID, workspace: workspaceSnapshot)?.buffer
                 ?? linearWorkspaceTab(for: tabID, workspace: workspaceSnapshot)?.buffer else { return }
+        let previousLayout = editorGroupLayout.snapshot
         let changed: Bool
         if editorGroupLayout.snapshot.orientation == nil {
             changed = editorGroupLayout.split(
@@ -3492,15 +3489,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             case .move:
                 changed = editorGroupLayout.move(tabID, from: source, to: destination)
             case .copy:
-                changed = editorGroupLayout.split(
-                    tabID: tabID,
-                    source: source,
-                    orientation: editorGroupLayout.snapshot.orientation ?? orientation,
-                    operation: .copy
-                )
+                changed = editorGroupLayout.clone(tabID, from: source, to: destination)
             }
         }
         guard changed else { return }
+        let updatedLayout = editorGroupLayout.snapshot
+        if !updatedLayout.visibleGroups.contains(destination) {
+            destination = updatedLayout.focusedGroup
+        }
+        reconcileEditorGroupRoutes(from: previousLayout, to: editorGroupLayout.snapshot, workspace: workspaceSnapshot)
         applyEditorGroupOrientation()
         rebuildEditorGroupIndexCache(editorGroupLayout.snapshot, workspace: workspaceSnapshot)
         editorGroupRouter?.assign(
@@ -3533,7 +3530,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         return canPerformGroupTransfer(
             tabID: tabID,
             source: layout.focusedGroup,
-            destination: layout.focusedGroup.other,
+            destination: otherEditorGroup(than: layout.focusedGroup),
             orientation: orientation,
             operation: operation
         )
@@ -3551,6 +3548,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               provisionalEditorGroupLayout == nil else { return false }
         let layout = editorGroupLayout.snapshot
         guard layout.orientation == nil || layout.orientation == orientation,
+              layout.orientation == nil || layout.visibleGroups.contains(destination),
               source != destination,
               layout.tabIDs(in: source).contains(tabID) else { return false }
         let destinationContainsTab = layout.tabIDs(in: destination).contains(tabID)
@@ -3564,8 +3562,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func bindEditorGroupContextValidation() {
         bindEditorGroupContextValidation(tabStrip, group: .primary)
-        if let secondary = editorGroupWorkspace.secondaryPane?.tabStrip {
-            bindEditorGroupContextValidation(secondary, group: .secondary)
+        for group in editorGroupLayout.snapshot.visibleGroups where group != .primary {
+            if let strip = tabStrip(for: group) { bindEditorGroupContextValidation(strip, group: group) }
         }
     }
 
@@ -3589,7 +3587,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return canPerformGroupTransfer(
                 tabID: tabID,
                 source: group,
-                destination: group.other,
+                destination: otherEditorGroup(than: group),
                 orientation: orientation,
                 operation: .move
             )
@@ -3598,7 +3596,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return canPerformGroupTransfer(
                 tabID: tabID,
                 source: group,
-                destination: group.other,
+                destination: otherEditorGroup(than: group),
                 orientation: orientation,
                 operation: .copy
             )
@@ -3652,9 +3650,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 operation: .copy
             )
         case .focusOtherEditorGroup:
-            performEditorGroupFocus(group.other)
+            performEditorGroupFocus(otherEditorGroup(than: group))
         case .closeEditorGroup:
-            performCloseEditorGroup(nil)
+            closeEditorGroup(group)
         case .compareWithOpenDocument:
             guard let source = workspace.snapshot().tabs.first(where: { $0.id == tabID }) else { return }
             beginOpenDocumentCompare(source: source, initiatingGroup: group)
@@ -3974,6 +3972,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         window?.isDocumentEdited = active.isDirty
     }
 
+    private func renderEditorStatus() {
+        guard let status = (activeEditor as? any EditorStatusReportingPort)?.editorStatus else { return }
+        statusBar.apply(status)
+    }
+
+    @objc private func performToggleOvertype(_ sender: Any?) {
+        guard workspaceInteractionsAreActionable else { return }
+        (activeEditor as? any EditorStatusReportingPort)?.toggleOvertype()
+        renderEditorStatus()
+    }
+
     private func renderFileFormatStatus() {
         let format = activeTextFileFormat
         let hasFileBinding = workspace.activeFileContext()?.binding != nil
@@ -3995,7 +4004,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case .cr: ending = "CR"
         case .mixed: ending = "Mixed EOL"
         }
-        setStatus(fileFormatStatus, text: "\(encoding) · \(ending)", warning: false)
+        setStatus(fileFormatStatus, text: encoding, warning: false)
+        switch format.lineEnding {
+        case .lf, .none: statusBar.lineEndingButton.title = "Unix (LF)"
+        case .crlf: statusBar.lineEndingButton.title = "Windows (CR LF)"
+        case .cr: statusBar.lineEndingButton.title = "Macintosh (CR)"
+        case .mixed: statusBar.lineEndingButton.title = "Mixed EOL"
+        }
+        statusBar.lineEndingButton.toolTip = "Line endings: \(ending). Choose to convert and save."
         fileFormatStatus.toolTip = "Encoding: \(encoding); line endings: \(ending). Choose to convert and save."
         fileFormatStatus.setAccessibilityValue("\(encoding), \(ending)")
     }

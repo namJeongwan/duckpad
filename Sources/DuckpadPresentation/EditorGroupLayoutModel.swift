@@ -10,8 +10,24 @@ public final class EditorGroupLayoutModel {
     private var secondarySelectedTabID: TabID?
     private var focusedGroup: EditorGroupID = .primary
     private var orientation: EditorGroupSplitOrientation?
+    private var additionalTabIDs: [EditorGroupID: [TabID]] = [:]
+    private var additionalSelectedTabIDs: [EditorGroupID: TabID] = [:]
+    private var tree: EditorGroupLayoutTree = .leaf(.primary)
 
     public init() {}
+
+    init(snapshot: EditorGroupLayoutSnapshot) {
+        primaryTabIDs = snapshot.primaryTabIDs
+        secondaryTabIDs = snapshot.secondaryTabIDs
+        primarySelectedTabID = snapshot.primarySelectedTabID
+        secondarySelectedTabID = snapshot.secondarySelectedTabID
+        additionalTabIDs = snapshot.additionalTabIDs
+        additionalSelectedTabIDs = snapshot.additionalSelectedTabIDs
+        focusedGroup = snapshot.focusedGroup
+        orientation = snapshot.orientation
+        tree = snapshot.tree
+        workspaceTabIDs = tree.groups.flatMap { snapshot.tabIDs(in: $0) }
+    }
 
     public var snapshot: EditorGroupLayoutSnapshot {
         EditorGroupLayoutSnapshot(
@@ -20,7 +36,10 @@ public final class EditorGroupLayoutModel {
             primarySelectedTabID: primarySelectedTabID,
             secondarySelectedTabID: secondarySelectedTabID,
             focusedGroup: focusedGroup,
-            orientation: orientation
+            orientation: orientation,
+            tree: tree,
+            additionalTabIDs: additionalTabIDs,
+            additionalSelectedTabIDs: additionalSelectedTabIDs
         )
     }
 
@@ -31,8 +50,11 @@ public final class EditorGroupLayoutModel {
 
         primaryTabIDs = normalized(primaryTabIDs.filter { workspaceTabIDSet.contains($0) })
         secondaryTabIDs = normalized(secondaryTabIDs.filter { workspaceTabIDSet.contains($0) })
+        for group in [EditorGroupID.tertiary, .quaternary] {
+            additionalTabIDs[group] = normalized(tabIDs(in: group).filter { workspaceTabIDSet.contains($0) })
+        }
 
-        let knownTabIDs = Set(primaryTabIDs).union(secondaryTabIDs)
+        let knownTabIDs = Set(EditorGroupID.allCases.flatMap { tabIDs(in: $0) })
         let insertedTabIDs = workspaceTabIDs.filter {
             !knownTabIDs.contains($0) && (!previousTabIDs.contains($0) || primaryTabIDs.isEmpty && secondaryTabIDs.isEmpty)
         }
@@ -46,7 +68,8 @@ public final class EditorGroupLayoutModel {
         case 1:
             focusedGroup = activeGroups[0]
             setSelected(activeTabID, in: focusedGroup)
-        case 2:
+        case 2...4:
+            if !activeGroups.contains(focusedGroup) { focusedGroup = activeGroups[0] }
             setSelected(activeTabID, in: focusedGroup)
         default:
             append([activeTabID], to: focusedGroup)
@@ -74,7 +97,8 @@ public final class EditorGroupLayoutModel {
         operation: EditorGroupDropOperation
     ) -> Bool {
         let destination = source.other
-        guard tabIDs(in: source).contains(tabID) else { return false }
+        guard tabIDs(in: source).contains(tabID),
+              self.orientation == nil || tree.groups.contains(destination) else { return false }
 
         switch operation {
         case .move:
@@ -83,6 +107,7 @@ public final class EditorGroupLayoutModel {
             guard !tabIDs(in: destination).contains(tabID) else { return false }
             append([tabID], to: destination)
             self.orientation = orientation
+            if tree.orientation == nil { tree = .split(orientation, .leaf(.primary), .leaf(.secondary)) }
             setSelected(tabID, in: destination)
             focusedGroup = destination
             return true
@@ -91,16 +116,58 @@ public final class EditorGroupLayoutModel {
 
     @discardableResult
     public func move(_ tabID: TabID, from source: EditorGroupID, to destination: EditorGroupID) -> Bool {
-        guard orientation != nil else { return false }
+        guard orientation != nil, tree.groups.contains(destination) else { return false }
         return move(tabID, from: source, to: destination, orientation: orientation)
     }
 
     public func closeSecondaryGroup() {
-        append(secondaryTabIDs, to: .primary)
+        append(tree.groups.filter { $0 != .primary }.flatMap { tabIDs(in: $0) }, to: .primary)
         secondaryTabIDs = []
         secondarySelectedTabID = nil
+        additionalTabIDs = [:]
+        additionalSelectedTabIDs = [:]
         focusedGroup = .primary
         orientation = nil
+        tree = .leaf(.primary)
+        reconcileSelections()
+    }
+
+    @discardableResult
+    public func splitAdjacent(
+        tabID: TabID, source: EditorGroupID, target: EditorGroupID,
+        zone: EditorGroupDropOverlay.Zone, operation: EditorGroupDropOperation
+    ) -> EditorGroupID? {
+        guard tree.groups.contains(target), tabIDs(in: source).contains(tabID),
+              operation == .copy || tabIDs(in: source).count > 1,
+              let destination = EditorGroupID.allCases.first(where: { !tree.groups.contains($0) }) else { return nil }
+        if operation == .move { remove(tabID, from: source) }
+        append([tabID], to: destination)
+        let old = EditorGroupLayoutTree.leaf(target)
+        let new = EditorGroupLayoutTree.leaf(destination)
+        tree = tree.replacing(target, with: .split(zone.orientation, zone.precedesTarget ? new : old, zone.precedesTarget ? old : new))
+        orientation = tree.orientation
+        setSelected(tabID, in: destination)
+        focusedGroup = destination
+        reconcileSelections()
+        return destination
+    }
+
+    @discardableResult
+    public func clone(_ tabID: TabID, from source: EditorGroupID, to destination: EditorGroupID) -> Bool {
+        guard tree.groups.contains(destination), tabIDs(in: source).contains(tabID),
+              !tabIDs(in: destination).contains(tabID) else { return false }
+        append([tabID], to: destination)
+        setSelected(tabID, in: destination)
+        focusedGroup = destination
+        return true
+    }
+
+    public func closeGroup(_ group: EditorGroupID) {
+        guard tree.groups.count > 1, let destination = tree.groups.first(where: { $0 != group }) else { return }
+        append(tabIDs(in: group), to: destination)
+        for id in tabIDs(in: group) { remove(id, from: group) }
+        focusedGroup = destination
+        normalizeEmptyGroup()
         reconcileSelections()
     }
 
@@ -114,6 +181,7 @@ public final class EditorGroupLayoutModel {
         remove(tabID, from: source)
         append([tabID], to: destination)
         if let orientation { self.orientation = orientation }
+        if tree.orientation == nil, let orientation { tree = .split(orientation, .leaf(.primary), .leaf(.secondary)) }
         setSelected(tabID, in: destination)
         focusedGroup = destination
         normalizeEmptyGroup()
@@ -131,6 +199,7 @@ public final class EditorGroupLayoutModel {
         switch group {
         case .primary: primaryTabIDs
         case .secondary: secondaryTabIDs
+        case .tertiary, .quaternary: additionalTabIDs[group] ?? []
         }
     }
 
@@ -140,6 +209,8 @@ public final class EditorGroupLayoutModel {
             primaryTabIDs = normalized(primaryTabIDs + tabIDs)
         case .secondary:
             secondaryTabIDs = normalized(secondaryTabIDs + tabIDs)
+        case .tertiary, .quaternary:
+            additionalTabIDs[group] = normalized((additionalTabIDs[group] ?? []) + tabIDs)
         }
     }
 
@@ -149,6 +220,8 @@ public final class EditorGroupLayoutModel {
             primaryTabIDs.removeAll { $0 == tabID }
         case .secondary:
             secondaryTabIDs.removeAll { $0 == tabID }
+        case .tertiary, .quaternary:
+            additionalTabIDs[group]?.removeAll { $0 == tabID }
         }
     }
 
@@ -156,6 +229,7 @@ public final class EditorGroupLayoutModel {
         switch group {
         case .primary: primarySelectedTabID = tabID
         case .secondary: secondarySelectedTabID = tabID
+        case .tertiary, .quaternary: additionalSelectedTabIDs[group] = tabID
         }
     }
 
@@ -165,15 +239,17 @@ public final class EditorGroupLayoutModel {
     }
 
     private func normalizeEmptyGroup() {
-        guard primaryTabIDs.isEmpty || secondaryTabIDs.isEmpty else { return }
-        if primaryTabIDs.isEmpty {
-            primaryTabIDs = secondaryTabIDs
-            primarySelectedTabID = secondarySelectedTabID
+        let remaining = Set(tree.groups.filter { !tabIDs(in: $0).isEmpty })
+        tree = tree.retaining(remaining) ?? .leaf(.primary)
+        if primaryTabIDs.isEmpty, let promoted = tree.groups.first, promoted != .primary {
+            primaryTabIDs = tabIDs(in: promoted)
+            primarySelectedTabID = snapshot.selectedTabID(in: promoted)
+            for id in primaryTabIDs { remove(id, from: promoted) }
+            tree = tree.replacing(promoted, with: .leaf(.primary))
+            if focusedGroup == promoted { focusedGroup = .primary }
         }
-        secondaryTabIDs = []
-        secondarySelectedTabID = nil
-        focusedGroup = .primary
-        orientation = nil
+        if !tree.groups.contains(focusedGroup) { focusedGroup = tree.groups.first ?? .primary }
+        orientation = tree.orientation
     }
 
     private func reconcileSelections() {
@@ -182,6 +258,11 @@ public final class EditorGroupLayoutModel {
         }
         if secondarySelectedTabID.map({ secondaryTabIDs.contains($0) }) != true {
             secondarySelectedTabID = secondaryTabIDs.first
+        }
+        for group in [EditorGroupID.tertiary, .quaternary] {
+            if additionalSelectedTabIDs[group].map({ tabIDs(in: group).contains($0) }) != true {
+                additionalSelectedTabIDs[group] = tabIDs(in: group).first
+            }
         }
     }
 }

@@ -3,6 +3,41 @@ import DuckpadDomain
 @testable import DuckpadPresentation
 import Testing
 
+@Test @MainActor func fourDirectionalSplitsBuildAGridAndRejectAFifthPaneWithoutLosingTabs() throws {
+    let tabs = (0..<5).map { _ in TabID() }
+    let model = EditorGroupLayoutModel()
+    model.reconcile(workspace: workspace(tabs))
+    #expect(model.splitAdjacent(tabID: tabs[1], source: .primary, target: .primary, zone: .right, operation: .move) == .secondary)
+    #expect(model.splitAdjacent(tabID: tabs[2], source: .primary, target: .primary, zone: .down, operation: .move) == .tertiary)
+    #expect(model.splitAdjacent(tabID: tabs[3], source: .primary, target: .secondary, zone: .up, operation: .move) == .quaternary)
+    #expect(model.snapshot.tree == .split(.sideBySide,
+        .split(.stacked, .leaf(.primary), .leaf(.tertiary)),
+        .split(.stacked, .leaf(.quaternary), .leaf(.secondary))))
+    let before = model.snapshot
+    #expect(model.splitAdjacent(tabID: tabs[4], source: .primary, target: .secondary, zone: .left, operation: .move) == nil)
+    #expect(model.snapshot == before)
+    #expect(Set(before.visibleGroups.flatMap { before.tabIDs(in: $0) }) == Set(tabs))
+    model.closeGroup(.quaternary)
+    #expect(model.snapshot.visibleGroups.count == 3)
+    #expect(Set(model.snapshot.visibleGroups.flatMap { model.snapshot.tabIDs(in: $0) }) == Set(tabs))
+    #expect(model.splitAdjacent(tabID: tabs[4], source: .primary, target: .tertiary, zone: .left, operation: .move) == .quaternary)
+    #expect(model.snapshot.tree.groups == [.primary, .quaternary, .tertiary, .secondary])
+}
+
+@Test @MainActor func closingTheLastTabOfAFourPaneLayoutCollapsesOnlyThatLeaf() {
+    let tabs = (0..<4).map { _ in TabID() }
+    let model = EditorGroupLayoutModel()
+    model.reconcile(workspace: workspace(tabs))
+    _ = model.splitAdjacent(tabID: tabs[1], source: .primary, target: .primary, zone: .left, operation: .move)
+    _ = model.splitAdjacent(tabID: tabs[2], source: .primary, target: .secondary, zone: .down, operation: .move)
+    _ = model.splitAdjacent(tabID: tabs[3], source: .primary, target: .primary, zone: .up, operation: .move)
+    model.reconcile(workspace: workspace(Array(tabs.dropLast()), active: tabs[2]))
+    #expect(model.snapshot.visibleGroups.count == 3)
+    #expect(model.snapshot.selectedTabID(in: .tertiary) == tabs[2])
+    #expect(model.snapshot.focusedGroup == .tertiary)
+    #expect(!model.snapshot.visibleGroups.contains(.quaternary))
+}
+
 @MainActor
 private func workspace(
     _ tabIDs: [TabID],

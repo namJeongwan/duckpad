@@ -2,6 +2,23 @@
 
 Status: **Implementation complete; code/test reviewed and remote-verified**
 
+## Four-direction panel update — 2026-09-09
+
+The current workspace supports up to four editor groups using nested native
+`NSSplitView` instances. Drop a tab near the left, right, top, or bottom of an
+editor to split that particular panel; the translucent half-panel preview shows
+where it will land. Repeating a horizontal and vertical split produces a 2×2
+layout. Option-drag shares the same document in another group. An ordinary
+split needs another tab to remain in the source. A fifth panel is rejected.
+
+Each group retains its own selection and editor view. Shared documents publish
+each edit once and share Undo/Redo. Closing a group transfers its tabs and view
+ownership to a surviving group; closing its final document collapses its leaf.
+Unaffected divider proportions survive subsequent splits. The implementation
+uses AppKit directly and adds no panel-layout package dependency.
+
+The two-group limitations in the original delivery notes below are historical.
+
 ## Outcome
 
 Duckpad now supports a lightweight, two-group editing workflow. Dragging a tab

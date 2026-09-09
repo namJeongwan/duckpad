@@ -76,6 +76,74 @@ private func hostCommandBar(
 
 @Suite(.serialized)
 struct WindowCommandBarViewTests {
+    // Native menu tracking mutates NSApplication's process-wide event loop.
+    // Run this UI probe in its own test process, not before unrelated AppKit tests.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["DUCKPAD_NATIVE_MENU_PROBE"] == "1"))
+    @MainActor func nativeMenuTrackingLoopSwitchesToTheHoveredSibling() throws {
+        let target = CommandBarTarget()
+        let (window, bar) = hostCommandBar(mainMenu: makeCommandBarMenu(target: target), appearance: .darkAqua)
+        defer { bar.tearDown(); window.contentView = nil; window.close() }
+        let file = try #require(bar.button(named: "File"))
+        let edit = try #require(bar.button(named: "Edit"))
+        window.makeKeyAndOrderFront(nil)
+        window.pointerLocation = file.convert(NSPoint(x: file.bounds.midX, y: file.bounds.midY), to: nil)
+        var sawEdit = false
+        var ticks = 0
+        let timer = Timer(timeInterval: 0.02, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                ticks += 1
+                if bar.activeMenuTitle == "Edit" {
+                    sawEdit = true
+                    bar.dismissMenu()
+                } else if bar.activeMenuTitle == "File" {
+                    window.pointerLocation = edit.convert(NSPoint(x: edit.bounds.midX, y: edit.bounds.midY), to: nil)
+                }
+                if ticks >= 25 { bar.dismissMenu() }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .eventTracking)
+        defer { timer.invalidate() }
+        file.performClick(nil)
+        #expect(sawEdit)
+        #expect(bar.activeMenuTitle == nil)
+    }
+
+    @Test @MainActor func openMenuFollowsPointerAcrossTitlesAndStopsAfterDismissal() throws {
+        let target = CommandBarTarget()
+        let file = MenuPresentationSpy(title: "File")
+        let edit = MenuPresentationSpy(title: "Edit")
+        let search = MenuPresentationSpy(title: "Search")
+        let (window, bar) = hostCommandBar(
+            mainMenu: makeCommandBarMenu(target: target, overridingMenus: ["File": file, "Edit": edit, "Search": search]),
+            appearance: .darkAqua
+        )
+        defer { bar.tearDown(); window.contentView = nil; window.close() }
+        let fileButton = try #require(bar.button(named: "File"))
+        let editButton = try #require(bar.button(named: "Edit"))
+        let searchButton = try #require(bar.button(named: "Search"))
+        func point(_ button: NSButton) -> NSPoint {
+            button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+        }
+        file.onPresent = {
+            #expect(bar.activeMenuTitle == "File")
+            bar.trackMenuPointer(at: NSPoint(x: -100, y: -100))
+            #expect(bar.activeMenuTitle == "File")
+            bar.trackMenuPointer(at: point(editButton))
+        }
+        edit.onPresent = {
+            #expect(bar.activeMenuTitle == "Edit")
+            bar.trackMenuPointer(at: point(searchButton))
+        }
+        search.onPresent = { bar.dismissMenu() }
+        fileButton.performClick(nil)
+        #expect(file.presentationCount == 1)
+        #expect(edit.presentationCount == 1)
+        #expect(search.presentationCount == 1)
+        #expect(bar.activeMenuTitle == nil)
+        bar.trackMenuPointer(at: point(fileButton))
+        #expect(file.presentationCount == 1)
+    }
+
     @Test @MainActor func commandBarUsesFamiliarOrderAndOriginalMenuTrees() throws {
         _ = NSApplication.shared
         let target = CommandBarTarget()

@@ -6,6 +6,7 @@ final class MenuPresentationSpy: NSMenu {
     nonisolated(unsafe) private(set) var presentedItem: NSMenuItem?
     nonisolated(unsafe) private(set) var presentedLocation: NSPoint?
     nonisolated(unsafe) private(set) weak var presentedView: NSView?
+    nonisolated(unsafe) var onPresent: (@MainActor () -> Void)?
 
     override func popUp(
         positioning item: NSMenuItem?,
@@ -16,6 +17,7 @@ final class MenuPresentationSpy: NSMenu {
         presentedItem = item
         presentedLocation = location
         presentedView = view
+        MainActor.assumeIsolated { onPresent?() }
         return false
     }
 }

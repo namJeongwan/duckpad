@@ -25,11 +25,11 @@ public final class EditorGroupPaneView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityIdentifier("duckpad.editor-group.\(groupID.rawValue)")
-        setAccessibilityLabel(groupID == .primary ? "Primary editor group" : "Secondary editor group")
+        setAccessibilityLabel("\(groupID.rawValue.capitalized) editor group")
 
         tabStrip.setEditorGroupID(groupID)
         tabStrip.hostedCollectionView.setAccessibilityLabel(
-            groupID == .primary ? "Primary editor group tabs" : "Secondary editor group tabs"
+            "\(groupID.rawValue.capitalized) editor group tabs"
         )
         tabStrip.hostedCollectionView.setAccessibilityIdentifier(
             "duckpad.editor-group.\(groupID.rawValue).tabs"

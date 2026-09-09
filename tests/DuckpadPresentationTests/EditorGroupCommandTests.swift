@@ -191,6 +191,49 @@ private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPor
 @Suite(.serialized)
 struct EditorGroupCommandTests {
     @Test @MainActor
+    func adjacentSplitsRouteFourVisiblePanesAndKeepTheSourceEditorPopulated() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 5)
+        defer { fixture.controller.close() }
+        let tabs = fixture.workspace.snapshot().tabs
+        let active = try #require(tabs.first(where: { $0.isActive }))
+        fixture.controller.editorGroupWorkspace.onAction?(.splitAdjacent(active.id, .primary, .primary, .right, .move))
+        let first = fixture.controller.editorGroupLayoutSnapshot
+        let sourceSelected = try #require(first.primarySelectedTabID)
+        let sourceBuffer = try #require(tabs.first(where: { $0.id == sourceSelected })?.buffer)
+        #expect(fixture.router.visibleBuffers[.primary] == sourceBuffer)
+        let rootSplit = fixture.controller.editorGroupWorkspace.splitView
+        rootSplit.setPosition(300, ofDividerAt: 0)
+        let originalLeftWidth = rootSplit.arrangedSubviews[0].frame.width
+        let remaining = tabs.filter { $0.id != active.id }
+        fixture.controller.editorGroupWorkspace.onAction?(.splitAdjacent(remaining[1].id, .primary, .primary, .down, .move))
+        fixture.controller.editorGroupWorkspace.onAction?(.splitAdjacent(remaining[2].id, .primary, .secondary, .down, .move))
+        await eventually { fixture.router.activeEditorGroup == .quaternary }
+        let layout = fixture.controller.editorGroupLayoutSnapshot
+        #expect(layout.visibleGroups.count == 4)
+        #expect(abs(rootSplit.arrangedSubviews[0].frame.width - originalLeftWidth) < 1)
+        fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+        let panes = try layout.visibleGroups.map { try #require(fixture.controller.editorGroupWorkspace.pane(for: $0)) }
+        #expect(panes.allSatisfy { $0.frame.width > 100 && $0.frame.height > 60 })
+        for group in layout.visibleGroups {
+            let selected = try #require(layout.selectedTabID(in: group))
+            let buffer = try #require(tabs.first(where: { $0.id == selected })?.buffer)
+            #expect(fixture.router.visibleBuffers[group] == buffer)
+        }
+        let before = layout
+        fixture.controller.editorGroupWorkspace.onAction?(.splitAdjacent(remaining[0].id, .primary, .primary, .left, .move))
+        #expect(fixture.controller.editorGroupLayoutSnapshot == before)
+        fixture.controller.editorGroupWorkspace.onAction?(.context(active.id, .secondary, .closeEditorGroup))
+        let closed = fixture.controller.editorGroupLayoutSnapshot
+        #expect(closed.visibleGroups.count == 3)
+        #expect(!closed.visibleGroups.contains(.secondary))
+        #expect(closed.visibleGroups.contains(.quaternary))
+        let primaryID = try #require(closed.primarySelectedTabID)
+        fixture.controller.editorGroupWorkspace.onAction?(.context(primaryID, .primary, .focusOtherEditorGroup))
+        await eventually { fixture.router.activeEditorGroup == .tertiary }
+        #expect(fixture.router.activeEditorGroup == .tertiary)
+    }
+
+    @Test @MainActor
     func reentrantEditorFocusIgnoresAffirmationButStillRoutesGenuineGroupFocus() async throws {
         let fixture = await makeEditorGroupController(tabCount: 2)
         defer { fixture.controller.close() }
@@ -738,6 +781,9 @@ struct EditorGroupCommandTests {
     func splitScratchInsertionUpdatesOnlyTheFocusedGroupStripWithFiveHundredTabs() async throws {
         let fixture = await makeEditorGroupController(tabCount: 500)
         defer { fixture.controller.close() }
+        // Physical pointer movement can independently reconfigure a hovered
+        // tab while this async performance measurement yields to AppKit.
+        fixture.controller.window?.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
         let cloned = try #require(fixture.workspace.snapshot().tabs.last)
         fixture.controller.editorGroupWorkspace.onAction?(
             .split(cloned.id, .primary, .sideBySide, .copy)

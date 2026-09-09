@@ -7,6 +7,33 @@ import Testing
 
 @Suite(.serialized)
 struct ScintillaEditorGroupTests {
+    @Test @MainActor func fourClonesHaveIndependentViewsAndPublishEachEditOnce() throws {
+        let adapter = ScintillaEditorAdapter()
+        defer { adapter.invalidate() }
+        let buffer = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        adapter.install(.init(bufferID: buffer.bufferID, revision: 0, text: "base"))
+        adapter.display(buffer)
+        adapter.setEditorGroupOrientation(.sideBySide)
+        var views: [DPScintillaEditorView] = []
+        for group in EditorGroupID.allCases {
+            adapter.assign(buffer, from: .primary, to: group, cloning: true)
+            adapter.display(buffer, in: group)
+            adapter.activateEditorGroup(group)
+            views.append(try #require(adapter.activeScintillaView))
+        }
+        #expect(Set(views.map(ObjectIdentifier.init)).count == 4)
+        #expect(views.allSatisfy { $0.superview != nil })
+        var edits = 0
+        adapter.onEdit = { edit in edits += 1; return .accepted(newRevision: edit.expectedRevision + 1) }
+        views[3].setPrimarySelectionUTF8Range(NSRange(location: 4, length: 0))
+        views[3].insertCommittedText("!")
+        #expect(edits == 1)
+        #expect(views.allSatisfy { $0.contentUTF8 == Data("base!".utf8) })
+        views[2].undo()
+        #expect(edits == 2)
+        #expect(views.allSatisfy { $0.contentUTF8 == Data("base".utf8) })
+    }
+
     @Test @MainActor
     func distinctBuffersRemainVisibleAndNormalDisplayRoutesThroughTheActiveGroup() throws {
         let adapter = ScintillaEditorAdapter()

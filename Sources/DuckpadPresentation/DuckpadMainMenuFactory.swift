@@ -628,6 +628,25 @@ public enum DuckpadMainMenuFactory {
         let item = menu.addItem(withTitle: title, action: action, keyEquivalent: keyEquivalent)
         item.keyEquivalentModifierMask = modifiers
         item.target = target
+        let symbol: String?
+        switch NSStringFromSelector(action) {
+        case "performNewScratch:": symbol = "doc.badge.plus"
+        case "performNewWindow:": symbol = "macwindow.badge.plus"
+        case "performOpenFile:": symbol = "folder"
+        case "performSaveFile:", "performSaveFileAs:": symbol = "square.and.arrow.down"
+        case "performUndo:": symbol = "arrow.uturn.backward"
+        case "performRedo:": symbol = "arrow.uturn.forward"
+        case "performCut:": symbol = "scissors"
+        case "performCopy:": symbol = "doc.on.doc"
+        case "performPaste:": symbol = "doc.on.clipboard"
+        case "performDelete:": symbol = "delete.left"
+        case "performSelectAll:": symbol = "selection.pin.in.out"
+        default: symbol = nil
+        }
+        if let symbol {
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
+        }
         if let accessibilityLabel { item.setAccessibilityLabel(accessibilityLabel) }
     }
 }
