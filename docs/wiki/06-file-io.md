@@ -8,7 +8,7 @@
 
 Duckpad의 scratch-first 흐름은 유지한다. 시작 시 `new 1`은 경로 없는 editable buffer이고, 처음 `Save`를 누르면 native Save panel로 이어진다. 파일을 열면 scratch tab을 없애지 않고 새 tab을 만들며, 이미 열린 canonical path는 중복 buffer를 만들지 않고 기존 tab을 활성화한다. tab과 window title은 파일 이름을 표시하고 editor revision이 저장된 revision보다 새로우면 AppKit document-edited 상태와 dirty tab 표시가 유지된다.
 
-macOS File menu는 `Open…` (`⌘O`), `Save` (`⌘S`), `Save As…` (`⇧⌘S`)를 제공한다. `NSOpenPanel`/`NSSavePanel`은 Presentation adapter에만 있고 Application use case에는 AppKit type이 없다. Finder file URL drag/drop도 같은 open use case를 통과한다.
+macOS File menu는 `Open…` (`⌘O`), `Save` (`⌘S`), `Save As…` (`⇧⌘S`)를 제공한다. `NSOpenPanel`/`NSSavePanel`은 Presentation adapter에만 있고 Application use case에는 AppKit type이 없다. Finder file URL drag/drop도 같은 open use case를 통과한다. Scintilla의 native content view는 파일 URL 드롭을 상위 workspace에 전달하며, 파일 경로를 본문에 삽입하지 않는다. 일반 텍스트 드롭은 기존 편집기 경로를 유지한다. macOS 문서 등록은 `public.data`와 모든 확장자를 포함한다.
 
 red-window close와 Cmd-Q는 같은 serialized dirty-document review를 사용한다. 각 dirty tab은 Save/Discard/Cancel 중 하나가 확정될 때까지 종료되지 않는다. Save/Save As 또는 persistence가 실패하면 window/application은 열린 채로 남고, Cancel은 live buffer를 유지한다. Cmd-Q의 비동기 panel/save 동안 App delegate는 `.terminateLater`를 반환하고 최종 결정을 `reply(toApplicationShouldTerminate:)`로 전달한다.
 
@@ -28,14 +28,14 @@ Notepad++ 대응 근거는 `notepad-plus-plus/PowerEditor/src/menuCmdID.h:25-31`
 
 ## Encoding and line endings
 
-읽기는 다음 순서로 fail-closed 감지한다.
+읽기는 다음 순서로 인코딩을 감지한 뒤, 해석할 수 없는 bytes는 UTF-8 replacement character로 표시한다. 확장자 없는 파일과 바이너리도 열 수 있다.
 
 1. `EF BB BF`: UTF-8 BOM
 2. `FF FE`: UTF-16 little-endian BOM
 3. `FE FF`: UTF-16 big-endian BOM
 4. BOM 없음: strict UTF-8
 
-잘못된 UTF-8, 홀수 byte UTF-16, 단독 high/low surrogate는 replacement character로 조용히 바꾸지 않고 typed codec error다. 빈 파일은 UTF-8/no-BOM/EOL-none으로 연다. LF, CRLF, CR 및 mixed 상태를 감지하며 normal save는 원문 text와 encoding/BOM을 그대로 encode한다. `TextFileConversion`을 넘긴 explicit save만 선택한 encoding/BOM/EOL로 변환한다. Korean, emoji와 combining scalar는 byte-exact codec round-trip test 대상이다.
+strict codec API는 잘못된 UTF-8, 홀수 byte UTF-16, 단독 high/low surrogate에 typed error를 반환한다. 파일 열기·다시 읽기·외부 비교는 `decodeForDisplay`의 replacement-character fallback을 사용한다. 수정이나 형식 변환 없이 Save를 누르면 원본 bytes를 그대로 둔다. fallback 문서를 편집 후 저장하면 UTF-8 텍스트가 된다. 빈 파일은 UTF-8/no-BOM/EOL-none으로 연다. LF, CRLF, CR 및 mixed 상태를 감지하며 normal save는 원문 text와 encoding/BOM을 그대로 encode한다. `TextFileConversion`을 넘긴 explicit save만 선택한 encoding/BOM/EOL로 변환한다. Korean, emoji와 combining scalar는 byte-exact codec round-trip test 대상이다.
 
 auto detection에서 BOM 없는 bytes는 계속 strict UTF-8로만 해석한다. 사용자가 encoding을 명시한 `decode(_:assuming:)` 및 file-open API만 BOM 없는 UTF-16LE/BE를 허용하며, endian별 surrogate validation은 동일하게 적용한다. explicit EOL/encoding conversion으로 갱신된 `FileBinding`은 이후 ordinary save에서도 선택한 EOL로 normalize하고 같은 encoding/BOM으로 encode하므로 한 번 선택한 durable format이 되돌아가지 않는다.
 
@@ -48,7 +48,7 @@ swap 뒤에는 displaced original을 삭제하기 전에 parent directory open/f
 binding의 identity는 canonical path, device/inode, byte count, nanosecond mtime와 SHA-256 content token을 포함한다. normal save 직전에 현재 identity가 마지막 open/save identity와 다르면 overwrite하지 않고 `.conflict`를 반환한다. UI는 다음 명시적 선택만 허용한다.
 
 - **Overwrite:** 현재 live snapshot을 의도적으로 대상에 쓴다.
-- **Reload:** 외부 bytes를 strict decode하고 같은 document/buffer의 revision을 올린 뒤 editor에 install한다.
+- **Reload:** 외부 bytes를 표시용 decode하고 같은 document/buffer의 revision을 올린 뒤 editor에 install한다.
 - **Cancel:** live text와 dirty state를 유지한다.
 
 save I/O 중 추가 edit가 들어와도 저장한 snapshot revision과 현재 revision이 같을 때만 clean 처리한다. 더 새 revision은 binding의 새 disk identity를 받되 dirty로 남아 accepted input을 잃지 않는다.

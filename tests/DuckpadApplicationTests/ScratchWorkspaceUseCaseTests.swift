@@ -754,7 +754,7 @@ private final class EditorFake: EditorPort {
     #expect(binding.activeTextSnapshot()?.text == "safe-after-restore")
 }
 
-@Test @MainActor func orderedWriterMakesFlushLatestDurableAgainstReentrantCancellationIgnoringStore() async {
+@Test @MainActor func autosaveAcceptsTypingAndDeletionWhileTheStoreIsBlocked() async {
     let store = AdversarialStore()
     let useCase = ScratchWorkspaceUseCase(store: store)
     _ = await useCase.start()
@@ -762,29 +762,24 @@ private final class EditorFake: EditorPort {
     await store.armBlockingCommit()
 
     #expect(useCase.acceptEditorEdit(EditorIncrementalEdit(
-        bufferID: bufferID,
-        expectedRevision: 0,
-        range: TextEditRange(location: 0, length: 0),
-        replacement: "a"
+        bufferID: bufferID, expectedRevision: 0,
+        range: TextEditRange(location: 0, length: 0), replacement: "a"
     )) == .accepted(newRevision: 1))
     await store.waitUntilCommitEntered()
     #expect(useCase.acceptEditorEdit(EditorIncrementalEdit(
-        bufferID: bufferID,
-        expectedRevision: 1,
-        range: TextEditRange(location: 1, length: 0),
-        replacement: "b"
-    )) == .rejected(currentRevision: 1))
+        bufferID: bufferID, expectedRevision: 1,
+        range: TextEditRange(location: 1, length: 0), replacement: "b"
+    )) == .accepted(newRevision: 2))
+    #expect(useCase.acceptEditorEdit(EditorIncrementalEdit(
+        bufferID: bufferID, expectedRevision: 2,
+        range: TextEditRange(location: 1, length: 1), replacement: ""
+    )) == .accepted(newRevision: 3))
+    #expect(useCase.snapshot().persistence == .pending)
     #expect(await store.maximumConcurrentCommits == 1)
     await store.releaseCommit()
-    await useCase.waitForPendingPersistence()
-    #expect(useCase.acceptEditorEdit(EditorIncrementalEdit(
-        bufferID: bufferID,
-        expectedRevision: 1,
-        range: TextEditRange(location: 1, length: 0),
-        replacement: "b"
-    )) == .accepted(newRevision: 2))
     #expect(await useCase.flushPersistence() == .saved)
-    #expect(await store.storedRevision(for: bufferID) == 2)
+    #expect(await store.storedRevision(for: bufferID) == 3)
+    #expect(useCase.snapshot().activeBuffer?.revision == 3)
     #expect(await store.maximumConcurrentCommits == 1)
 }
 

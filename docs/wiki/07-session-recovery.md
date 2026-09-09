@@ -9,6 +9,8 @@ Duckpad는 정상 종료를 기다리지 않고 편집 중인 scratch와 dirty f
 
 복구 manifest schema v1은 session ID, tab order와 active tab, tab/document/buffer ID, title/pinned state, revision/dirty metadata, `FileBinding`, next untitled number를 저장한다. 각 buffer는 별도의 strict UTF-8 blob이며 selection anchor/caret, first visible line, horizontal scroll offset와 word-wrap 상태를 함께 기록한다.
 
+세션 metadata 자동저장은 마지막 편집 후 250ms 동안 모으며, 저장 I/O 중에도 입력과 삭제를 받아들인다. 저장 중 새 편집이 생기면 이전 snapshot의 완료는 상태를 `pending`으로 유지하고 다음 저장이 최신 revision을 기록한다. 탭 추가·닫기 같은 구조 변경과 명시적 flush는 기존 transaction 직렬화를 유지한다.
+
 ## Clean Architecture boundary
 
 - Domain의 `ScratchSession`은 exact-ID recovery initializer로 참조 무결성, buffer 단일 소유권, file binding 중복과 active-tab 유효성을 fail closed로 검사한다.

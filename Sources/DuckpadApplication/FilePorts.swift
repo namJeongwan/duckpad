@@ -138,6 +138,23 @@ public struct TextFileConversion: Equatable, Sendable {
 public enum TextFileCodec {
     private static let utf8BOM = Data([0xEF, 0xBB, 0xBF])
 
+    /// Opening arbitrary files is permissive; strict decoding remains available
+    /// to callers that need to validate an encoding or guarantee a round trip.
+    public static func decodeForDisplay(
+        _ data: Data,
+        assuming explicitEncoding: TextFileEncoding? = nil
+    ) -> DecodedTextFile {
+        if let decoded = try? decode(data, assuming: explicitEncoding) { return decoded }
+        let hasBOM = data.starts(with: utf8BOM)
+        let text = String(decoding: hasBOM ? data.dropFirst(3) : data[...], as: UTF8.self)
+        return DecodedTextFile(
+            text: text,
+            encoding: .utf8,
+            byteOrderMark: hasBOM ? .present : .absent,
+            lineEnding: detectLineEnding(text)
+        )
+    }
+
     public static func decode(
         _ data: Data,
         assuming explicitEncoding: TextFileEncoding? = nil
