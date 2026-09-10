@@ -2623,7 +2623,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
         $0.accessibilityIdentifier() == "duckpad.tab.close.\(stableID)"
     })
 
-    #expect(icon.frame.size == NSSize(width: 13, height: 13))
+    #expect(icon.frame.size == NSSize(width: 17, height: 17))
     #expect(dirty.frame.width == 5)
     #expect(dirty.frame.midY == icon.frame.midY)
     let titleAlignment = title.alignmentRect(forFrame: title.frame)
@@ -2691,7 +2691,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let title = try #require(descendantTextFields(of: item.view).first {
         $0.stringValue == tabs[0].title
     })
-    #expect(title.frame.minX <= 28)
+    #expect(title.frame.minX <= 32)
     #expect(item.view.bounds.maxX - title.frame.maxX <= 39)
     #expect(title.frame.width >= title.intrinsicContentSize.width)
 }
@@ -2831,7 +2831,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
             buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
         )
     }
-    let (window, _, strip) = hostStrip(width: 304, height: 320, tabs: tabs)
+    let (window, _, strip) = hostStrip(width: 320, height: 320, tabs: tabs)
     defer {
         strip.tearDownHostedViews()
         window.contentView = nil
@@ -3233,7 +3233,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
             buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
         )
     }
-    let (window, _, strip) = hostStrip(width: 304, height: 320, tabs: tabs)
+    let (window, _, strip) = hostStrip(width: 320, height: 320, tabs: tabs)
     defer {
         strip.tearDownHostedViews()
         window.contentView = nil

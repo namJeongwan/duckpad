@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 
 @MainActor
@@ -16,18 +17,18 @@ final class EditorGroupDropZoneView: NSView {
         switch zone {
         case .left:
             setAccessibilityIdentifier("duckpad.editor-group.drop.left")
-            setAccessibilityLabel("Split editor to the left")
+            setAccessibilityLabel(L10n.text("Split editor to the left"))
         case .up:
             setAccessibilityIdentifier("duckpad.editor-group.drop.up")
-            setAccessibilityLabel("Split editor up")
+            setAccessibilityLabel(L10n.text("Split editor up"))
         case .right:
             setAccessibilityIdentifier("duckpad.editor-group.drop.right")
-            setAccessibilityLabel("Split editor to the right")
+            setAccessibilityLabel(L10n.text("Split editor to the right"))
         case .down:
             setAccessibilityIdentifier("duckpad.editor-group.drop.down")
-            setAccessibilityLabel("Split editor down")
+            setAccessibilityLabel(L10n.text("Split editor down"))
         }
-        setAccessibilityHelp("Drop a document tab here to create another editor group")
+        setAccessibilityHelp(L10n.text("Drop a document tab here to create another editor group"))
         setHighlighted(false)
     }
 

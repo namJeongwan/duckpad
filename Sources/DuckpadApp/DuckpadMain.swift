@@ -5,6 +5,7 @@ import DuckpadDomain
 import DuckpadEditorAdapter
 import DuckpadInfrastructure
 import DuckpadPresentation
+import DuckpadLocalization
 
 @MainActor
 final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
@@ -57,6 +58,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         Task { @MainActor [weak self] in
             guard let self else { return }
             let initialSettings = await settingsUseCase.start().settings
+            L10n.configure(language: initialSettings.appLanguage)
             apply(initialSettings)
             finishLaunching()
         }
@@ -92,7 +94,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             languageConfigurationIssue = nil
         } catch {
             languageRegistry = LanguageManifestLoader.fallbackRegistry
-            languageConfigurationIssue = "Language registry degraded: \(error)"
+            languageConfigurationIssue = L10n.text("Language configuration is unavailable.")
         }
         let extensionsRoot = environment["DUCKPAD_EXTENSIONS_ROOT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? LocalExtensionPackageLoader.defaultRoot()
@@ -1071,9 +1073,18 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         }
         settingsWindow.configure(settings: settingsUseCase.state.settings) { [weak self] settings in
             guard let self else { return .failed(.writeFailed("application unavailable")) }
+            let previousLanguage = self.settingsUseCase.state.settings.appLanguage
             let outcome = await self.settingsUseCase.update(settings)
             switch outcome {
-            case .saved(let saved), .savedWithWarning(let saved, _): self.apply(saved)
+            case .saved(let saved), .savedWithWarning(let saved, _):
+                if saved.appLanguage != previousLanguage {
+                    if saved.appLanguage == .system {
+                        UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+                    } else {
+                        UserDefaults.standard.set([saved.appLanguage.rawValue], forKey: "AppleLanguages")
+                    }
+                }
+                self.apply(saved)
             case .failed: break
             }
             return outcome
@@ -1113,6 +1124,17 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
 enum DuckpadMain {
     @MainActor
     static func main() {
+        // Resource-only packaged smoke: exits before loading sessions or preferences.
+        if let raw = ProcessInfo.processInfo.environment["DUCKPAD_LOCALIZATION_SMOKE"],
+           let language = AppLanguage(rawValue: raw), language != .system {
+            L10n.configure(language: language)
+            let label = L10n.text("App Language")
+            precondition(language == .english || label != "App Language", "packaged translation missing")
+            let matches = L10n.text("search.matches", 2)
+            precondition(matches != "search.matches" && !matches.contains("%"), "packaged plural resource missing")
+            print("DUCKPAD_LOCALIZATION_READY=\(language.rawValue) \(label)")
+            return
+        }
         let application = NSApplication.shared
         application.setActivationPolicy(.regular)
         let delegate = DuckpadAppDelegate()

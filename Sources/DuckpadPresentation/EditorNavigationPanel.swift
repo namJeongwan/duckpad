@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 
@@ -50,10 +51,10 @@ final class NativeEditorNavigationPresenter: EditorNavigationPresenting {
         completion: @escaping @MainActor (Int, Int) -> Void
     ) {
         present(
-            title: "Go to Line / Column",
-            message: "Enter line or line:column (1…\(current.lineCount)).",
+            title: L10n.text("Go to Line / Column"),
+            message: L10n.text("Enter line or line:column (1…%1$@).", L10n.argument(current.lineCount)),
             initialValue: "\(current.line):\(current.column)",
-            accessibilityLabel: "Line and column",
+            accessibilityLabel: L10n.text("Line and column"),
             in: window
         ) { value in
             guard let destination = EditorNavigationInput.lineAndColumn(
@@ -70,10 +71,10 @@ final class NativeEditorNavigationPresenter: EditorNavigationPresenting {
         completion: @escaping @MainActor (Int) -> Void
     ) {
         present(
-            title: "Go to UTF-8 Offset",
-            message: "Enter a byte offset (0…\(current.utf8Length)).",
+            title: L10n.text("Go to UTF-8 Offset"),
+            message: L10n.text("Enter a byte offset (0…%1$@).", L10n.argument(current.utf8Length)),
             initialValue: "\(current.utf8Offset)",
-            accessibilityLabel: "UTF-8 byte offset",
+            accessibilityLabel: L10n.text("UTF-8 byte offset"),
             in: window
         ) { value in
             guard let offset = EditorNavigationInput.utf8Offset(
@@ -102,8 +103,8 @@ final class NativeEditorNavigationPresenter: EditorNavigationPresenting {
         alert.informativeText = message
         alert.alertStyle = .informational
         alert.accessoryView = field
-        alert.addButton(withTitle: "Go")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.text("Go"))
+        alert.addButton(withTitle: L10n.text("Cancel"))
         alert.beginSheetModal(for: window) { response in
             guard response == .alertFirstButtonReturn else { return }
             MainActor.assumeIsolated { completion(field.stringValue) }

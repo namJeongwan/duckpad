@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -76,7 +77,7 @@ final class DocumentSwitcherPanel: NSObject,
     private let searchField = NSSearchField(frame: .zero)
     private let tableView = NSTableView(frame: .zero)
     private let scrollView = NSScrollView(frame: .zero)
-    private let emptyLabel = NSTextField(labelWithString: "No matching documents")
+    private let emptyLabel = NSTextField(labelWithString: L10n.text("No matching documents"))
     private let countLabel = NSTextField(labelWithString: "")
     private var popover: NSPopover?
     private let contentController = NSViewController()
@@ -95,11 +96,11 @@ final class DocumentSwitcherPanel: NSObject,
         super.init()
         rootView.setAccessibilityIdentifier("duckpad.documents.panel")
 
-        searchField.placeholderString = "Search open documents"
+        searchField.placeholderString = L10n.text("Search open documents")
         searchField.sendsSearchStringImmediately = true
         searchField.delegate = self
         searchField.setAccessibilityIdentifier("duckpad.documents.search")
-        searchField.setAccessibilityLabel("Search open documents")
+        searchField.setAccessibilityLabel(L10n.text("Search open documents"))
         searchField.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("document"))
@@ -115,7 +116,7 @@ final class DocumentSwitcherPanel: NSObject,
         tableView.target = self
         tableView.doubleAction = #selector(activateSelection)
         tableView.setAccessibilityIdentifier("duckpad.documents.results")
-        tableView.setAccessibilityLabel("Open document search results")
+        tableView.setAccessibilityLabel(L10n.text("Open document search results"))
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -286,16 +287,16 @@ final class DocumentSwitcherPanel: NSObject,
             systemSymbolName: tab.isPinned ? "pin.fill" : (tab.fullPath == nil ? "note.text" : "doc.text"),
             accessibilityDescription: nil
         )
-        cell.toolTip = tab.fullPath ?? "Unsaved scratch document"
+        cell.toolTip = tab.fullPath ?? L10n.text("Unsaved scratch document")
         cell.setAccessibilityLabel(
             tab.title
-                + (tab.isActive ? ", current document" : "")
-                + (tab.isDirty ? ", modified" : "")
-                + (tab.isPinned ? ", pinned" : "")
-                + (tab.fullPath.map { ", \($0)" } ?? ", unsaved scratch document")
+                + (tab.isActive ? L10n.text(", current document") : "")
+                + (tab.isDirty ? L10n.text(", modified") : "")
+                + (tab.isPinned ? L10n.text(", pinned") : "")
+                + (tab.fullPath.map { ", \($0)" } ?? L10n.text(", unsaved scratch document"))
         )
         if let detail = cell.viewWithTag(41) as? NSTextField {
-            detail.stringValue = tab.fullPath ?? "Unsaved scratch document"
+            detail.stringValue = tab.fullPath ?? L10n.text("Unsaved scratch document")
         }
         return cell
     }
@@ -419,8 +420,8 @@ final class DocumentSwitcherPanel: NSObject,
     private func updateResultChrome() {
         emptyLabel.isHidden = !filteredIndices.isEmpty
         countLabel.stringValue = filteredIndices.count == tabs.count
-            ? "\(tabs.count) open"
-            : "\(filteredIndices.count) of \(tabs.count)"
+            ? L10n.text("%1$@ open", L10n.argument(tabs.count))
+            : L10n.text("%1$@ of %2$@", L10n.argument(filteredIndices.count), L10n.argument(tabs.count))
     }
 
     private func moveSelection(by delta: Int) {
@@ -444,7 +445,7 @@ final class DocumentSwitcherPanel: NSObject,
         let cell = NSTableCellView(frame: .zero)
         cell.identifier = identifier
         let icon = NSImageView(frame: .zero)
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
         icon.contentTintColor = .secondaryLabelColor
         icon.translatesAutoresizingMaskIntoConstraints = false
         let title = NSTextField(labelWithString: "")
@@ -465,8 +466,8 @@ final class DocumentSwitcherPanel: NSObject,
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
             icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 18),
-            icon.heightAnchor.constraint(equalToConstant: 18),
+            icon.widthAnchor.constraint(equalToConstant: 23),
+            icon.heightAnchor.constraint(equalToConstant: 23),
             title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
             title.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
             title.topAnchor.constraint(equalTo: cell.topAnchor, constant: 5),

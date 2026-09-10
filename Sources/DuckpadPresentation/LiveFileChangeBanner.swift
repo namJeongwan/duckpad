@@ -1,10 +1,11 @@
+import DuckpadLocalization
 import AppKit
 
 @MainActor
 final class LiveFileChangeBanner: NSView {
     private let message = NSTextField(labelWithString: "")
-    let reload = NSButton(title: "Reload from Disk…", target: nil, action: nil)
-    let dismiss = NSButton(title: "Keep Editing", target: nil, action: nil)
+    let reload = NSButton(title: L10n.text("Reload from Disk…"), target: nil, action: nil)
+    let dismiss = NSButton(title: L10n.text("Keep Editing"), target: nil, action: nil)
     private var barHeight: NSLayoutConstraint!
 
     override init(frame: NSRect) {

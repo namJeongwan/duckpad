@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadDomain
 
@@ -411,23 +412,23 @@ public enum DuckpadMainMenuFactory {
             let item = extensionsMenu.addItem(withTitle: command.title, action: #selector(DuckpadWindowController.performExtensionCommand(_:)), keyEquivalent: "")
             item.keyEquivalentModifierMask = []
             item.target = target; item.representedObject = command.id.rawValue
-            var accessibilityValue = "No keyboard shortcut"
+            var accessibilityValue = L10n.text("No keyboard shortcut")
             if let declaration = target.extensionKeybinding(for: command.id) {
                 if let shortcut = ExtensionShortcut(declaration) {
                     if occupiedShortcuts.insert(shortcut.identity).inserted {
                         item.keyEquivalent = shortcut.keyEquivalent
                         item.keyEquivalentModifierMask = shortcut.modifiers
-                        accessibilityValue = "Keyboard shortcut \(shortcut.accessibilityLabel)"
+                        accessibilityValue = L10n.text("Keyboard shortcut %1$@", L10n.argument(shortcut.accessibilityLabel))
                     } else {
-                        item.toolTip = "Shortcut unavailable because \(declaration) conflicts with another command."
-                        accessibilityValue = "Shortcut \(declaration) unavailable because it conflicts with another command"
+                        item.toolTip = L10n.text("Shortcut unavailable because %1$@ conflicts with another command.", L10n.argument(declaration))
+                        accessibilityValue = L10n.text("Shortcut %1$@ unavailable because it conflicts with another command", L10n.argument(declaration))
                     }
                 } else {
-                    item.toolTip = "Shortcut unavailable because \(declaration) is not a supported macOS key combination."
-                    accessibilityValue = "Shortcut \(declaration) unavailable because it is invalid"
+                    item.toolTip = L10n.text("Shortcut unavailable because %1$@ is not a supported macOS key combination.", L10n.argument(declaration))
+                    accessibilityValue = L10n.text("Shortcut %1$@ unavailable because it is invalid", L10n.argument(declaration))
                 }
             }
-            item.setAccessibilityLabel("Extension command: \(command.title)")
+            item.setAccessibilityLabel(L10n.text("Extension command: %1$@", L10n.argument(command.title)))
             item.setAccessibilityValue(accessibilityValue)
         }
         extensionsItem.submenu = extensionsMenu
@@ -444,6 +445,7 @@ public enum DuckpadMainMenuFactory {
             version.isEnabled = false
             help.addItem(version)
         }
+        MenuLocalization.apply(to: mainMenu)
         return mainMenu
     }
 
@@ -660,7 +662,7 @@ public enum DuckpadMainMenuFactory {
                 recentItem.target = applicationTarget
                 recentItem.representedObject = url
                 recentItem.toolTip = url.path
-                recentItem.setAccessibilityLabel("Open recent document \(title)")
+                recentItem.setAccessibilityLabel(L10n.text("Open recent document %1$@", L10n.argument(title)))
                 recentItem.setAccessibilityValue(url.path)
                 menu.addItem(recentItem)
             }
@@ -721,6 +723,7 @@ public enum DuckpadMainMenuFactory {
         save.submenu = makeEncodingMenu(target: target)
         save.toolTip = "Save the displayed text using another encoding; this does not repair garbled text."
         menu.addItem(save)
+        MenuLocalization.apply(to: menu)
         return menu
     }
 

@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 
 /// Display names belong to the UI; only stable PostScript names reach settings.
@@ -37,8 +38,8 @@ final class EditorFontComboBox: NSComboBox, NSComboBoxDataSource, NSComboBoxDele
         itemHeight = 28
         target = self
         action = #selector(commitTypedFont(_:))
-        placeholderString = NSLocalizedString("preferences.editor.font.search", value: "Search fonts", comment: "Placeholder in the editor font selector")
-        setAccessibilityLabel(NSLocalizedString("preferences.editor.font.accessibility", value: "Editor font", comment: "Accessible label for the font selector"))
+        placeholderString = L10n.text("Search fonts")
+        setAccessibilityLabel(L10n.text("Editor font"))
         setAccessibilityIdentifier("duckpad.settings.editor-font")
         reloadInstalledFonts()
     }

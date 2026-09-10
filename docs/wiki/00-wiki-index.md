@@ -1040,3 +1040,5 @@ DUCKPAD_NPP_REFERENCE=notepad-plus-plus \
 - **Validation:** official archive SHA 재검증; raw upstream과 비교해 차이가 선언된 14개에만 존재하고 전부 정확한 정규화 결과임을 확인했다. staged script의 fresh reproduction은 168/168 byte-identical, `sh -n` 및 `git diff --cached --check` PASS다.
 - **Manifest/verdict:** product/acceptance 196-path path digest `2bdb07824db766fc8da73c77d9893d437e4408ad0bb49bd0a24a20663bc6b02b`, staged path+byte digest `498e8b7acf348011532fb394f433187045033dd2600239742a6def06632b6dfc`; **APPROVED — CONTENT REVIEW; 0 Blocker, 0 Major, 0 Minor.** Receipt/sign은 아직 수행하지 않았다.
 - **Safety:** review doc/index만 수정했다. product/source/tests/stage/commit은 변경하지 않았다. 상세 evidence는 [Phase 8 review](reviews/2026-09-03-phase-8-extension-platform-code-review.md)에 있다.
+
+- [App localization and translation contributions](39-localization.md)

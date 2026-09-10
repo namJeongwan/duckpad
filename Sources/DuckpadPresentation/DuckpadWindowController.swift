@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -170,7 +171,7 @@ private final class NativeTabPathActionHandler: TabPathActionHandling {
 @MainActor
 private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
     private let message = NSTextField(labelWithString: "")
-    private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
+    private let retryButton = NSButton(title: L10n.text("Retry"), target: nil, action: nil)
     private var retryAction: (@MainActor () -> Void)?
     private var heightConstraint: NSLayoutConstraint!
 
@@ -203,7 +204,7 @@ private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
     required init?(coder: NSCoder) { nil }
 
     func present(failure: PersistenceFailure, retry: @escaping @MainActor () -> Void) {
-        message.stringValue = "Session \(failure.operation.rawValue) failed: \(failure.cause)"
+        message.stringValue = L10n.text("Session %1$@ failed: %2$@", L10n.text(failure.operation == .load ? "Restore" : "Save"), PresentationErrorText.message(failure.cause))
         retryAction = retry
         heightConstraint.constant = 36
         isHidden = false
@@ -240,10 +241,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var appPreferences = AppSettings.defaults
     let statusBar = DocumentStatusBarView(frame: .zero)
     private let persistenceBanner = PersistenceErrorBanner(frame: .zero)
-    private let languageStatus = StatusBarButton(title: "Plain Text", target: nil, action: nil)
-    private let symbolStatus = NSButton(title: "Symbols", target: nil, action: nil)
+    private let languageStatus = StatusBarButton(title: L10n.text("Plain Text"), target: nil, action: nil)
+    private let symbolStatus = NSButton(title: L10n.text("Symbols"), target: nil, action: nil)
     private let fileFormatStatus = StatusBarButton(title: "UTF-8", target: nil, action: nil)
-    private let extensionStatus = NSButton(title: "Extensions loading…", target: nil, action: nil)
+    private let extensionStatus = NSButton(title: L10n.text("Extensions loading…"), target: nil, action: nil)
     private let extensionsPanel = ExtensionsManagerPanel()
     let commandPalettePanel = CommandPalettePanel()
     let symbolOutlinePanel = SymbolOutlinePanel()
@@ -682,7 +683,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         let requested = item.manifest.capabilities.map { "\($0.id.rawValue) [\($0.scope.rawValue)]" }.joined(separator: "\n")
         let affected = (try? extensionUseCase?.revocationReviewToken(for: id).affectedPackageIdentities.joined(separator: "\n"))
             ?? "\(item.manifest.id.rawValue)@\(item.manifest.version)#\(item.packageDigest)"
-        return "Publisher: \(item.manifest.publisher.id)\nFingerprint: \(item.publisherFingerprint)\nVersion: \(item.manifest.version)\nPackage: \(item.packageDigest)\n\nData access and destination:\n\(requested)\n\nAffected signed package identities:\n\(affected)\n\nGrants last until revoked or identity changes. Publisher revoke is durable across restart until deliberate Reset. No network, filesystem, environment, clock, or process access is exposed."
+        return L10n.text("Publisher: %1$@\nFingerprint: %2$@\nVersion: %3$@\nPackage: %4$@\n\nData access and destination:\n%5$@\n\nAffected signed package identities:\n%6$@\n\nGrants last until revoked or identity changes. Publisher revoke is durable across restart until deliberate Reset. No network, filesystem, environment, clock, or process access is exposed.", L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint), L10n.argument(item.manifest.version), L10n.argument(item.packageDigest), L10n.argument(requested), L10n.argument(affected))
     }
 
     public var extensionCommands: [ExtensionCommandContribution] {
@@ -1139,7 +1140,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func compareContent(_ comparison: OpenDocumentComparison) -> OpenDocumentCompareContent {
         let duplicateTitle = comparison.left.title == comparison.right.title
         return OpenDocumentCompareContent(
-            title: "Diff — \(comparison.left.title) ↔ \(comparison.right.title)",
+            title: L10n.text("Diff — %1$@ ↔ %2$@", L10n.argument(comparison.left.title), L10n.argument(comparison.right.title)),
             leftTitle: duplicateTitle
                 ? "\(comparison.left.title) — \(comparison.left.fullPath ?? "Untitled")"
                 : comparison.left.title,
@@ -1208,8 +1209,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func refreshLiveFileBanner() {
         guard let tab = workspace.snapshot().tabs.first(where: \.isActive),
               let change = fileUseCase?.externalChanges[tab.id] else { liveFileBanner.show(nil); return }
-        let detail = change == .conflict ? "changed on disk. Your unsaved edits were kept." : "is unavailable on disk. Your contents were kept."
-        liveFileBanner.show("\(tab.title) \(detail)")
+        liveFileBanner.show(change == .conflict
+            ? L10n.text("%1$@ changed on disk. Your unsaved edits were kept.", tab.title)
+            : L10n.text("%1$@ is unavailable on disk. Your contents were kept.", tab.title))
     }
 
     @objc private func performKeepEditingExternalFile(_ sender: Any?) {
@@ -1222,10 +1224,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               let tab = workspace.snapshot().tabs.first(where: \.isActive), let window else { return }
         if tab.isDirty {
             let alert = NSAlert()
-            alert.messageText = "Reload \(tab.title) from disk?"
-            alert.informativeText = "Your unsaved edits will be replaced by the file on disk."
-            alert.addButton(withTitle: "Cancel")
-            alert.addButton(withTitle: "Reload")
+            alert.messageText = L10n.text("Reload %1$@ from disk?", L10n.argument(tab.title))
+            alert.informativeText = L10n.text("Your unsaved edits will be replaced by the file on disk.")
+            alert.addButton(withTitle: L10n.text("Cancel"))
+            alert.addButton(withTitle: L10n.text("Reload"))
             alert.beginSheetModal(for: window) { [weak self] response in
                 guard response == .alertSecondButtonReturn else { return }
                 self?.startExplicitLiveReload(tabID: tab.id, revision: tab.buffer.revision)
@@ -1265,10 +1267,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             case .overBudget(let actual, let maximum):
                 self.setStatus(
                     self.symbolStatus,
-                    text: "Completion paused · \(actual / 1_024 / 1_024) MiB",
+                    text: L10n.text("Completion paused · %1$@ MiB", L10n.argument(actual / 1_024 / 1_024)),
                     warning: true
                 )
-                self.symbolStatus.toolTip = "Completion limit: \(maximum) bytes"
+                self.symbolStatus.toolTip = L10n.text("Completion limit: %1$@ bytes", L10n.argument(maximum))
             case .noPrefix, .noMatches:
                 NSSound.beep()
             case .presented, .unavailable, .stale:
@@ -1289,18 +1291,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 self.currentDocumentOutline = outline
                 self.setStatus(
                     self.symbolStatus,
-                    text: outline.symbols.isEmpty ? "Symbols" : "Symbols \(outline.symbols.count)",
+                    text: outline.symbols.isEmpty ? L10n.text("Symbols") : L10n.text("Symbols %1$@", L10n.argument(outline.symbols.count)),
                     warning: false
                 )
-                self.symbolStatus.setAccessibilityValue("\(outline.symbols.count) current document symbols")
+                self.symbolStatus.setAccessibilityValue(L10n.text("%1$@ current document symbols", L10n.argument(outline.symbols.count)))
                 self.symbolOutlinePanel.present(symbols: outline.symbols, relativeTo: self.statusBar)
             case .overBudget(let actual, let maximum):
                 self.setStatus(
                     self.symbolStatus,
-                    text: "Symbols paused · \(actual / 1_024 / 1_024) MiB",
+                    text: L10n.text("Symbols paused · %1$@ MiB", L10n.argument(actual / 1_024 / 1_024)),
                     warning: true
                 )
-                self.symbolStatus.toolTip = "Symbol outline limit: \(maximum) bytes"
+                self.symbolStatus.toolTip = L10n.text("Symbol outline limit: %1$@ bytes", L10n.argument(maximum))
                 NSSound.beep()
             case .unavailable, .stale:
                 break
@@ -1389,7 +1391,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performShowLineEndingMenu(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable, fileUseCase != nil else { return }
         let button = statusBar.lineEndingButton
-        DuckpadMainMenuFactory.makeLineEndingMenu(target: self).popUp(
+        let menu = DuckpadMainMenuFactory.makeLineEndingMenu(target: self)
+        MenuLocalization.apply(to: menu)
+        menu.popUp(
             positioning: nil,
             at: NSPoint(x: 0, y: button.bounds.height + 2),
             in: button
@@ -1524,7 +1528,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         if searchPanel.isHidden { showSearchPanel(replace: false) }
         let query = searchPanel.currentQuery()
         guard !query.pattern.isEmpty else {
-            searchPanel.presentStatus("Enter text, then choose Find in Folder again")
+            searchPanel.presentStatus(L10n.text("Enter text, then choose Find in Folder again"))
             searchPanel.focusFind()
             return
         }
@@ -2732,9 +2736,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     func makeLanguageStatusMenu() -> NSMenu {
-        let menu = NSMenu(title: "Language")
+        let menu = NSMenu(title: L10n.text("Language"))
         let automatic = menu.addItem(
-            withTitle: "Automatic Detection",
+            withTitle: L10n.text("Automatic Detection"),
             action: #selector(performAutomaticLanguage(_:)),
             keyEquivalent: ""
         )
@@ -2753,7 +2757,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         if let plainText = languageDefinitions.first(where: { $0.id == .plainText }) {
             let item = menu.addItem(
-                withTitle: plainText.displayName,
+                withTitle: L10n.text("Plain Text"),
                 action: #selector(performChooseLanguage(_:)),
                 keyEquivalent: ""
             )
@@ -3326,8 +3330,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             if shouldCancelCompletion(for: change) { documentIntelligenceUseCase?.cancel() }
             symbolOutlinePanel.dismiss()
             currentDocumentOutline = nil
-            setStatus(symbolStatus, text: "Symbols", warning: false)
-            symbolStatus.setAccessibilityValue("Current document symbols")
+            setStatus(symbolStatus, text: L10n.text("Symbols"), warning: false)
+            symbolStatus.setAccessibilityValue(L10n.text("Current document symbols"))
         }
         let previousLayout = editorGroupLayoutSnapshot
         let currentLayout: EditorGroupLayoutSnapshot
@@ -3562,11 +3566,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Save changes to \(tab.title) before closing?"
-        alert.informativeText = "Discard closes this exact reviewed revision without writing."
-        if saveAvailable { alert.addButton(withTitle: "Save") }
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Discard")
+        alert.messageText = L10n.text("Save changes to %1$@ before closing?", L10n.argument(tab.title))
+        alert.informativeText = L10n.text("Discard closes this exact reviewed revision without writing.")
+        if saveAvailable { alert.addButton(withTitle: L10n.text("Save")) }
+        alert.addButton(withTitle: L10n.text("Cancel"))
+        alert.addButton(withTitle: L10n.text("Discard"))
         let response = alert.runModal()
         if saveAvailable, response == .alertFirstButtonReturn { return .save }
         let discardResponse: NSApplication.ModalResponse = saveAvailable ? .alertThirdButtonReturn : .alertSecondButtonReturn
@@ -3874,24 +3878,24 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard workspaceInteractionsAreActionable,
               !query.pattern.isEmpty, let searchUseCase else { return }
         let operation = beginSearchOperation()
-        searchPanel.presentStatus("Searching…")
+        searchPanel.presentStatus(L10n.text("Searching…"))
         searchTask = Task { [weak self] in
             do {
                 let match = try await searchUseCase.find(query)
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(match == nil ? "No matches" : "Match selected")
+                self?.searchPanel.presentStatus(match == nil ? L10n.text("No matches") : L10n.text("Match selected"))
             } catch SearchFailure.cancelled { }
             catch SearchFailure.noSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Select a non-empty range to search")
+                self?.searchPanel.presentStatus(L10n.text("Select a non-empty range to search"))
             }
             catch SearchFailure.invalidSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Selection changed; select a range again")
+                self?.searchPanel.presentStatus(L10n.text("Selection changed; select a range again"))
             }
             catch {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Search failed: \(error)")
+                self?.searchPanel.presentStatus(L10n.text("Search failed: %1$@", PresentationErrorText.message(error)))
             }
         }
     }
@@ -3900,7 +3904,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard workspaceInteractionsAreActionable,
               !query.pattern.isEmpty, let searchUseCase else { return }
         let operation = beginSearchOperation()
-        searchPanel.presentStatus("Searching…")
+        searchPanel.presentStatus(L10n.text("Searching…"))
         searchTask = Task { [weak self] in
             do {
                 let result = try await searchUseCase.findAll(query)
@@ -3909,15 +3913,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             } catch SearchFailure.cancelled { }
             catch SearchFailure.noSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Select a non-empty range to search")
+                self?.searchPanel.presentStatus(L10n.text("Select a non-empty range to search"))
             }
             catch SearchFailure.invalidSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Selection changed; select a range again")
+                self?.searchPanel.presentStatus(L10n.text("Selection changed; select a range again"))
             }
             catch {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Search failed: \(error)")
+                self?.searchPanel.presentStatus(L10n.text("Search failed: %1$@", PresentationErrorText.message(error)))
             }
         }
     }
@@ -3928,13 +3932,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               let folderSearchUseCase,
               let filePanels else { return }
         let operation = beginSearchOperation()
-        searchPanel.presentStatus("Choose a folder…")
+        searchPanel.presentStatus(L10n.text("Choose a folder…"))
         searchTask = Task { [weak self] in
             guard let self,
                   let root = await filePanels.chooseFolderURL(attachedTo: self.window),
                   self.searchOperationID == operation,
                   self.workspaceInteractionsAreActionable else { return }
-            self.searchPanel.presentStatus("Searching \(root.lastPathComponent)…")
+            self.searchPanel.presentStatus(L10n.text("Searching %1$@…", L10n.argument(root.lastPathComponent)))
             do {
                 let result = try await folderSearchUseCase.search(rootPath: root.path, query: query)
                 guard self.searchOperationID == operation else { return }
@@ -3942,7 +3946,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             } catch FolderSearchFailure.search(.cancelled) { }
             catch {
                 guard self.searchOperationID == operation else { return }
-                self.searchPanel.presentStatus("Folder search failed: \(error)")
+                self.searchPanel.presentStatus(L10n.text("Folder search failed: %1$@", PresentationErrorText.message(error)))
             }
         }
     }
@@ -3955,18 +3959,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             do {
                 let next = try await searchUseCase.replaceCurrentThenFind(query)
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(next == nil ? "Replaced; no next match" : "Replaced")
+                self?.searchPanel.presentStatus(next == nil ? L10n.text("Replaced; no next match") : L10n.text("Replaced"))
             } catch SearchFailure.noSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Select a non-empty range to replace")
+                self?.searchPanel.presentStatus(L10n.text("Select a non-empty range to replace"))
             }
             catch SearchFailure.invalidSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Selection changed; select a range again")
+                self?.searchPanel.presentStatus(L10n.text("Selection changed; select a range again"))
             }
             catch {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Replace failed: \(error)")
+                self?.searchPanel.presentStatus(L10n.text("Replace failed: %1$@", PresentationErrorText.message(error)))
             }
         }
     }
@@ -3979,18 +3983,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             do {
                 let count = try await searchUseCase.replaceAll(query)
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Replaced \(count) match(es)")
+                self?.searchPanel.presentStatus(L10n.text("search.replaced", count))
             } catch SearchFailure.noSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Select a non-empty range to replace")
+                self?.searchPanel.presentStatus(L10n.text("Select a non-empty range to replace"))
             }
             catch SearchFailure.invalidSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Selection changed; select a range again")
+                self?.searchPanel.presentStatus(L10n.text("Selection changed; select a range again"))
             }
             catch {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Replace All failed: \(error)")
+                self?.searchPanel.presentStatus(L10n.text("Replace All failed: %1$@", PresentationErrorText.message(error)))
             }
         }
     }
@@ -4005,7 +4009,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 self?.activeEditor.focus()
             } catch {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus("Result is stale")
+                self?.searchPanel.presentStatus(L10n.text("Result is stale"))
             }
         }
     }
@@ -4026,9 +4030,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                   self.workspaceInteractionsAreActionable else { return }
             switch outcome {
             case .activated:
-                self.searchPanel.presentStatus("Opened \(document.relativePath):\(match.line)")
+                self.searchPanel.presentStatus(L10n.text("Opened %1$@:%2$@", L10n.argument(document.relativePath), L10n.argument(match.line)))
             case .stale:
-                self.searchPanel.presentStatus("Folder result changed; search again")
+                self.searchPanel.presentStatus(L10n.text("Folder result changed; search again"))
             case .failed(let failure):
                 guard failure != .cancelled else { return }
                 self.fileConflictPresenter?.presentFileFailure(
@@ -4239,22 +4243,22 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         let ending: String
         switch format.lineEnding {
-        case .none where !hasFileBinding: ending = "Unsaved"
-        case .none: ending = "No EOL"
+        case .none where !hasFileBinding: ending = L10n.text("Unsaved")
+        case .none: ending = L10n.text("No EOL")
         case .lf: ending = "LF"
         case .crlf: ending = "CRLF"
         case .cr: ending = "CR"
-        case .mixed: ending = "Mixed EOL"
+        case .mixed: ending = L10n.text("Mixed EOL")
         }
         setStatus(fileFormatStatus, text: encoding, warning: false)
         switch format.lineEnding {
         case .lf, .none: statusBar.lineEndingButton.title = "Unix (LF)"
         case .crlf: statusBar.lineEndingButton.title = "Windows (CRLF)"
         case .cr: statusBar.lineEndingButton.title = "Macintosh (CR)"
-        case .mixed: statusBar.lineEndingButton.title = "Mixed EOL"
+        case .mixed: statusBar.lineEndingButton.title = L10n.text("Mixed EOL")
         }
-        statusBar.lineEndingButton.toolTip = "Line endings: \(ending). Choose to convert and save."
-        fileFormatStatus.toolTip = "Encoding: \(encoding). Choose to reopen a file with another encoding or convert and save the displayed text."
+        statusBar.lineEndingButton.toolTip = L10n.text("Line endings: %1$@. Choose to convert and save.", L10n.argument(ending))
+        fileFormatStatus.toolTip = L10n.text("Encoding: %1$@. Choose to reopen a file with another encoding or convert and save the displayed text.", L10n.argument(encoding))
         fileFormatStatus.setAccessibilityValue("\(encoding), \(ending)")
     }
 
@@ -4262,23 +4266,23 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         languageState = state
         switch state {
         case .ready(let detection, let fallback):
-            let name = languageUseCase?.registry[detection.languageID]?.displayName ?? detection.languageID.rawValue
+            let name = detection.languageID == .plainText ? L10n.text("Plain Text") : (languageUseCase?.registry[detection.languageID]?.displayName ?? detection.languageID.rawValue)
             let tier = languageUseCase?.registry[detection.languageID]?.supportTier
-            let suffix = tier == .structural ? " · structural" : ""
+            let displayName = tier == .structural ? L10n.text("%1$@ · structural", name) : name
             setStatus(
                 languageStatus,
-                text: fallback ? "\(name) · styling paused (large file)" : name + suffix,
+                text: fallback ? L10n.text("%1$@ · styling paused (large file)", name) : displayName,
                 warning: false
             )
         case .unavailableManual(let requestedID, let fallbackID):
-            let fallbackName = languageUseCase?.registry[fallbackID]?.displayName ?? fallbackID.rawValue
+            let fallbackName = fallbackID == .plainText ? L10n.text("Plain Text") : (languageUseCase?.registry[fallbackID]?.displayName ?? fallbackID.rawValue)
             setStatus(
                 languageStatus,
-                text: "Unavailable language: \(requestedID.rawValue) · using \(fallbackName)",
+                text: L10n.text("Unavailable language: %1$@ · using %2$@", L10n.argument(requestedID.rawValue), L10n.argument(fallbackName)),
                 warning: true
             )
         case .degraded(let reason):
-            setStatus(languageStatus, text: "Plain Text · \(reason)", warning: true)
+            setStatus(languageStatus, text: L10n.text("Plain Text · %1$@", L10n.argument(reason)), warning: true)
         }
     }
 
@@ -4300,13 +4304,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         if !state.discoveryFailures.isEmpty {
             setStatus(
                 extensionStatus,
-                text: "Extensions: \(enabled) enabled · \(state.discoveryFailures.count) issue(s)",
+                text: L10n.text("Extensions: %1$@ enabled · %2$@ issue(s)", L10n.argument(enabled), L10n.argument(state.discoveryFailures.count)),
                 warning: true
             )
         } else {
             setStatus(
                 extensionStatus,
-                text: state.operationStatus ?? "Extensions: \(enabled) enabled",
+                text: state.operationStatus ?? L10n.text("Extensions: %1$@ enabled", L10n.argument(enabled)),
                 warning: false
             )
         }
@@ -4314,15 +4318,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func renderExtensionError(_ error: any Error) {
-        setStatus(extensionStatus, text: "Extension error: \(error)", warning: true)
+        setStatus(extensionStatus, text: L10n.text("Extension error: %1$@", PresentationErrorText.message(error)), warning: true)
     }
 
     private func reviewCapabilities(for item: ExtensionRegistryItem, allow: Bool) {
         guard let window else { return }
         if !allow, item.issue == .untrustedPublisher {
-            let alert = NSAlert(); alert.messageText = "Reset publisher revocation?"
-            alert.informativeText = "This removes the durable publisher tombstone for \(item.manifest.publisher.id) (\(item.publisherFingerprint)). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review."
-            alert.addButton(withTitle: "Reset Revocation"); alert.addButton(withTitle: "Cancel")
+            let alert = NSAlert(); alert.messageText = L10n.text("Reset publisher revocation?")
+            alert.informativeText = L10n.text("This removes the durable publisher tombstone for %1$@ (%2$@). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review.", L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint))
+            alert.addButton(withTitle: L10n.text("Reset Revocation")); alert.addButton(withTitle: L10n.text("Cancel"))
             alert.beginSheetModal(for: window) { [weak self] response in
                 guard response == .alertFirstButtonReturn else { return }
                 Task { @MainActor [weak self] in
@@ -4344,11 +4348,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         } else { token = nil }
         let alert = NSAlert()
         alert.messageText = allow
-            ? "Grant capabilities to \(item.manifest.name)?"
-            : "Revoke publisher \(item.manifest.publisher.id) across \(revocationToken?.affectedPackageIdentities.count ?? 0) extension(s)?"
-        alert.informativeText = extensionReviewDisclosure(for: item.manifest.id, revoking: !allow) ?? "Extension identity unavailable; cancel and refresh."
-        alert.addButton(withTitle: allow ? "Grant Exact Capabilities" : "Revoke Publisher")
-        alert.addButton(withTitle: "Cancel")
+            ? L10n.text("Grant capabilities to %1$@?", L10n.argument(item.manifest.name))
+            : L10n.text("Revoke publisher %1$@ across %2$@ extension(s)?", L10n.argument(item.manifest.publisher.id), L10n.argument(revocationToken?.affectedPackageIdentities.count ?? 0))
+        alert.informativeText = extensionReviewDisclosure(for: item.manifest.id, revoking: !allow) ?? L10n.text("Extension identity unavailable; cancel and refresh.")
+        alert.addButton(withTitle: allow ? L10n.text("Grant Exact Capabilities") : L10n.text("Revoke Publisher"))
+        alert.addButton(withTitle: L10n.text("Cancel"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             Task { @MainActor [weak self] in

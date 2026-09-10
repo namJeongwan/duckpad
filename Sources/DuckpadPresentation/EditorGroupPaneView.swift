@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -25,11 +26,11 @@ public final class EditorGroupPaneView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityIdentifier("duckpad.editor-group.\(groupID.rawValue)")
-        setAccessibilityLabel("\(groupID.rawValue.capitalized) editor group")
+        setAccessibilityLabel(L10n.text("%1$@ editor group", L10n.text(groupID.rawValue.capitalized)))
 
         tabStrip.setEditorGroupID(groupID)
         tabStrip.hostedCollectionView.setAccessibilityLabel(
-            "\(groupID.rawValue.capitalized) editor group tabs"
+            L10n.text("%1$@ editor group tabs", L10n.text(groupID.rawValue.capitalized))
         )
         tabStrip.hostedCollectionView.setAccessibilityIdentifier(
             "duckpad.editor-group.\(groupID.rawValue).tabs"
@@ -70,12 +71,12 @@ public final class EditorGroupPaneView: NSView {
 
     public func setFocused(_ focused: Bool) {
         guard isFocused != focused else {
-            setAccessibilityValue(focused ? "focused" : "not focused")
+            setAccessibilityValue(focused ? L10n.text("focused") : L10n.text("not focused"))
             return
         }
         isFocused = focused
         focusUpdateCount += 1
-        setAccessibilityValue(focused ? "focused" : "not focused")
+        setAccessibilityValue(focused ? L10n.text("focused") : L10n.text("not focused"))
     }
 
     public func tearDown() {

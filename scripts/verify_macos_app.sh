@@ -23,6 +23,15 @@ test -f "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MaterialIcon
 test -f "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MaterialIconTheme/dist/material-icons.json"
 test -f "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MaterialIconTheme/icons/file.svg"
 
+for LOCALE in en ko ja zh-Hans pt-BR it fr de; do
+    # SwiftPM normalizes resource directory names to lowercase.
+    LOCALE_DIRECTORY="$(printf '%s' "$LOCALE" | tr '[:upper:]' '[:lower:]')"
+    LOCALIZATION="$APP/Contents/Resources/Duckpad_DuckpadLocalization.bundle/$LOCALE_DIRECTORY.lproj"
+    test -s "$LOCALIZATION/Localizable.strings"
+    test -s "$LOCALIZATION/Localizable.stringsdict"
+    plutil -lint "$LOCALIZATION/Localizable.strings" "$LOCALIZATION/Localizable.stringsdict" >/dev/null
+done
+
 APP_ARCHES="$(lipo -archs "$APP/Contents/MacOS/Duckpad")"
 XPC_ARCHES="$(lipo -archs "$XPC/Contents/MacOS/DuckpadPluginRuntime")"
 [[ "$APP_ARCHES" == "$XPC_ARCHES" ]]

@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$REPOSITORY_ROOT/build/Duckpad.app"
 IDENTITY="-"
-SHORT_VERSION="0.2.1"
-BUILD_VERSION="6"
+SHORT_VERSION="0.3.0"
+BUILD_VERSION="7"
 NOTARY_PROFILE=""
 ARCHITECTURE="universal"
 
@@ -82,7 +82,7 @@ install -m 0644 "$REPOSITORY_ROOT/Vendor/Scintilla/5.6.6/License.txt" "$APP/Cont
 install -m 0644 "$REPOSITORY_ROOT/Vendor/Lexilla/5.5.3/License.txt" "$APP/Contents/Resources/ThirdPartyLicenses/Lexilla.txt"
 install -m 0644 "$REPOSITORY_ROOT/Vendor/WAMR/2.4.5/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/WAMR.txt"
 
-for RESOURCE_BUNDLE in Duckpad_DuckpadApp.bundle Duckpad_DuckpadEditorAdapter.bundle Duckpad_DuckpadInfrastructure.bundle Duckpad_DuckpadPresentation.bundle; do
+for RESOURCE_BUNDLE in Duckpad_DuckpadApp.bundle Duckpad_DuckpadEditorAdapter.bundle Duckpad_DuckpadInfrastructure.bundle Duckpad_DuckpadPresentation.bundle Duckpad_DuckpadLocalization.bundle; do
     if [[ ! -d "$BIN_PATH/$RESOURCE_BUNDLE" ]]; then
         echo "Missing SwiftPM resource bundle: $RESOURCE_BUNDLE" >&2
         exit 66

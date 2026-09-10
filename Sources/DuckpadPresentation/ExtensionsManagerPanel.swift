@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -5,9 +6,9 @@ import DuckpadDomain
 @MainActor
 final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
     private let table = NSTableView()
-    private let enableButton = NSButton(title: "Enable", target: nil, action: nil)
-    private let grantButton = NSButton(title: "Grant Requested Capabilities", target: nil, action: nil)
-    private let revokeButton = NSButton(title: "Revoke", target: nil, action: nil)
+    private let enableButton = NSButton(title: L10n.text("Enable"), target: nil, action: nil)
+    private let grantButton = NSButton(title: L10n.text("Grant Requested Capabilities"), target: nil, action: nil)
+    private let revokeButton = NSButton(title: L10n.text("Revoke"), target: nil, action: nil)
     private var items: [ExtensionRegistryItem] = []
     var onSetEnabled: ((ExtensionID, Bool) -> Void)?
     var onGrantRequested: ((ExtensionRegistryItem) -> Void)?
@@ -16,9 +17,9 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
     init() {
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 620, height: 340),
                             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        panel.title = "Duckpad Extensions"
+        panel.title = L10n.text("Duckpad Extensions")
         super.init(window: panel)
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("extension")); column.title = "Extension"
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("extension")); column.title = L10n.text("Extension")
         table.addTableColumn(column); table.headerView = nil; table.delegate = self; table.dataSource = self
         table.setAccessibilityIdentifier("duckpad.extensions.list")
         let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
@@ -52,9 +53,9 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let item = items[row]
-        let field = NSTextField(labelWithString: "\(item.manifest.name)  \(item.manifest.version)  ·  \(item.enabled ? "Enabled" : "Disabled")")
-        field.toolTip = "Publisher \(item.manifest.publisher.id) · fingerprint \(item.publisherFingerprint) · package \(item.packageDigest)"
-        field.setAccessibilityLabel("\(item.manifest.name), version \(item.manifest.version), publisher \(item.manifest.publisher.id), fingerprint \(item.publisherFingerprint), \(item.enabled ? "enabled" : "disabled"), \(item.granted.count) exact capability scopes granted")
+        let field = NSTextField(labelWithString: "\(item.manifest.name)  \(item.manifest.version)  ·  \(item.enabled ? L10n.text("Enabled") : L10n.text("Disabled"))")
+        field.toolTip = L10n.text("Publisher %1$@ · fingerprint %2$@ · package %3$@", L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint), L10n.argument(item.packageDigest))
+        field.setAccessibilityLabel(L10n.text("%1$@, version %2$@, publisher %3$@, fingerprint %4$@, %5$@, %6$@ exact capability scopes granted", L10n.argument(item.manifest.name), L10n.argument(item.manifest.version), L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint), L10n.argument(item.enabled ? L10n.text("Enabled") : L10n.text("Disabled")), L10n.argument(item.granted.count)))
         return field
     }
 
@@ -70,9 +71,9 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
 
     private var selected: ExtensionRegistryItem? { items.indices.contains(table.selectedRow) ? items[table.selectedRow] : nil }
     private func updateButtons() {
-        enableButton.isEnabled = selected != nil; enableButton.title = selected?.enabled == true ? "Disable" : "Enable"
+        enableButton.isEnabled = selected != nil; enableButton.title = selected?.enabled == true ? L10n.text("Disable") : L10n.text("Enable")
         grantButton.isEnabled = selected?.enabled == true && selected?.issue == nil
         revokeButton.isEnabled = selected?.issue != nil || (selected?.enabled == true && !(selected?.granted.isEmpty ?? true))
-        revokeButton.title = selected?.issue == .untrustedPublisher ? "Reset Publisher Revocation…" : "Revoke Publisher…"
+        revokeButton.title = selected?.issue == .untrustedPublisher ? L10n.text("Reset Publisher Revocation…") : L10n.text("Revoke Publisher…")
     }
 }

@@ -123,10 +123,10 @@ private func normalizedRMSE(_ lhs: Data, _ rhs: Data) -> Double {
         sourcePixels[name] = rgba
         if pixels == 1_024 {
             let bounds = try #require(alphaBounds(in: rgba, width: pixels, height: pixels))
-            #expect(bounds.width == 859)
-            #expect(bounds.height == 865)
-            // Removing the right-hand background exposes the artwork's original 1.5px offset.
-            #expect(abs((bounds.minX + bounds.maxX) - (pixels - 1)) <= 3)
+            #expect(bounds.width == 864)
+            #expect(bounds.height == 864)
+            // The white rounded tile stays centered while the cropped artwork fills it.
+            #expect(abs((bounds.minX + bounds.maxX) - (pixels - 1)) <= 1)
             #expect(abs((bounds.minY + bounds.maxY) - (pixels - 1)) <= 1)
         }
     }

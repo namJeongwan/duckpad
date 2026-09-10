@@ -67,6 +67,10 @@ struct WindowFramePersistenceTests {
         first.showAndFocus()
         let firstWindow = try #require(first.window)
         firstWindow.setContentSize(NSSize(width: 950, height: 630))
+        // Keep both sizes on screen: resizing a centered window can overflow a
+        // portrait display, where restoration correctly clamps its saved frame.
+        let visible = try #require(firstWindow.screen).visibleFrame
+        firstWindow.setFrameTopLeftPoint(NSPoint(x: visible.minX, y: visible.maxY))
         let firstFrame = firstWindow.frame
         first.close()
 

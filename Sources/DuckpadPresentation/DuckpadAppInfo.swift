@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import Foundation
 import DuckpadDomain
 
@@ -18,8 +19,8 @@ public struct DuckpadAppInfo: Sendable {
     }
 
     public var versionDescription: String {
-        guard let version else { return "Development build" }
-        return "Version \(version)" + (build.map { " (\($0))" } ?? "")
+        guard let version else { return L10n.text("Development build") }
+        return L10n.text("Version %1$@", L10n.argument(version)) + (build.map { " (\($0))" } ?? "")
     }
 
     public var diagnosticDescription: String {

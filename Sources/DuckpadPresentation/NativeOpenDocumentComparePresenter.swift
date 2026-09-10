@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -58,14 +59,14 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
         let choices = Self.choices(source: source, candidates: candidates)
         guard !choices.isEmpty, !Task.isCancelled else { return nil }
         let alert = NSAlert()
-        alert.messageText = "Compare \(source.title)"
-        alert.informativeText = "Choose another open document."
-        alert.addButton(withTitle: "Compare")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.text("Compare %1$@", L10n.argument(source.title))
+        alert.informativeText = L10n.text("Choose another open document.")
+        alert.addButton(withTitle: L10n.text("Compare"))
+        alert.addButton(withTitle: L10n.text("Cancel"))
         let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 28), pullsDown: false)
         choices.forEach { picker.addItem(withTitle: $0.label) }
-        picker.setAccessibilityLabel("Open document to compare")
-        picker.setAccessibilityHelp("Choose a different open document for a read-only comparison.")
+        picker.setAccessibilityLabel(L10n.text("Open document to compare"))
+        picker.setAccessibilityHelp(L10n.text("Choose a different open document for a read-only comparison."))
         alert.accessoryView = picker
         if let previous = activeAlert { dismissActiveAlert(previous) }
         activeAlert = alert
@@ -134,9 +135,9 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
         guard error != .cancelled else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Duckpad could not compare these documents."
-        alert.informativeText = String(describing: error)
-        alert.addButton(withTitle: "OK")
+        alert.messageText = L10n.text("Duckpad could not compare these documents.")
+        alert.informativeText = PresentationErrorText.message(error)
+        alert.addButton(withTitle: L10n.text("OK"))
         let identifier = ObjectIdentifier(alert)
         failureAlerts[identifier] = alert
         if let window {

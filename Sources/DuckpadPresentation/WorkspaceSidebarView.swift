@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -62,12 +63,12 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     var onRevealPath: ((String) -> Void)?
 
     private let header = NSVisualEffectView(frame: .zero)
-    private let title = NSTextField(labelWithString: "Workspace")
-    private let addButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "Add Folder")!, target: nil, action: nil)
-    private let removeButton = NSButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: "Remove Folder")!, target: nil, action: nil)
+    private let title = NSTextField(labelWithString: L10n.text("Workspace"))
+    private let addButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: L10n.text("Add Folder"))!, target: nil, action: nil)
+    private let removeButton = NSButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: L10n.text("Remove Folder"))!, target: nil, action: nil)
     private let outline = WorkspaceOutlineView(frame: .zero)
     private let scroll = NSScrollView(frame: .zero)
-    private let emptyLabel = NSTextField(wrappingLabelWithString: "Add a folder to browse files here.")
+    private let emptyLabel = NSTextField(wrappingLabelWithString: L10n.text("Add a folder to browse files here."))
     private var roots: [WorkspaceRoot] = []
     private var rootNodes: [WorkspaceSidebarNode] = []
     private var isRestoringNavigation = false
@@ -101,7 +102,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         header.addSubview(title)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("workspace"))
-        column.title = "Workspace"
+        column.title = L10n.text("Workspace")
         outline.addTableColumn(column)
         outline.outlineTableColumn = column
         outline.headerView = nil
@@ -112,10 +113,10 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         outline.target = self
         outline.doubleAction = #selector(openSelected)
         outline.onPressReturn = { [weak self] in self?.openSelected() }
-        let contextMenu = NSMenu(title: "Workspace")
+        let contextMenu = NSMenu(title: L10n.text("Workspace"))
         contextMenu.delegate = self
         outline.menu = contextMenu
-        outline.setAccessibilityLabel("Workspace files")
+        outline.setAccessibilityLabel(L10n.text("Workspace files"))
         outline.setAccessibilityIdentifier("duckpad.workspace.outline")
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
@@ -162,9 +163,9 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             $0.id == $1.id && $0.canonicalPath == $1.canonicalPath && $0.isAvailable == $1.isAvailable
         }
         self.roots = roots
-        title.stringValue = "Workspace"
+        title.stringValue = L10n.text("Workspace")
         title.toolTip = nil
-        emptyLabel.stringValue = "Add a folder to browse files here."
+        emptyLabel.stringValue = L10n.text("Add a folder to browse files here.")
         emptyLabel.isHidden = !roots.isEmpty
         if structureChanged {
             rootNodes = roots.map(WorkspaceSidebarNode.init(root:))
@@ -193,10 +194,10 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     ) {
         guard let parent = node(rootID: rootID, relativePath: relativeDirectory) else { return }
         parent.isLoading = false
-        parent.failureMessage = failure.localizedDescription
+        parent.failureMessage = PresentationErrorText.message(failure)
         parent.children = nil
-        title.stringValue = "Workspace ⚠"
-        title.toolTip = failure.localizedDescription
+        title.stringValue = L10n.text("Workspace ⚠")
+        title.toolTip = PresentationErrorText.message(failure)
         outline.reloadItem(parent, reloadChildren: true)
     }
 
@@ -208,10 +209,10 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     }
 
     func presentFailure(_ failure: WorkspaceBrowserFailure) {
-        title.stringValue = "Workspace ⚠"
-        title.toolTip = failure.localizedDescription
+        title.stringValue = L10n.text("Workspace ⚠")
+        title.toolTip = PresentationErrorText.message(failure)
         if roots.isEmpty {
-            emptyLabel.stringValue = "Workspace unavailable\n\(failure.localizedDescription)"
+            emptyLabel.stringValue = L10n.text("Workspace unavailable\n%1$@", L10n.argument(PresentationErrorText.message(failure)))
             emptyLabel.isHidden = false
         }
     }
@@ -265,6 +266,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             let cell = NSTableCellView(frame: .zero)
             cell.identifier = identifier
             let image = NSImageView(frame: .zero)
+            image.imageScaling = .scaleProportionallyUpOrDown
             image.translatesAutoresizingMaskIntoConstraints = false
             let label = NSTextField(labelWithString: "")
             label.lineBreakMode = .byTruncatingMiddle
@@ -276,8 +278,8 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             NSLayoutConstraint.activate([
                 image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
                 image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                image.widthAnchor.constraint(equalToConstant: 16),
-                image.heightAnchor.constraint(equalToConstant: 16),
+                image.widthAnchor.constraint(equalToConstant: 21),
+                image.heightAnchor.constraint(equalToConstant: 21),
                 label.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 5),
                 label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
                 label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
@@ -343,12 +345,12 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         let row = outline.clickedRow
         contextNode = row >= 0 ? outline.item(atRow: row) as? WorkspaceSidebarNode : selectedNode
         guard let contextNode else { return }
-        let reveal = menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealContextPath), keyEquivalent: "")
+        let reveal = menu.addItem(withTitle: L10n.text("Reveal in Finder"), action: #selector(revealContextPath), keyEquivalent: "")
         reveal.target = self
         reveal.isEnabled = contextNode.isAvailable
         menu.addItem(.separator())
         let remove = menu.addItem(
-            withTitle: "Remove Folder from Workspace",
+            withTitle: L10n.text("Remove Folder from Workspace"),
             action: #selector(removeContextRoot),
             keyEquivalent: ""
         )
