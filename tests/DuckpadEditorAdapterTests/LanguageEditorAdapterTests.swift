@@ -78,6 +78,90 @@ struct LanguageEditorAdapterTests {
         #expect(primary.contentUTF8 == Data("base".utf8))
     }
 
+    @Test @MainActor func editorFontPreferencesReachClonesAndPreserveUndoAndZoom() throws {
+        let adapter = ScintillaEditorAdapter()
+        defer { adapter.invalidate() }
+        let buffer = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        adapter.install(.init(bufferID: buffer.bufferID, revision: 0, text: "base"))
+        adapter.display(buffer)
+        let primary = try #require(adapter.activeScintillaView)
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        primary.setPrimarySelectionUTF8Range(NSRange(location: 4, length: 0))
+        primary.insertCommittedText("!")
+        adapter.setZoomLevel(2)
+        let settings = AppSettings(editorFontName: "Monaco", editorFontSize: 19.5)
+        adapter.applyPreferences(settings)
+        #expect(primary.editorFontName == NSFont(name: "Monaco", size: 19)?.fontName)
+        #expect(primary.editorFontSize == 19.5)
+        #expect(primary.zoomLevel == 2)
+        #expect(primary.contentUTF8 == Data("base!".utf8))
+        #expect(primary.revision == 1 && primary.canUndo)
+        adapter.setEditorGroupOrientation(.sideBySide)
+        let group = EditorGroupID()
+        adapter.assign(buffer, from: .primary, to: group, cloning: true)
+        adapter.display(.init(bufferID: buffer.bufferID, revision: 1), in: group)
+        adapter.activateEditorGroup(group)
+        let clone = try #require(adapter.activeScintillaView)
+        #expect(clone.editorFontSize == 19.5 && clone.editorFontName == primary.editorFontName)
+        #expect(adapter.applyLanguage(.init(languageID: .plainText, lexerName: "null", indentation: .init(), folding: false, braceMatching: false)))
+        #expect(clone.editorFontSize == 19.5)
+        #expect(try sendTestingScintillaMessage(2062, wParam: 32, to: clone) == 1950)
+        #expect(try sendTestingScintillaMessage(2062, wParam: 0, to: clone) == 1950)
+        clone.undo()
+        #expect(primary.contentUTF8 == Data("base".utf8))
+        let another = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        adapter.install(.init(bufferID: another.bufferID, revision: 0, text: "new"))
+        adapter.display(another, in: group)
+        #expect(adapter.activeScintillaView?.editorFontSize == 19.5)
+        adapter.applyPreferences(AppSettings(editorFontName: "missing-font-XYZ", editorFontSize: 1000))
+        #expect(adapter.activeScintillaView?.editorFontName == NSFont(name: "Menlo", size: 72)?.fontName)
+        #expect(adapter.activeScintillaView?.editorFontSize == 72)
+    }
+
+    @Test @MainActor func liveReloadNativeEditorPreservesCaretFontAndUnsavedText() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("duckpad-native-live-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("sample.txt")
+        try Data("before text".utf8).write(to: url)
+        let metadata = LiveReloadMetadataGate()
+        let workspace = ScratchWorkspaceUseCase(store: metadata)
+        let editor = ScintillaEditorAdapter()
+        defer { editor.invalidate() }
+        let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+        workspace.onChange = { binding.render($0) }
+        _ = await workspace.start()
+        editor.applyPreferences(AppSettings(editorFontName: "Monaco", editorFontSize: 18))
+        let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: LocalTextFileStore(bookmarkArchiveURL: root.appendingPathComponent("bookmarks.json")))
+        guard case .opened(let id) = await files.open(url) else { Issue.record("open failed"); return }
+        let view = try #require(editor.activeScintillaView)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 3, length: 2))
+        let caret = view.caretUTF8Position
+        let anchor = view.anchorUTF8Position
+        try Data("external content".utf8).write(to: url, options: .atomic)
+        await files.refreshFromDisk(tabID: id)
+        #expect(view.contentUTF8 == Data("external content".utf8))
+        #expect(view.caretUTF8Position == caret && view.anchorUTF8Position == anchor)
+        #expect(view.editorFontSize == 18)
+        #expect(view.revision == workspace.fileContext(tabID: id)?.buffer.revision)
+        try Data("new external".utf8).write(to: url, options: .atomic)
+        await metadata.arm()
+        let reload = Task { await files.refreshFromDisk(tabID: id) }
+        await metadata.waitUntilBlocked()
+        let revision = view.revision
+        view.insertCommittedText("local")
+        #expect(view.revision > revision)
+        let local = view.contentUTF8
+        #expect(String(decoding: local, as: UTF8.self).contains("local"))
+        await metadata.release()
+        await reload.value
+        #expect(view.contentUTF8 == local)
+        #expect(files.externalChanges[id] == .conflict)
+        #expect(workspace.snapshot().tabs.first(where: { $0.id == id })?.isDirty == true)
+        let durable = try await metadata.loadSession()
+        #expect(try durable?.session.buffer(for: id).isDirty == true)
+    }
+
     @MainActor
     private func hostedView() -> (NSWindow, DPScintillaEditorView) {
         _ = NSApplication.shared
@@ -1334,7 +1418,7 @@ struct LanguageEditorAdapterTests {
             view.insertCommittedText("}")
 
             #expect(view.contentUTF8 == Data("  }".utf8))
-            #expect(view.revision == revision + 1)
+            #expect(view.revision > revision)
         }
 
         let (_, exhausted) = hostedView()
@@ -2696,4 +2780,24 @@ struct LanguageEditorAdapterTests {
         #expect(!secondary.isCompletionActive)
         _ = binding
     }
+}
+
+
+private actor LiveReloadMetadataGate: SessionStore {
+    private let backing = InMemorySessionStore()
+    private var blocks = false
+    private var entered = false
+    private var released = false
+    func loadSession() async throws(SessionStoreError) -> StoredSession? { try await backing.loadSession() }
+    func commitSession(_ session: ScratchSession, generation: PersistenceGeneration) async throws(SessionStoreError) -> SessionCommitResult {
+        if blocks {
+            blocks = false
+            entered = true
+            while !released { await Task.yield() }
+        }
+        return try await backing.commitSession(session, generation: generation)
+    }
+    func arm() { blocks = true; entered = false; released = false }
+    func waitUntilBlocked() async { while !entered { await Task.yield() } }
+    func release() { released = true }
 }

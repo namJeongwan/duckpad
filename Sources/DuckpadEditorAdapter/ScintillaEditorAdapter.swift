@@ -623,6 +623,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
 
     private func applyDisplayPreferences(to view: DPScintillaEditorView) {
         let settings = displayPreferences
+        view.configureEditorFont(settings.editorFontName, size: settings.editorFontSize)
         view.configureGuides(withIndentation: settings.indentationGuidesVisible,
                              virtualSpace: settings.virtualSpaceEnabled,
                              edgeVisible: settings.edgeLineVisible, edgeColumn: settings.edgeColumn)

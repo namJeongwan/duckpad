@@ -1,7 +1,7 @@
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
-import DuckpadPresentation
+@testable import DuckpadPresentation
 import Testing
 
 private actor ThemeSettingsStore: AppSettingsStore {
@@ -199,4 +199,281 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
 
         }
     }
+}
+
+
+@Test @MainActor func fontComboBoxImmediatelyPersistsSelectionAndTypedNames() async throws {
+    _ = NSApplication.shared
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var saved: AppSettings?
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { settings in saved = settings; return .saved(settings) }
+    controller.onUpdateTaskStarted = { task = $0 }
+    let combo = controller.editorFont
+    let index = try #require(combo.visibleFonts.firstIndex { $0.family == "Monaco" })
+    combo.selectItem(at: index)
+    combo.comboBoxSelectionDidChange(Notification(name: NSComboBox.selectionDidChangeNotification, object: combo))
+    await task?.value
+    #expect(saved?.editorFontName == "Monaco")
+    combo.stringValue = "menlo"
+    let action = try #require(combo.action)
+    #expect(NSApp.sendAction(action, to: combo.target, from: combo))
+    await task?.value
+    #expect(saved?.editorFontName == NSFont(name: "Menlo", size: 13)?.fontName)
+    combo.stringValue = "not an installed font"
+    #expect(NSApp.sendAction(action, to: combo.target, from: combo))
+    #expect(combo.stringValue == "Menlo")
+}
+
+@Test @MainActor func fontComboBoxFiltersInstalledFontsAndUsesEachFontForPreview() throws {
+    _ = NSApplication.shared
+    let combo = EditorFontComboBox()
+    var selected: String?
+    combo.onFontSelected = { selected = $0 }
+    combo.display(fontName: "Menlo")
+    #expect(combo.stringValue == "Menlo")
+    combo.stringValue = "MONA"
+    combo.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: combo))
+    #expect(!combo.visibleFonts.isEmpty)
+    #expect(combo.visibleFonts.allSatisfy { $0.family.localizedStandardContains("mona") || $0.font.fontName.localizedStandardContains("mona") })
+    #expect(combo.comboBox(combo, completedString: "mona") == "Monaco")
+    #expect(selected == nil)
+    let item = try #require(combo.comboBox(combo, objectValueForItemAt: 0) as? NSAttributedString)
+    #expect(item.string == "Monaco")
+    #expect((item.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.fontName == "Monaco")
+    combo.stringValue = "does-not-exist"
+    combo.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: combo))
+    #expect(combo.visibleFonts.isEmpty)
+    #expect(selected == nil)
+    combo.stringValue = ""
+    combo.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: combo))
+    #expect(combo.visibleFonts.count == combo.installedFonts.count)
+}
+
+@Test @MainActor func fontComboBoxKeepsNativeMarkedTextOutOfSettings() throws {
+    _ = NSApplication.shared
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    let combo = EditorFontComboBox()
+    combo.frame = NSRect(x: 10, y: 40, width: 300, height: 26)
+    window.contentView?.addSubview(combo)
+    combo.display(fontName: "Menlo")
+    var selected: String?
+    combo.onFontSelected = { selected = $0 }
+    #expect(window.makeFirstResponder(combo))
+    let editor = try #require(combo.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    editor.insertText("mona", replacementRange: editor.selectedRange())
+    #expect(selected == nil)
+    #expect(combo.visibleFonts.contains { $0.family == "Monaco" })
+    editor.setMarkedText("Monaco", selectedRange: NSRange(location: 6, length: 0), replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+    #expect(editor.hasMarkedText())
+    let index = try #require(combo.visibleFonts.firstIndex { $0.family == "Monaco" })
+    combo.selectItem(at: index)
+    combo.comboBoxSelectionDidChange(Notification(name: NSComboBox.selectionDidChangeNotification, object: combo))
+    let action = try #require(combo.action)
+    #expect(NSApp.sendAction(action, to: combo.target, from: combo))
+    #expect(selected == nil)
+    editor.unmarkText()
+    combo.stringValue = "Monaco"
+    #expect(NSApp.sendAction(action, to: combo.target, from: combo))
+    #expect(selected == "Monaco")
+}
+
+@Test @MainActor func fontComboBoxKeepsSymbolNamesReadableAndTallPreviewsInsideRows() throws {
+    _ = NSApplication.shared
+    let symbol = try #require(NSFont(name: "Symbol", size: 14))
+    let symbolEntry = EditorFontComboBox.Entry(family: "Symbol", font: symbol)
+    #expect(symbolEntry.previewFont.fontName == NSFont.systemFont(ofSize: 14).fontName)
+    #expect(symbolEntry.font.fontName == "Symbol")
+    let tall = try #require(NSFont(name: "Zapfino", size: 14))
+    let preview = EditorFontComboBox.Entry(family: "Zapfino", font: tall).previewFont
+    #expect(preview.fontName == tall.fontName)
+    #expect(preview.ascender - preview.descender + max(0, preview.leading) <= 22.01)
+}
+
+@Test @MainActor func fontComboBoxKeepsSequentialTypingAutocompleteAndDeletion() throws {
+    _ = NSApplication.shared
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    let combo = EditorFontComboBox()
+    combo.frame = NSRect(x: 10, y: 40, width: 300, height: 26)
+    window.contentView?.addSubview(combo)
+    combo.display(fontName: "Menlo")
+    var selected: String?
+    combo.onFontSelected = { selected = $0 }
+    #expect(window.makeFirstResponder(combo))
+    let editor = try #require(combo.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    var prefix = ""
+    for character in "Monaco" {
+        prefix.append(character)
+        editor.insertText(String(character), replacementRange: editor.selectedRange())
+        #expect(editor.string.lowercased().hasPrefix(prefix.lowercased()))
+        #expect(editor.selectedRange().location == prefix.utf16.count)
+        #expect(selected == nil)
+    }
+    #expect(editor.string == "Monaco")
+    editor.deleteBackward(nil)
+    #expect(editor.string == "Monac")
+    #expect(editor.selectedRange() == NSRange(location: 5, length: 0))
+    editor.selectAll(nil)
+    prefix = ""
+    for character in "not-an-installed-font" {
+        prefix.append(character)
+        editor.insertText(String(character), replacementRange: editor.selectedRange())
+        #expect(editor.string.lowercased().hasPrefix(prefix.lowercased()))
+    }
+    #expect(editor.string.lowercased() == "not-an-installed-font")
+    #expect(combo.visibleFonts.isEmpty)
+    #expect(selected == nil)
+}
+
+@Test @MainActor func fontSizeInputAppliesWhileTypingAndValidatesPasteAndStepper() async throws {
+    _ = NSApplication.shared
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var saves: [AppSettings] = []
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { settings in saves.append(settings); return .saved(settings) }
+    controller.onUpdateTaskStarted = { task = $0 }
+    controller.selectCategory("Editing")
+    let field = controller.editorFontSize
+    #expect(controller.window?.makeFirstResponder(field) == true)
+    let editor = try #require(field.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    for character in "24.5" {
+        editor.insertText(String(character), replacementRange: editor.selectedRange())
+        await task?.value
+        #expect(field.isEnabled)
+    }
+    #expect(saves.last?.editorFontSize == 24.5)
+    #expect(editor.string == "24.5")
+    #expect(editor.selectedRange() == NSRange(location: 4, length: 0))
+    #expect(field.currentEditor() === editor)
+    for invalid in ["a", ".", "-", "12px", "1.2.3", "한", " ", "1e3"] {
+        editor.insertText(invalid, replacementRange: editor.selectedRange())
+        #expect(editor.string == "24.5")
+    }
+    editor.selectAll(nil)
+    editor.insertText("18.25", replacementRange: editor.selectedRange())
+    await task?.value
+    #expect(saves.last?.editorFontSize == 18.25)
+    let stepper = controller.editorFontSizeStepper
+    #expect(stepper.minValue == 6 && stepper.maxValue == 72 && stepper.increment == 1)
+    stepper.doubleValue += stepper.increment
+    #expect(NSApp.sendAction(try #require(stepper.action), to: stepper.target, from: stepper))
+    await task?.value
+    #expect(saves.last?.editorFontSize == 19.25)
+    #expect(field.stringValue == "19.25")
+    stepper.doubleValue -= stepper.increment
+    #expect(NSApp.sendAction(try #require(stepper.action), to: stepper.target, from: stepper))
+    await task?.value
+    #expect(saves.last?.editorFontSize == 18.25)
+    editor.selectAll(nil)
+    editor.insertText("73", replacementRange: editor.selectedRange())
+    #expect(saves.last?.editorFontSize == 18.25)
+    #expect(NSApp.sendAction(try #require(field.action), to: field.target, from: field))
+    #expect(field.stringValue == "18.25")
+}
+
+@Test @MainActor func fontSizeLiveSavesKeepLatestTypingWhilePersistenceIsPending() async throws {
+    _ = NSApplication.shared
+    let gate = SettingsSaveGate()
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var saves: [Double] = []
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { settings in
+        await gate.wait()
+        saves.append(settings.editorFontSize)
+        return .saved(settings)
+    }
+    controller.onUpdateTaskStarted = { task = $0 }
+    controller.selectCategory("Editing")
+    let field = controller.editorFontSize
+    #expect(controller.window?.makeFirstResponder(field) == true)
+    let editor = try #require(field.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    editor.insertText("18", replacementRange: editor.selectedRange())
+    #expect(controller.isUpdating)
+    #expect(field.isEnabled && controller.editorFontSizeStepper.isEnabled)
+    editor.selectAll(nil)
+    editor.insertText("24.5", replacementRange: editor.selectedRange())
+    #expect(editor.string == "24.5")
+    await gate.open()
+    await task?.value
+    #expect(saves == [18, 24.5])
+    #expect(editor.string == "24.5")
+    #expect(editor.selectedRange() == NSRange(location: 4, length: 0))
+}
+
+@Test @MainActor func fontSizeStepperDoesNotLoseClicksAcrossSlowSaves() async throws {
+    _ = NSApplication.shared
+    let first = SettingsSaveGate()
+    let second = SettingsSaveGate()
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var attempts = 0
+    var saved: [Double] = []
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { settings in
+        attempts += 1
+        if attempts == 1 { await first.wait() }
+        if attempts == 2 { await second.wait() }
+        saved.append(settings.editorFontSize)
+        return .saved(settings)
+    }
+    controller.onUpdateTaskStarted = { task = $0 }
+    let stepper = controller.editorFontSizeStepper
+    let action = try #require(stepper.action)
+    stepper.doubleValue = 22
+    #expect(NSApp.sendAction(action, to: stepper.target, from: stepper))
+    stepper.doubleValue += 1
+    #expect(NSApp.sendAction(action, to: stepper.target, from: stepper))
+    await first.open()
+    for _ in 0..<1_000 where attempts < 2 { await Task.yield() }
+    #expect(attempts == 2)
+    #expect(controller.editorFontSize.stringValue == "23")
+    #expect(stepper.doubleValue == 23)
+    stepper.doubleValue += 1
+    #expect(NSApp.sendAction(action, to: stepper.target, from: stepper))
+    await second.open()
+    await task?.value
+    #expect(saved == [22, 23, 24])
+    #expect(controller.editorFontSize.stringValue == "24")
+    #expect(stepper.doubleValue == 24)
+}
+
+@Test @MainActor func fontSizeFailedSavePreservesNewerQueuedTyping() async throws {
+    _ = NSApplication.shared
+    let gate = SettingsSaveGate()
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var attempts = 0
+    var saved: Double?
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { settings in
+        attempts += 1
+        if attempts == 1 { await gate.wait(); return .failed(.writeFailed("fixture")) }
+        saved = settings.editorFontSize
+        return .saved(settings)
+    }
+    controller.onUpdateTaskStarted = { task = $0 }
+    controller.selectCategory("Editing")
+    let field = controller.editorFontSize
+    #expect(controller.window?.makeFirstResponder(field) == true)
+    let editor = try #require(field.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    editor.insertText("18", replacementRange: editor.selectedRange())
+    editor.selectAll(nil)
+    editor.insertText("24.5", replacementRange: editor.selectedRange())
+    await gate.open()
+    await task?.value
+    #expect(saved == 24.5)
+    #expect(field.stringValue == "24.5")
+    #expect(controller.editorFontSizeStepper.doubleValue == 24.5)
 }

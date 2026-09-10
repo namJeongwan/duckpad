@@ -63,6 +63,8 @@ public final class AppSettingsUseCase {
     public func update(_ settings: AppSettings) async -> AppSettingsUpdateOutcome {
         var normalized = settings
         normalized.schemaVersion = AppSettings.currentSchemaVersion
+        normalized.editorFontSize = settings.editorFontSize.isFinite ? (min(max(settings.editorFontSize, 6), 72) * 100).rounded() / 100 : 13
+        if settings.editorFontName.isEmpty || settings.editorFontName.utf8.count > 256 { normalized.editorFontName = "Menlo" }
         normalized.caretWidth = min(max(settings.caretWidth, 1), 3)
         normalized.caretBlinkPeriod = min(max(settings.caretBlinkPeriod, 0), 2000)
         normalized.wrapIndentMode = min(max(settings.wrapIndentMode, 0), 2)

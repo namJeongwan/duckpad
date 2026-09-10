@@ -1,0 +1,36 @@
+import AppKit
+
+@MainActor
+final class LiveFileChangeBanner: NSView {
+    private let message = NSTextField(labelWithString: "")
+    let reload = NSButton(title: "Reload from Disk…", target: nil, action: nil)
+    let dismiss = NSButton(title: "Keep Editing", target: nil, action: nil)
+    private var barHeight: NSLayoutConstraint!
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        translatesAutoresizingMaskIntoConstraints = false
+        message.lineBreakMode = .byTruncatingMiddle
+        message.textColor = .labelColor
+        message.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let row = NSStackView(views: [message, reload, dismiss])
+        row.spacing = 10
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        barHeight = heightAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            barHeight, row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10), row.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        setAccessibilityIdentifier("duckpad.file-change.banner")
+        isHidden = true
+    }
+    required init?(coder: NSCoder) { nil }
+
+    func show(_ text: String?) {
+        message.stringValue = text ?? ""
+        message.toolTip = text
+        isHidden = text == nil
+        barHeight.constant = text == nil ? 0 : 34
+    }
+}

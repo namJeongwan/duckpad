@@ -216,6 +216,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     __weak DPScintillaEditorView *_documentPublisher;
     BOOL _smartEditingEnabled;
     BOOL _highlightCurrentLine;
+    NSString *_editorFontName;
+    double _editorFontSize;
     BOOL _textInputSourceKnown;
     BOOL _directInputInsertion;
     BOOL _directInputByteLengthKnown;
@@ -260,7 +262,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_SETUNDOSELECTIONHISTORY
                      wParam:SC_UNDO_SELECTION_HISTORY_ENABLED];
         [_scintilla message:SCI_SETWRAPMODE wParam:SC_WRAP_WORD];
-        [_scintilla setFontName:@"Menlo" size:13 bold:NO italic:NO];
+        _editorFontName = @"Menlo";
+        _editorFontSize = 13;
+        [_scintilla setFontName:_editorFontName size:_editorFontSize bold:NO italic:NO];
         _lexerName = @"null";
         _maximumStyleBytes = 16 * 1024 * 1024;
         _foldingEnabled = YES;
@@ -645,6 +649,26 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 - (BOOL)areLineEndingsVisible { return [_scintilla message:SCI_GETVIEWEOL] != 0; }
 - (void)setLineEndingsVisible:(BOOL)visible { [_scintilla message:SCI_SETVIEWEOL wParam:visible]; }
+- (NSString *)editorFontName { return _editorFontName; }
+- (double)editorFontSize { return _editorFontSize; }
+- (void)configureEditorFont:(NSString *)name size:(double)size {
+    double boundedSize = std::isfinite(size) ? std::round(MAX(6.0, MIN(72.0, size)) * 100.0) / 100.0 : 13.0;
+    NSFont *font = [NSFont fontWithName:name size:boundedSize] ?: [NSFont fontWithName:@"Menlo" size:boundedSize];
+    NSString *resolved = font.fontName ?: @"Menlo";
+    if ([_editorFontName isEqualToString:resolved] && _editorFontSize == boundedSize) return;
+    _editorFontName = [resolved copy];
+    _editorFontSize = boundedSize;
+    // Change only typography: preserve token colours, documents, undo and zoom.
+    for (int style = 0; style <= STYLE_MAX; ++style) {
+        [_scintilla message:SCI_STYLESETFONT wParam:style lParam:reinterpret_cast<sptr_t>(_editorFontName.UTF8String)];
+        [_scintilla message:SCI_STYLESETSIZEFRACTIONAL wParam:style lParam:std::lround(_editorFontSize * 100)];
+    }
+    [_scintilla message:SCI_STYLESETSIZEFRACTIONAL wParam:STYLE_LINENUMBER lParam:std::lround(MAX(6.0, _editorFontSize - 2) * 100)];
+    if ([_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0) {
+        [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:[_scintilla message:SCI_TEXTWIDTH wParam:STYLE_LINENUMBER lParam:reinterpret_cast<sptr_t>("99999")] + 8];
+    }
+}
+
 - (NSInteger)zoomLevel { return [_scintilla message:SCI_GETZOOM]; }
 - (void)setZoomLevel:(NSInteger)level {
     [_scintilla message:SCI_SETZOOM wParam:(uptr_t)MAX(-10, MIN(20, level))];
@@ -1149,7 +1173,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                  scrollBeyondLastLine:(BOOL)scrollBeyondLastLine
                        wrapIndentMode:(NSInteger)wrapIndentMode {
     _highlightCurrentLine = highlightCurrentLine;
-    [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:lineNumbers ? 40 : 0];
+    [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:lineNumbers ? [_scintilla message:SCI_TEXTWIDTH wParam:STYLE_LINENUMBER lParam:reinterpret_cast<sptr_t>("99999")] + 8 : 0];
     [_scintilla message:SCI_SETMARGINWIDTHN wParam:2 lParam:bookmarkMargin ? 12 : 0];
     [_scintilla message:SCI_SETCARETLINEVISIBLE wParam:highlightCurrentLine lParam:0];
     [_scintilla message:SCI_SETCARETWIDTH wParam:MIN(MAX(caretWidth, 1), 3) lParam:0];
@@ -1189,8 +1213,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const int errorColour = dark ? 0x8080FF : 0x2020D0;
     [_scintilla message:SCI_STYLESETFORE wParam:STYLE_DEFAULT lParam:foreground];
     [_scintilla message:SCI_STYLESETBACK wParam:STYLE_DEFAULT lParam:background];
-    [_scintilla message:SCI_STYLESETFONT wParam:STYLE_DEFAULT lParam:reinterpret_cast<sptr_t>("Menlo")];
-    [_scintilla message:SCI_STYLESETSIZE wParam:STYLE_DEFAULT lParam:13];
+    [_scintilla message:SCI_STYLESETFONT wParam:STYLE_DEFAULT lParam:reinterpret_cast<sptr_t>(_editorFontName.UTF8String)];
+    [_scintilla message:SCI_STYLESETSIZEFRACTIONAL wParam:STYLE_DEFAULT lParam:std::lround(_editorFontSize * 100)];
     // Let Scintilla verify fixed-width ASCII once per font instead of shaping
     // every character of a long line with CoreText on each edit. Unicode and
     // fonts that fail the width check retain the normal shaping path.
@@ -1198,8 +1222,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_STYLECLEARALL];
     [_scintilla message:SCI_STYLESETFORE wParam:STYLE_LINENUMBER lParam:gutterForeground];
     [_scintilla message:SCI_STYLESETBACK wParam:STYLE_LINENUMBER lParam:gutterBackground];
-    [_scintilla message:SCI_STYLESETFONT wParam:STYLE_LINENUMBER lParam:reinterpret_cast<sptr_t>("SF Mono")];
-    [_scintilla message:SCI_STYLESETSIZE wParam:STYLE_LINENUMBER lParam:11];
+    [_scintilla message:SCI_STYLESETFONT wParam:STYLE_LINENUMBER lParam:reinterpret_cast<sptr_t>(_editorFontName.UTF8String)];
+    [_scintilla message:SCI_STYLESETSIZEFRACTIONAL wParam:STYLE_LINENUMBER lParam:std::lround(MAX(6.0, _editorFontSize - 2) * 100)];
     [_scintilla message:SCI_SETMARGINBACKN wParam:0 lParam:gutterBackground];
     [_scintilla message:SCI_SETMARGINBACKN wParam:1 lParam:gutterBackground];
     [_scintilla message:SCI_SETMARGINBACKN wParam:2 lParam:gutterBackground];

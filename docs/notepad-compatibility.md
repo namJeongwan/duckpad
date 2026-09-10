@@ -18,9 +18,9 @@ Preferences uses a category list, immediate application, persistent storage, and
 
 | Category | Working controls |
 | --- | --- |
-| General | Document-window menu bar; status bar |
+| General | Document-window menu bar; status bar; automatically reload files changed on disk |
 | Tab Bar | Multi-line or single-row tabs; tab drag and drop; close buttons; buttons on inactive tabs |
-| Editing | Current-line highlight; caret width and blink rate; default/aligned/indented wrapping; scrolling beyond the last line; virtual space |
+| Editing | Installed editor font and size (6–72 pt); current-line highlight; caret width and blink rate; default/aligned/indented wrapping; scrolling beyond the last line; virtual space |
 | Dark Mode | Light Mode, Dark Mode, Follow macOS |
 | Margins/Border/Edge | Line numbers; bookmark margin; vertical edge and column |
 | New Document | Default word wrap and wrap symbols |
@@ -42,3 +42,21 @@ Tab labels use modified dot, file icon, and file name. Single-row mode places ho
 - Native macOS file authorization, appearance, window controls, and shortcuts are platform adaptations.
 
 Session restoration, pinned tabs, multiple tab rows, word wrap, bookmarks, syntax highlighting, and document/function lists are not exclusive Duckpad features.
+
+## External file changes
+
+Live reload is enabled by default and can be disabled in Preferences → General.
+The background monitor checks file metadata every 250 ms and reads contents
+only after a changed stamp is stable across two checks. Clean files reload
+without selecting their tabs; the native editor preserves selection and view
+state. Unsaved edits remain local and show a nonmodal notice with Keep Editing
+and Reload from Disk. Explicit reload confirms discarding the current revision.
+Missing or inaccessible files keep their contents. Monitoring is suspended and
+drained before final session recovery during window close or Quit.
+
+Preferences → Editing applies the selected installed font and base size to
+existing and new editor views. View → Zoom remains a separate per-view setting.
+
+Editor font selection uses a searchable native combo box populated from the Mac’s installed font families. Each row previews its own font (symbol fonts use readable system-font labels, and tall decorative previews scale to fit); selecting a row or confirming a complete family/PostScript name applies immediately. Incomplete input only filters the list, and invalid names restore the last selection. Reopening Preferences refreshes the installed font list. New font labels use stable localization keys with English defaults; stored PostScript font identifiers are independent of translated UI text.
+
+Font size uses a direct numeric field and native up/down stepper (6–72 pt, 0.01 pt precision). Valid input applies immediately while typing; saves coalesce without interrupting the caret. Only ASCII digits and one decimal point can be typed or pasted. Incomplete/out-of-range drafts preserve the last applied size and restore it on confirmation or blur. Search text and its autocomplete selection survive font-list refreshes; typing does not apply a font until selection/confirmation. Font preferences affect editor text and line numbers; menus and controls retain the system UI font.

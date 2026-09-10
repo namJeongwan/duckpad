@@ -911,3 +911,140 @@ private actor FileSessionStoreFake: SessionStore {
         #expect(await files.data(at: url) == bytes)
     }
 }
+
+@Test @MainActor func liveReloadUpdatesCleanDocumentBeforePublishingAndKeepsTabFocus() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let store = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-live-clean.txt")
+    await store.seed("before", at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    guard case .opened(let id) = await files.open(url) else { Issue.record("open failed"); return }
+    _ = await workspace.addScratch()
+    let selected = workspace.snapshot().tabs.first(where: \.isActive)?.id
+    await store.externalReplace("after 🦆", at: url)
+    var publications = 0
+    workspace.onChange = { change in
+        binding.render(change)
+        if case .tabUpdated = change.kind {
+            publications += 1
+            let context = workspace.fileContext(tabID: id)!
+            #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "after 🦆")
+            #expect(editor.snapshot(for: context.buffer.bufferID)?.revision == context.buffer.revision)
+        }
+    }
+    await files.refreshFromDisk(tabID: id)
+    #expect(publications == 1)
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.id == selected)
+    #expect(workspace.snapshot().tabs.first(where: { $0.id == id })?.isDirty == false)
+    #expect(files.externalChanges.isEmpty)
+    await files.refreshFromDisk(tabID: id)
+    #expect(publications == 1)
+}
+
+@Test @MainActor func liveReloadPreservesEditsAcceptedDuringReadAndRejectsStaleDiscard() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let store = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-live-race.txt")
+    await store.seed("before", at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    guard case .opened(let id) = await files.open(url) else { Issue.record("open failed"); return }
+    await store.externalReplace("external", at: url)
+    await store.armBlockedRead()
+    let reload = Task { await files.refreshFromDisk(tabID: id) }
+    await store.waitForBlockedRead()
+    _ = editor.replaceWith("my typing")
+    await store.releaseRead()
+    await reload.value
+    let context = try #require(workspace.fileContext(tabID: id))
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "my typing")
+    #expect(files.externalChanges[id] == .conflict)
+    let reviewedRevision = context.buffer.revision
+    _ = editor.replaceWith("more typing")
+    await files.refreshFromDisk(tabID: id, discardingRevision: reviewedRevision)
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "more typing")
+    #expect(files.externalChanges[id] == .conflict)
+    await files.refreshFromDisk(tabID: id, discardingRevision: workspace.fileContext(tabID: id)!.buffer.revision)
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "external")
+    #expect(files.externalChanges[id] == nil)
+}
+
+@Test @MainActor func liveReloadRetainsEncodingAndMissingFileContents() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let store = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-live-utf16.txt")
+    await store.seed("한글", at: url, encoding: .utf16LittleEndian, bom: .present)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    guard case .opened(let id) = await files.open(url) else { Issue.record("open failed"); return }
+    await store.seed("바뀜", at: url, encoding: .utf16LittleEndian, bom: .absent)
+    await files.refreshFromDisk(tabID: id)
+    let context = workspace.fileContext(tabID: id)!
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "바뀜")
+    #expect(context.binding?.encoding == .utf16LittleEndian)
+    // A different store represents a file removed after its tab was opened.
+    let missing = FileDocumentUseCase(workspace: workspace, editor: editor, store: FileStoreFake())
+    await missing.refreshFromDisk(tabID: id)
+    #expect(missing.externalChanges[id] == .unavailable)
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "바뀜")
+    #expect(workspace.fileContext(tabID: id) == context)
+}
+
+@MainActor private final class LiveMonitorFake: FileChangeMonitoring {
+    var onChange: ((Set<String>) -> Void)?
+    var paths = Set<String>()
+    func watch(paths: Set<String>) { self.paths = paths }
+    func stop() { paths.removeAll() }
+}
+
+@Test @MainActor func liveReloadMonitorSuspendsAndDrainsBeforeFinalRecovery() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let store = FileStoreFake()
+    let monitor = LiveMonitorFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-live-lifecycle.txt")
+    await store.seed("before", at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store, changeMonitor: monitor)
+    guard case .opened(let id) = await files.open(url) else { Issue.record("open failed"); return }
+    let context = workspace.fileContext(tabID: id)!
+    files.setLiveReloadEnabled(true)
+    #expect(monitor.paths == [url.path])
+    await store.externalReplace("external", at: url)
+    await store.armBlockedRead()
+    monitor.onChange?([url.path])
+    await store.waitForBlockedRead()
+    files.suspendLiveReload()
+    var drained = false
+    let drain = Task { await files.waitForLiveReload(); drained = true }
+    await Task.yield()
+    #expect(!drained)
+    #expect(monitor.paths.isEmpty)
+    await store.releaseRead()
+    await drain.value
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "before")
+    #expect(workspace.fileContext(tabID: id) == context)
+    files.resumeLiveReload()
+    #expect(monitor.paths == [url.path])
+    monitor.onChange?([url.path])
+    await files.waitForLiveReload()
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "external")
+    files.setLiveReloadEnabled(false)
+    #expect(monitor.paths.isEmpty)
+    await store.externalReplace("disabled", at: url)
+    monitor.onChange?([url.path])
+    await files.waitForLiveReload()
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "external")
+}
