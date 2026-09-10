@@ -2247,7 +2247,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 acceptedBeforeTermination: acceptedBeforeTermination
             )
         } else {
-            let resolved = await resolve(fileOutcome: outcome) { [weak self] in
+            let resolved = await resolve(fileOutcome: outcome, accessRecoveryContext: context, conversion: conversion) { [weak self] in
                 self?.beginFileCommandTask { [weak self] in
                     await self?.routeSaveFile(
                         conversion: conversion,
@@ -2300,7 +2300,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             url,
             conversion: conversion,
             expectedContext: context
-        )) { [weak self] in
+        ), accessRecoveryContext: context, conversion: conversion) { [weak self] in
             self?.beginFileCommandTask { [weak self] in
                 await self?.routeSaveFileAs(
                     conversion: conversion,
@@ -2325,7 +2325,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         _ = await resolve(fileOutcome: await fileUseCase.saveCopy(
             url,
             expectedContext: expectedContext
-        )) { [weak self] in
+        ), accessRecoveryContext: expectedContext, savesCopy: true) { [weak self] in
             self?.beginFileCommandTask { [weak self] in
                 await self?.routeSaveCopyAs(expectedContext: expectedContext)
             }
@@ -2354,7 +2354,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 ), !hasTornDownWindow, workspace.activeFileContext() == context else { break }
                 outcome = await fileUseCase.saveAs(url, expectedContext: context)
             }
-            let resolved = await resolve(fileOutcome: outcome) {}
+            let resolved = await resolve(fileOutcome: outcome, accessRecoveryContext: context) {}
             guard case .saved = resolved else { break }
             recordActiveDocumentURLIfSaved(resolved)
         }
@@ -3976,9 +3976,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @discardableResult
     private func resolve(
         fileOutcome: FileSaveOutcome,
+        accessRecoveryContext: FileWorkspaceContext? = nil,
+        conversion: TextFileConversion? = nil,
+        savesCopy: Bool = false,
         retry: @escaping @MainActor () -> Void
     ) async -> FileSaveOutcome {
         var current = fileOutcome
+        var offeredAccessRecovery = false
         while true {
             switch current {
             case .conflict:
@@ -3997,6 +4001,31 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 current = await fileUseCase.resolveConflict(resolution)
             case .failed(.workspace):
                 return current
+            case .failed(.store(.permissionDenied(let path))), .failed(.store(.notFound(let path))):
+                guard !offeredAccessRecovery, let context = accessRecoveryContext,
+                      let fileUseCase, let filePanels else {
+                    if case .failed(let failure) = current {
+                        fileConflictPresenter?.presentFileFailure(failure, attachedTo: window, retry: retry)
+                    }
+                    return current
+                }
+                offeredAccessRecovery = true
+                guard !Task.isCancelled, !hasTornDownWindow,
+                      workspace.activeFileContext() == context else { return .cancelled(context.tabID) }
+                let selected = await filePanels.chooseSaveAccessURL(
+                    for: URL(fileURLWithPath: path), attachedTo: window
+                )
+                guard let selected, !Task.isCancelled, !hasTornDownWindow,
+                      workspace.activeFileContext() == context else { return .cancelled(context.tabID) }
+                // Preserve the buffer and original observed identity: regranting
+                // access must not reload edits or bypass external-change checks.
+                if savesCopy {
+                    current = await fileUseCase.saveCopy(selected, conversion: conversion,
+                        expectedContext: context, renewingAccess: true)
+                } else {
+                    current = await fileUseCase.saveAs(selected, conversion: conversion,
+                        expectedContext: context, renewingAccess: true)
+                }
             case .failed(let failure):
                 fileConflictPresenter?.presentFileFailure(failure, attachedTo: window, retry: retry)
                 return current
@@ -4033,16 +4062,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 ))
             }
         }
-        var outcome = await fileUseCase.saveActive()
+        guard let context = workspace.activeFileContext(), context.tabID == tabID else { return .cancelled }
+        var outcome = await fileUseCase.saveActive(expectedContext: context)
         if case .requiresDestination = outcome {
-            guard let context = workspace.activeFileContext(),
-                  let url = await filePanels?.chooseSaveURL(suggestedName: context.title, attachedTo: window) else {
+            guard let url = await filePanels?.chooseSaveURL(suggestedName: context.title, attachedTo: window),
+                  !Task.isCancelled, !hasTornDownWindow,
+                  workspace.activeFileContext() == context else {
                 return .cancelled
             }
-            outcome = await fileUseCase.saveAs(url)
+            outcome = await fileUseCase.saveAs(url, expectedContext: context)
         }
         if case .failed(.workspace(let failure)) = outcome { return .workspaceFailure(failure) }
-        let resolved = await resolve(fileOutcome: outcome) { [weak self] in
+        let resolved = await resolve(fileOutcome: outcome, accessRecoveryContext: context) { [weak self] in
             guard let self else { return }
             self.retryClose(retryContext, failedSaveTabID: tabID)
         }

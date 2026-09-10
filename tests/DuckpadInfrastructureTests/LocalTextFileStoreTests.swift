@@ -214,3 +214,78 @@ func directoryDurabilityFailuresRestoreOriginal(fault: AtomicWriteFault) async t
     }
     #expect(try Data(contentsOf: file) == original)
 }
+
+@Test func renewedSecurityScopeReplacesCachedGrantAndRetainsOtherOwners() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("scope.note")
+    try Data("original".utf8).write(to: file)
+    let counter = SecurityScopeCounter()
+    let store = LocalTextFileStore(bookmarkArchiveURL: directory.appendingPathComponent("bookmarks.json"),
+        testingSecurityScopedAccessRequired: true,
+        testingStartSecurityScopedAccess: { counter.start($0) },
+        testingStopSecurityScopedAccess: { counter.stop($0) },
+        testingCreateSecurityScopedBookmark: { _ in Data("grant-\(counter.values.starts)".utf8) },
+        testingResolveSecurityScopedBookmark: { _ in (file, false) })
+    let first = UUID(), second = UUID()
+    let original = try await store.prepareSecurityScopedAccess(to: file, ownerID: first)
+    _ = try await store.prepareSecurityScopedAccess(to: file, ownerID: second)
+    let renewed = try await store.renewSecurityScopedAccess(to: file, ownerID: first)
+    #expect(renewed.bookmark != original.bookmark)
+    #expect(counter.values == (2, 1))
+    #expect(try await store.prepareSecurityScopedAccess(to: file, ownerID: second).bookmark == renewed.bookmark)
+    await store.releaseAllSecurityScopedAccess(ownerID: first)
+    #expect(counter.values == (2, 1))
+    await store.releaseAllSecurityScopedAccess(ownerID: second)
+    #expect(counter.values == (2, 2))
+}
+
+@Test func failedRenewalPreservesTheExistingOwnersAndGrant() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("scope.note")
+    try Data("original".utf8).write(to: file)
+    let counter = SecurityScopeCounter()
+    let store = LocalTextFileStore(bookmarkArchiveURL: directory.appendingPathComponent("bookmarks.json"),
+        testingSecurityScopedAccessRequired: true,
+        testingStartSecurityScopedAccess: { counter.start($0) },
+        testingStopSecurityScopedAccess: { counter.stop($0) },
+        testingCreateSecurityScopedBookmark: { _ in
+            if counter.values.starts > 1 { throw TextFileStoreError.io("bookmark failure") }
+            return Data("original-grant".utf8)
+        }, testingResolveSecurityScopedBookmark: { _ in (file, false) })
+    let owner = UUID()
+    let original = try await store.prepareSecurityScopedAccess(to: file, ownerID: owner)
+    do {
+        _ = try await store.renewSecurityScopedAccess(to: file, ownerID: owner)
+        Issue.record("renewal unexpectedly succeeded")
+    } catch { #expect(error == .io("bookmark failure")) }
+    #expect(counter.values == (2, 1))
+    #expect(try await store.prepareSecurityScopedAccess(to: file, ownerID: owner).bookmark == original.bookmark)
+    await store.releaseAllSecurityScopedAccess(ownerID: owner)
+    #expect(counter.values == (2, 2))
+}
+
+@Test func newSaveDestinationPersistsBookmarkOnlyAfterFileExists() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("new.note")
+    let store = LocalTextFileStore(bookmarkArchiveURL: directory.appendingPathComponent("bookmarks.json"),
+        testingSecurityScopedAccessRequired: true, testingStartSecurityScopedAccess: { _ in true },
+        testingStopSecurityScopedAccess: { _ in }, testingCreateSecurityScopedBookmark: { url in
+            guard FileManager.default.fileExists(atPath: url.path) else { throw TextFileStoreError.notFound(url.path) }
+            return Data("durable-new-file-grant".utf8)
+        }, testingResolveSecurityScopedBookmark: { _ in (file, false) })
+    let owner = UUID()
+    #expect(try await store.renewSecurityScopedAccess(to: file, ownerID: owner).bookmark == nil)
+    // A conflict/Overwrite retry can prepare the same grant before creation.
+    #expect(try await store.prepareSecurityScopedAccess(to: file, ownerID: owner).bookmark == nil)
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+    _ = try await store.writeAtomically(Data("preserved edits".utf8), to: file, expectedIdentity: nil, overwrite: false)
+    #expect(try await store.prepareSecurityScopedAccess(to: file, ownerID: owner).bookmark == Data("durable-new-file-grant".utf8))
+    #expect(try String(contentsOf: file, encoding: .utf8) == "preserved edits")
+    await store.releaseAllSecurityScopedAccess(ownerID: owner)
+}

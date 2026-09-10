@@ -12,12 +12,16 @@ public final class WeakWindowReference: @unchecked Sendable {
 public protocol FilePanelPresenting: AnyObject {
     func chooseOpenURL(attachedTo window: NSWindow?) async -> URL?
     func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL?
+    func chooseSaveAccessURL(for url: URL, attachedTo window: NSWindow?) async -> URL?
     func chooseFolderURL(attachedTo window: NSWindow?) async -> URL?
     func chooseWorkspaceFolderURL(attachedTo window: WeakWindowReference) async -> URL?
     func cancelOutstandingPanels()
 }
 
 public extension FilePanelPresenting {
+    func chooseSaveAccessURL(for url: URL, attachedTo window: NSWindow?) async -> URL? {
+        await chooseSaveURL(suggestedName: url.lastPathComponent, attachedTo: window)
+    }
     func chooseFolderURL(attachedTo window: NSWindow?) async -> URL? { nil }
     func chooseWorkspaceFolderURL(attachedTo window: WeakWindowReference) async -> URL? { nil }
     func cancelOutstandingPanels() {}
@@ -69,6 +73,15 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
     public func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL? {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggestedName
+        return await run(panel, attachedTo: window) == .OK ? panel.url : nil
+    }
+
+    public func chooseSaveAccessURL(for url: URL, attachedTo window: NSWindow?) async -> URL? {
+        let panel = NSSavePanel()
+        panel.title = "Allow Access and Save"
+        panel.message = "Choose this file again to restore access and save your edits. If it was moved or deleted, choose a new location."
+        panel.directoryURL = url.deletingLastPathComponent()
+        panel.nameFieldStringValue = url.lastPathComponent
         return await run(panel, attachedTo: window) == .OK ? panel.url : nil
     }
 

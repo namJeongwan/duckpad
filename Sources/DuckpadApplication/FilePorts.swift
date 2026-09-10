@@ -55,6 +55,8 @@ public struct SecurityScopedFileAccess: Equatable, Sendable {
 }
 
 public protocol TextFileStore: Sendable {
+    /// Refresh access from a URL explicitly selected in a native file panel.
+    func renewSecurityScopedAccess(to url: URL, ownerID: UUID) async throws(TextFileStoreError) -> SecurityScopedFileAccess
     func prepareSecurityScopedAccess(
         to url: URL,
         ownerID: UUID
@@ -79,6 +81,9 @@ public protocol TextFileStore: Sendable {
 }
 
 public extension TextFileStore {
+    func renewSecurityScopedAccess(to url: URL, ownerID: UUID) async throws(TextFileStoreError) -> SecurityScopedFileAccess {
+        try await prepareSecurityScopedAccess(to: url, ownerID: ownerID)
+    }
     func prepareSecurityScopedAccess(
         to url: URL,
         ownerID: UUID

@@ -95,6 +95,7 @@ public final class FileDocumentUseCase {
         let url: URL
         let conversion: TextFileConversion?
         let currentIdentity: FileIdentity?
+        let securityScopedBookmark: Data?
     }
 
     private let workspace: ScratchWorkspaceUseCase
@@ -402,7 +403,8 @@ public final class FileDocumentUseCase {
     public func saveAs(
         _ url: URL,
         conversion: TextFileConversion? = nil,
-        expectedContext: FileWorkspaceContext? = nil
+        expectedContext: FileWorkspaceContext? = nil,
+        renewingAccess: Bool = false
     ) async -> FileSaveOutcome {
         await acquireOperation()
         defer { releaseOperation() }
@@ -410,7 +412,7 @@ public final class FileDocumentUseCase {
         guard expectedContext == nil || expectedContext == context else {
             return .failed(.comparisonInvalidated)
         }
-        return await save(context: context, to: url, conversion: conversion, overwrite: false)
+        return await save(context: context, to: url, conversion: conversion, overwrite: false, renewingAccess: renewingAccess)
     }
 
     /// Writes a point-in-time copy without rebinding the tab or marking it clean.
@@ -419,7 +421,8 @@ public final class FileDocumentUseCase {
     public func saveCopy(
         _ url: URL,
         conversion: TextFileConversion? = nil,
-        expectedContext: FileWorkspaceContext? = nil
+        expectedContext: FileWorkspaceContext? = nil,
+        renewingAccess: Bool = false
     ) async -> FileSaveOutcome {
         await acquireOperation()
         defer { releaseOperation() }
@@ -433,7 +436,11 @@ public final class FileDocumentUseCase {
         let access: SecurityScopedFileAccess
         let canonical: URL
         do {
-            access = try await store.prepareSecurityScopedAccess(to: url, ownerID: transientOwnerID)
+            if renewingAccess {
+                access = try await store.renewSecurityScopedAccess(to: url, ownerID: transientOwnerID)
+            } else {
+                access = try await store.prepareSecurityScopedAccess(to: url, ownerID: transientOwnerID)
+            }
             canonical = try await store.canonicalURL(for: access.url)
         } catch let error {
             return .failed(.store(error))
@@ -464,6 +471,7 @@ public final class FileDocumentUseCase {
                         expectedIdentity: destinationIdentity,
                         overwrite: false
                     )
+                    _ = try await store.prepareSecurityScopedAccess(to: canonical, ownerID: transientOwnerID)
                     outcome = .saved(context.tabID)
                 } catch let error {
                     outcome = .failed(.store(error))
@@ -502,6 +510,9 @@ public final class FileDocumentUseCase {
         case .reload:
             do {
                 let read = try await store.read(from: pendingConflict.url)
+                let retainedAccess = try await store.prepareSecurityScopedAccess(
+                    to: pendingConflict.url, ownerID: securityScopeOwnerID
+                )
                 let decoded = TextFileCodec.decodeForDisplay(read.data)
                 let updated = FileBinding(
                     canonicalPath: read.identity.canonicalPath,
@@ -509,7 +520,8 @@ public final class FileDocumentUseCase {
                     byteOrderMark: decoded.byteOrderMark,
                     lineEnding: decoded.lineEnding,
                     observedIdentity: read.identity,
-                    securityScopedBookmark: context.binding?.securityScopedBookmark
+                    securityScopedBookmark: retainedAccess.bookmark ?? pendingConflict.securityScopedBookmark
+                        ?? (context.binding?.canonicalPath == pendingConflict.url.path ? context.binding?.securityScopedBookmark : nil)
                 )
                 switch await workspace.replaceFileContents(
                     tabID: context.tabID,
@@ -598,15 +610,17 @@ public final class FileDocumentUseCase {
         context: FileWorkspaceContext,
         to url: URL,
         conversion: TextFileConversion?,
-        overwrite: Bool
+        overwrite: Bool,
+        renewingAccess: Bool = false
     ) async -> FileSaveOutcome {
         let access: SecurityScopedFileAccess
         let canonical: URL
         do {
-            access = try await store.prepareSecurityScopedAccess(
-                to: url,
-                ownerID: securityScopeOwnerID
-            )
+            if renewingAccess {
+                access = try await store.renewSecurityScopedAccess(to: url, ownerID: securityScopeOwnerID)
+            } else {
+                access = try await store.prepareSecurityScopedAccess(to: url, ownerID: securityScopeOwnerID)
+            }
             canonical = try await store.canonicalURL(for: access.url)
         } catch let error {
             return .failed(.store(error))
@@ -670,6 +684,7 @@ public final class FileDocumentUseCase {
         let expected = !overwrite && context.binding?.canonicalPath == url.path ? context.binding?.observedIdentity : nil
         do {
             let receipt = try await store.writeAtomically(data, to: url, expectedIdentity: expected, overwrite: overwrite)
+            let retainedAccess = try await store.prepareSecurityScopedAccess(to: url, ownerID: securityScopeOwnerID)
             let identity = receipt.identity
             let binding = FileBinding(
                 canonicalPath: identity.canonicalPath,
@@ -677,7 +692,8 @@ public final class FileDocumentUseCase {
                 byteOrderMark: bom,
                 lineEnding: lineEnding == .none ? inferLineEnding(text) : lineEnding,
                 observedIdentity: identity,
-                securityScopedBookmark: securityScopedBookmark ?? context.binding?.securityScopedBookmark
+                securityScopedBookmark: retainedAccess.bookmark ?? securityScopedBookmark
+                    ?? (context.binding?.canonicalPath == url.path ? context.binding?.securityScopedBookmark : nil)
             )
             switch await workspace.bindSavedFileIfCurrent(
                 tabID: context.tabID,
@@ -701,7 +717,8 @@ public final class FileDocumentUseCase {
                 context: context,
                 url: url,
                 conversion: conversion,
-                currentIdentity: current
+                currentIdentity: current,
+                securityScopedBookmark: securityScopedBookmark
             )
             return .conflict(tabID: context.tabID, current: current)
         } catch let error {

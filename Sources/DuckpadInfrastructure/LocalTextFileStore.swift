@@ -21,7 +21,7 @@ public enum AtomicWriteFault: Sendable {
 public actor LocalTextFileStore: TextFileStore {
     private struct ActiveSecurityScope: Sendable {
         let url: URL
-        let bookmark: Data
+        var bookmark: Data?
         var owners: Set<UUID>
     }
 
@@ -108,6 +108,16 @@ public actor LocalTextFileStore: TextFileStore {
         let requested = url.standardizedFileURL
         guard requested.isFileURL else { throw .invalidPath(url.absoluteString) }
         if var current = activeSecurityScopes[requested.path] {
+            // A SavePanel may authorize a destination before it exists. Once
+            // the write completes, turn that live grant into a durable bookmark.
+            if current.bookmark == nil, FileManager.default.fileExists(atPath: current.url.path) {
+                do {
+                    let bookmark = try createSecurityScopedBookmark(current.url)
+                    try persistBookmark(bookmark, aliases: [requested.path, current.url.path])
+                    current.bookmark = bookmark
+                } catch let error as TextFileStoreError { throw error }
+                catch { throw .io(String(describing: error)) }
+            }
             current.owners.insert(ownerID)
             activeSecurityScopes[requested.path] = current
             return SecurityScopedFileAccess(url: current.url, bookmark: current.bookmark)
@@ -135,8 +145,9 @@ public actor LocalTextFileStore: TextFileStore {
                 activeSecurityScopes[canonical.path] = current
                 return SecurityScopedFileAccess(url: current.url, bookmark: current.bookmark)
             }
-            let bookmark = try createSecurityScopedBookmark(canonical)
-            try persistBookmark(bookmark, aliases: [requested.path, canonical.path])
+            let bookmark = try FileManager.default.fileExists(atPath: canonical.path)
+                ? createSecurityScopedBookmark(canonical) : nil
+            if let bookmark { try persistBookmark(bookmark, aliases: [requested.path, canonical.path]) }
             activeSecurityScopes[canonical.path] = ActiveSecurityScope(
                 url: canonical,
                 bookmark: bookmark,
@@ -148,6 +159,34 @@ public actor LocalTextFileStore: TextFileStore {
             throw error
         } catch {
             stopSecurityScopedAccess(accessedURL)
+            throw .io(String(describing: error))
+        }
+    }
+
+    public func renewSecurityScopedAccess(
+        to url: URL,
+        ownerID: UUID
+    ) async throws(TextFileStoreError) -> SecurityScopedFileAccess {
+        guard securityScopedAccessRequired else { return SecurityScopedFileAccess(url: url) }
+        guard url.isFileURL else { throw .invalidPath(url.absoluteString) }
+        // Use the newly selected Powerbox URL, never the expired cached grant.
+        guard startSecurityScopedAccess(url) else { throw .permissionDenied(url.path) }
+        do {
+            let canonical = try Self.canonicalize(url)
+            let bookmark = try FileManager.default.fileExists(atPath: canonical.path)
+                ? createSecurityScopedBookmark(canonical) : nil
+            if let bookmark { try persistBookmark(bookmark, aliases: [url.path, canonical.path]) }
+            let previous = activeSecurityScopes[canonical.path]
+            var owners = previous?.owners ?? []
+            owners.insert(ownerID)
+            activeSecurityScopes[canonical.path] = ActiveSecurityScope(url: url, bookmark: bookmark, owners: owners)
+            if let previous { stopSecurityScopedAccess(previous.url) }
+            return SecurityScopedFileAccess(url: canonical, bookmark: bookmark)
+        } catch let error as TextFileStoreError {
+            stopSecurityScopedAccess(url)
+            throw error
+        } catch {
+            stopSecurityScopedAccess(url)
             throw .io(String(describing: error))
         }
     }

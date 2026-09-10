@@ -153,6 +153,48 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 fflush(stdout)
                 Darwin._exit(0)
             }
+        } else if let path = environment["DUCKPAD_SAVE_ACCESS_SMOKE_FILE"], securityScopeSmokeNamespace != nil {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                let target = URL(fileURLWithPath: path)
+                precondition(!FileManager.default.fileExists(atPath: target.path), "save-access smoke requires a new fixture")
+                let panel = NSSavePanel()
+                panel.directoryURL = target.deletingLastPathComponent()
+                panel.nameFieldStringValue = target.lastPathComponent
+                panel.prompt = "Save"
+                var attempts = 0
+                let watchdog: @MainActor @Sendable () -> Void = {
+                    attempts += 1
+                    if attempts > 60 { Darwin._exit(88) }
+                }
+                let timer = Timer(timeInterval: 0.5, repeats: true) { _ in
+                    MainActor.assumeIsolated { watchdog() }
+                }
+                RunLoop.main.add(timer, forMode: .common)
+                let response = await withCheckedContinuation { continuation in
+                    panel.beginSheetModal(for: controller.window!) { continuation.resume(returning: $0) }
+                }
+                timer.invalidate()
+                guard response == .OK, let selected = panel.url,
+                      selected.standardizedFileURL.path == target.standardizedFileURL.path,
+                      let view = editor.activeScintillaView else {
+                    preconditionFailure("save-access smoke panel did not select the fixture")
+                }
+                view.insertCommittedText("first-grant")
+                let outcome = await fileUseCase.saveAs(selected, renewingAccess: true)
+                guard case .saved = outcome,
+                      workspace.activeFileContext()?.binding?.securityScopedBookmark != nil else {
+                    FileHandle.standardError.write(Data("save-access smoke failed: \(outcome)\n".utf8))
+                    Darwin._exit(87)
+                }
+                view.selectAll()
+                view.insertCommittedText("bookmark-relaunch")
+                guard case .saved = await recoveryUseCase.flush() else {
+                    preconditionFailure("save-access recovery flush failed")
+                }
+                print("Duckpad save-access smoke created a file with renewed access")
+                fflush(stdout); Darwin._exit(86)
+            }
         } else if let expectedPath = environment["DUCKPAD_SECURITY_SCOPE_SMOKE_WRITE"] {
             Task { @MainActor in
                 await controller.waitForStartup()

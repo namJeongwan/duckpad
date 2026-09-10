@@ -247,6 +247,15 @@ private actor RoutingFileStore: TextFileStore {
     private var readPaths: [String] = []
     private var generation: UInt64 = 0
     private var forcedWriteError: TextFileStoreError?
+    private(set) var renewedPaths: [String] = []
+    private var renewalError: TextFileStoreError?
+    func setRenewalError(_ error: TextFileStoreError?) { renewalError = error }
+    func renewSecurityScopedAccess(to url: URL, ownerID: UUID) async throws(TextFileStoreError) -> SecurityScopedFileAccess {
+        renewedPaths.append(url.path)
+        if let renewalError { throw renewalError }
+        forcedWriteError = nil
+        return SecurityScopedFileAccess(url: url, bookmark: Data("renewed-grant".utf8))
+    }
     private var blockNextRead = false
     private var blockedReadEntered = false
     private var releaseBlockedRead = false
@@ -354,6 +363,14 @@ private final class PanelFake: FilePanelPresenting, FileConflictPresenting, Dirt
     var folderURL: URL?
     private(set) var openRequests = 0
     private(set) var saveRequests = 0
+    private(set) var saveAccessRequests: [URL] = []
+    var saveAccessURL: URL?
+    var onSaveAccess: (@MainActor () async -> Void)?
+    func chooseSaveAccessURL(for url: URL, attachedTo window: NSWindow?) async -> URL? {
+        saveAccessRequests.append(url)
+        await onSaveAccess?()
+        return saveAccessURL
+    }
     private(set) var folderRequests = 0
     private(set) var failures: [FileOperationFailure] = []
     private(set) var fileFailureRetries: [@MainActor () -> Void] = []
@@ -2337,5 +2354,102 @@ struct FileLifecycleTests {
         #expect(!controller.searchPanelSmokeState().isVisible)
         #expect(controller.searchPanelSmokeState().height == 0)
         controller.close()
+    }
+}
+
+@Test(arguments: ["same", "new", "cancel", "edit", "conflict", "reload", "deniedAgain", "missing"])
+@MainActor func savingReauthorizesWithoutReloadingOrLosingEdits(scenario: String) async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let source = URL(fileURLWithPath: "/tmp/duckpad-reauthorize-source.note")
+    let destination = URL(fileURLWithPath: "/tmp/duckpad-reauthorize-new.note")
+    await files.seed("original", at: source)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let panels = PanelFake()
+    panels.openURL = source
+    panels.saveAccessURL = scenario == "cancel" ? nil : (["new", "missing"].contains(scenario) ? destination : source)
+    let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor,
+        editorView: editor.scrollView, fileUseCase: useCase, filePanels: panels,
+        fileConflictPresenter: panels, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    await controller.routeOpenFile()
+    editor.textView.selectAll(nil)
+    editor.textView.insertText("edited 한글", replacementRange: editor.textView.selectedRange())
+    let context = try #require(workspace.activeFileContext())
+    await files.setWriteError(scenario == "missing" ? .notFound(source.path) : .permissionDenied(source.path))
+    if scenario == "deniedAgain" { await files.setRenewalError(.permissionDenied(source.path)) }
+    if scenario == "reload" { panels.conflictResolutions = [.reload] }
+    panels.onSaveAccess = {
+        if scenario == "edit" { editor.textView.insertText(" later", replacementRange: editor.textView.selectedRange()) }
+        if ["conflict", "reload"].contains(scenario) { await files.seed("external", at: source) }
+    }
+    await controller.routeSaveFile()
+    #expect(panels.saveAccessRequests == [source])
+    #expect(editor.textView.string == (scenario == "edit" ? "edited 한글 later" : (scenario == "reload" ? "external" : "edited 한글")))
+    #expect(workspace.activeFileContext()?.buffer.bufferID == context.buffer.bufferID)
+    let succeeds = ["same", "new", "missing", "reload"].contains(scenario)
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == !succeeds)
+    #expect(await files.renewedPaths == (["cancel", "edit"].contains(scenario) ? [] : [panels.saveAccessURL!.path]))
+    #expect(panels.failures.count == (scenario == "deniedAgain" ? 1 : 0))
+    if succeeds {
+        #expect(await files.text(at: panels.saveAccessURL!) == (scenario == "reload" ? "external" : "edited 한글"))
+        #expect(workspace.activeFileContext()?.binding?.canonicalPath == panels.saveAccessURL!.path)
+        #expect(workspace.activeFileContext()?.binding?.securityScopedBookmark == Data("renewed-grant".utf8))
+    }
+    if scenario != "same" { #expect(await files.text(at: source) == (["conflict", "reload"].contains(scenario) ? "external" : "original")) }
+}
+
+@Test(arguments: ["all", "close", "copy"])
+@MainActor func saveAccessRecoveryWorksForBatchCloseAndCopy(action: String) async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let files = RoutingFileStore()
+    let source = URL(fileURLWithPath: "/tmp/duckpad-access-command.note")
+    let copy = URL(fileURLWithPath: "/tmp/duckpad-access-copy.note")
+    let target = action == "copy" ? copy : source
+    await files.seed("original", at: source)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let panels = PanelFake()
+    panels.openURL = source
+    panels.saveURL = copy
+    panels.saveAccessURL = target
+    panels.decisions = [.save]
+    let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor,
+        editorView: editor.scrollView, fileUseCase: useCase, filePanels: panels,
+        fileConflictPresenter: panels, dirtyDecisionPresenter: panels, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    await controller.routeOpenFile()
+    editor.textView.selectAll(nil)
+    editor.textView.insertText("retained edits", replacementRange: editor.textView.selectedRange())
+    let context = try #require(workspace.activeFileContext())
+    await files.setWriteError(.permissionDenied(target.path))
+    switch action {
+    case "all": controller.performSaveAll()
+    case "close": controller.performCloseActiveTab()
+    default: controller.performSaveCopyAs()
+    }
+    for _ in 0..<400 {
+        let written = await files.text(at: target) == "retained edits"
+        let tab = workspace.snapshot().tabs.first(where: { $0.id == context.tabID })
+        if written && (action == "copy" || (action == "close" ? tab == nil : tab?.isDirty == false)) { break }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(await files.text(at: target) == "retained edits")
+    #expect(panels.saveAccessRequests == [target])
+    #expect(panels.failures.isEmpty)
+    let tab = workspace.snapshot().tabs.first(where: { $0.id == context.tabID })
+    if action == "close" { #expect(tab == nil) }
+    if action == "all" { #expect(tab?.isDirty == false) }
+    if action == "copy" {
+        #expect(tab?.isDirty == true)
+        #expect(workspace.activeFileContext()?.binding == context.binding)
+        #expect(await files.text(at: source) == "original")
     }
 }
