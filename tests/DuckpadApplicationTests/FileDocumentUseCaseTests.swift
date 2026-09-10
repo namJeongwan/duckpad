@@ -7,6 +7,7 @@ private actor FileStoreFake: TextFileStore {
     private var files: [String: FileReadResult] = [:]
     private var serial: UInt64 = 0
     private(set) var readCount = 0
+    private(set) var releasedPaths: [String] = []
     private var blockNextWrite = false
     private var blockedWriteEntered = false
     private var releaseBlockedWrite = false
@@ -17,6 +18,10 @@ private actor FileStoreFake: TextFileStore {
 
     func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL {
         url.standardizedFileURL
+    }
+
+    func releaseSecurityScopedAccess(forCanonicalPath path: String, ownerID: UUID) async {
+        releasedPaths.append(path)
     }
 
     func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult {
@@ -130,6 +135,98 @@ private final class FileEditorFake: EditorPort, EditorSelectionPort {
     #expect(first == second)
     #expect(workspace.snapshot().tabs.count == 2)
     #expect(await files.readCount == 1)
+}
+
+@Test @MainActor func explicitEncodingReopensExistingDocumentWithoutWriting() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-reopen-encoding.txt")
+    // BOM-less UTF-16 LE for "한글"; initially opened with the default UTF-8 preview.
+    let bytes = Data([0x5C, 0xD5, 0x00, 0xAE])
+    await files.seedBytes(bytes, at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    guard case .opened(let tabID) = await useCase.open(url) else { Issue.record("open failed"); return }
+    _ = await workspace.addScratch()
+
+    #expect(await useCase.open(url, assuming: .utf16LittleEndian) == .activatedExisting(tabID))
+    let context = workspace.fileContext(tabID: tabID)!
+    #expect(workspace.activeFileContext()?.tabID == tabID)
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "한글")
+    #expect(context.binding?.encoding == .utf16LittleEndian)
+    #expect(workspace.snapshot().tabs.first(where: { $0.id == tabID })?.isDirty == false)
+    #expect(await files.data(at: url) == bytes)
+    #expect(await files.readCount == 2)
+}
+
+@Test @MainActor func explicitEncodingRejectsInvalidBytesWithoutChangingDocument() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-invalid-encoding.txt")
+    await files.seed("abc", at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    // Explicit selection must report the error, including on a first open.
+    #expect(await useCase.open(url, assuming: .utf16LittleEndian) == .failed(.codec(.truncatedUTF16)))
+    guard case .opened(let tabID) = await useCase.open(url) else { Issue.record("open failed"); return }
+    let before = workspace.fileContext(tabID: tabID)!
+    #expect(await useCase.open(url, assuming: .utf16LittleEndian) == .failed(.codec(.truncatedUTF16)))
+    #expect(workspace.fileContext(tabID: tabID) == before)
+    #expect(editor.snapshot(for: before.buffer.bufferID)?.text == "abc")
+    #expect(await files.text(at: url) == "abc")
+}
+
+@Test @MainActor func explicitEncodingPreservesUnsavedEdits() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-dirty-encoding.txt")
+    await files.seed("saved", at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    guard case .opened(let tabID) = await useCase.open(url) else { Issue.record("open failed"); return }
+    editor.replaceWith("unsaved edits")
+    let before = workspace.fileContext(tabID: tabID)!
+    #expect(await useCase.open(url, assuming: .utf8) == .failed(.unsavedChanges(tabID)))
+    #expect(workspace.fileContext(tabID: tabID) == before)
+    #expect(editor.snapshot(for: before.buffer.bufferID)?.text == "unsaved edits")
+    #expect(await files.text(at: url) == "saved")
+    #expect(await files.releasedPaths.isEmpty)
+}
+
+@Test @MainActor func explicitEncodingReopenPreservesEditsDuringRead() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let files = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-reopen-edit-race.txt")
+    await files.seed("saved", at: url)
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    guard case .opened(let tabID) = await useCase.open(url) else { Issue.record("open failed"); return }
+    let before = workspace.fileContext(tabID: tabID)!
+    await files.armBlockedRead()
+    let reopen = Task { await useCase.open(url, assuming: .utf8) }
+    await files.waitForBlockedRead()
+    #expect(editor.replaceWith("new edit") == .accepted(newRevision: before.buffer.revision + 1))
+    await files.releaseRead()
+    #expect(await reopen.value == .failed(.editorRevisionMismatch(
+        bufferID: before.buffer.bufferID,
+        expected: before.buffer.revision,
+        actual: before.buffer.revision + 1
+    )))
+    #expect(editor.snapshot(for: before.buffer.bufferID)?.text == "new edit")
+    #expect(workspace.fileContext(tabID: tabID)?.binding == before.binding)
+    #expect(await files.text(at: url) == "saved")
 }
 
 @Test @MainActor func workspaceDescriptorReadOpensWithoutASecondPathRead() async throws {

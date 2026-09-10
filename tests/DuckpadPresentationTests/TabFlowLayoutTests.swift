@@ -1510,6 +1510,17 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     #expect(positioningItem.submenu?.items.first { $0.state == .on }?.title == "C++")
 }
 
+@Test @MainActor func encodingStatusMenuSeparatesReopeningFromSaving() {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
+    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    defer { controller.close() }
+    let menu = DuckpadMainMenuFactory.makeFileFormatStatusMenu(target: controller)
+    #expect(menu.items.map(\.title) == ["Open or Reopen Using Encoding", "Convert and Save Encoding"])
+    #expect(menu.items.first?.submenu?.items.first?.action == #selector(DuckpadWindowController.performOpenAsUTF8(_:)))
+    #expect(menu.items.last?.submenu?.items.first?.action == #selector(DuckpadWindowController.performConvertToUTF8(_:)))
+}
+
 @Test @MainActor func mainMenuPublishesNativeTabSelectorsAndExactShortcuts() async {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())

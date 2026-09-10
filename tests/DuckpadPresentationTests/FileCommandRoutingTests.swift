@@ -903,7 +903,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     #expect(panels.failures.isEmpty)
 }
 
-@Test @MainActor func controllerOpensExplicitUTF16AndConvertsDurableFormat() async throws {
+@Test @MainActor func controllerReopensExplicitUTF16AndConvertsDurableFormat() async throws {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
     let editor = TextViewEditorAdapter()
@@ -934,7 +934,11 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     controller.start()
     await controller.waitForStartup()
 
+    await controller.routeOpenFile()
+    let openedTabID = workspace.activeFileContext()?.tabID
+    #expect(editor.textView.string != original)
     await controller.routeOpenFile(encodingHint: .utf16LittleEndian)
+    #expect(workspace.activeFileContext()?.tabID == openedTabID)
     #expect(editor.textView.string == original)
     #expect(controller.fileFormatStatusSmokeState().encoding == .utf16LittleEndian)
     #expect(controller.fileFormatStatusSmokeState().byteOrderMark == .absent)

@@ -31,7 +31,7 @@ tar -xzf "$tmp_dir/scintilla566.tgz" -C "$tmp_dir"
 ```
 
 The allowlist is normative in `Package.swift`; files not named by that target
-are not compiled. Duckpad carries four narrow Cocoa integration and compatibility patches:
+are not compiled. Duckpad carries five narrow Cocoa integration and compatibility patches:
 
 1. The two Xcode-generated TIFF cursor lookups in `cocoa/ScintillaView.mm` use
    Duckpad's configured SwiftPM resource directory and the official PNG names.
@@ -52,10 +52,15 @@ are not compiled. Duckpad carries four narrow Cocoa integration and compatibilit
    supported replacement for the macOS 12-deprecated source-list selection
    highlight style.
 
+5. `cocoa/ScintillaView.mm` ignores explicit replacement input whose text is
+   identical to the existing range, while moving the caret to the range end.
+   This prevents reconfirmed text from adding delete/insert pairs to native
+   undo history. Active IME composition follows the original commit path.
+
 The four packaged cursor PNGs are byte-identical copies from `cocoa/res`.
 
 Fold-state capture, restore, commands, and recovery-progress callbacks are
-implemented only in Duckpad-owned `bridge/` code. Apart from the four patches
+implemented only in Duckpad-owned `bridge/` code. Apart from the five patches
 listed above, no byte from the official Scintilla 5.6.6 archive was modified
 for that façade.
 

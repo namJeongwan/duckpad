@@ -314,6 +314,37 @@ struct ScintillaBridgeTests {
         #expect(work.allSatisfy { $0 < 256 })
     }
 
+    @Test(arguments: [false, true], ["asdasd", "한🙂e\u{301}"]) @MainActor
+    func nativeTypingUndoNeverReinsertsCharacters(repeatedReplacement: Bool, sample: String) throws {
+        let view = makeHostedView()
+        try view.loadUTF8(Data(), revision: 0)
+        view.focusEditor()
+        let client = try #require(view.window?.firstResponder as? any NSTextInputClient)
+        var offset = 0
+        for character in sample {
+            let input = String(character)
+            let length = (input as NSString).length
+            client.insertText(input, replacementRange: NSRange(location: NSNotFound, length: 0))
+            if repeatedReplacement {
+                let revision = view.revision
+                client.insertText(NSAttributedString(string: input), replacementRange: NSRange(location: offset, length: length))
+                #expect(view.revision == revision)
+                #expect(client.selectedRange() == NSRange(location: offset + length, length: 0))
+            }
+            offset += length
+        }
+        #expect(text(view) == sample)
+        var states = [sample]
+        for _ in 0..<24 where view.canUndo {
+            view.undo()
+            states.append(try #require(text(view)))
+        }
+        #expect(states.last == "")
+        #expect(zip(states, states.dropFirst()).allSatisfy { $0.count > $1.count }, "Undo sequence: \(states)")
+        for _ in 0..<24 where view.canRedo { view.redo() }
+        #expect(text(view) == sample)
+    }
+
     @Test @MainActor
     func typingUndoRedoAndMultiselectionEmitOwnedEdits() throws {
         let view = makeHostedView()

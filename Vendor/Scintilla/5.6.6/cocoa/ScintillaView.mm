@@ -545,6 +545,21 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  */
 - (void) insertText: (id) aString replacementRange: (NSRange) replacementRange {
 	const BOOL wasComposing = mMarkedTextRange.location != NSNotFound;
+	NSString *newText = @"";
+	if ([aString isKindOfClass: [NSString class]])
+		newText = (NSString *) aString;
+	else if ([aString isKindOfClass: [NSAttributedString class]])
+		newText = (NSString *) [aString string];
+
+	// Reconfirming unchanged text must not add a delete/insert pair to undo history.
+	if (!wasComposing && replacementRange.location < NSNotFound - 1 && replacementRange.length > 0) {
+		const NSRange positions = mOwner.backend->PositionsFromCharacters(replacementRange);
+		if (NSEqualRanges(mOwner.backend->CharactersFromPositions(positions), replacementRange)
+			&& [mOwner.backend->RangeTextAsString(positions) isEqualToString: newText]) {
+			[mOwner message: SCI_SETEMPTYSELECTION wParam: NSMaxRange(positions)];
+			return;
+		}
+	}
 	if ((mMarkedTextRange.location != NSNotFound) && (replacementRange.location != NSNotFound)) {
 		NSLog(@"Trying to insertText when there is both a marked range and a replacement range");
 	}
@@ -569,12 +584,6 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 			 lParam: posRangeReplacement.length];
 		[mOwner message: SCI_SETEMPTYSELECTION wParam: posRangeReplacement.location];
 	}
-
-	NSString *newText = @"";
-	if ([aString isKindOfClass: [NSString class]])
-		newText = (NSString *) aString;
-	else if ([aString isKindOfClass: [NSAttributedString class]])
-		newText = (NSString *) [aString string];
 
 	id delegate = mOwner.delegate;
 	if ([delegate respondsToSelector: @selector(scintillaWillInsertTextFromSource:)])
