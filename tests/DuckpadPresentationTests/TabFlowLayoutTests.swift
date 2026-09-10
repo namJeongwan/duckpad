@@ -4128,3 +4128,20 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     #expect(activated.isEmpty)
     #expect(closed.isEmpty)
 }
+
+@Test @MainActor func recentFilePreferencesLimitAndFormatWithoutLosingTargets() {
+    let controller = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: PresentationStore()), automaticallyStarts: false)
+    defer { controller.close() }
+    let urls = (0..<15).map { URL(fileURLWithPath: "/tmp/folder\($0)/same.txt") }
+    let settings = AppSettings(recentFileLimit: 5, recentFilePathMode: 1)
+    let menu = DuckpadMainMenuFactory.make(target: controller, recentDocumentURLs: [urls[0]] + urls, settings: settings)
+    let recent = menuItem("Open Recent", in: menu)?.submenu
+    let files = recent?.items.filter { $0.representedObject is URL } ?? []
+    #expect(files.count == 5)
+    #expect(files.map(\.title) == Array(urls.prefix(5)).map(\.path))
+    #expect(files.compactMap { $0.representedObject as? URL } == Array(urls.prefix(5)))
+    let hidden = DuckpadMainMenuFactory.make(target: controller, recentDocumentURLs: urls, settings: AppSettings(recentFileLimit: 0))
+    #expect(menuItem("Open Recent", in: hidden)?.submenu?.items.contains { $0.representedObject is URL } == false)
+    let names = DuckpadMainMenuFactory.make(target: controller, recentDocumentURLs: urls, settings: AppSettings(recentFileLimit: 15, recentFilePathMode: 0))
+    #expect(menuItem("Open Recent", in: names)?.submenu?.items.filter { $0.title == "same.txt" }.count == 15)
+}

@@ -26,7 +26,7 @@ public struct DuckpadSettingsSmokeState: Equatable, Sendable {
 
 @MainActor
 public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate {
-    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Indentation"]
+    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation"]
     public private(set) var selectedCategory = "General"
     private var pages: [String: NSView] = [:]
     private var categoryButtons: [NSButton] = []
@@ -180,6 +180,15 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             row.spacing = 12
             (pages[category] as? NSStackView)?.addArrangedSubview(row)
         }
+        checkbox("Follow the current document’s directory", \.fileDialogFollowsDocument, "Default Directory")
+        let directoryNote = NSTextField(wrappingLabelWithString: "Open and Save As start beside the active file. When turned off, or for an untitled tab, macOS remembers the last used location.")
+        (pages["Default Directory"] as? NSStackView)?.addArrangedSubview(directoryNote)
+        directoryNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
+        choices("Maximum entries", \.recentFileLimit, [("None", 0), ("5", 5), ("10", 10), ("15", 15), ("20", 20), ("30", 30), ("50", 50)], "Recent Files History")
+        choices("Display", \.recentFilePathMode, [("File name only", 0), ("Full path", 1), ("Disambiguate duplicates", 2)], "Recent Files History")
+        let recentNote = NSTextField(wrappingLabelWithString: "Open Recent shows up to this many entries from macOS recent document history. Changing the limit does not delete that history.")
+        (pages["Recent Files History"] as? NSStackView)?.addArrangedSubview(recentNote)
+        recentNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
         checkbox("Show menu bar in document windows", \.menuBarVisible, "General")
         checkbox("Show status bar", \.statusBarVisible, "General")
         checkbox("Allow tab drag and drop", \.tabDragEnabled, "Tab Bar")

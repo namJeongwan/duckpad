@@ -86,7 +86,8 @@ import Testing
         lineNumbersVisible: false, bookmarkMarginVisible: false, highlightCurrentLine: false,
         caretWidth: 3, caretBlinkPeriod: 1000, scrollBeyondLastLine: true, wrapIndentMode: 2,
         overrideLanguageIndentation: true, indentationWidth: 2, indentationUsesTabs: true,
-        indentationGuidesVisible: false, virtualSpaceEnabled: true, edgeLineVisible: true, edgeColumn: 120)
+        indentationGuidesVisible: false, virtualSpaceEnabled: true, edgeLineVisible: true, edgeColumn: 120,
+        recentFileLimit: 30, recentFilePathMode: 1, fileDialogFollowsDocument: true)
     try await store.save(updated)
     #expect(try await LocalAppSettingsStore(archiveURL: archive).load() == updated)
 }

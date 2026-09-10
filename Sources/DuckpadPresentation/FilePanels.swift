@@ -54,6 +54,12 @@ public extension DirtyDocumentDecisionPresenting {
 
 @MainActor
 public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPresenting, DirtyDocumentDecisionPresenting, OpenDocumentComparePresenting {
+    public var preferredFileDirectory: (() -> URL?)?
+
+    func configureFileDirectory(_ panel: NSSavePanel) {
+        if let directory = preferredFileDirectory?(), directory.isFileURL { panel.directoryURL = directory }
+    }
+
     private var activePanels: [ObjectIdentifier: NSSavePanel] = [:]
     private let openDocumentComparePresenter: any OpenDocumentComparePresenting
 
@@ -67,12 +73,14 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
+        configureFileDirectory(panel)
         return await run(panel, attachedTo: window) == .OK ? panel.url : nil
     }
 
     public func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL? {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggestedName
+        configureFileDirectory(panel)
         return await run(panel, attachedTo: window) == .OK ? panel.url : nil
     }
 

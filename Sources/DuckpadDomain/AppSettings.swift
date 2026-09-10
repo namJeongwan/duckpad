@@ -34,6 +34,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var edgeLineVisible: Bool
     public var edgeColumn: Int
 
+    public var recentFileLimit: Int
+    public var recentFilePathMode: Int
+    public var fileDialogFollowsDocument: Bool
+
     public init(
         schemaVersion: Int = AppSettings.currentSchemaVersion,
         appearanceMode: AppAppearanceMode = .system,
@@ -57,7 +61,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         indentationGuidesVisible: Bool = true,
         virtualSpaceEnabled: Bool = false,
         edgeLineVisible: Bool = false,
-        edgeColumn: Int = 80
+        edgeColumn: Int = 80,
+        recentFileLimit: Int = 10,
+        recentFilePathMode: Int = 2,
+        fileDialogFollowsDocument: Bool = false
     ) {
         self.schemaVersion = schemaVersion
         self.appearanceMode = appearanceMode
@@ -82,6 +89,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.virtualSpaceEnabled = virtualSpaceEnabled
         self.edgeLineVisible = edgeLineVisible
         self.edgeColumn = edgeColumn
+        self.recentFileLimit = recentFileLimit
+        self.recentFilePathMode = recentFilePathMode
+        self.fileDialogFollowsDocument = fileDialogFollowsDocument
     }
 
     public init(from decoder: Decoder) throws {
@@ -109,5 +119,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         virtualSpaceEnabled = try values.decodeIfPresent(Bool.self, forKey: .virtualSpaceEnabled) ?? false
         edgeLineVisible = try values.decodeIfPresent(Bool.self, forKey: .edgeLineVisible) ?? false
         edgeColumn = try values.decodeIfPresent(Int.self, forKey: .edgeColumn) ?? 80
+        recentFileLimit = try values.decodeIfPresent(Int.self, forKey: .recentFileLimit) ?? 10
+        recentFilePathMode = try values.decodeIfPresent(Int.self, forKey: .recentFilePathMode) ?? 2
+        fileDialogFollowsDocument = try values.decodeIfPresent(Bool.self, forKey: .fileDialogFollowsDocument) ?? false
     }
 }

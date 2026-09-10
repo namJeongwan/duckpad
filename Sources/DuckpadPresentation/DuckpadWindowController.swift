@@ -417,6 +417,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        (filePanels as? NativeFilePanelAdapter)?.preferredFileDirectory = { [weak self] in
+            guard let self, self.appPreferences.fileDialogFollowsDocument,
+                  let path = self.workspace.activeFileContext()?.binding?.canonicalPath else { return nil }
+            return URL(fileURLWithPath: path).deletingLastPathComponent()
+        }
         self.errorPresenter = configureContent(injectedPresenter: errorPresenter)
         let workspaceNotifications = NSWorkspace.shared.notificationCenter
         let accessibilityToken = workspaceNotifications.addObserver(

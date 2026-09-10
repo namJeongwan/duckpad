@@ -2453,3 +2453,19 @@ struct FileLifecycleTests {
         #expect(await files.text(at: source) == "original")
     }
 }
+
+@Test @MainActor func fileDialogDirectoryFollowsActiveBindingOnlyWhenEnabled() async {
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    _ = await workspace.start()
+    let panels = NativeFilePanelAdapter()
+    let controller = DuckpadWindowController(workspace: workspace, filePanels: panels, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.applyPreferences(AppSettings(fileDialogFollowsDocument: true))
+    #expect(panels.preferredFileDirectory?() == nil)
+    let path = "/tmp/duckpad-folder/example.txt"
+    let identity = FileIdentity(canonicalPath: path, device: 1, inode: 2, byteCount: 0, modifiedNanoseconds: 0, contentToken: "test")
+    _ = await workspace.addOpenedFile(binding: FileBinding(canonicalPath: path, encoding: .utf8, byteOrderMark: .absent, lineEnding: .lf, observedIdentity: identity), title: "example.txt")
+    #expect(panels.preferredFileDirectory?()?.path == "/tmp/duckpad-folder")
+    controller.applyPreferences(.defaults)
+    #expect(panels.preferredFileDirectory?() == nil)
+}

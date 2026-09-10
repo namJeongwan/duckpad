@@ -1005,7 +1005,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         let menu = DuckpadMainMenuFactory.make(
             target: target,
             applicationTarget: self,
-            recentDocumentURLs: recentDocumentURLs
+            recentDocumentURLs: recentDocumentURLs,
+            settings: settingsUseCase.state.settings
         )
         NSApplication.shared.mainMenu = menu
         target.applicationMainMenuDidChange(menu)
@@ -1082,6 +1083,9 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         for controller in windowControllers.values {
             controller.applyPreferences(settings)
             controller.refreshAppearance()
+        }
+        if let target = windowControllers.values.first(where: { $0.window?.isKeyWindow == true }) {
+            installMainMenu(target: target)
         }
     }
 

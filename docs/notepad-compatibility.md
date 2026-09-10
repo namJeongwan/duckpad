@@ -24,9 +24,11 @@ Preferences uses a category list, immediate application, persistent storage, and
 | Dark Mode | Light Mode, Dark Mode, Follow macOS |
 | Margins/Border/Edge | Line numbers; bookmark margin; vertical edge and column |
 | New Document | Default word wrap and wrap symbols |
+| Default Directory | Last used location or active document directory for Open/Save As |
+| Recent Files History | Maximum visible entries; file name/full path/disambiguated display |
 | Indentation | Override language defaults; tab size; tabs/spaces; indent guides |
 
-The complete Notepad++ Preferences inventory is larger. Toolbar icon sets, further tab options, Editing 2, default document encoding/EOL, default directory, recent-file limits, language overrides, per-language indentation and auto-indent modes, highlighting options, print, search defaults, backup configuration, auto-completion configuration, date formats, delimiters, performance configuration, cloud/link configuration, search engines, and miscellaneous toggles remain separate feature work. Session recovery, searching, language detection, indentation, and completion already have implementations; this does not mean their full Notepad++ configuration interfaces exist.
+The complete Notepad++ Preferences inventory is larger. Toolbar icon sets, further tab options, Editing 2, default document encoding/EOL, custom default directory, language overrides, per-language indentation and auto-indent modes, highlighting options, print, search defaults, backup configuration, auto-completion configuration, date formats, delimiters, performance configuration, cloud/link configuration, search engines, and miscellaneous toggles remain separate feature work. Session recovery, searching, language detection, indentation, and completion already have implementations; this does not mean their full Notepad++ configuration interfaces exist.
 
 ## Duckpad additions and differences
 

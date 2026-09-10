@@ -13,7 +13,8 @@ public enum DuckpadMainMenuFactory {
     public static func make(
         target: DuckpadWindowController,
         applicationTarget: AnyObject? = nil,
-        recentDocumentURLs: [URL] = []
+        recentDocumentURLs: [URL] = [],
+        settings: AppSettings = .defaults
     ) -> NSMenu {
         let mainMenu = NSMenu()
         let appItem = NSMenuItem()
@@ -43,7 +44,7 @@ public enum DuckpadMainMenuFactory {
         add("Open…", #selector(DuckpadWindowController.performOpenFile(_:)), "o", target, to: fileMenu)
         fileMenu.addItem(makeOpenRecentItem(
             applicationTarget: applicationTarget,
-            urls: recentDocumentURLs
+            urls: recentDocumentURLs, settings: settings
         ))
         fileMenu.addItem(.separator())
         add("Save", #selector(DuckpadWindowController.performSaveFile(_:)), "s", target, to: fileMenu)
@@ -619,25 +620,26 @@ public enum DuckpadMainMenuFactory {
 
     private static func makeOpenRecentItem(
         applicationTarget: AnyObject?,
-        urls: [URL]
+        urls: [URL], settings: AppSettings
     ) -> NSMenuItem {
         let item = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
         let menu = NSMenu(title: "Open Recent")
         var seen: Set<URL> = []
         var recent: [URL] = []
-        for url in urls {
+        let limit = min(max(settings.recentFileLimit, 0), 50)
+        for url in urls where recent.count < limit {
             let standardized = url.standardizedFileURL
             guard seen.insert(standardized).inserted else { continue }
             recent.append(standardized)
-            if recent.count == 10 { break }
         }
         if recent.isEmpty {
-            let empty = NSMenuItem(title: "No Recent Documents", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: limit == 0 ? "Recent Documents Hidden" : "No Recent Documents", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         } else {
             for url in recent {
-                let title = recentTitle(for: url, among: recent)
+                let title = settings.recentFilePathMode == 0 ? url.lastPathComponent
+                    : settings.recentFilePathMode == 1 ? url.path : recentTitle(for: url, among: recent)
                 let recentItem = NSMenuItem(
                     title: title,
                     action: #selector(DuckpadApplicationCommandTarget.performOpenRecentDocument(_:)),

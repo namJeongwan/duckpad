@@ -68,6 +68,8 @@ public final class AppSettingsUseCase {
         normalized.wrapIndentMode = min(max(settings.wrapIndentMode, 0), 2)
         normalized.indentationWidth = min(max(settings.indentationWidth, 1), 16)
         normalized.edgeColumn = min(max(settings.edgeColumn, 1), 500)
+        normalized.recentFileLimit = min(max(settings.recentFileLimit, 0), 50)
+        normalized.recentFilePathMode = min(max(settings.recentFilePathMode, 0), 2)
         do {
             try await store.save(normalized)
             state = .ready(normalized)
