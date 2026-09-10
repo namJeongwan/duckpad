@@ -98,6 +98,13 @@ public final class FileDocumentUseCase {
         let securityScopedBookmark: Data?
     }
 
+    private let changeMonitor: (any FileChangeMonitoring)?
+    private var liveReloadEnabled = false
+    private var liveReloadSuspended = false
+    private var liveReloadTask: Task<Void, Never>?
+    private var pendingLivePaths = Set<String>()
+    public private(set) var externalChanges: [TabID: LiveFileChange] = [:]
+    public var onExternalChanges: (() -> Void)?
     private let workspace: ScratchWorkspaceUseCase
     private let editor: any EditorPort
     private let store: any TextFileStore
@@ -111,13 +118,130 @@ public final class FileDocumentUseCase {
         workspace: ScratchWorkspaceUseCase,
         editor: any EditorPort,
         store: any TextFileStore,
-        maximumComparisonBytes: Int = FileDocumentUseCase.defaultMaximumComparisonBytes
+        maximumComparisonBytes: Int = FileDocumentUseCase.defaultMaximumComparisonBytes,
+        changeMonitor: (any FileChangeMonitoring)? = nil
     ) {
         precondition(maximumComparisonBytes > 0)
         self.workspace = workspace
         self.editor = editor
         self.store = store
         self.maximumComparisonBytes = maximumComparisonBytes
+        self.changeMonitor = changeMonitor
+        changeMonitor?.onChange = { [weak self] paths in self?.queueLiveReload(paths) }
+    }
+
+    public func suspendLiveReload() {
+        liveReloadSuspended = true
+        changeMonitor?.stop()
+        liveReloadTask?.cancel()
+        pendingLivePaths.removeAll()
+    }
+
+    public func resumeLiveReload() {
+        liveReloadSuspended = false
+        updateLiveReloadDocuments()
+    }
+
+    public func waitForLiveReload() async {
+        await liveReloadTask?.value
+        // Includes an already accepted explicit Reload action.
+        await acquireOperation()
+        releaseOperation()
+    }
+
+    public func setLiveReloadEnabled(_ enabled: Bool) {
+        liveReloadEnabled = enabled
+        if !enabled {
+            changeMonitor?.stop()
+            liveReloadTask?.cancel()
+            pendingLivePaths.removeAll()
+        } else { updateLiveReloadDocuments() }
+    }
+
+    public func updateLiveReloadDocuments() {
+        let tabs = workspace.snapshot().tabs
+        let ids = Set(tabs.map(\.id))
+        externalChanges = externalChanges.filter { ids.contains($0.key) }
+        guard liveReloadEnabled, !liveReloadSuspended, workspace.snapshot().startup == .ready else { return }
+        changeMonitor?.watch(paths: Set(tabs.compactMap { workspace.fileContext(tabID: $0.id)?.binding?.canonicalPath }))
+    }
+
+    public func dismissExternalChange(for tabID: TabID) {
+        externalChanges.removeValue(forKey: tabID)
+        onExternalChanges?()
+    }
+
+    private func queueLiveReload(_ paths: Set<String>) {
+        guard liveReloadEnabled, !liveReloadSuspended else { return }
+        pendingLivePaths.formUnion(paths)
+        guard liveReloadTask == nil else { return }
+        liveReloadTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                self.liveReloadTask = nil
+                if self.liveReloadEnabled && !self.liveReloadSuspended && !self.pendingLivePaths.isEmpty { self.queueLiveReload([]) }
+            }
+            while !self.pendingLivePaths.isEmpty && self.liveReloadEnabled && !self.liveReloadSuspended && !Task.isCancelled {
+                let paths = self.pendingLivePaths
+                self.pendingLivePaths.removeAll()
+                let ids = self.workspace.snapshot().tabs.compactMap { tab -> TabID? in
+                    guard let path = self.workspace.fileContext(tabID: tab.id)?.binding?.canonicalPath,
+                          paths.contains(path) else { return nil }
+                    return tab.id
+                }
+                for id in ids where !Task.isCancelled { await self.refreshFromDisk(tabID: id) }
+            }
+        }
+    }
+
+    /// Clean documents reload automatically. Explicit discard applies only to
+    /// the exact revision reviewed by the user; concurrent edits always win.
+    public func refreshFromDisk(tabID: TabID, discardingRevision: UInt64? = nil) async {
+        await acquireOperation()
+        defer { releaseOperation() }
+        guard !Task.isCancelled, !liveReloadSuspended, let context = workspace.fileContext(tabID: tabID), let binding = context.binding else { return }
+        do {
+            let url = URL(fileURLWithPath: binding.canonicalPath)
+            let read = try await store.read(from: url)
+            guard !Task.isCancelled, !liveReloadSuspended, let current = workspace.fileContext(tabID: tabID), current.binding == binding else { return }
+            if read.identity == binding.observedIdentity {
+                externalChanges.removeValue(forKey: tabID)
+                onExternalChanges?()
+                return
+            }
+            let dirty = workspace.snapshot().tabs.first(where: { $0.id == tabID })?.isDirty == true
+            guard !dirty || discardingRevision == current.buffer.revision else {
+                externalChanges[tabID] = .conflict
+                onExternalChanges?()
+                return
+            }
+            let decoded = await Task.detached(priority: .utility) {
+                TextFileCodec.decodeForDisplay(read.data, assuming: binding.encoding)
+            }.value
+            guard !Task.isCancelled, !liveReloadSuspended else { return }
+            let retained = try await store.prepareSecurityScopedAccess(to: url, ownerID: securityScopeOwnerID)
+            let updated = FileBinding(canonicalPath: read.identity.canonicalPath, encoding: decoded.encoding,
+                byteOrderMark: decoded.byteOrderMark, lineEnding: decoded.lineEnding,
+                observedIdentity: read.identity, securityScopedBookmark: retained.bookmark ?? binding.securityScopedBookmark)
+            guard !Task.isCancelled, !liveReloadSuspended else { return }
+            let state = editor.recoveryCapture(for: current.buffer.bufferID)?.viewState ?? EditorViewState()
+            let bytes = Data(decoded.text.utf8)
+            let result = await workspace.replaceFileContents(tabID: tabID, binding: updated, title: current.title,
+                expectedRevision: current.buffer.revision, expectedBinding: binding,
+                installContents: { [editor] descriptor in
+                    editor.installRecovery(EditorRecoverySnapshot(bufferID: descriptor.bufferID,
+                        revision: descriptor.revision, utf8: bytes, viewState: state))
+                })
+            switch result {
+            case .applied: externalChanges.removeValue(forKey: tabID)
+            case .rejected(.unknownTab): externalChanges.removeValue(forKey: tabID)
+            case .rejected: externalChanges[tabID] = .conflict
+            case .persistenceFailed: externalChanges[tabID] = .unavailable
+            }
+        } catch {
+            if workspace.fileContext(tabID: tabID)?.binding == binding { externalChanges[tabID] = .unavailable }
+        }
+        onExternalChanges?()
     }
 
     /// Reacquires every recovered document bookmark before the window becomes

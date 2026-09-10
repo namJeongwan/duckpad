@@ -81,7 +81,7 @@ import Testing
     let store = LocalAppSettingsStore(archiveURL: archive)
     let original = try #require(try await store.load())
     #expect(original == AppSettings(appearanceMode: .dark, defaultWordWrapEnabled: false, defaultWrapMarkerVisible: true))
-    let updated = AppSettings(appearanceMode: .light, menuBarVisible: false, statusBarVisible: false,
+    let updated = AppSettings(appearanceMode: .light, editorFontName: "Monaco", editorFontSize: 18, liveFileReloadEnabled: false, menuBarVisible: false, statusBarVisible: false,
         multilineTabsEnabled: false, tabDragEnabled: false, showTabCloseButton: false, showInactiveTabButtons: true,
         lineNumbersVisible: false, bookmarkMarginVisible: false, highlightCurrentLine: false,
         caretWidth: 3, caretBlinkPeriod: 1000, scrollBeyondLastLine: true, wrapIndentMode: 2,

@@ -83,3 +83,15 @@ private final class AppSettingsStoreFake: AppSettingsStore {
         failure: .writeUncertain("directory sync")
     ))
 }
+
+@Test @MainActor func fontSettingsNormalizeSizeAndKeepLiveReloadChoice() async {
+    let store = AppSettingsStoreFake()
+    let settings = AppSettingsUseCase(store: store)
+    _ = await settings.update(AppSettings(editorFontName: "", editorFontSize: 500, liveFileReloadEnabled: false))
+    #expect(settings.state.settings.editorFontName == "Menlo")
+    #expect(settings.state.settings.editorFontSize == 72)
+    #expect(!settings.state.settings.liveFileReloadEnabled)
+    _ = await settings.update(AppSettings(editorFontName: "Monaco", editorFontSize: -1))
+    #expect(settings.state.settings.editorFontName == "Monaco")
+    #expect(settings.state.settings.editorFontSize == 6)
+}

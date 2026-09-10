@@ -1,7 +1,7 @@
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
-import DuckpadPresentation
+@testable import DuckpadPresentation
 import Testing
 
 private actor ThemeSettingsStore: AppSettingsStore {
@@ -199,4 +199,21 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
 
         }
     }
+}
+
+
+@Test @MainActor func fontPopupPersistsTheSelectedInstalledFont() async throws {
+    _ = NSApplication.shared
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var saved: AppSettings?
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { settings in saved = settings; return .saved(settings) }
+    controller.onUpdateTaskStarted = { task = $0 }
+    let item = try #require(controller.editorFont.itemArray.first { ($0.representedObject as? String)?.contains("Monaco") == true })
+    controller.editorFont.select(item)
+    let action = try #require(controller.editorFont.action)
+    #expect(NSApp.sendAction(action, to: controller.editorFont.target, from: controller.editorFont))
+    await task?.value
+    #expect(saved?.editorFontName == item.representedObject as? String)
 }

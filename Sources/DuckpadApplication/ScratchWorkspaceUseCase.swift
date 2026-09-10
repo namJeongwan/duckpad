@@ -1002,7 +1002,8 @@ public final class ScratchWorkspaceUseCase {
         binding: FileBinding,
         title: String,
         expectedRevision: UInt64,
-        expectedBinding: FileBinding?
+        expectedBinding: FileBinding?,
+        installContents: (@MainActor (EditorBufferDescriptor) -> Void)? = nil
     ) async -> WorkspaceActionOutcome {
         await acquireTransaction()
         defer { releaseTransaction() }
@@ -1016,7 +1017,49 @@ public final class ScratchWorkspaceUseCase {
                 expectedBinding: expectedBinding
             )
             guard let index = candidate.tabs.firstIndex(where: { $0.id == tabID }) else { return .rejected(.unknownTab(tabID)) }
-            return await persistMutation(candidate, kind: .tabUpdated(index: index), retry: .saveCurrent)
+            guard let installContents else {
+                return await persistMutation(candidate, kind: .tabUpdated(index: index), retry: .saveCurrent)
+            }
+            // Background reload must not swallow typing while metadata I/O
+            // yields. Only incremental edits are admitted; structural commands
+            // still wait on this transaction.
+            acceptsEditsDuringAutosave = true
+            defer { acceptsEditsDuringAutosave = false }
+            switch await save(candidate) {
+            case .saved:
+                var live = session
+                do {
+                    _ = try live.replaceFileContents(tabID: tabID, binding: binding, title: title,
+                        expectedRevision: expectedRevision, expectedBinding: expectedBinding)
+                } catch let stale as SessionError {
+                    // A local edit won. Repair the just-written candidate's
+                    // metadata without touching editor contents. Further edits
+                    // remain accepted and get the usual follow-up autosave.
+                    switch await save(session) {
+                    case .saved:
+                        persistenceState = .pending
+                        schedulePersistence()
+                        publish(.persistence)
+                        return .rejected(stale)
+                    case .failed(let failure):
+                        persistenceState = .failed(failure)
+                        publishFailure(failure, retry: .saveCurrent)
+                        return .persistenceFailed(failure)
+                    }
+                }
+                let needsFollowUpSave = live != candidate
+                session = live
+                let buffer = try live.buffer(for: tabID)
+                installContents(EditorBufferDescriptor(bufferID: buffer.id, revision: buffer.revision))
+                persistenceState = needsFollowUpSave ? .pending : .saved
+                if needsFollowUpSave { schedulePersistence() }
+                publish(.tabUpdated(index: index))
+                return .applied(.saved)
+            case .failed(let failure):
+                persistenceState = .failed(failure)
+                publishFailure(failure, retry: .saveCurrent)
+                return .persistenceFailed(failure)
+            }
         } catch let error as SessionError { return .rejected(error) }
         catch { preconditionFailure("ScratchSession only throws SessionError") }
     }

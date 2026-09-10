@@ -768,7 +768,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             editor: editor,
             store: recoveryStore
         )
-        let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: fileStore)
+        let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: fileStore, changeMonitor: LocalFileChangeMonitor())
         let searchUseCase = SearchWorkspaceUseCase(
             workspace: workspace,
             editor: editor,

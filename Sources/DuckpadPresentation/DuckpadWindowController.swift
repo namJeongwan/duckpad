@@ -234,6 +234,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let activeEditor: any EditorPort
     private let editorGroupRouter: (any EditorGroupRoutingPort)?
     private let searchPanel = SearchPanelView(frame: .zero)
+    let liveFileBanner = LiveFileChangeBanner(frame: .zero)
     let commandBar = WindowCommandBarView(frame: .zero)
     private var statusBarHeightConstraint: NSLayoutConstraint!
     private var appPreferences = AppSettings.defaults
@@ -571,6 +572,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         editorGroupActivationTask = nil
         cancelOpenDocumentCompare(superseded: true)
         window?.delegate = nil
+        fileUseCase?.setLiveReloadEnabled(false)
+        fileUseCase?.onExternalChanges = nil
         workspace.onChange = nil
         editorGroupRouter?.onEditorGroupFocus = nil
         activeEditor.onEdit = nil
@@ -1199,11 +1202,52 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public func applyPreferences(_ settings: AppSettings) {
         appPreferences = settings
+        fileUseCase?.setLiveReloadEnabled(settings.liveFileReloadEnabled)
         searchPanel.applyPreferences(settings)
         commandBar.setBarVisible(settings.menuBarVisible)
         statusBar.isHidden = !settings.statusBarVisible
         statusBarHeightConstraint?.constant = settings.statusBarVisible ? 24 : 0
         for group in editorGroupLayout.snapshot.visibleGroups { tabStrip(for: group)?.applyPreferences(settings) }
+    }
+
+    private func refreshLiveFileBanner() {
+        guard let tab = workspace.snapshot().tabs.first(where: \.isActive),
+              let change = fileUseCase?.externalChanges[tab.id] else { liveFileBanner.show(nil); return }
+        let detail = change == .conflict ? "changed on disk. Your unsaved edits were kept." : "is unavailable on disk. Your contents were kept."
+        liveFileBanner.show("\(tab.title) \(detail)")
+    }
+
+    @objc private func performKeepEditingExternalFile(_ sender: Any?) {
+        guard let id = workspace.snapshot().tabs.first(where: \.isActive)?.id else { return }
+        fileUseCase?.dismissExternalChange(for: id)
+    }
+
+    @objc private func performReloadExternalFile(_ sender: Any?) {
+        guard workspaceInteractionsAreActionable, fileUseCase != nil,
+              let tab = workspace.snapshot().tabs.first(where: \.isActive), let window else { return }
+        if tab.isDirty {
+            let alert = NSAlert()
+            alert.messageText = "Reload \(tab.title) from disk?"
+            alert.informativeText = "Your unsaved edits will be replaced by the file on disk."
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: "Reload")
+            alert.beginSheetModal(for: window) { [weak self] response in
+                guard response == .alertSecondButtonReturn else { return }
+                self?.startExplicitLiveReload(tabID: tab.id, revision: tab.buffer.revision)
+            }
+        } else {
+            startExplicitLiveReload(tabID: tab.id, revision: nil)
+        }
+    }
+
+    private func startExplicitLiveReload(tabID: TabID, revision: UInt64?) {
+        guard workspaceInteractionsAreActionable, let fileUseCase else { return }
+        let token = UUID()
+        pendingFileCommandTasks[token] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.pendingFileCommandTasks.removeValue(forKey: token) }
+            await fileUseCase.refreshFromDisk(tabID: tabID, discardingRevision: revision)
+        }
     }
 
     public func applicationMainMenuDidChange(_ menu: NSMenu) {
@@ -2427,6 +2471,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     var requiresTerminationDecision: Bool { recoveryUseCase == nil }
 
     private var preservesRecoveryOnClose = false
+    private var liveReloadHiddenWindow = false
 
     public var requiresTerminationReview: Bool {
         hasDirtyDocuments || recoveryUseCase != nil || extensionUseCase != nil
@@ -2466,6 +2511,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     func beginTerminationReviewAdmission() -> Bool {
         guard !terminationReviewInProgress else { return false }
         terminationReviewInProgress = true
+        fileUseCase?.suspendLiveReload()
         documentIntelligenceTask?.cancel()
         documentIntelligenceTask = nil
         documentIntelligenceUseCase?.cancel()
@@ -2486,6 +2532,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard terminationReviewInProgress else { return [] }
         await waitForStartup()
         await waitForAcceptedWorkspaceTasks()
+        await fileUseCase?.waitForLiveReload()
         await extensionUseCase?.suspendInvocationsAndWait()
         return workspace.snapshot().tabs.filter(\.isDirty)
     }
@@ -2510,6 +2557,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             if !approved {
                 terminationRetrySaveTabID = nil
                 terminationReviewInProgress = false
+                if !liveReloadHiddenWindow { fileUseCase?.resumeLiveReload() }
                 extensionUseCase?.resumeInvocations()
                 Task { @MainActor [weak workspaceBrowserUseCase] in
                     await workspaceBrowserUseCase?.resumeCommandsAndReconcile()
@@ -2570,6 +2618,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         terminationRetrySaveTabID = nil
         guard terminationReviewInProgress else { return }
         terminationReviewInProgress = false
+        if !liveReloadHiddenWindow { fileUseCase?.resumeLiveReload() }
         extensionUseCase?.resumeInvocations()
         Task { @MainActor [weak workspaceBrowserUseCase] in
             await workspaceBrowserUseCase?.resumeCommandsAndReconcile()
@@ -2606,6 +2655,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 // within the live-window cap. Repeated red-close must not create
                 // orphan archives beyond the bounded restore inventory.
                 self.saveWindowFrame()
+                self.liveReloadHiddenWindow = true
                 sender.orderOut(nil)
                 if self.terminationCoordinator?.permitsApplicationCommands == true {
                     self.cancelPreparedTerminationReview()
@@ -2619,6 +2669,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func windowDidBecomeKey(_ notification: Notification) {
+        if liveReloadHiddenWindow && !terminationReviewInProgress {
+            liveReloadHiddenWindow = false
+            fileUseCase?.resumeLiveReload()
+        }
         onBecameKey?()
     }
 
@@ -2747,6 +2801,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         root.view.addSubview(persistenceBanner)
         root.view.addSubview(searchPanel)
         root.view.addSubview(commandBar)
+        root.view.addSubview(liveFileBanner)
+        liveFileBanner.reload.target = self
+        liveFileBanner.reload.action = #selector(performReloadExternalFile(_:))
+        liveFileBanner.dismiss.target = self
+        liveFileBanner.dismiss.action = #selector(performKeepEditingExternalFile(_:))
+        fileUseCase?.onExternalChanges = { [weak self] in self?.refreshLiveFileBanner() }
         workspaceContentSplit.isVertical = true
         workspaceContentSplit.dividerStyle = .thin
         workspaceContentSplit.translatesAutoresizingMaskIntoConstraints = false
@@ -2803,7 +2863,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             commandBar.topAnchor.constraint(equalTo: searchPanel.bottomAnchor),
             workspaceContentSplit.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             workspaceContentSplit.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            workspaceContentSplit.topAnchor.constraint(equalTo: commandBar.bottomAnchor),
+            liveFileBanner.topAnchor.constraint(equalTo: commandBar.bottomAnchor),
+            liveFileBanner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            liveFileBanner.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            workspaceContentSplit.topAnchor.constraint(equalTo: liveFileBanner.bottomAnchor),
             workspaceContentSplit.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             statusBar.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             statusBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
@@ -3256,6 +3319,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func handle(_ change: WorkspaceChange) {
         latestWorkspaceSnapshot = change.snapshot
+        switch change.kind {
+        case .bufferEdited, .persistence, .activeTabChanged: break
+        default: fileUseCase?.updateLiveReloadDocuments()
+        }
+        refreshLiveFileBanner()
         invalidateOpenDocumentCompareIfNeeded(change.snapshot)
         if shouldInvalidateDocumentIntelligence(for: change) {
             documentIntelligenceTask?.cancel()

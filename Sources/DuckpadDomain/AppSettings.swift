@@ -13,6 +13,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var defaultWordWrapEnabled: Bool
     public var defaultWrapMarkerVisible: Bool
 
+    public var editorFontName: String
+    public var editorFontSize: Int
+    public var liveFileReloadEnabled: Bool
+
     public var menuBarVisible: Bool
     public var statusBarVisible: Bool
     public var multilineTabsEnabled: Bool
@@ -48,6 +52,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         appearanceMode: AppAppearanceMode = .system,
         defaultWordWrapEnabled: Bool = true,
         defaultWrapMarkerVisible: Bool = false,
+        editorFontName: String = "Menlo",
+        editorFontSize: Int = 13,
+        liveFileReloadEnabled: Bool = true,
         menuBarVisible: Bool = true,
         statusBarVisible: Bool = true,
         multilineTabsEnabled: Bool = true,
@@ -79,6 +86,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.appearanceMode = appearanceMode
         self.defaultWordWrapEnabled = defaultWordWrapEnabled
         self.defaultWrapMarkerVisible = defaultWrapMarkerVisible
+        self.editorFontName = editorFontName
+        self.editorFontSize = editorFontSize
+        self.liveFileReloadEnabled = liveFileReloadEnabled
         self.menuBarVisible = menuBarVisible
         self.statusBarVisible = statusBarVisible
         self.multilineTabsEnabled = multilineTabsEnabled
@@ -113,6 +123,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         appearanceMode = try values.decode(AppAppearanceMode.self, forKey: .appearanceMode)
         defaultWordWrapEnabled = try values.decode(Bool.self, forKey: .defaultWordWrapEnabled)
         defaultWrapMarkerVisible = try values.decode(Bool.self, forKey: .defaultWrapMarkerVisible)
+        editorFontName = try values.decodeIfPresent(String.self, forKey: .editorFontName) ?? "Menlo"
+        editorFontSize = try values.decodeIfPresent(Int.self, forKey: .editorFontSize) ?? 13
+        liveFileReloadEnabled = try values.decodeIfPresent(Bool.self, forKey: .liveFileReloadEnabled) ?? true
         menuBarVisible = try values.decodeIfPresent(Bool.self, forKey: .menuBarVisible) ?? true
         statusBarVisible = try values.decodeIfPresent(Bool.self, forKey: .statusBarVisible) ?? true
         multilineTabsEnabled = try values.decodeIfPresent(Bool.self, forKey: .multilineTabsEnabled) ?? true

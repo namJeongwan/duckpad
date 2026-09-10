@@ -32,6 +32,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     private var categoryButtons: [NSButton] = []
     private var booleanControls: [(NSButton, WritableKeyPath<AppSettings, Bool>)] = []
     private var numberControls: [(NSPopUpButton, WritableKeyPath<AppSettings, Int>)] = []
+    let editorFont = NSPopUpButton(frame: .zero, pullsDown: false)
     private let appearance = NSPopUpButton(frame: .zero, pullsDown: false)
     private let wordWrap = NSButton(checkboxWithTitle: "Wrap long lines in new tabs", target: nil, action: nil)
     private let wrapMarkers = NSButton(checkboxWithTitle: "Show wrap symbols in new tabs", target: nil, action: nil)
@@ -202,6 +203,21 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         checkbox("Allow tab drag and drop", \.tabDragEnabled, "Tab Bar")
         checkbox("Show close button", \.showTabCloseButton, "Tab Bar")
         checkbox("Show buttons on inactive tabs", \.showInactiveTabButtons, "Tab Bar")
+        for family in NSFontManager.shared.availableFontFamilies.filter({ !$0.hasPrefix(".") }).sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) {
+            guard let font = NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: 13), !font.fontName.hasPrefix(".") else { continue }
+            editorFont.addItem(withTitle: family)
+            editorFont.lastItem?.representedObject = font.fontName
+        }
+        editorFont.target = self
+        editorFont.action = #selector(settingChanged(_:))
+        editorFont.setAccessibilityLabel("Editor font")
+        editorFont.setAccessibilityIdentifier("duckpad.settings.editor-font")
+        let fontRow = NSStackView(views: [NSTextField(labelWithString: "Font"), editorFont])
+        fontRow.spacing = 12
+        editorFont.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        (pages["Editing"] as? NSStackView)?.addArrangedSubview(fontRow)
+        choices("Font size (pt)", \.editorFontSize, (6...72).map { (String($0), $0) }, "Editing")
+        checkbox("Automatically reload files changed on disk", \.liveFileReloadEnabled, "General")
         checkbox("Highlight current line", \.highlightCurrentLine, "Editing")
         choices("Caret width", \.caretWidth, [("1", 1), ("2", 2), ("3", 3)], "Editing")
         choices("Caret blink rate", \.caretBlinkPeriod, [("Fast", 250), ("Normal", 500), ("Slow", 1000), ("No blinking", 0)], "Editing")
@@ -275,6 +291,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
 
     @objc private func settingChanged(_ sender: Any?) {
         var proposed = settings
+        if let name = editorFont.selectedItem?.representedObject as? String { proposed.editorFontName = name }
         proposed.appearanceMode = selectedAppearanceMode
         proposed.defaultWordWrapEnabled = wordWrap.state == .on
         proposed.defaultWrapMarkerVisible = wrapMarkers.state == .on
@@ -320,6 +337,13 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
 
     private func render(_ settings: AppSettings) {
         self.settings = settings
+        if let item = editorFont.itemArray.first(where: { $0.representedObject as? String == settings.editorFontName }) {
+            editorFont.select(item)
+        } else {
+            editorFont.addItem(withTitle: settings.editorFontName)
+            editorFont.lastItem?.representedObject = settings.editorFontName
+            editorFont.select(editorFont.lastItem)
+        }
         for (button, key) in booleanControls { button.state = settings[keyPath: key] ? .on : .off }
         for (popup, key) in numberControls {
             if let item = popup.itemArray.first(where: { $0.representedObject as? Int == settings[keyPath: key] }) {
@@ -338,6 +362,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     private func setControlsEnabled(_ enabled: Bool) {
         for (button, _) in booleanControls { button.isEnabled = enabled }
         for (popup, _) in numberControls { popup.isEnabled = enabled }
+        editorFont.isEnabled = enabled
         appearance.isEnabled = enabled
         wordWrap.isEnabled = enabled
         wrapMarkers.isEnabled = enabled && wordWrap.state == .on
