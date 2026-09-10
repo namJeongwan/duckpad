@@ -54,6 +54,8 @@ public extension DirtyDocumentDecisionPresenting {
 
 @MainActor
 public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPresenting, DirtyDocumentDecisionPresenting, OpenDocumentComparePresenting {
+    public var hasPresentedSnapshot: Bool { openDocumentComparePresenter.hasPresentedSnapshot }
+    public var restoresEditorFocusAfterDismissal: Bool { openDocumentComparePresenter.restoresEditorFocusAfterDismissal }
     public var preferredFileDirectory: (() -> URL?)?
 
     func configureFileDirectory(_ panel: NSSavePanel) {

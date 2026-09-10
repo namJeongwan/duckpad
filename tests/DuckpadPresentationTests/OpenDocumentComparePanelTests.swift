@@ -339,3 +339,20 @@ private func compareContent(
     await task.value
     #expect(!presenter.hasPresentedSnapshot)
 }
+
+@Test @MainActor func filePanelWrapperForwardsComparisonSnapshotAndFocusPolicy() async throws {
+    let native = NativeOpenDocumentComparePresenter()
+    let wrapper: any OpenDocumentComparePresenting = NativeFilePanelAdapter(openDocumentComparePresenter: native)
+    #expect(!wrapper.hasPresentedSnapshot)
+    #expect(!wrapper.restoresEditorFocusAfterDismissal)
+    let task = Task { @MainActor in try? await wrapper.present(compareContent(), attachedTo: nil, isCurrent: { true }) }
+    defer { wrapper.cancelOutstandingComparisons() }
+    for _ in 0..<200 where !native.hasPresentedSnapshot { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(native.hasPresentedSnapshot)
+    #expect(wrapper.hasPresentedSnapshot)
+    native.comparisonWindowForTesting?.orderOut(nil)
+    #expect(wrapper.hasPresentedSnapshot)
+    wrapper.cancelOutstandingComparisons()
+    await task.value
+    #expect(!wrapper.hasPresentedSnapshot)
+}
