@@ -202,7 +202,7 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
 }
 
 
-@Test @MainActor func fontPopupPersistsTheSelectedInstalledFont() async throws {
+@Test @MainActor func fontComboBoxImmediatelyPersistsSelectionAndTypedNames() async throws {
     _ = NSApplication.shared
     let controller = DuckpadSettingsWindowController()
     defer { controller.close() }
@@ -210,10 +210,86 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
     var task: Task<Void, Never>?
     controller.configure(settings: .defaults) { settings in saved = settings; return .saved(settings) }
     controller.onUpdateTaskStarted = { task = $0 }
-    let item = try #require(controller.editorFont.itemArray.first { ($0.representedObject as? String)?.contains("Monaco") == true })
-    controller.editorFont.select(item)
-    let action = try #require(controller.editorFont.action)
-    #expect(NSApp.sendAction(action, to: controller.editorFont.target, from: controller.editorFont))
+    let combo = controller.editorFont
+    let index = try #require(combo.visibleFonts.firstIndex { $0.family == "Monaco" })
+    combo.selectItem(at: index)
+    combo.comboBoxSelectionDidChange(Notification(name: NSComboBox.selectionDidChangeNotification, object: combo))
     await task?.value
-    #expect(saved?.editorFontName == item.representedObject as? String)
+    #expect(saved?.editorFontName == "Monaco")
+    combo.stringValue = "menlo"
+    let action = try #require(combo.action)
+    #expect(NSApp.sendAction(action, to: combo.target, from: combo))
+    await task?.value
+    #expect(saved?.editorFontName == NSFont(name: "Menlo", size: 13)?.fontName)
+    combo.stringValue = "not an installed font"
+    #expect(NSApp.sendAction(action, to: combo.target, from: combo))
+    #expect(combo.stringValue == "Menlo")
+}
+
+@Test @MainActor func fontComboBoxFiltersInstalledFontsAndUsesEachFontForPreview() throws {
+    _ = NSApplication.shared
+    let combo = EditorFontComboBox()
+    var selected: String?
+    combo.onFontSelected = { selected = $0 }
+    combo.display(fontName: "Menlo")
+    #expect(combo.stringValue == "Menlo")
+    combo.stringValue = "MONA"
+    combo.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: combo))
+    #expect(!combo.visibleFonts.isEmpty)
+    #expect(combo.visibleFonts.allSatisfy { $0.family.localizedStandardContains("mona") || $0.font.fontName.localizedStandardContains("mona") })
+    #expect(combo.comboBox(combo, completedString: "mona") == "Monaco")
+    #expect(selected == nil)
+    let item = try #require(combo.comboBox(combo, objectValueForItemAt: 0) as? NSAttributedString)
+    #expect(item.string == "Monaco")
+    #expect((item.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.fontName == "Monaco")
+    combo.stringValue = "does-not-exist"
+    combo.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: combo))
+    #expect(combo.visibleFonts.isEmpty)
+    #expect(selected == nil)
+    combo.stringValue = ""
+    combo.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: combo))
+    #expect(combo.visibleFonts.count == combo.installedFonts.count)
+}
+
+@Test @MainActor func fontComboBoxKeepsNativeMarkedTextOutOfSettings() throws {
+    _ = NSApplication.shared
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    let combo = EditorFontComboBox()
+    combo.frame = NSRect(x: 10, y: 40, width: 300, height: 26)
+    window.contentView?.addSubview(combo)
+    combo.display(fontName: "Menlo")
+    var selected: String?
+    combo.onFontSelected = { selected = $0 }
+    #expect(window.makeFirstResponder(combo))
+    let editor = try #require(combo.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    editor.insertText("mona", replacementRange: editor.selectedRange())
+    #expect(selected == nil)
+    #expect(combo.visibleFonts.contains { $0.family == "Monaco" })
+    editor.setMarkedText("Monaco", selectedRange: NSRange(location: 6, length: 0), replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+    #expect(editor.hasMarkedText())
+    let index = try #require(combo.visibleFonts.firstIndex { $0.family == "Monaco" })
+    combo.selectItem(at: index)
+    combo.comboBoxSelectionDidChange(Notification(name: NSComboBox.selectionDidChangeNotification, object: combo))
+    let action = try #require(combo.action)
+    #expect(NSApp.sendAction(action, to: combo.target, from: combo))
+    #expect(selected == nil)
+    editor.unmarkText()
+    combo.stringValue = "Monaco"
+    #expect(NSApp.sendAction(action, to: combo.target, from: combo))
+    #expect(selected == "Monaco")
+}
+
+@Test @MainActor func fontComboBoxKeepsSymbolNamesReadableAndTallPreviewsInsideRows() throws {
+    _ = NSApplication.shared
+    let symbol = try #require(NSFont(name: "Symbol", size: 14))
+    let symbolEntry = EditorFontComboBox.Entry(family: "Symbol", font: symbol)
+    #expect(symbolEntry.previewFont.fontName == NSFont.systemFont(ofSize: 14).fontName)
+    #expect(symbolEntry.font.fontName == "Symbol")
+    let tall = try #require(NSFont(name: "Zapfino", size: 14))
+    let preview = EditorFontComboBox.Entry(family: "Zapfino", font: tall).previewFont
+    #expect(preview.fontName == tall.fontName)
+    #expect(preview.ascender - preview.descender + max(0, preview.leading) <= 22.01)
 }

@@ -32,7 +32,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     private var categoryButtons: [NSButton] = []
     private var booleanControls: [(NSButton, WritableKeyPath<AppSettings, Bool>)] = []
     private var numberControls: [(NSPopUpButton, WritableKeyPath<AppSettings, Int>)] = []
-    let editorFont = NSPopUpButton(frame: .zero, pullsDown: false)
+    let editorFont = EditorFontComboBox()
     private let appearance = NSPopUpButton(frame: .zero, pullsDown: false)
     private let wordWrap = NSButton(checkboxWithTitle: "Wrap long lines in new tabs", target: nil, action: nil)
     private let wrapMarkers = NSButton(checkboxWithTitle: "Show wrap symbols in new tabs", target: nil, action: nil)
@@ -65,6 +65,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         settings: AppSettings,
         update: @escaping (AppSettings) async -> AppSettingsUpdateOutcome
     ) {
+        editorFont.reloadInstalledFonts()
         configure(settings: settings, update: update)
         showWindow(nil)
         window?.center()
@@ -203,20 +204,18 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         checkbox("Allow tab drag and drop", \.tabDragEnabled, "Tab Bar")
         checkbox("Show close button", \.showTabCloseButton, "Tab Bar")
         checkbox("Show buttons on inactive tabs", \.showInactiveTabButtons, "Tab Bar")
-        for family in NSFontManager.shared.availableFontFamilies.filter({ !$0.hasPrefix(".") }).sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) {
-            guard let font = NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: 13), !font.fontName.hasPrefix(".") else { continue }
-            editorFont.addItem(withTitle: family)
-            editorFont.lastItem?.representedObject = font.fontName
+        editorFont.onFontSelected = { [weak self] name in
+            guard let self else { return }
+            var proposed = self.settings
+            proposed.editorFontName = name
+            self.startUpdate(proposed)
         }
-        editorFont.target = self
-        editorFont.action = #selector(settingChanged(_:))
-        editorFont.setAccessibilityLabel("Editor font")
-        editorFont.setAccessibilityIdentifier("duckpad.settings.editor-font")
-        let fontRow = NSStackView(views: [NSTextField(labelWithString: "Font"), editorFont])
+        let fontLabel = NSLocalizedString("preferences.editor.font.label", value: "Font", comment: "Editor font preference label")
+        let fontRow = NSStackView(views: [NSTextField(labelWithString: fontLabel), editorFont])
         fontRow.spacing = 12
         editorFont.widthAnchor.constraint(equalToConstant: 260).isActive = true
         (pages["Editing"] as? NSStackView)?.addArrangedSubview(fontRow)
-        choices("Font size (pt)", \.editorFontSize, (6...72).map { (String($0), $0) }, "Editing")
+        choices(NSLocalizedString("preferences.editor.font.size", value: "Font size (pt)", comment: "Editor font size in points"), \.editorFontSize, (6...72).map { (String($0), $0) }, "Editing")
         checkbox("Automatically reload files changed on disk", \.liveFileReloadEnabled, "General")
         checkbox("Highlight current line", \.highlightCurrentLine, "Editing")
         choices("Caret width", \.caretWidth, [("1", 1), ("2", 2), ("3", 3)], "Editing")
@@ -291,7 +290,6 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
 
     @objc private func settingChanged(_ sender: Any?) {
         var proposed = settings
-        if let name = editorFont.selectedItem?.representedObject as? String { proposed.editorFontName = name }
         proposed.appearanceMode = selectedAppearanceMode
         proposed.defaultWordWrapEnabled = wordWrap.state == .on
         proposed.defaultWrapMarkerVisible = wrapMarkers.state == .on
@@ -337,13 +335,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
 
     private func render(_ settings: AppSettings) {
         self.settings = settings
-        if let item = editorFont.itemArray.first(where: { $0.representedObject as? String == settings.editorFontName }) {
-            editorFont.select(item)
-        } else {
-            editorFont.addItem(withTitle: settings.editorFontName)
-            editorFont.lastItem?.representedObject = settings.editorFontName
-            editorFont.select(editorFont.lastItem)
-        }
+        editorFont.display(fontName: settings.editorFontName)
         for (button, key) in booleanControls { button.state = settings[keyPath: key] ? .on : .off }
         for (popup, key) in numberControls {
             if let item = popup.itemArray.first(where: { $0.representedObject as? Int == settings[keyPath: key] }) {
