@@ -1159,6 +1159,18 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETWRAPINDENTMODE wParam:wrapMode lParam:0];
 }
 
+- (void)configureIndentationWithWidth:(NSUInteger)width useTabs:(BOOL)useTabs {
+    [_scintilla message:SCI_SETTABWIDTH wParam:MAX(1, MIN(width, 16))];
+    [_scintilla message:SCI_SETUSETABS wParam:useTabs ? 1 : 0];
+}
+
+- (void)configureGuidesWithIndentation:(BOOL)indentation virtualSpace:(BOOL)virtualSpace edgeVisible:(BOOL)edgeVisible edgeColumn:(NSInteger)edgeColumn {
+    [_scintilla message:SCI_SETINDENTATIONGUIDES wParam:indentation ? SC_IV_LOOKBOTH : SC_IV_NONE];
+    [_scintilla message:SCI_SETVIRTUALSPACEOPTIONS wParam:virtualSpace ? SCVS_USERACCESSIBLE | SCVS_RECTANGULARSELECTION : SCVS_NONE];
+    [_scintilla message:SCI_SETEDGEMODE wParam:edgeVisible ? EDGE_LINE : EDGE_NONE];
+    [_scintilla message:SCI_SETEDGECOLUMN wParam:MIN(MAX(edgeColumn, 1), 500)];
+}
+
 - (void)applyPalette:(DPScintillaPalette)palette {
     _palette = palette;
     const BOOL dark = palette == DPScintillaPaletteDark || palette == DPScintillaPaletteHighContrastDark;
@@ -1167,6 +1179,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const int background = dark ? 0x1E1E1E : 0xFFFFFF;
     const int gutterBackground = dark ? 0x262626 : 0xF6F6F6;
     const int gutterForeground = dark ? 0x8A8A8A : 0x747474;
+    [_scintilla message:SCI_SETEDGECOLOUR wParam:dark ? 0x505050 : 0xD0D0D0];
     const int caretLineBackground = dark ? 0x292929 : 0xF8F8F8;
     const int comment = dark ? 0x7FD47F : 0x397A32;
     const int number = dark ? 0xD7A0F8 : 0x7C2F8E;

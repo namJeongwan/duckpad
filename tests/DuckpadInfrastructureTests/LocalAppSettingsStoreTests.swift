@@ -84,7 +84,9 @@ import Testing
     let updated = AppSettings(appearanceMode: .light, menuBarVisible: false, statusBarVisible: false,
         tabDragEnabled: false, showTabCloseButton: false, showInactiveTabButtons: true,
         lineNumbersVisible: false, bookmarkMarginVisible: false, highlightCurrentLine: false,
-        caretWidth: 3, caretBlinkPeriod: 1000, scrollBeyondLastLine: true, wrapIndentMode: 2)
+        caretWidth: 3, caretBlinkPeriod: 1000, scrollBeyondLastLine: true, wrapIndentMode: 2,
+        overrideLanguageIndentation: true, indentationWidth: 2, indentationUsesTabs: true,
+        indentationGuidesVisible: false, virtualSpaceEnabled: true, edgeLineVisible: true, edgeColumn: 120)
     try await store.save(updated)
     #expect(try await LocalAppSettingsStore(archiveURL: archive).load() == updated)
 }

@@ -192,6 +192,8 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
            braceMatching:(BOOL)braceMatching
         maximumStyleBytes:(NSUInteger)maximumStyleBytes;
 - (NSData *)contentPrefixUTF8WithMaximumLength:(NSUInteger)maximumLength;
+- (void)configureIndentationWithWidth:(NSUInteger)width useTabs:(BOOL)useTabs;
+- (void)configureGuidesWithIndentation:(BOOL)indentation virtualSpace:(BOOL)virtualSpace edgeVisible:(BOOL)edgeVisible edgeColumn:(NSInteger)edgeColumn;
 - (void)applyPalette:(DPScintillaPalette)palette;
 - (NSInteger)styleAtUTF8Position:(NSUInteger)position;
 - (NSUInteger)foregroundColorForStyle:(NSInteger)style;

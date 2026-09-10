@@ -20,12 +20,13 @@ Preferences uses a category list, immediate application, persistent storage, and
 | --- | --- |
 | General | Document-window menu bar; status bar |
 | Tab Bar | Tab drag and drop; close buttons; buttons on inactive tabs |
-| Editing | Current-line highlight; caret width and blink rate; default/aligned/indented wrapping; scrolling beyond the last line |
+| Editing | Current-line highlight; caret width and blink rate; default/aligned/indented wrapping; scrolling beyond the last line; virtual space |
 | Dark Mode | Light Mode, Dark Mode, Follow macOS |
-| Margins/Border/Edge | Line numbers; bookmark margin |
+| Margins/Border/Edge | Line numbers; bookmark margin; vertical edge and column |
 | New Document | Default word wrap and wrap symbols |
+| Indentation | Override language defaults; tab size; tabs/spaces; indent guides |
 
-The complete Notepad++ Preferences inventory is larger. Toolbar icon sets, further tab options, Editing 2, default document encoding/EOL, default directory, recent-file limits, language overrides, indentation, highlighting options, print, search defaults, backup configuration, auto-completion configuration, date formats, delimiters, performance configuration, cloud/link configuration, search engines, and miscellaneous toggles remain separate feature work. Session recovery, searching, language detection, indentation, and completion already have implementations; this does not mean their full Notepad++ configuration interfaces exist.
+The complete Notepad++ Preferences inventory is larger. Toolbar icon sets, further tab options, Editing 2, default document encoding/EOL, default directory, recent-file limits, language overrides, per-language indentation and auto-indent modes, highlighting options, print, search defaults, backup configuration, auto-completion configuration, date formats, delimiters, performance configuration, cloud/link configuration, search engines, and miscellaneous toggles remain separate feature work. Session recovery, searching, language detection, indentation, and completion already have implementations; this does not mean their full Notepad++ configuration interfaces exist.
 
 ## Duckpad additions and differences
 

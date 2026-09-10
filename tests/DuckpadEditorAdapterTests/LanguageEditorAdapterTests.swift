@@ -17,6 +17,47 @@ private typealias ScintillaMessageInvocation = @convention(c) (
 
 @Suite(.serialized)
 struct LanguageEditorAdapterTests {
+    @Test @MainActor func indentationPreferencesReachClonesAndPreserveEdits() throws {
+        let adapter = ScintillaEditorAdapter()
+        defer { adapter.invalidate() }
+        let buffer = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        adapter.install(.init(bufferID: buffer.bufferID, revision: 0, text: "base"))
+        adapter.display(buffer)
+        let primary = try #require(adapter.activeScintillaView)
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        primary.setPrimarySelectionUTF8Range(NSRange(location: 4, length: 0))
+        primary.insertCommittedText("!")
+        let configuration = EditorLanguageConfiguration(languageID: .plainText, lexerName: "null",
+            indentation: .init(width: 8, useTabs: true), folding: false, braceMatching: false)
+        #expect(adapter.applyLanguage(configuration))
+        var settings = AppSettings(overrideLanguageIndentation: true, indentationWidth: 2,
+            indentationGuidesVisible: false, virtualSpaceEnabled: true, edgeLineVisible: true, edgeColumn: 120)
+        adapter.applyPreferences(settings)
+        #expect(primary.configuredTabWidth == 2)
+        #expect(!primary.configuredUseTabs)
+        #expect(try sendTestingScintillaMessage(2133, to: primary) == 0)
+        #expect(try sendTestingScintillaMessage(2597, to: primary) == 3)
+        #expect(try sendTestingScintillaMessage(2360, to: primary) == 120)
+        #expect(try sendTestingScintillaMessage(2362, to: primary) == 1)
+        adapter.setEditorGroupOrientation(.sideBySide)
+        let group = EditorGroupID()
+        adapter.assign(buffer, from: .primary, to: group, cloning: true)
+        adapter.display(buffer, in: group)
+        adapter.activateEditorGroup(group)
+        let clone = try #require(adapter.activeScintillaView)
+        #expect(clone.configuredTabWidth == 2)
+        #expect(adapter.applyLanguage(configuration))
+        #expect(clone.configuredTabWidth == 2)
+        settings.overrideLanguageIndentation = false
+        adapter.applyPreferences(settings)
+        #expect(primary.configuredTabWidth == 8 && clone.configuredTabWidth == 8)
+        #expect(primary.configuredUseTabs && clone.configuredUseTabs)
+        #expect(primary.contentUTF8 == Data("base!".utf8))
+        #expect(primary.revision == 1)
+        clone.undo()
+        #expect(primary.contentUTF8 == Data("base".utf8))
+    }
+
     @MainActor
     private func hostedView() -> (NSWindow, DPScintillaEditorView) {
         _ = NSApplication.shared

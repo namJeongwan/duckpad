@@ -26,6 +26,14 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var scrollBeyondLastLine: Bool
     public var wrapIndentMode: Int
 
+    public var overrideLanguageIndentation: Bool
+    public var indentationWidth: Int
+    public var indentationUsesTabs: Bool
+    public var indentationGuidesVisible: Bool
+    public var virtualSpaceEnabled: Bool
+    public var edgeLineVisible: Bool
+    public var edgeColumn: Int
+
     public init(
         schemaVersion: Int = AppSettings.currentSchemaVersion,
         appearanceMode: AppAppearanceMode = .system,
@@ -42,7 +50,14 @@ public struct AppSettings: Codable, Equatable, Sendable {
         caretWidth: Int = 1,
         caretBlinkPeriod: Int = 500,
         scrollBeyondLastLine: Bool = false,
-        wrapIndentMode: Int = 0
+        wrapIndentMode: Int = 0,
+        overrideLanguageIndentation: Bool = false,
+        indentationWidth: Int = 4,
+        indentationUsesTabs: Bool = false,
+        indentationGuidesVisible: Bool = true,
+        virtualSpaceEnabled: Bool = false,
+        edgeLineVisible: Bool = false,
+        edgeColumn: Int = 80
     ) {
         self.schemaVersion = schemaVersion
         self.appearanceMode = appearanceMode
@@ -60,6 +75,13 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.caretBlinkPeriod = caretBlinkPeriod
         self.scrollBeyondLastLine = scrollBeyondLastLine
         self.wrapIndentMode = wrapIndentMode
+        self.overrideLanguageIndentation = overrideLanguageIndentation
+        self.indentationWidth = indentationWidth
+        self.indentationUsesTabs = indentationUsesTabs
+        self.indentationGuidesVisible = indentationGuidesVisible
+        self.virtualSpaceEnabled = virtualSpaceEnabled
+        self.edgeLineVisible = edgeLineVisible
+        self.edgeColumn = edgeColumn
     }
 
     public init(from decoder: Decoder) throws {
@@ -80,5 +102,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
         caretBlinkPeriod = try values.decodeIfPresent(Int.self, forKey: .caretBlinkPeriod) ?? 500
         scrollBeyondLastLine = try values.decodeIfPresent(Bool.self, forKey: .scrollBeyondLastLine) ?? false
         wrapIndentMode = try values.decodeIfPresent(Int.self, forKey: .wrapIndentMode) ?? 0
+        overrideLanguageIndentation = try values.decodeIfPresent(Bool.self, forKey: .overrideLanguageIndentation) ?? false
+        indentationWidth = try values.decodeIfPresent(Int.self, forKey: .indentationWidth) ?? 4
+        indentationUsesTabs = try values.decodeIfPresent(Bool.self, forKey: .indentationUsesTabs) ?? false
+        indentationGuidesVisible = try values.decodeIfPresent(Bool.self, forKey: .indentationGuidesVisible) ?? true
+        virtualSpaceEnabled = try values.decodeIfPresent(Bool.self, forKey: .virtualSpaceEnabled) ?? false
+        edgeLineVisible = try values.decodeIfPresent(Bool.self, forKey: .edgeLineVisible) ?? false
+        edgeColumn = try values.decodeIfPresent(Int.self, forKey: .edgeColumn) ?? 80
     }
 }

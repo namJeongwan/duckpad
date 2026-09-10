@@ -614,10 +614,18 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         let views = Array(bufferViews.values) + Array(secondaryBufferViews.values)
             + groupPeerViews.values.flatMap { $0 }
         for view in views { applyDisplayPreferences(to: view) }
+        for bufferID in bufferViews.keys {
+            for view in allViews(for: bufferID) {
+                applyIndentationPreferences(to: view, indentation: languageConfigurations[bufferID]?.indentation ?? .init())
+            }
+        }
     }
 
     private func applyDisplayPreferences(to view: DPScintillaEditorView) {
         let settings = displayPreferences
+        view.configureGuides(withIndentation: settings.indentationGuidesVisible,
+                             virtualSpace: settings.virtualSpaceEnabled,
+                             edgeVisible: settings.edgeLineVisible, edgeColumn: settings.edgeColumn)
         view.configureDisplay(withLineNumbers: settings.lineNumbersVisible,
                               bookmarkMargin: settings.bookmarkMarginVisible,
                               highlightCurrentLine: settings.highlightCurrentLine,
@@ -625,6 +633,12 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
                               caretBlinkPeriod: settings.caretBlinkPeriod,
                               scrollBeyondLastLine: settings.scrollBeyondLastLine,
                               wrapIndentMode: settings.wrapIndentMode)
+    }
+
+    private func applyIndentationPreferences(to view: DPScintillaEditorView, indentation: LanguageIndentation) {
+        let settings = displayPreferences
+        view.configureIndentation(withWidth: UInt(clamping: settings.overrideLanguageIndentation ? settings.indentationWidth : indentation.width),
+                                  useTabs: settings.overrideLanguageIndentation ? settings.indentationUsesTabs : indentation.useTabs)
     }
 
     public var isWhitespaceVisible: Bool { activeScintillaView?.isWhitespaceVisible ?? false }
@@ -928,6 +942,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
                 braceMatching: configuration.braceMatching,
                 maximumStyleBytes: UInt(configuration.maximumStyleBytes)
             ) else { return false }
+            applyIndentationPreferences(to: editorView, indentation: configuration.indentation)
             editorView.apply(nativePalette(themePalette))
         }
         languageConfigurations[bufferID] = configuration
@@ -1935,6 +1950,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             braceMatching: configuration.braceMatching,
             maximumStyleBytes: UInt(configuration.maximumStyleBytes)
         )
+        applyIndentationPreferences(to: editorView, indentation: configuration.indentation)
         editorView.apply(nativePalette(themePalette))
         guard applied, storedConfiguration != nil else { return }
         if editorView.configuredFoldingEnabled {

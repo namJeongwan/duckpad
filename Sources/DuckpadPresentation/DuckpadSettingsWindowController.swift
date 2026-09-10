@@ -26,7 +26,7 @@ public struct DuckpadSettingsSmokeState: Equatable, Sendable {
 
 @MainActor
 public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate {
-    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document"]
+    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Indentation"]
     public private(set) var selectedCategory = "General"
     private var pages: [String: NSView] = [:]
     private var categoryButtons: [NSButton] = []
@@ -192,6 +192,16 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         checkbox("Enable scrolling beyond last line", \.scrollBeyondLastLine, "Editing")
         checkbox("Display line number", \.lineNumbersVisible, "Margins/Border/Edge")
         checkbox("Display bookmark", \.bookmarkMarginVisible, "Margins/Border/Edge")
+        checkbox("Show vertical edge", \.edgeLineVisible, "Margins/Border/Edge")
+        choices("Vertical edge column", \.edgeColumn, [("72", 72), ("80", 80), ("100", 100), ("120", 120)], "Margins/Border/Edge")
+        checkbox("Enable virtual space", \.virtualSpaceEnabled, "Editing")
+        checkbox("Override language indentation", \.overrideLanguageIndentation, "Indentation")
+        choices("Tab size", \.indentationWidth, (1...16).map { (String($0), $0) }, "Indentation")
+        checkbox("Use tab characters instead of spaces", \.indentationUsesTabs, "Indentation")
+        checkbox("Show indent guide", \.indentationGuidesVisible, "Indentation")
+        let indentNote = NSTextField(wrappingLabelWithString: "The override applies to all languages. Turn it off to restore each language’s defaults. Existing text is not converted.")
+        (pages["Indentation"] as? NSStackView)?.addArrangedSubview(indentNote)
+        indentNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
 
         for mode in AppAppearanceMode.allCases {
             appearance.addItem(withTitle: title(for: mode))
