@@ -25,14 +25,18 @@ public struct DuckpadSettingsSmokeState: Equatable, Sendable {
 }
 
 @MainActor
-public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate {
+public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
     public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation", "Searching"]
     public private(set) var selectedCategory = "General"
     private var pages: [String: NSView] = [:]
     private var categoryButtons: [NSButton] = []
     private var booleanControls: [(NSButton, WritableKeyPath<AppSettings, Bool>)] = []
     private var numberControls: [(NSPopUpButton, WritableKeyPath<AppSettings, Int>)] = []
-    let editorFont = NSPopUpButton(frame: .zero, pullsDown: false)
+    let editorFont = EditorFontComboBox()
+    let editorFontSize = NSTextField(string: "13")
+    let editorFontSizeStepper = NSStepper()
+    private var preservesFontSizeDraft = false
+    private var pendingFontSize: Double?
     private let appearance = NSPopUpButton(frame: .zero, pullsDown: false)
     private let wordWrap = NSButton(checkboxWithTitle: "Wrap long lines in new tabs", target: nil, action: nil)
     private let wrapMarkers = NSButton(checkboxWithTitle: "Show wrap symbols in new tabs", target: nil, action: nil)
@@ -65,6 +69,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         settings: AppSettings,
         update: @escaping (AppSettings) async -> AppSettingsUpdateOutcome
     ) {
+        editorFont.reloadInstalledFonts()
         configure(settings: settings, update: update)
         showWindow(nil)
         window?.center()
@@ -203,20 +208,38 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         checkbox("Allow tab drag and drop", \.tabDragEnabled, "Tab Bar")
         checkbox("Show close button", \.showTabCloseButton, "Tab Bar")
         checkbox("Show buttons on inactive tabs", \.showInactiveTabButtons, "Tab Bar")
-        for family in NSFontManager.shared.availableFontFamilies.filter({ !$0.hasPrefix(".") }).sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) {
-            guard let font = NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: 13), !font.fontName.hasPrefix(".") else { continue }
-            editorFont.addItem(withTitle: family)
-            editorFont.lastItem?.representedObject = font.fontName
+        editorFont.onFontSelected = { [weak self] name in
+            guard let self else { return }
+            var proposed = self.settings
+            proposed.editorFontName = name
+            self.startUpdate(proposed)
         }
-        editorFont.target = self
-        editorFont.action = #selector(settingChanged(_:))
-        editorFont.setAccessibilityLabel("Editor font")
-        editorFont.setAccessibilityIdentifier("duckpad.settings.editor-font")
-        let fontRow = NSStackView(views: [NSTextField(labelWithString: "Font"), editorFont])
+        let fontLabel = NSLocalizedString("preferences.editor.font.label", value: "Font", comment: "Editor font preference label")
+        let fontRow = NSStackView(views: [NSTextField(labelWithString: fontLabel), editorFont])
         fontRow.spacing = 12
         editorFont.widthAnchor.constraint(equalToConstant: 260).isActive = true
         (pages["Editing"] as? NSStackView)?.addArrangedSubview(fontRow)
-        choices("Font size (pt)", \.editorFontSize, (6...72).map { (String($0), $0) }, "Editing")
+        let fontSizeLabel = NSLocalizedString("preferences.editor.font.size", value: "Font size (pt)", comment: "Editor font size in points")
+        editorFontSize.target = self
+        editorFontSize.action = #selector(fontSizeChanged(_:))
+        editorFontSize.delegate = self
+        editorFontSize.alignment = .right
+        editorFontSize.formatter = FontSizeFormatter()
+        editorFontSize.setAccessibilityLabel(fontSizeLabel)
+        editorFontSize.setAccessibilityIdentifier("duckpad.settings.editor-font-size")
+        editorFontSize.toolTip = NSLocalizedString("preferences.editor.font.size.range", value: "Enter a size from 6 to 72 points", comment: "Valid editor font size range")
+        editorFontSize.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        editorFontSizeStepper.minValue = 6
+        editorFontSizeStepper.maxValue = 72
+        editorFontSizeStepper.increment = 1
+        editorFontSizeStepper.valueWraps = false
+        editorFontSizeStepper.target = self
+        editorFontSizeStepper.action = #selector(stepFontSize(_:))
+        editorFontSizeStepper.setAccessibilityLabel(fontSizeLabel)
+        editorFontSizeStepper.setAccessibilityIdentifier("duckpad.settings.editor-font-size-stepper")
+        let fontSizeRow = NSStackView(views: [NSTextField(labelWithString: fontSizeLabel), editorFontSize, editorFontSizeStepper])
+        fontSizeRow.spacing = 12
+        (pages["Editing"] as? NSStackView)?.addArrangedSubview(fontSizeRow)
         checkbox("Automatically reload files changed on disk", \.liveFileReloadEnabled, "General")
         checkbox("Highlight current line", \.highlightCurrentLine, "Editing")
         choices("Caret width", \.caretWidth, [("1", 1), ("2", 2), ("3", 3)], "Editing")
@@ -291,7 +314,6 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
 
     @objc private func settingChanged(_ sender: Any?) {
         var proposed = settings
-        if let name = editorFont.selectedItem?.representedObject as? String { proposed.editorFontName = name }
         proposed.appearanceMode = selectedAppearanceMode
         proposed.defaultWordWrapEnabled = wordWrap.state == .on
         proposed.defaultWrapMarkerVisible = wrapMarkers.state == .on
@@ -302,19 +324,93 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         startUpdate(proposed)
     }
 
-    private func startUpdate(_ proposed: AppSettings) {
+    private var enteredFontSize: Double? {
+        let text = editorFontSize.stringValue
+        guard FontSizeFormatter.accepts(text), let value = Double(text), value.isFinite,
+              (6...72).contains(value) else { return nil }
+        return (value * 100).rounded() / 100
+    }
+
+    private func sizeText(_ value: Double) -> String {
+        let value = value.isFinite ? min(max(value, 6), 72) : 13
+        return value.rounded() == value ? String(Int(value)) : String(value)
+    }
+
+    public func controlTextDidChange(_ notification: Notification) {
+        guard notification.object as? NSTextField === editorFontSize,
+              !((editorFontSize.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) else { return }
+        guard let size = enteredFontSize else { pendingFontSize = nil; return }
+        editorFontSizeStepper.doubleValue = size
+        submitFontSize(size)
+    }
+
+    public func controlTextDidEndEditing(_ notification: Notification) {
+        guard notification.object as? NSTextField === editorFontSize else { return }
+        fontSizeChanged(editorFontSize)
+    }
+
+    @objc private func stepFontSize(_ sender: NSStepper) {
+        editorFontSize.stringValue = sizeText(sender.doubleValue)
+        submitFontSize(sender.doubleValue)
+    }
+
+    @objc private func fontSizeChanged(_ sender: Any?) {
+        guard !((editorFontSize.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) else { return }
+        guard let size = enteredFontSize else {
+            if !isUpdating { editorFontSize.stringValue = sizeText(settings.editorFontSize) }
+            status.stringValue = NSLocalizedString("preferences.editor.font.size.invalid", value: "Font size must be between 6 and 72 points.", comment: "Invalid font size feedback")
+            return
+        }
+        editorFontSize.stringValue = sizeText(size)
+        submitFontSize(size)
+    }
+
+    private func submitFontSize(_ size: Double) {
+        guard acceptsUpdates?() ?? true else { return }
+        if isUpdating {
+            pendingFontSize = size
+            return
+        }
+        guard size != settings.editorFontSize else { return }
+        var proposed = settings
+        proposed.editorFontSize = size
+        startUpdate(proposed, editingSize: true)
+    }
+
+    private func startUpdate(_ proposed: AppSettings, editingSize: Bool = false) {
         guard !isUpdating, acceptsUpdates?() ?? true else {
             NSSound.beep()
             return
         }
-        setControlsEnabled(false)
+        // A checkbox can dispatch without first moving focus out of the size field.
+        // Carry a valid draft into that same update before disabling the controls.
+        var proposed = proposed
+        if proposed.editorFontSize == settings.editorFontSize,
+           !((editorFontSize.currentEditor() as? NSTextView)?.hasMarkedText() ?? false),
+           let size = enteredFontSize {
+            proposed.editorFontSize = size
+        }
+        preservesFontSizeDraft = editingSize
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.apply(proposed)
+            var next = proposed
+            while true {
+                await self.apply(next)
+                guard let size = self.pendingFontSize else { break }
+                self.pendingFontSize = nil
+                guard size != self.settings.editorFontSize else { break }
+                next = self.settings
+                next.editorFontSize = size
+            }
+            self.preservesFontSizeDraft = false
+            if self.editorFontSize.currentEditor() == nil {
+                self.editorFontSize.stringValue = self.sizeText(self.settings.editorFontSize)
+            }
             self.setControlsEnabled(true)
             self.updateTask = nil
         }
         updateTask = task
+        setControlsEnabled(false)
         onUpdateTaskStarted?(task)
     }
 
@@ -328,7 +424,10 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             render(saved)
             status.stringValue = "Saved, but durability could not be confirmed: \(failure)"
         case .failed(let failure):
+            let preserveDraft = preservesFontSizeDraft
+            if pendingFontSize == nil { preservesFontSizeDraft = false }
             render(settings)
+            preservesFontSizeDraft = preserveDraft
             status.stringValue = "Could not save preferences: \(failure)"
             NSSound.beep()
             showWindow(nil)
@@ -337,13 +436,11 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
 
     private func render(_ settings: AppSettings) {
         self.settings = settings
-        if let item = editorFont.itemArray.first(where: { $0.representedObject as? String == settings.editorFontName }) {
-            editorFont.select(item)
-        } else {
-            editorFont.addItem(withTitle: settings.editorFontName)
-            editorFont.lastItem?.representedObject = settings.editorFontName
-            editorFont.select(editorFont.lastItem)
+        editorFont.display(fontName: settings.editorFontName)
+        if !preservesFontSizeDraft {
+            editorFontSize.stringValue = sizeText(settings.editorFontSize)
         }
+        editorFontSizeStepper.doubleValue = enteredFontSize ?? settings.editorFontSize
         for (button, key) in booleanControls { button.state = settings[keyPath: key] ? .on : .off }
         for (popup, key) in numberControls {
             if let item = popup.itemArray.first(where: { $0.representedObject as? Int == settings[keyPath: key] }) {
@@ -363,6 +460,8 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         for (button, _) in booleanControls { button.isEnabled = enabled }
         for (popup, _) in numberControls { popup.isEnabled = enabled }
         editorFont.isEnabled = enabled
+        editorFontSize.isEnabled = enabled || preservesFontSizeDraft
+        editorFontSizeStepper.isEnabled = enabled || preservesFontSizeDraft
         appearance.isEnabled = enabled
         wordWrap.isEnabled = enabled
         wrapMarkers.isEnabled = enabled && wordWrap.state == .on

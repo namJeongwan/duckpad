@@ -80,8 +80,8 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, getter=areLineEndingsVisible) BOOL lineEndingsVisible;
 @property(nonatomic) NSInteger zoomLevel;
 @property(nonatomic, readonly, copy) NSString *editorFontName;
-@property(nonatomic, readonly) NSInteger editorFontSize;
-- (void)configureEditorFont:(NSString *)name size:(NSInteger)size;
+@property(nonatomic, readonly) double editorFontSize;
+- (void)configureEditorFont:(NSString *)name size:(double)size;
 - (void)configureDisplayWithLineNumbers:(BOOL)lineNumbers
                        bookmarkMargin:(BOOL)bookmarkMargin
                  highlightCurrentLine:(BOOL)highlightCurrentLine

@@ -14,7 +14,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var defaultWrapMarkerVisible: Bool
 
     public var editorFontName: String
-    public var editorFontSize: Int
+    public var editorFontSize: Double
     public var liveFileReloadEnabled: Bool
 
     public var menuBarVisible: Bool
@@ -53,7 +53,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         defaultWordWrapEnabled: Bool = true,
         defaultWrapMarkerVisible: Bool = false,
         editorFontName: String = "Menlo",
-        editorFontSize: Int = 13,
+        editorFontSize: Double = 13,
         liveFileReloadEnabled: Bool = true,
         menuBarVisible: Bool = true,
         statusBarVisible: Bool = true,
@@ -124,7 +124,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         defaultWordWrapEnabled = try values.decode(Bool.self, forKey: .defaultWordWrapEnabled)
         defaultWrapMarkerVisible = try values.decode(Bool.self, forKey: .defaultWrapMarkerVisible)
         editorFontName = try values.decodeIfPresent(String.self, forKey: .editorFontName) ?? "Menlo"
-        editorFontSize = try values.decodeIfPresent(Int.self, forKey: .editorFontSize) ?? 13
+        editorFontSize = try values.decodeIfPresent(Double.self, forKey: .editorFontSize) ?? 13
         liveFileReloadEnabled = try values.decodeIfPresent(Bool.self, forKey: .liveFileReloadEnabled) ?? true
         menuBarVisible = try values.decodeIfPresent(Bool.self, forKey: .menuBarVisible) ?? true
         statusBarVisible = try values.decodeIfPresent(Bool.self, forKey: .statusBarVisible) ?? true
