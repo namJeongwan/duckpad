@@ -6,7 +6,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -1006,6 +1006,16 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             return .rejected(currentRevision: self.activeBuffer?.revision ?? oldRevision)
         }
         return .accepted(newRevision: authoritative.revision)
+    }
+
+    public func selectedTextForFind(maximumUTF16Length: Int) -> String? {
+        let limit = min(max(maximumUTF16Length, 0), 16383)
+        guard limit > 0, let view = activeScintillaView, view.selectionCount == 1,
+              let range = activeSelectionUTF8Range(), range.length > 0,
+              range.length <= limit * 4,
+              let bytes = try? view.utf8Bytes(in: NSRange(location: range.location, length: range.length)),
+              let text = String(data: bytes, encoding: .utf8), text.utf16.count <= limit else { return nil }
+        return text
     }
 
     public func activeSelectionUTF8Range() -> SearchUTF8Range? {

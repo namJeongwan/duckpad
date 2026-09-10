@@ -26,7 +26,7 @@ public struct DuckpadSettingsSmokeState: Equatable, Sendable {
 
 @MainActor
 public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate {
-    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation"]
+    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation", "Searching"]
     public private(set) var selectedCategory = "General"
     private var pages: [String: NSView] = [:]
     private var categoryButtons: [NSButton] = []
@@ -189,6 +189,13 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         let recentNote = NSTextField(wrappingLabelWithString: "Open Recent shows up to this many entries from macOS recent document history. Changing the limit does not delete that history.")
         (pages["Recent Files History"] as? NSStackView)?.addArrangedSubview(recentNote)
         recentNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
+        checkbox("Fill Find field with selected text", \.fillFindWithSelection, "Searching")
+        choices("Maximum selected characters", \.findSelectionMaximumCharacters,
+                [("256", 256), ("512", 512), ("1024", 1024), ("4096", 4096), ("16383", 16383)], "Searching")
+        checkbox("Use monospaced font in Find and Replace", \.monospacedFindFields, "Searching")
+        let searchNote = NSTextField(wrappingLabelWithString: "An empty or oversized selection keeps the previous search text. The selection and document stay unchanged.")
+        (pages["Searching"] as? NSStackView)?.addArrangedSubview(searchNote)
+        searchNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
         checkbox("Show menu bar in document windows", \.menuBarVisible, "General")
         checkbox("Show status bar", \.statusBarVisible, "General")
         checkbox("Allow tab drag and drop", \.tabDragEnabled, "Tab Bar")

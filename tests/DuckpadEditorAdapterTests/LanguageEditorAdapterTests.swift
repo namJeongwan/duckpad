@@ -17,6 +17,26 @@ private typealias ScintillaMessageInvocation = @convention(c) (
 
 @Suite(.serialized)
 struct LanguageEditorAdapterTests {
+    @Test @MainActor func findSelectionCaptureIsUnicodeBoundedWithoutFullDocumentRead() throws {
+        let adapter = ScintillaEditorAdapter()
+        defer { adapter.invalidate() }
+        let buffer = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        adapter.install(.init(bufferID: buffer.bufferID, revision: 0, text: "한글🦆" + String(repeating: "a", count: 5 * 1024 * 1024)))
+        adapter.display(buffer)
+        let view = try #require(adapter.activeScintillaView)
+        let reads = view.snapshotReadCount
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 10))
+        #expect(adapter.selectedTextForFind(maximumUTF16Length: 4) == "한글🦆")
+        #expect(adapter.selectedTextForFind(maximumUTF16Length: 3) == nil)
+        #expect(adapter.selectedTextForFind(maximumUTF16Length: 0) == nil)
+        #expect(view.caretUTF8Position == 10)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: Int(view.documentByteLength)))
+        #expect(adapter.selectedTextForFind(maximumUTF16Length: 1024) == nil)
+        #expect(view.snapshotReadCount == reads)
+        #expect(view.revision == 0)
+        #expect(!view.canUndo)
+    }
+
     @Test @MainActor func indentationPreferencesReachClonesAndPreserveEdits() throws {
         let adapter = ScintillaEditorAdapter()
         defer { adapter.invalidate() }

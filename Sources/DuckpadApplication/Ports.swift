@@ -318,3 +318,10 @@ public extension EditorPort {
         install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text))
     }
 }
+
+/// Captures only a bounded selection for Find; never reads the full document
+/// or changes selection, clipboard, revision, or undo history.
+@MainActor
+public protocol EditorFindTextPort: EditorPort {
+    func selectedTextForFind(maximumUTF16Length: Int) -> String?
+}

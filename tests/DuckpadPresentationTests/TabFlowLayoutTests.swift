@@ -4145,3 +4145,35 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let names = DuckpadMainMenuFactory.make(target: controller, recentDocumentURLs: urls, settings: AppSettings(recentFileLimit: 15, recentFilePathMode: 0))
     #expect(menuItem("Open Recent", in: names)?.submenu?.items.filter { $0.title == "same.txt" }.count == 15)
 }
+
+@Test @MainActor func findPreferencesSeedSelectionAndPreserveQueryWhenDisabledOrOversized() async throws {
+    let controller = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: PresentationStore()))
+    defer { controller.close() }
+    await controller.waitForStartup()
+    let editor = controller.editor.textView
+    editor.insertText("alpha beta", replacementRange: NSRange(location: 0, length: 0))
+    func searchPanel(in view: NSView) -> SearchPanelView? {
+        if let panel = view as? SearchPanelView { return panel }
+        return view.subviews.lazy.compactMap { searchPanel(in: $0) }.first
+    }
+    let root = try #require(controller.window?.contentView)
+    let panel = try #require(searchPanel(in: root))
+    editor.setSelectedRange(NSRange(location: 0, length: 5))
+    controller.performShowFind()
+    #expect(panel.currentQuery().pattern == "alpha")
+    #expect(editor.selectedRange() == NSRange(location: 0, length: 5))
+    controller.applyPreferences(AppSettings(fillFindWithSelection: false))
+    editor.setSelectedRange(NSRange(location: 6, length: 4))
+    controller.performShowReplace()
+    #expect(panel.currentQuery().pattern == "alpha")
+    controller.applyPreferences(AppSettings(findSelectionMaximumCharacters: 3))
+    controller.performShowFind()
+    #expect(panel.currentQuery().pattern == "alpha")
+    controller.applyPreferences(AppSettings(monospacedFindFields: true))
+    controller.performShowFind()
+    #expect(panel.currentQuery().pattern == "beta")
+    editor.setSelectedRange(NSRange(location: 0, length: 0))
+    controller.performShowFind()
+    #expect(panel.currentQuery().pattern == "beta")
+    #expect(editor.string == "alpha beta")
+}

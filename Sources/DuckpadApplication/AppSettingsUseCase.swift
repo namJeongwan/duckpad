@@ -70,6 +70,7 @@ public final class AppSettingsUseCase {
         normalized.edgeColumn = min(max(settings.edgeColumn, 1), 500)
         normalized.recentFileLimit = min(max(settings.recentFileLimit, 0), 50)
         normalized.recentFilePathMode = min(max(settings.recentFilePathMode, 0), 2)
+        normalized.findSelectionMaximumCharacters = min(max(settings.findSelectionMaximumCharacters, 0), 16383)
         do {
             try await store.save(normalized)
             state = .ready(normalized)

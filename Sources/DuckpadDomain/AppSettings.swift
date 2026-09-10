@@ -38,6 +38,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var recentFilePathMode: Int
     public var fileDialogFollowsDocument: Bool
 
+    public var fillFindWithSelection: Bool
+    public var findSelectionMaximumCharacters: Int
+    public var monospacedFindFields: Bool
+
     public init(
         schemaVersion: Int = AppSettings.currentSchemaVersion,
         appearanceMode: AppAppearanceMode = .system,
@@ -64,7 +68,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         edgeColumn: Int = 80,
         recentFileLimit: Int = 10,
         recentFilePathMode: Int = 2,
-        fileDialogFollowsDocument: Bool = false
+        fileDialogFollowsDocument: Bool = false,
+        fillFindWithSelection: Bool = true,
+        findSelectionMaximumCharacters: Int = 1024,
+        monospacedFindFields: Bool = false
     ) {
         self.schemaVersion = schemaVersion
         self.appearanceMode = appearanceMode
@@ -92,6 +99,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.recentFileLimit = recentFileLimit
         self.recentFilePathMode = recentFilePathMode
         self.fileDialogFollowsDocument = fileDialogFollowsDocument
+        self.fillFindWithSelection = fillFindWithSelection
+        self.findSelectionMaximumCharacters = findSelectionMaximumCharacters
+        self.monospacedFindFields = monospacedFindFields
     }
 
     public init(from decoder: Decoder) throws {
@@ -122,5 +132,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         recentFileLimit = try values.decodeIfPresent(Int.self, forKey: .recentFileLimit) ?? 10
         recentFilePathMode = try values.decodeIfPresent(Int.self, forKey: .recentFilePathMode) ?? 2
         fileDialogFollowsDocument = try values.decodeIfPresent(Bool.self, forKey: .fileDialogFollowsDocument) ?? false
+        fillFindWithSelection = try values.decodeIfPresent(Bool.self, forKey: .fillFindWithSelection) ?? true
+        findSelectionMaximumCharacters = try values.decodeIfPresent(Int.self, forKey: .findSelectionMaximumCharacters) ?? 1024
+        monospacedFindFields = try values.decodeIfPresent(Bool.self, forKey: .monospacedFindFields) ?? false
     }
 }

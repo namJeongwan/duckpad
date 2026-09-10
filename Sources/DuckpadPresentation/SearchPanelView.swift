@@ -129,7 +129,25 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    func show(replace: Bool) {
+    func applyPreferences(_ settings: AppSettings) {
+        let font = settings.monospacedFindFields
+            ? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular) : NSFont.systemFont(ofSize: 13)
+        findField.font = font
+        replaceField.font = font
+    }
+
+    func show(replace: Bool, selectedText: String? = nil) {
+        if let selectedText, !selectedText.isEmpty, selectedText != findField.stringValue {
+            incrementalTask?.cancel()
+            onQueryInvalidated?()
+            findField.stringValue = selectedText
+            rows = []
+            folderResult = nil
+            folderRowOffsets = []
+            table.reloadData()
+            resultsScroll.isHidden = true
+            status.stringValue = ""
+        }
         showingReplace = replace
         allDocuments.isEnabled = !replace
         if replace { allDocuments.state = .off }

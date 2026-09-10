@@ -1199,6 +1199,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public func applyPreferences(_ settings: AppSettings) {
         appPreferences = settings
+        searchPanel.applyPreferences(settings)
         commandBar.setBarVisible(settings.menuBarVisible)
         statusBar.isHidden = !settings.statusBarVisible
         statusBarHeightConstraint?.constant = settings.statusBarVisible ? 24 : 0
@@ -1416,22 +1417,29 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    private func showSearchPanel(replace: Bool) {
+        let selectedText = appPreferences.fillFindWithSelection
+            ? (activeEditor as? any EditorFindTextPort)?.selectedTextForFind(maximumUTF16Length: appPreferences.findSelectionMaximumCharacters)
+            : nil
+        searchPanel.show(replace: replace, selectedText: selectedText)
+    }
+
     @objc public func performShowFind(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
-        searchPanel.show(replace: false)
+        showSearchPanel(replace: false)
     }
     @objc public func performShowReplace(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
-        searchPanel.show(replace: true)
+        showSearchPanel(replace: true)
     }
     @objc public func performFindNext(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
-        if searchPanel.isHidden { searchPanel.show(replace: false); return }
+        if searchPanel.isHidden { showSearchPanel(replace: false); return }
         routeFind(searchPanel.currentQuery())
     }
     @objc public func performFindPrevious(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
-        if searchPanel.isHidden { searchPanel.show(replace: false); return }
+        if searchPanel.isHidden { showSearchPanel(replace: false); return }
         routeFind(searchPanel.currentQuery(direction: .backward))
     }
     @objc public func performCloseFindPanel(_ sender: Any? = nil) {
@@ -1474,7 +1482,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performFindInFolder(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
-        if searchPanel.isHidden { searchPanel.show(replace: false) }
+        if searchPanel.isHidden { showSearchPanel(replace: false) }
         let query = searchPanel.currentQuery()
         guard !query.pattern.isEmpty else {
             searchPanel.presentStatus("Enter text, then choose Find in Folder again")

@@ -9,7 +9,7 @@ private final class BufferTextView: NSTextView {
 }
 
 @MainActor
-public final class TextViewEditorAdapter: NSObject, EditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, EditorSelectionPort, BookmarkEditorPort, @preconcurrency NSTextStorageDelegate, @preconcurrency NSLayoutManagerDelegate {
+public final class TextViewEditorAdapter: NSObject, EditorPort, EditorFindTextPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, EditorSelectionPort, BookmarkEditorPort, @preconcurrency NSTextStorageDelegate, @preconcurrency NSLayoutManagerDelegate {
     public let scrollView: NSScrollView
     public let textView: NSTextView
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
@@ -25,6 +25,15 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorDefaultVie
     private var defaultViewState = EditorViewState()
     private let navigationContextID = EditorNavigationContextID()
     private static let bookmarkTemporaryAttribute = NSAttributedString.Key("app.duckpad.bookmark")
+
+    public func selectedTextForFind(maximumUTF16Length: Int) -> String? {
+        let limit = min(max(maximumUTF16Length, 0), 16383)
+        let range = textView.selectedRange()
+        guard limit > 0, textView.selectedRanges.count == 1, range.length > 0, range.length <= limit else { return nil }
+        guard let source = textView.textStorage else { return nil }
+        guard range.location <= source.length, range.length <= source.length - range.location else { return nil }
+        return source.attributedSubstring(from: range).string
+    }
 
     public override init() {
         textView = BufferTextView(frame: .zero)
