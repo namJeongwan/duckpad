@@ -47,11 +47,44 @@ public final class TabCloseCoordinator {
         let requested = tabIDs.map { ($0, reviewVersions[$0, default: 0]) }
         await acquireReview()
         defer { releaseReview() }
-        for (tabID, requestedVersion) in requested {
-            guard let tab = workspace.snapshot().tabs.first(where: { $0.id == tabID }) else { continue }
-            guard reviewVersions[tabID, default: 0] == requestedVersion else { continue }
+        var cursor = 0
+        while cursor < requested.count {
+            let current = Dictionary(uniqueKeysWithValues: workspace.snapshot().tabs.map { ($0.id, $0) })
+            let (tabID, requestedVersion) = requested[cursor]
+            guard let tab = current[tabID],
+                  reviewVersions[tabID, default: 0] == requestedVersion else {
+                cursor += 1
+                continue
+            }
+            // Keep prompt order: batch only the clean run before the next
+            // dirty tab, so Cancel never closes tabs beyond that prompt.
+            var clean: [TabID] = []
+            var end = cursor
+            while end < requested.count {
+                let (id, version) = requested[end]
+                guard let candidate = current[id], !candidate.isDirty,
+                      reviewVersions[id, default: 0] == version else { break }
+                clean.append(id)
+                end += 1
+            }
+            if clean.count > 1 {
+                switch await workspace.closeUnchanged(tabIDs: clean) {
+                case .closed:
+                    for id in clean { reviewVersions[id, default: 0] &+= 1 }
+                    cursor = end
+                    continue
+                case .requiresDecision:
+                    // A queued transaction accepted an edit after our snapshot.
+                    // Fall back to revision-aware single-tab review below.
+                    break
+                case .persistenceFailed(let failure):
+                    return .workspaceFailure(failure)
+                case let result:
+                    return outcome(result)
+                }
+            }
             let result = await closeOne(
-                tab: tab,
+                tab: workspace.snapshot().tabs.first(where: { $0.id == tabID }) ?? tab,
                 saveAvailable: saveAvailable,
                 decision: decision,
                 save: save
@@ -59,7 +92,7 @@ public final class TabCloseCoordinator {
             reviewVersions[tabID, default: 0] &+= 1
             switch result {
             case .completed:
-                continue
+                cursor += 1
             case .cancelled, .failed, .workspaceFailure, .alreadyPresented:
                 return result
             }

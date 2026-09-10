@@ -76,7 +76,7 @@ public final class SessionRecoveryUseCase {
         switch change.kind {
         case .persistence:
             return
-        case .tabRemovalPending:
+        case .tabRemovalPending, .tabsRemovalPending:
             // The UI has hidden the tab, but the durable close transaction is
             // still in flight. Cancel any older debounce before it can race the
             // transaction. The workspace also keeps its authoritative recovery
@@ -86,7 +86,7 @@ public final class SessionRecoveryUseCase {
             pendingTask = nil
             return
         case .reset, .tabInserted, .activeTabChanged, .tabUpdated, .bufferEdited,
-             .tabRemoved, .tabsReordered:
+             .tabRemoved, .tabsRemoved, .tabsReordered:
             changeSerial &+= 1
             scheduleAutosave()
         }

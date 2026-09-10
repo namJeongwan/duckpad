@@ -1171,3 +1171,31 @@ private extension NSMenu {
     #expect(!fixture.controller.commandBar.isHidden)
     #expect(fixture.controller.tabStrip.collectionView(fixture.controller.tabStrip.hostedCollectionView, pasteboardWriterForItemAt: IndexPath(item: 0, section: 0)) != nil)
 }
+
+
+@Test @MainActor func bulkCloseFailurePreservesSplitMembershipAndTabInteraction() async throws {
+    let fixture = await makeEditorGroupController(tabCount: 5)
+    defer { fixture.controller.close() }
+    let original = fixture.workspace.snapshot().tabs
+    fixture.controller.editorGroupWorkspace.onAction?(.split(original[4].id, .primary, .sideBySide, .move))
+    fixture.controller.editorGroupWorkspace.onAction?(.move(original[3].id, .primary, .secondary))
+    await fixture.workspace.waitForPendingPersistence()
+    let durable = fixture.controller.editorGroupLayoutSnapshot
+    await fixture.store.blockNextCommit(failingAfterRelease: true)
+    let task = Task { @MainActor in await fixture.workspace.closeUnchanged(tabIDs: original[1...3].map(\.id)) }
+    await fixture.store.waitUntilCommitIsBlocked()
+    #expect(!fixture.controller.tabStrip.hostedCollectionView.isSelectable)
+    #expect(fixture.controller.tabStrip.tabIDs == [original[0].id])
+    #expect(fixture.controller.editorGroupWorkspace.secondaryPane?.tabStrip.tabIDs == [original[4].id])
+    await fixture.store.releaseCommit()
+    guard case .persistenceFailed = await task.value else { Issue.record("Expected failed bulk commit"); return }
+    #expect(fixture.workspace.snapshot().tabs.map(\.id) == original.map(\.id))
+    #expect(fixture.controller.editorGroupLayoutSnapshot == durable)
+    #expect(fixture.controller.tabStrip.hostedCollectionView.isSelectable)
+    #expect(fixture.controller.editorGroupWorkspace.secondaryPane?.tabStrip.hostedCollectionView.isSelectable == true)
+    guard case .closed = await fixture.workspace.closeUnchanged(tabIDs: original[1...3].map(\.id)) else {
+        Issue.record("Retry should succeed"); return
+    }
+    #expect(fixture.controller.tabStrip.tabIDs == [original[0].id])
+    #expect(fixture.controller.editorGroupWorkspace.secondaryPane?.tabStrip.tabIDs == [original[4].id])
+}

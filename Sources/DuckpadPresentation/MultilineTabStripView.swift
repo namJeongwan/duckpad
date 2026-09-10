@@ -850,7 +850,9 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             } else {
                 apply(tabs: change.snapshot.tabs)
             }
-        case .tabRemoved:
+        case .tabsRemovalPending:
+            apply(tabs: change.snapshot.tabs)
+        case .tabRemoved, .tabsRemoved:
             guard tabs.map(\.id) == change.snapshot.tabs.map(\.id) else {
                 apply(tabs: change.snapshot.tabs)
                 return

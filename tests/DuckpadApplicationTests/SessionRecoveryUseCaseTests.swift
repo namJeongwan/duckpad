@@ -118,12 +118,13 @@ private final class RecoveryEditorFake: EditorPort {
 @MainActor
 private func recoveryHarness(
     store: RecoveryStoreFake,
-    metadataStore: RecoveryMetadataStore = RecoveryMetadataStore()
+    metadataStore: RecoveryMetadataStore = RecoveryMetadataStore(),
+    debounce: Duration = .milliseconds(20)
 ) -> (ScratchWorkspaceUseCase, RecoveryEditorFake, EditorBindingUseCase, SessionRecoveryUseCase) {
     let workspace = ScratchWorkspaceUseCase(store: metadataStore)
     let editor = RecoveryEditorFake()
     let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
-    let recovery = SessionRecoveryUseCase(workspace: workspace, editor: editor, store: store, debounce: .milliseconds(20))
+    let recovery = SessionRecoveryUseCase(workspace: workspace, editor: editor, store: store, debounce: debounce)
     workspace.onChange = { change in
         binding.render(change)
         recovery.workspaceDidChange(change)
@@ -418,4 +419,27 @@ private func recoveredFileBinding() -> FileBinding {
     await recovery.waitForPendingAutosave()
 
     #expect(await store.commitCount == before + 1)
+}
+
+@Test @MainActor func bulkCloseCommitsOneRecoveryArchiveAndDoesNotResurrectTabs() async throws {
+    let store = RecoveryStoreFake()
+    let (workspace, editor, _, recovery) = recoveryHarness(store: store, debounce: .seconds(60))
+    _ = await recovery.start()
+    for _ in 0..<20 { _ = await workspace.addScratch() }
+    let original = workspace.snapshot().tabs
+    #expect(editor.insert("keep unsaved text 🦆") == .accepted(newRevision: 1))
+    _ = await recovery.flush()
+    let before = await store.commitCount
+    let ids = original.dropLast().map(\.id)
+    #expect(await TabCloseCoordinator(workspace: workspace).close(tabIDs: ids, saveAvailable: false,
+        decision: { _, _ in .cancel }, save: { _, _ in .cancelled }) == .completed)
+    #expect(await store.commitCount == before + 1)
+    let latest = try #require(await store.latest())
+    #expect(latest.archive.session.tabs.map(\.id) == [original.last!.id])
+    #expect(latest.archive.buffers.count == 1)
+    #expect(latest.archive.buffers.values.first?.utf8 == Data("keep unsaved text 🦆".utf8))
+    let (reopened, reopenedEditor, _, reopenedRecovery) = recoveryHarness(store: store, debounce: .seconds(60))
+    _ = await reopenedRecovery.start()
+    #expect(reopened.snapshot().tabs.map(\.id) == [original.last!.id])
+    #expect(reopenedEditor.snapshot(for: original.last!.buffer.bufferID)?.text == "keep unsaved text 🦆")
 }

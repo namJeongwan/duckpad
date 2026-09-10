@@ -3268,7 +3268,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         let previousLayout = editorGroupLayoutSnapshot
         let currentLayout: EditorGroupLayoutSnapshot
-        if case .tabRemovalPending = change.kind {
+        if change.kind.isRemovalPending {
             let provisional = makeProvisionalEditorGroupLayout(
                 durable: editorGroupLayout.snapshot,
                 workspace: change.snapshot
@@ -3342,7 +3342,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard let event = change.failureEvent, handledFailureIDs.insert(event.id).inserted else { return }
         errorPresenter.present(failure: event.failure) { [weak self] in
             guard let self else { return }
-            Task { [weak workspace] in _ = await workspace?.retry(event.retry) }
+            if case .closeUnchanged(let ids) = event.retry {
+                self.performClose(tabIDs: ids)
+            } else {
+                Task { [weak workspace] in _ = await workspace?.retry(event.retry) }
+            }
         }
     }
 
@@ -3365,7 +3369,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func shouldRefreshLanguage(for change: WorkspaceChange) -> Bool {
         switch change.kind {
-        case .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabRemoved:
+        case .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabsRemovalPending, .tabRemoved, .tabsRemoved:
             return true
         case .tabUpdated(let index):
             return change.snapshot.tabs.indices.contains(index) && change.snapshot.tabs[index].isActive
@@ -3376,7 +3380,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func shouldRouteSelectedEditorGroups(for kind: WorkspaceChangeKind) -> Bool {
         switch kind {
-        case .reset, .tabInserted, .tabRemovalPending, .tabRemoved:
+        case .reset, .tabInserted, .tabRemovalPending, .tabsRemovalPending, .tabRemoved, .tabsRemoved:
             return true
         case .activeTabChanged, .tabUpdated, .bufferEdited, .persistence, .tabsReordered:
             return false
@@ -3385,7 +3389,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func shouldReconcileEditorGroups(for kind: WorkspaceChangeKind) -> Bool {
         switch kind {
-        case .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabRemoved, .tabsReordered:
+        case .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabsRemovalPending, .tabRemoved, .tabsRemoved, .tabsReordered:
             return true
         case .tabUpdated, .bufferEdited, .persistence:
             return false
@@ -3394,7 +3398,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func editorGroupMembershipMayHaveChanged(_ kind: WorkspaceChangeKind) -> Bool {
         switch kind {
-        case .reset, .tabInserted, .tabRemovalPending, .tabRemoved, .tabsReordered:
+        case .reset, .tabInserted, .tabRemovalPending, .tabsRemovalPending, .tabRemoved, .tabsRemoved, .tabsReordered:
             return true
         case .activeTabChanged, .tabUpdated, .bufferEdited, .persistence:
             return false
@@ -3403,17 +3407,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func editorGroupRemovalDidFinish(_ kind: WorkspaceChangeKind) -> Bool {
         switch kind {
-        case .reset, .tabRemoved:
+        case .reset, .tabRemoved, .tabsRemoved:
             return true
         case .tabInserted, .activeTabChanged, .tabUpdated, .bufferEdited,
-             .tabRemovalPending, .tabsReordered, .persistence:
+             .tabRemovalPending, .tabsRemovalPending, .tabsReordered, .persistence:
             return false
         }
     }
 
     private func shouldInvalidateDocumentIntelligence(for change: WorkspaceChange) -> Bool {
         switch change.kind {
-        case .bufferEdited, .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabRemoved:
+        case .bufferEdited, .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabsRemovalPending, .tabRemoved, .tabsRemoved:
             return true
         case .tabUpdated(let index):
             return change.snapshot.tabs.indices.contains(index) && change.snapshot.tabs[index].isActive
@@ -3424,7 +3428,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func shouldCancelCompletion(for change: WorkspaceChange) -> Bool {
         switch change.kind {
-        case .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabRemoved:
+        case .reset, .tabInserted, .activeTabChanged, .tabRemovalPending, .tabsRemovalPending, .tabRemoved, .tabsRemoved:
             return true
         case .bufferEdited, .tabUpdated, .persistence, .tabsReordered:
             return false

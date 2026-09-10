@@ -941,3 +941,115 @@ private final class EditorFake: EditorPort {
     #expect(await workspace.moveActiveTab(by: -1) == .applied(.saved))
     #expect(workspace.snapshot().tabs.map(\.id) == [ids[1], ids[0], ids[2]])
 }
+
+@Test @MainActor func bulkCloseLeftCommitsOnceAndRestoresTabsInOrder() async throws {
+    var initial = ScratchSession()
+    for _ in 0..<102 { initial.addUntitled() }
+    let store = StoreSpy(session: initial)
+    let workspace = ScratchWorkspaceUseCase(store: store)
+    _ = await workspace.start()
+    let editor = EditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    for tab in workspace.snapshot().tabs { editor.display(tab.buffer) }
+    var changes: [WorkspaceChangeKind] = []
+    workspace.onChange = { changes.append($0.kind); binding.render($0) }
+    let original = workspace.snapshot().tabs
+    _ = await workspace.setPinned(original[0].id, isPinned: true)
+    let anchor = original.last!.id
+    let ids = workspace.tabIDs(for: .left, relativeTo: anchor)
+    #expect(ids.count == 100)
+    let before = await store.saveCount
+    changes.removeAll()
+    var recoveryWrites = 0
+    workspace.installCloseRecoveryCommitter { _ in
+        recoveryWrites += 1
+        #expect(editor.retired.isEmpty)
+        return .saved(PersistenceGeneration(rawValue: UInt64(recoveryWrites)))
+    }
+    let coordinator = TabCloseCoordinator(workspace: workspace)
+    #expect(await coordinator.close(tabIDs: ids, saveAvailable: false,
+        decision: { _, _ in Issue.record("Clean tabs should not prompt"); return .cancel },
+        save: { _, _ in .cancelled }) == .completed)
+    #expect(await store.saveCount == before + 1)
+    #expect(recoveryWrites == 1)
+    #expect(changes.count == 2)
+    #expect(changes.first == .tabsRemovalPending)
+    #expect(workspace.snapshot().tabs.map(\.id) == [original[0].id, anchor])
+    #expect(Set(editor.retired) == Set(original[1..<101].map { $0.buffer.bufferID }))
+    #expect(workspace.recentlyClosedTabCount == 100)
+    workspace.installCloseRecoveryCommitter { _ in .saved(PersistenceGeneration(rawValue: 1)) }
+    for _ in ids { #expect(await workspace.restoreLastClosedTab() == .applied(.saved)) }
+    #expect(workspace.snapshot().tabs.map(\.id) == original.map(\.id))
+}
+
+@Test @MainActor func bulkCloseFailureRestoresEveryTabAndRetainsBuffersUntilRetry() async throws {
+    for recoveryFailure in [false, true] {
+        let store = StoreSpy()
+        let workspace = ScratchWorkspaceUseCase(store: store)
+        _ = await workspace.start()
+        let editor = EditorFake()
+        let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+        binding.render(workspace.snapshot())
+        var retry: PersistenceRetry?
+        workspace.onChange = { binding.render($0); retry = $0.failureEvent?.retry ?? retry }
+        for _ in 0..<3 { _ = await workspace.addScratch() }
+        let original = workspace.snapshot().tabs
+        let ids = original.prefix(3).map(\.id)
+        if recoveryFailure {
+            workspace.installCloseRecoveryCommitter { _ in .failed(.unavailable("blocked recovery")) }
+        } else { await store.setFailure(.unavailable("blocked metadata")) }
+        guard case .persistenceFailed = await workspace.closeUnchanged(tabIDs: ids) else {
+            Issue.record("Bulk close should fail"); return
+        }
+        #expect(workspace.snapshot().tabs == original)
+        #expect(editor.retired.isEmpty)
+        #expect(workspace.recentlyClosedTabCount == 0)
+        #expect(retry == .closeUnchanged(ids))
+        await store.setFailure(nil)
+        workspace.installCloseRecoveryCommitter { _ in .saved(PersistenceGeneration(rawValue: 1)) }
+        #expect(await workspace.retry(try #require(retry)) == .saved)
+        #expect(workspace.snapshot().tabs.map(\.id) == [original.last!.id])
+        #expect(editor.retired.count == 3)
+        #expect(workspace.recentlyClosedTabCount == 3)
+    }
+}
+
+@Test @MainActor func bulkCloseStopsAtDirtyPromptAndRetainsLaterCleanTabs() async {
+    let store = StoreSpy()
+    let workspace = ScratchWorkspaceUseCase(store: store)
+    _ = await workspace.start()
+    for _ in 0..<4 { _ = await workspace.addScratch() }
+    let original = workspace.snapshot().tabs
+    _ = workspace.acceptEditorEdit(EditorIncrementalEdit(bufferID: original[2].buffer.bufferID,
+        expectedRevision: 0, range: TextEditRange(location: 0, length: 0), replacement: "unsaved"))
+    var reviewed: [TabID] = []
+    let result = await TabCloseCoordinator(workspace: workspace).close(
+        tabIDs: original.map(\.id), saveAvailable: false,
+        decision: { tab, _ in reviewed.append(tab.id); return .cancel }, save: { _, _ in .cancelled })
+    #expect(result == .cancelled)
+    #expect(reviewed == [original[2].id])
+    #expect(workspace.snapshot().tabs.map(\.id) == Array(original[2...]).map(\.id))
+    #expect(workspace.snapshot().tabs[0].isDirty)
+    #expect(await workspace.closeUnchanged(tabIDs: original[2...].map(\.id)) == .requiresDecision(saveAvailable: false))
+    #expect(workspace.snapshot().tabs.count == 3)
+}
+
+@Test @MainActor func bulkCloseAllCreatesOneReplacementAndUndoRemovesIt() async {
+    let workspace = ScratchWorkspaceUseCase(store: StoreSpy())
+    _ = await workspace.start()
+    let editor = EditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    binding.render(workspace.snapshot())
+    workspace.onChange = { binding.render($0) }
+    for _ in 0..<129 { _ = await workspace.addScratch() }
+    let original = workspace.snapshot().tabs
+    guard case .closed(_, true, .saved) = await workspace.closeUnchanged(tabIDs: original.map(\.id)) else {
+        Issue.record("Expected one replacement"); return
+    }
+    #expect(workspace.snapshot().tabs.count == 1)
+    #expect(workspace.recentlyClosedTabCount == 100)
+    #expect(await workspace.restoreLastClosedTab() == .applied(.saved))
+    #expect(workspace.snapshot().tabs.map(\.id) == [original.last!.id])
+    for _ in 0..<99 { _ = await workspace.restoreLastClosedTab() }
+    #expect(workspace.snapshot().tabs.map(\.id) == original.suffix(100).map(\.id))
+}

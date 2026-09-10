@@ -71,6 +71,7 @@ public enum PersistenceRetry: Equatable, Sendable {
     case addScratch
     case activate(TabID)
     case close(TabID, CloseDecision?, expectedRevision: UInt64?)
+    case closeUnchanged([TabID])
     case restoreClosedTab(UUID)
     case moveTab(TabID, Int)
     case pinTab(TabID, Bool)
@@ -99,8 +100,17 @@ public enum WorkspaceChangeKind: Equatable, Sendable {
     /// alive until the matching `tabRemoved` commit event.
     case tabRemovalPending(index: Int)
     case tabRemoved(index: Int, retiredBufferID: BufferID)
+    case tabsRemovalPending
+    case tabsRemoved(retiredBufferIDs: [BufferID])
     case tabsReordered(fromIndex: Int, toIndex: Int)
     case persistence
+
+    public var isRemovalPending: Bool {
+        switch self {
+        case .tabRemovalPending, .tabsRemovalPending: true
+        default: false
+        }
+    }
 }
 
 public enum TabNavigationCommand: Equatable, Sendable {
@@ -322,6 +332,8 @@ public final class ScratchWorkspaceUseCase {
             return outcome(from: await activate(tabID: id))
         case .close(let id, let decision, let expectedRevision):
             return outcome(from: await close(tabID: id, decision: decision, expectedRevision: expectedRevision))
+        case .closeUnchanged(let ids):
+            return outcome(from: await closeUnchanged(tabIDs: ids))
         case .restoreClosedTab(let entryID):
             return outcome(from: await restoreLastClosedTab(expectedEntryID: entryID))
         case .moveTab(let id, let index):
@@ -503,7 +515,7 @@ public final class ScratchWorkspaceUseCase {
     ) async -> CloseOutcome {
         await acquireTransaction()
         defer { releaseTransaction() }
-        guard let removedIndex = session.tabs.firstIndex(where: { $0.id == tabID }) else {
+        guard session.tabs.contains(where: { $0.id == tabID }) else {
             return .rejected(.unknownTab(tabID))
         }
         let buffer: BufferMetadata
@@ -523,24 +535,49 @@ public final class ScratchWorkspaceUseCase {
             }
         }
 
-        let closedState = try? session.closedTabState(for: tabID)
-        let closedEditor = captureClosedBuffer?(buffer.id)
-        let restorable = closedState.flatMap { state -> RecentlyClosedTab? in
-            guard let closedEditor,
-                  closedEditor.bufferID == state.buffer.id,
-                  closedEditor.revision == state.buffer.revision else { return nil }
-            return RecentlyClosedTab(
-                id: UUID(),
-                state: state,
-                editor: closedEditor,
-                automaticReplacement: nil
-            )
-        }
+        return await commitClose(tabIDs: [tabID], decision: decision, expectedRevision: expectedRevision)
+    }
 
+    /// Recheck under the transaction lock: edits accepted while a bulk request
+    /// was queued must still go through the ordinary dirty-tab review.
+    public func closeUnchanged(tabIDs: [TabID]) async -> CloseOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        var seen = Set<TabID>()
+        let existing = Set(session.tabs.map(\.id))
+        let ids = tabIDs.filter { existing.contains($0) && seen.insert($0).inserted }
+        guard !ids.isEmpty else {
+            guard let active = session.activeTabID else { return .rejected(.invalidRecoveryState("no active tab")) }
+            return .closed(activeTabID: active, replacementCreated: false, persistence: .saved)
+        }
+        for id in ids {
+            guard let buffer = try? session.buffer(for: id) else { return .rejected(.unknownTab(id)) }
+            if buffer.isDirty { return .requiresDecision(saveAvailable: false) }
+        }
+        return await commitClose(tabIDs: ids, decision: nil, expectedRevision: nil)
+    }
+
+    /// Caller owns the transaction and has validated all close decisions.
+    private func commitClose(tabIDs: [TabID], decision: CloseDecision?, expectedRevision: UInt64?) async -> CloseOutcome {
+        let tabID = tabIDs[0]
+        let removedIndex = session.tabs.firstIndex(where: { $0.id == tabID })!
+        let isBatch = tabIDs.count > 1
+        let retry: PersistenceRetry = isBatch ? .closeUnchanged(tabIDs) : .close(tabID, decision, expectedRevision: expectedRevision)
+        var restorable: [RecentlyClosedTab] = []
+        var retiredBuffers: [BufferID] = []
         let original = session
         var candidate = session
         do {
-            _ = try candidate.close(tabID: tabID, discardingDirty: buffer.isDirty && decision == .discard)
+            for id in tabIDs {
+                let state = try candidate.closedTabState(for: id)
+                retiredBuffers.append(state.buffer.id)
+                if let captured = captureClosedBuffer?(state.buffer.id),
+                   captured.bufferID == state.buffer.id, captured.revision == state.buffer.revision {
+                    restorable.append(RecentlyClosedTab(id: UUID(), state: state, editor: captured, automaticReplacement: nil))
+                    if restorable.count > Self.recentlyClosedLimit { restorable.removeFirst() }
+                }
+                _ = try candidate.close(tabID: id, discardingDirty: decision == .discard)
+            }
             let replacementCreated = candidate.tabs.isEmpty
             if replacementCreated { candidate.addUntitled() }
             // Publish the lightweight tab transition immediately. The editor
@@ -548,7 +585,7 @@ public final class ScratchWorkspaceUseCase {
             // so a failed save can restore the exact original snapshot.
             session = candidate
             persistenceState = .pending
-            publish(.tabRemovalPending(index: removedIndex))
+            publish(isBatch ? .tabsRemovalPending : .tabRemovalPending(index: removedIndex))
             switch await save(candidate) {
             case .saved:
                 if let closeRecoveryCommitter {
@@ -563,27 +600,27 @@ public final class ScratchWorkspaceUseCase {
                             .reset,
                             failure: PersistenceFailureEvent(
                                 failure: failure,
-                                retry: .close(tabID, decision, expectedRevision: expectedRevision)
+                                retry: retry
                             )
                         )
                         return .persistenceFailed(failure)
                     }
                 }
-                if let restorable {
+                for entry in restorable {
                     recentlyClosedTabs.append(RecentlyClosedTab(
-                        id: restorable.id,
-                        state: restorable.state,
-                        editor: restorable.editor,
-                        automaticReplacement: replacementCreated
+                        id: entry.id,
+                        state: entry.state,
+                        editor: entry.editor,
+                        automaticReplacement: replacementCreated && entry.state.tab.id == tabIDs.last
                             ? candidate.activeTabID.flatMap { try? candidate.closedTabState(for: $0) }
                             : nil
                     ))
-                    if recentlyClosedTabs.count > Self.recentlyClosedLimit {
-                        recentlyClosedTabs.removeFirst(recentlyClosedTabs.count - Self.recentlyClosedLimit)
-                    }
+                }
+                if recentlyClosedTabs.count > Self.recentlyClosedLimit {
+                    recentlyClosedTabs.removeFirst(recentlyClosedTabs.count - Self.recentlyClosedLimit)
                 }
                 persistenceState = .saved
-                publish(.tabRemoved(index: removedIndex, retiredBufferID: buffer.id))
+                publish(isBatch ? .tabsRemoved(retiredBufferIDs: retiredBuffers) : .tabRemoved(index: removedIndex, retiredBufferID: retiredBuffers[0]))
                 return .closed(activeTabID: candidate.activeTabID!, replacementCreated: replacementCreated, persistence: .saved)
             case .failed(let failure):
                 session = original
@@ -592,7 +629,7 @@ public final class ScratchWorkspaceUseCase {
                     .reset,
                     failure: PersistenceFailureEvent(
                         failure: failure,
-                        retry: .close(tabID, decision, expectedRevision: expectedRevision)
+                        retry: retry
                     )
                 )
                 return .persistenceFailed(failure)
@@ -1121,6 +1158,9 @@ public final class EditorBindingUseCase {
 
     public func render(_ change: WorkspaceChange, requestFocus: Bool = false) {
         if case .tabRemoved(_, let bufferID) = change.kind { editor?.retire(bufferID: bufferID) }
+        if case .tabsRemoved(let bufferIDs) = change.kind {
+            for bufferID in bufferIDs { editor?.retire(bufferID: bufferID) }
+        }
         if case .tabUpdated = change.kind {
             editor?.setInputEnabled(change.snapshot.startup == .ready)
             if requestFocus, change.snapshot.startup == .ready { editor?.focus() }
