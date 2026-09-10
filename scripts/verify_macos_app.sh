@@ -40,10 +40,11 @@ codesign -d --entitlements :- "$XPC" > "$TEMP_ROOT/xpc.plist" 2>/dev/null
 plutil -lint "$TEMP_ROOT/app.plist" "$TEMP_ROOT/xpc.plist" >/dev/null
 
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$TEMP_ROOT/app.plist")" == "true" ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.network.client' "$TEMP_ROOT/app.plist")" == "true" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.files.user-selected.read-write' "$TEMP_ROOT/app.plist")" == "true" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.files.bookmarks.app-scope' "$TEMP_ROOT/app.plist")" == "true" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$TEMP_ROOT/xpc.plist")" == "true" ]]
-[[ "$(plutil -p "$TEMP_ROOT/app.plist" | grep -c 'com.apple.security' | tr -d ' ')" == "3" ]]
+[[ "$(plutil -p "$TEMP_ROOT/app.plist" | grep -c 'com.apple.security' | tr -d ' ')" == "4" ]]
 [[ "$(plutil -p "$TEMP_ROOT/xpc.plist" | grep -c 'com.apple.security' | tr -d ' ')" == "1" ]]
 
 codesign -dv --verbose=4 "$APP" 2> "$TEMP_ROOT/app-signature.txt"

@@ -13,6 +13,7 @@ public enum DuckpadMainMenuFactory {
     public static func make(
         target: DuckpadWindowController,
         applicationTarget: AnyObject? = nil,
+        projectTarget: DuckpadAppInfoController? = nil,
         recentDocumentURLs: [URL] = [],
         settings: AppSettings = .defaults
     ) -> NSMenu {
@@ -431,6 +432,18 @@ public enum DuckpadMainMenuFactory {
         }
         extensionsItem.submenu = extensionsMenu
         alignNotepadMenus(mainMenu, target: target, settingsTarget: settingsTarget)
+        if let projectTarget, let help = mainMenu.items.first(where: { $0.submenu?.title == "Help" })?.submenu {
+            add("Check for Updates…", #selector(DuckpadAppInfoController.performCheckForUpdates(_:)), "", projectTarget, modifiers: [], to: help)
+            add("Release Notes", #selector(DuckpadAppInfoController.performOpenReleaseNotes(_:)), "", projectTarget, modifiers: [], to: help)
+            add("Report an Issue…", #selector(DuckpadAppInfoController.performReportIssue(_:)), "", projectTarget, modifiers: [], to: help)
+            add("Star Duckpad on GitHub", #selector(DuckpadAppInfoController.performStarOnGitHub(_:)), "", projectTarget, modifiers: [], to: help)
+            help.addItem(.separator())
+            add("About Duckpad", #selector(DuckpadAppInfoController.performShowAbout(_:)), "", projectTarget, modifiers: [], to: help)
+            help.addItem(.separator())
+            let version = NSMenuItem(title: projectTarget.appInfo.version.map { "v\($0)" } ?? "Development build", action: nil, keyEquivalent: "")
+            version.isEnabled = false
+            help.addItem(version)
+        }
         return mainMenu
     }
 
@@ -495,7 +508,6 @@ public enum DuckpadMainMenuFactory {
             move(item, from: view, to: tools)
         }
         let help = NSMenu(title: "Help")
-        add("Duckpad User Guide", #selector(DuckpadWindowController.performOpenUserGuide(_:)), "", target, modifiers: [], to: help)
         for submenu in [preferences, tools, help] {
             let root = NSMenuItem()
             root.submenu = submenu

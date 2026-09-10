@@ -1185,11 +1185,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         activeEditor.focus()
     }
 
-    @objc public func performOpenUserGuide(_ sender: Any? = nil) {
-        guard let url = URL(string: "https://github.com/namJeongwan/duckpad#readme") else { return }
-        NSWorkspace.shared.open(url)
-    }
-
     @objc public func performShowCommandPalette(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable,
               let menu = NSApplication.shared.mainMenu else { return }
