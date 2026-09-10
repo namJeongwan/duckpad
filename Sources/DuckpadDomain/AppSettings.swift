@@ -15,6 +15,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public var menuBarVisible: Bool
     public var statusBarVisible: Bool
+    public var multilineTabsEnabled: Bool
     public var tabDragEnabled: Bool
     public var showTabCloseButton: Bool
     public var showInactiveTabButtons: Bool
@@ -49,6 +50,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         defaultWrapMarkerVisible: Bool = false,
         menuBarVisible: Bool = true,
         statusBarVisible: Bool = true,
+        multilineTabsEnabled: Bool = true,
         tabDragEnabled: Bool = true,
         showTabCloseButton: Bool = true,
         showInactiveTabButtons: Bool = false,
@@ -79,6 +81,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.defaultWrapMarkerVisible = defaultWrapMarkerVisible
         self.menuBarVisible = menuBarVisible
         self.statusBarVisible = statusBarVisible
+        self.multilineTabsEnabled = multilineTabsEnabled
         self.tabDragEnabled = tabDragEnabled
         self.showTabCloseButton = showTabCloseButton
         self.showInactiveTabButtons = showInactiveTabButtons
@@ -112,6 +115,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         defaultWrapMarkerVisible = try values.decode(Bool.self, forKey: .defaultWrapMarkerVisible)
         menuBarVisible = try values.decodeIfPresent(Bool.self, forKey: .menuBarVisible) ?? true
         statusBarVisible = try values.decodeIfPresent(Bool.self, forKey: .statusBarVisible) ?? true
+        multilineTabsEnabled = try values.decodeIfPresent(Bool.self, forKey: .multilineTabsEnabled) ?? true
         tabDragEnabled = try values.decodeIfPresent(Bool.self, forKey: .tabDragEnabled) ?? true
         showTabCloseButton = try values.decodeIfPresent(Bool.self, forKey: .showTabCloseButton) ?? true
         showInactiveTabButtons = try values.decodeIfPresent(Bool.self, forKey: .showInactiveTabButtons) ?? false

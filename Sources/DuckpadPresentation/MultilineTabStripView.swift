@@ -161,15 +161,15 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         view.addSubview(pinButton)
         view.addSubview(closeButton)
         NSLayoutConstraint.activate([
-            fileIconImage.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 3),
+            fileIconImage.leadingAnchor.constraint(equalTo: dirtyIndicator.trailingAnchor, constant: 2),
             fileIconImage.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             fileIconImage.widthAnchor.constraint(equalToConstant: 13),
             fileIconImage.heightAnchor.constraint(equalToConstant: 13),
-            dirtyIndicator.leadingAnchor.constraint(equalTo: fileIconImage.trailingAnchor, constant: 1),
+            dirtyIndicator.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 5),
             dirtyIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             dirtyIndicator.widthAnchor.constraint(equalToConstant: 5),
             dirtyIndicator.heightAnchor.constraint(equalToConstant: 5),
-            titleLabel.leadingAnchor.constraint(equalTo: dirtyIndicator.trailingAnchor, constant: 1),
+            titleLabel.leadingAnchor.constraint(equalTo: fileIconImage.trailingAnchor, constant: 2),
             titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             pinButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 1),
             pinButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
@@ -288,7 +288,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
             )
         }
         activeIndicator.backgroundColor = NSColor.controlAccentColor.cgColor
-        dirtyIndicator.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        dirtyIndicator.layer?.backgroundColor = NSColor.systemBlue.cgColor
         titleLabel.textColor = active || isHovered ? .labelColor : .secondaryLabelColor
         let separatorColor: NSColor
         if active {
@@ -482,6 +482,15 @@ final class TabDocumentCollectionView: NSCollectionView {
 
 @MainActor
 final class TabOverflowScrollView: NSScrollView {
+    var multilineEnabled = true
+    var onViewportChanged: (() -> Void)?
+
+    func scrollHorizontally(to x: CGFloat) {
+        let maximum = max(0, (documentView?.frame.width ?? 0) - contentView.bounds.width)
+        contentView.scroll(to: NSPoint(x: multilineEnabled ? 0 : min(max(0, x), maximum), y: 0))
+        reflectScrolledClipView(contentView)
+    }
+
     var requiresHorizontalScroller = false {
         didSet { synchronizeHorizontalScroller() }
     }
@@ -493,24 +502,30 @@ final class TabOverflowScrollView: NSScrollView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        // Notepad++ multiline tabs expose every row at once. Wheel input belongs
-        // to the editor below and never turns this strip into a hidden viewport.
-        pinContentOrigin()
+        guard !multilineEnabled else { pinContentOrigin(); return }
+        let delta = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) ? event.scrollingDeltaX : event.scrollingDeltaY
+        scrollHorizontally(to: contentView.bounds.minX - delta * (event.hasPreciseScrollingDeltas ? 1 : 12))
     }
 
     override func reflectScrolledClipView(_ cView: NSClipView) {
-        if cView === contentView, cView.bounds.origin != .zero {
-            cView.scroll(to: .zero)
+        if cView === contentView {
+            let maximum = max(0, (documentView?.frame.width ?? 0) - cView.bounds.width)
+            let origin = NSPoint(x: multilineEnabled ? 0 : min(max(0, cView.bounds.minX), maximum), y: 0)
+            if cView.bounds.origin != origin { cView.scroll(to: origin) }
         }
         super.reflectScrolledClipView(cView)
         suppressScrollerChrome()
+        onViewportChanged?()
     }
 
     func pinContentOrigin() {
-        if contentView.bounds.origin != .zero {
-            contentView.scroll(to: .zero)
+        let maximum = max(0, (documentView?.frame.width ?? 0) - contentView.bounds.width)
+        let origin = NSPoint(x: multilineEnabled ? 0 : min(max(0, contentView.bounds.minX), maximum), y: 0)
+        if contentView.bounds.origin != origin {
+            contentView.scroll(to: origin)
             super.reflectScrolledClipView(contentView)
         }
+        onViewportChanged?()
         if hasVerticalScroller { hasVerticalScroller = false }
         if hasHorizontalScroller { hasHorizontalScroller = false }
         suppressScrollerChrome()
@@ -574,6 +589,13 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     let hostedScrollView = TabOverflowScrollView()
     let flowLayout = MultilineTabCollectionLayout()
     let documentSwitcher = DocumentSwitcherButton(frame: .zero)
+    let navigator = NSStackView()
+    let previousTabsButton = StatusBarButton(frame: .zero)
+    let nextTabsButton = StatusBarButton(frame: .zero)
+    private var navigatorWidth: NSLayoutConstraint!
+    private var viewportTrailing: NSLayoutConstraint!
+    private var navigatorButtonWidths: [NSLayoutConstraint] = []
+    private var needsRevealActiveTab = true
     private var appPreferences = AppSettings.defaults
     private var tabs: [TabSnapshot] = []
     private var heightConstraint: NSLayoutConstraint!
@@ -584,7 +606,9 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     private var isSynchronizingSelection = false
     private var isApplyingCollectionStructure = false
     private var requiresVisibleItemRefreshAfterCollectionStructure = false
-    private var activeIndex: Int?
+    private var activeIndex: Int? {
+        didSet { if activeIndex != oldValue { needsRevealActiveTab = true } }
+    }
     private var hoveredTabID: TabID?
     private var hoveredTabIndex: Int?
     public private(set) var editorGroupID: EditorGroupID = .primary
@@ -633,14 +657,48 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             guard self?.interactionsEnabled == true else { return }
             self?.onActivate?(id)
         }
+        navigator.orientation = .horizontal
+        navigator.spacing = 0
+        navigator.edgeInsets = NSEdgeInsets(top: 1, left: 2, bottom: 1, right: 2)
+        navigator.translatesAutoresizingMaskIntoConstraints = false
+        navigator.isHidden = true
+        navigator.setAccessibilityIdentifier("duckpad.tab.navigator")
+        for (button, symbol, label, action) in [
+            (previousTabsButton, "chevron.left", "Scroll tabs left", #selector(scrollTabsLeft(_:))),
+            (nextTabsButton, "chevron.right", "Scroll tabs right", #selector(scrollTabsRight(_:)))
+        ] {
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+            button.imagePosition = .imageOnly
+            button.isBordered = false
+            button.contentTintColor = .secondaryLabelColor
+            button.target = self
+            button.action = action
+            button.toolTip = label
+            button.setAccessibilityLabel(label)
+            navigator.addArrangedSubview(button)
+            button.imageScaling = .scaleProportionallyDown
+            let width = button.widthAnchor.constraint(equalToConstant: 26)
+            width.isActive = true
+            navigatorButtonWidths.append(width)
+            button.heightAnchor.constraint(equalToConstant: 25).isActive = true
+        }
         addSubview(hostedScrollView)
+        addSubview(navigator)
+        navigatorWidth = navigator.widthAnchor.constraint(equalToConstant: 56)
+        navigatorWidth.priority = .defaultHigh
+        viewportTrailing = hostedScrollView.trailingAnchor.constraint(equalTo: trailingAnchor)
+        hostedScrollView.onViewportChanged = { [weak self] in self?.updateNavigator() }
         heightConstraint = heightAnchor.constraint(equalToConstant: 27)
         NSLayoutConstraint.activate([
             heightConstraint,
             hostedScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             hostedScrollView.topAnchor.constraint(equalTo: topAnchor),
             hostedScrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            hostedScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            viewportTrailing,
+            navigator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            navigator.topAnchor.constraint(equalTo: topAnchor),
+            navigator.heightAnchor.constraint(equalToConstant: 27),
+            navigatorWidth,
         ])
         flowLayout.onContentSizeChange = { [weak self] size in
             guard let self else { return }
@@ -665,6 +723,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     required init?(coder: NSCoder) { nil }
 
     public override func layout() {
+        updateNavigatorLayout()
         super.layout()
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         let thickness = 1 / scale
@@ -676,7 +735,9 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             engine.backingScale = scale
             flowLayout.engine = engine
         }
-        flowLayout.viewportWidth = max(1, hostedScrollView.contentSize.width)
+        let viewportWidth = max(1, hostedScrollView.contentSize.width)
+        if flowLayout.viewportWidth != viewportWidth { needsRevealActiveTab = true }
+        flowLayout.viewportWidth = viewportWidth
         hostedCollectionView.layoutSubtreeIfNeeded()
         updateDocumentFrame()
         if heightConstraint.constant != measuredContentHeight { needsUpdateConstraints = true }
@@ -855,7 +916,18 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
 
     public func applyPreferences(_ settings: AppSettings) {
         guard appPreferences != settings else { return }
+        let modeChanged = appPreferences.multilineTabsEnabled != settings.multilineTabsEnabled
         appPreferences = settings
+        if modeChanged {
+            hostedScrollView.multilineEnabled = settings.multilineTabsEnabled
+            updateNavigatorLayout()
+            flowLayout.engine.multilineEnabled = settings.multilineTabsEnabled
+            hostedScrollView.setAccessibilityLabel(settings.multilineTabsEnabled ? "Multiline tab rows" : "Scrollable document tabs")
+            needsRevealActiveTab = true
+            needsLayout = true
+            needsUpdateConstraints = true
+        }
+        updateNavigator()
         if !settings.tabDragEnabled { hostedCollectionView.showInsertionMarker(nil) }
         refreshVisibleItems()
     }
@@ -866,6 +938,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         if !isEnabled { hostedCollectionView.showInsertionMarker(nil) }
         hostedCollectionView.isSelectable = isEnabled
         documentSwitcher.setInteractionsEnabled(isEnabled)
+        updateNavigator()
         for case let item as DuckpadTabItem in hostedCollectionView.visibleItems() {
             item.setInteractionsEnabled(isEnabled)
         }
@@ -892,6 +965,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedCollectionView.unregisterDraggedTypes()
         hostedCollectionView.dataSource = nil
         hostedCollectionView.delegate = nil
+        hostedScrollView.onViewportChanged = nil
         hostedScrollView.documentView = nil
         hostedCollectionView.collectionViewLayout = nil
         onActivate = nil
@@ -1121,6 +1195,47 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
 
     private func pinTabSurfaceOrigin() {
         hostedScrollView.pinContentOrigin()
+        guard !appPreferences.multilineTabsEnabled, needsRevealActiveTab,
+              let activeIndex,
+              let frame = flowLayout.layoutAttributesForItem(at: IndexPath(item: activeIndex, section: 0))?.frame else { return }
+        let viewport = hostedScrollView.contentView.bounds
+        var x = viewport.minX
+        if frame.width > viewport.width || frame.minX < viewport.minX { x = frame.minX }
+        else if frame.maxX > viewport.maxX { x = frame.maxX - viewport.width }
+        needsRevealActiveTab = false
+        hostedScrollView.scrollHorizontally(to: x)
+    }
+
+    @objc private func scrollTabsLeft(_ sender: Any?) { scrollTabs(forward: false) }
+    @objc private func scrollTabsRight(_ sender: Any?) { scrollTabs(forward: true) }
+
+    func scrollTabs(forward: Bool) {
+        guard interactionsEnabled, !appPreferences.multilineTabsEnabled else { return }
+        needsRevealActiveTab = false
+        let viewport = hostedScrollView.contentView.bounds
+        hostedScrollView.scrollHorizontally(to: viewport.minX + (forward ? 1 : -1) * max(80, viewport.width * 0.75))
+    }
+
+    private func updateNavigatorLayout() {
+        // Narrow split panes retain a nonnegative document viewport. Below
+        // 40 points, wheel scrolling remains available without tiny buttons.
+        let visible = !appPreferences.multilineTabsEnabled && bounds.width >= 40
+        let width: CGFloat = visible ? min(56, bounds.width / 2) : 56
+        if navigator.isHidden == visible { navigator.isHidden = !visible }
+        if navigatorWidth.constant != width { navigatorWidth.constant = width }
+        let trailing = visible ? -width : 0
+        if viewportTrailing.constant != trailing { viewportTrailing.constant = trailing }
+        for constraint in navigatorButtonWidths {
+            let buttonWidth = (width - 4) / 2
+            if constraint.constant != buttonWidth { constraint.constant = buttonWidth }
+        }
+    }
+
+    private func updateNavigator() {
+        let viewport = hostedScrollView.contentView.bounds
+        let enabled = interactionsEnabled && !appPreferences.multilineTabsEnabled && !navigator.isHidden
+        previousTabsButton.isEnabled = enabled && viewport.minX > 0.5
+        nextTabsButton.isEnabled = enabled && viewport.maxX < measuredContentWidth - 0.5
     }
 
     private func synchronizeSelection() {
@@ -1266,7 +1381,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             withAttributes: [.font: NSFont.systemFont(ofSize: 12)]
         ).width
         // Reserve icon, status, pin, and close slots so hover never moves the title.
-        return ceil(width) + 65
+        return ceil(width) + 69
     }
 
     public override func viewDidChangeEffectiveAppearance() {

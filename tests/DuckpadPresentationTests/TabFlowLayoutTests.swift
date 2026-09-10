@@ -2621,8 +2621,8 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     #expect(pinAlignment.width == 20)
     #expect(pinAlignment.height == 20)
     #expect(closeAlignment.width == 16)
-    #expect(icon.frame.maxX <= dirty.frame.minX)
-    #expect(dirty.frame.maxX <= titleAlignment.minX)
+    #expect(dirty.frame.maxX <= icon.frame.minX)
+    #expect(icon.frame.maxX <= titleAlignment.minX)
     #expect(titleAlignment.maxX <= pinAlignment.minX)
     #expect(pinAlignment.maxX <= closeAlignment.minX)
     if let directory = ProcessInfo.processInfo.environment["DUCKPAD_TAB_CHROME_TEST_IMAGES"] {
@@ -2680,7 +2680,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let title = try #require(descendantTextFields(of: item.view).first {
         $0.stringValue == tabs[0].title
     })
-    #expect(title.frame.minX <= 24)
+    #expect(title.frame.minX <= 28)
     #expect(item.view.bounds.maxX - title.frame.maxX <= 39)
     #expect(title.frame.width >= title.intrinsicContentSize.width)
 }
@@ -4176,4 +4176,90 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     controller.performShowFind()
     #expect(panel.currentQuery().pattern == "beta")
     #expect(editor.string == "alpha beta")
+}
+
+@Test @MainActor func singleRowTabsKeepNavigatorOnRightAndRevealSelectedTabs() throws {
+    let tabs = makeTabs(count: 30, activeIndex: 0)
+    let (window, root, strip) = hostStrip(width: 500, height: 500, tabs: tabs)
+    defer { strip.tearDownHostedViews(); window.contentView = nil; window.close() }
+    #expect(strip.navigator.isHidden)
+    strip.applyPreferences(AppSettings(multilineTabsEnabled: false))
+    root.layoutSubtreeIfNeeded()
+    strip.layoutSubtreeIfNeeded()
+    #expect(strip.rowCount == 1)
+    #expect(!strip.navigator.isHidden)
+    #expect(abs(strip.navigator.frame.maxX - strip.bounds.maxX) < 1)
+    #expect(strip.hostedScrollView.frame.maxX <= strip.navigator.frame.minX)
+    #expect(!strip.previousTabsButton.isEnabled)
+    #expect(strip.nextTabsButton.isEnabled)
+    let action = try #require(strip.nextTabsButton.action)
+    #expect(NSApp.sendAction(action, to: strip.nextTabsButton.target, from: strip.nextTabsButton))
+    let scrolled = strip.hostedScrollView.contentView.bounds.minX
+    #expect(scrolled > 0)
+    #expect(strip.previousTabsButton.isEnabled)
+    root.layoutSubtreeIfNeeded()
+    strip.layoutSubtreeIfNeeded()
+    #expect(strip.hostedScrollView.contentView.bounds.minX == scrolled)
+    let changed = tabs.enumerated().map { index, tab in
+        TabSnapshot(id: tab.id, title: tab.title, isActive: index == tabs.count - 1,
+            isDirty: tab.isDirty, isPinned: tab.isPinned, buffer: tab.buffer, fullPath: tab.fullPath)
+    }
+    #expect(strip.applySelection(previous: changed[0], at: 0, current: changed[29], at: 29))
+    #expect(strip.selectedTabIsVisible)
+    #expect(!strip.nextTabsButton.isEnabled)
+    #expect(!strip.hostedScrollView.hasHorizontalScroller)
+    strip.applyPreferences(.defaults)
+    root.layoutSubtreeIfNeeded()
+    strip.layoutSubtreeIfNeeded()
+    #expect(strip.rowCount > 1)
+    #expect(strip.navigator.isHidden)
+    #expect(strip.hostedScrollView.contentView.bounds.origin == .zero)
+    #expect(abs(strip.hostedScrollView.frame.width - strip.bounds.width) < 1)
+    strip.apply(tabs: Array(tabs.prefix(1)))
+    strip.applyPreferences(AppSettings(multilineTabsEnabled: false))
+    root.layoutSubtreeIfNeeded()
+    strip.layoutSubtreeIfNeeded()
+    #expect(!strip.navigator.isHidden)
+    #expect(!strip.previousTabsButton.isEnabled && !strip.nextTabsButton.isEnabled)
+}
+
+@Test @MainActor func singleRowLayoutOnlyInspectsVisibleTabsAmongThousands() throws {
+    let collection = NSCollectionView(frame: NSRect(x: 0, y: 0, width: 400, height: 27))
+    let layout = MultilineTabCollectionLayout()
+    layout.engine.multilineEnabled = false
+    layout.itemWidths = Array(repeating: 100, count: 5000)
+    collection.collectionViewLayout = layout
+    layout.prepare()
+    #expect(layout.rowCount == 1)
+    #expect(layout.collectionViewContentSize.width == 500_000)
+    let visible = layout.layoutAttributesForElements(in: NSRect(x: 250_000, y: 0, width: 400, height: 27))
+    #expect(visible.compactMap { $0.indexPath?.item } == [2500, 2501, 2502, 2503])
+    #expect(layout.lastElementsQueryInspectedItems == 4)
+    #expect(layout.dropInsertion(at: NSPoint(x: 250_075, y: 13)).index == 2501)
+}
+
+@Test @MainActor func narrowSingleRowPanesKeepTheirViewportInsideBounds() {
+    for width: CGFloat in [0, 1, 40, 55, 56, 100] {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 60))
+        let strip = MultilineTabStripView()
+        root.addSubview(strip)
+        NSLayoutConstraint.activate([
+            strip.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            strip.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            strip.topAnchor.constraint(equalTo: root.topAnchor)
+        ])
+        strip.apply(tabs: makeTabs(count: 3, activeIndex: 0))
+        strip.applyPreferences(AppSettings(multilineTabsEnabled: false))
+        root.layoutSubtreeIfNeeded()
+        strip.layoutSubtreeIfNeeded()
+        root.layoutSubtreeIfNeeded()
+        #expect(strip.hostedScrollView.frame.width >= 0)
+        #expect(strip.hostedScrollView.frame.maxX <= strip.bounds.width + 0.5)
+        #expect(strip.navigator.isHidden == (width < 40))
+        if !strip.navigator.isHidden {
+            #expect(strip.navigator.frame.minX >= 0)
+            #expect(abs(strip.navigator.frame.maxX - strip.bounds.width) < 0.5)
+        }
+        strip.tearDownHostedViews()
+    }
 }

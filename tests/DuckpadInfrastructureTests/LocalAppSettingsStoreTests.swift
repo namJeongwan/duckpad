@@ -82,7 +82,7 @@ import Testing
     let original = try #require(try await store.load())
     #expect(original == AppSettings(appearanceMode: .dark, defaultWordWrapEnabled: false, defaultWrapMarkerVisible: true))
     let updated = AppSettings(appearanceMode: .light, menuBarVisible: false, statusBarVisible: false,
-        tabDragEnabled: false, showTabCloseButton: false, showInactiveTabButtons: true,
+        multilineTabsEnabled: false, tabDragEnabled: false, showTabCloseButton: false, showInactiveTabButtons: true,
         lineNumbersVisible: false, bookmarkMarginVisible: false, highlightCurrentLine: false,
         caretWidth: 3, caretBlinkPeriod: 1000, scrollBeyondLastLine: true, wrapIndentMode: 2,
         overrideLanguageIndentation: true, indentationWidth: 2, indentationUsesTabs: true,

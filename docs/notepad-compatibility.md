@@ -19,7 +19,7 @@ Preferences uses a category list, immediate application, persistent storage, and
 | Category | Working controls |
 | --- | --- |
 | General | Document-window menu bar; status bar |
-| Tab Bar | Tab drag and drop; close buttons; buttons on inactive tabs |
+| Tab Bar | Multi-line or single-row tabs; tab drag and drop; close buttons; buttons on inactive tabs |
 | Editing | Current-line highlight; caret width and blink rate; default/aligned/indented wrapping; scrolling beyond the last line; virtual space |
 | Dark Mode | Light Mode, Dark Mode, Follow macOS |
 | Margins/Border/Edge | Line numbers; bookmark margin; vertical edge and column |
@@ -30,6 +30,8 @@ Preferences uses a category list, immediate application, persistent storage, and
 | Indentation | Override language defaults; tab size; tabs/spaces; indent guides |
 
 The complete Notepad++ Preferences inventory is larger. Toolbar icon sets, further tab options, Editing 2, default document encoding/EOL, custom default directory, language overrides, per-language indentation and auto-indent modes, highlighting options, print, further search defaults (caret word and automatic selection scope), backup configuration, auto-completion configuration, date formats, delimiters, performance configuration, cloud/link configuration, search engines, and miscellaneous toggles remain separate feature work. Session recovery, searching, language detection, indentation, and completion already have implementations; this does not mean their full Notepad++ configuration interfaces exist.
+
+Tab labels use modified dot, file icon, and file name. Single-row mode places horizontal navigation at the right edge; multi-line mode hides the navigation controls.
 
 ## Duckpad additions and differences
 

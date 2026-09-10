@@ -36,6 +36,7 @@ public struct TabFlowLayoutResult: Equatable, Sendable {
 }
 
 public struct TabFlowLayoutEngine: Sendable {
+    public var multilineEnabled: Bool
     public var rowHeight: CGFloat
     public var horizontalSpacing: CGFloat
     public var verticalSpacing: CGFloat
@@ -51,8 +52,10 @@ public struct TabFlowLayoutEngine: Sendable {
         insets: NSEdgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0),
         minimumItemWidth: CGFloat = 76,
         maximumItemWidth: CGFloat = .greatestFiniteMagnitude,
-        backingScale: CGFloat = 2
+        backingScale: CGFloat = 2,
+        multilineEnabled: Bool = true
     ) {
+        self.multilineEnabled = multilineEnabled
         self.rowHeight = rowHeight
         self.horizontalSpacing = horizontalSpacing
         self.verticalSpacing = verticalSpacing
@@ -69,7 +72,7 @@ public struct TabFlowLayoutEngine: Sendable {
                 rowIndices: [],
                 rowCount: 0,
                 contentWidth: max(0, containerWidth),
-                contentHeight: insets.top + insets.bottom
+                contentHeight: insets.top + insets.bottom + (multilineEnabled ? 0 : rowHeight)
             )
         }
         let usableWidth = max(minimumItemWidth, containerWidth - insets.left - insets.right)
@@ -84,7 +87,7 @@ public struct TabFlowLayoutEngine: Sendable {
 
         let totalNaturalWidth = naturalWidth(of: boundedWidths.indices)
         var rowRanges: [Range<Int>] = []
-        if totalNaturalWidth <= usableWidth || boundedWidths.count == 1 {
+        if !multilineEnabled || totalNaturalWidth <= usableWidth || boundedWidths.count == 1 {
             rowRanges = [boundedWidths.indices]
         } else {
             // A greedy pass gives the minimum ordered row count without
@@ -270,10 +273,19 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         while rowIndex < rows.count, rows[rowIndex].minY < rect.maxY {
             let row = rows[rowIndex]
             lastElementsQueryVisitedRows += 1
-            for itemIndex in row.itemRange {
+            var first = row.itemRange.lowerBound
+            var end = row.itemRange.upperBound
+            while first < end {
+                let middle = (first + end) / 2
+                if attributes[middle].frame.maxX <= rect.minX { first = middle + 1 }
+                else { end = middle }
+            }
+            var itemIndex = first
+            while itemIndex < row.itemRange.upperBound, attributes[itemIndex].frame.minX < rect.maxX {
                 lastElementsQueryInspectedItems += 1
                 let item = attributes[itemIndex]
                 if item.frame.intersects(rect) { visible.append(item) }
+                itemIndex += 1
             }
             rowIndex += 1
         }

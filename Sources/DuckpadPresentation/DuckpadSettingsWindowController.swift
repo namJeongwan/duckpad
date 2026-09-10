@@ -198,6 +198,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         searchNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
         checkbox("Show menu bar in document windows", \.menuBarVisible, "General")
         checkbox("Show status bar", \.statusBarVisible, "General")
+        checkbox("Multi-line tabs", \.multilineTabsEnabled, "Tab Bar")
         checkbox("Allow tab drag and drop", \.tabDragEnabled, "Tab Bar")
         checkbox("Show close button", \.showTabCloseButton, "Tab Bar")
         checkbox("Show buttons on inactive tabs", \.showInactiveTabButtons, "Tab Bar")
