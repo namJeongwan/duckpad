@@ -93,15 +93,25 @@ final class EditorFontComboBox: NSComboBox, NSComboBoxDataSource, NSComboBoxDele
 
     func controlTextDidChange(_ notification: Notification) {
         guard !rendering else { return }
-        // Filtering is presentation only: incomplete input and IME composition never change the editor.
-        let query = stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        // NSComboBox clears its field editor while deselecting/reloading items. Preserve
+        // the actual input and caret, including the selected autocomplete suffix.
+        let editor = currentEditor() as? NSTextView
+        guard editor?.hasMarkedText() != true else { return }
+        let input = editor?.string ?? stringValue
+        let selection = editor?.selectedRange()
+        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
         rendering = true
+        defer { rendering = false }
         if indexOfSelectedItem >= 0 { deselectItem(at: indexOfSelectedItem) }
         visibleFonts = query.isEmpty ? installedFonts : installedFonts.filter {
             $0.family.localizedStandardContains(query) || $0.font.fontName.localizedStandardContains(query)
         }
         reloadData()
-        rendering = false
+        stringValue = input
+        if let editor, let selection {
+            editor.string = input
+            editor.setSelectedRange(selection)
+        }
     }
 
     func comboBoxSelectionDidChange(_ notification: Notification) {

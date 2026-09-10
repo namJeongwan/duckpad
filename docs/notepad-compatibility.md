@@ -58,3 +58,5 @@ Preferences → Editing applies the selected installed font and base size to
 existing and new editor views. View → Zoom remains a separate per-view setting.
 
 Editor font selection uses a searchable native combo box populated from the Mac’s installed font families. Each row previews its own font (symbol fonts use readable system-font labels, and tall decorative previews scale to fit); selecting a row or confirming a complete family/PostScript name applies immediately. Incomplete input only filters the list, and invalid names restore the last selection. Reopening Preferences refreshes the installed font list. New font labels use stable localization keys with English defaults; stored PostScript font identifiers are independent of translated UI text.
+
+Font size uses a direct numeric field (6–72 pt), committed with Enter or when leaving the field. Invalid input restores the saved size. Search text and its autocomplete selection survive font-list refreshes; typing does not apply a font until selection/confirmation. Font preferences affect editor text and line numbers; menus and controls retain the system UI font.

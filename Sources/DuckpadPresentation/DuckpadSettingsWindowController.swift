@@ -25,7 +25,7 @@ public struct DuckpadSettingsSmokeState: Equatable, Sendable {
 }
 
 @MainActor
-public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate {
+public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
     public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation", "Searching"]
     public private(set) var selectedCategory = "General"
     private var pages: [String: NSView] = [:]
@@ -33,6 +33,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     private var booleanControls: [(NSButton, WritableKeyPath<AppSettings, Bool>)] = []
     private var numberControls: [(NSPopUpButton, WritableKeyPath<AppSettings, Int>)] = []
     let editorFont = EditorFontComboBox()
+    let editorFontSize = NSTextField(string: "13")
     private let appearance = NSPopUpButton(frame: .zero, pullsDown: false)
     private let wordWrap = NSButton(checkboxWithTitle: "Wrap long lines in new tabs", target: nil, action: nil)
     private let wrapMarkers = NSButton(checkboxWithTitle: "Show wrap symbols in new tabs", target: nil, action: nil)
@@ -215,7 +216,18 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         fontRow.spacing = 12
         editorFont.widthAnchor.constraint(equalToConstant: 260).isActive = true
         (pages["Editing"] as? NSStackView)?.addArrangedSubview(fontRow)
-        choices(NSLocalizedString("preferences.editor.font.size", value: "Font size (pt)", comment: "Editor font size in points"), \.editorFontSize, (6...72).map { (String($0), $0) }, "Editing")
+        let fontSizeLabel = NSLocalizedString("preferences.editor.font.size", value: "Font size (pt)", comment: "Editor font size in points")
+        editorFontSize.target = self
+        editorFontSize.action = #selector(fontSizeChanged(_:))
+        editorFontSize.delegate = self
+        editorFontSize.alignment = .right
+        editorFontSize.setAccessibilityLabel(fontSizeLabel)
+        editorFontSize.setAccessibilityIdentifier("duckpad.settings.editor-font-size")
+        editorFontSize.toolTip = NSLocalizedString("preferences.editor.font.size.range", value: "Enter a whole number from 6 to 72", comment: "Valid editor font size range")
+        editorFontSize.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let fontSizeRow = NSStackView(views: [NSTextField(labelWithString: fontSizeLabel), editorFontSize])
+        fontSizeRow.spacing = 12
+        (pages["Editing"] as? NSStackView)?.addArrangedSubview(fontSizeRow)
         checkbox("Automatically reload files changed on disk", \.liveFileReloadEnabled, "General")
         checkbox("Highlight current line", \.highlightCurrentLine, "Editing")
         choices("Caret width", \.caretWidth, [("1", 1), ("2", 2), ("3", 3)], "Editing")
@@ -300,12 +312,42 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         startUpdate(proposed)
     }
 
+    public func controlTextDidEndEditing(_ notification: Notification) {
+        guard notification.object as? NSTextField === editorFontSize else { return }
+        fontSizeChanged(editorFontSize)
+    }
+
+    @objc private func fontSizeChanged(_ sender: Any?) {
+        guard !isUpdating, !((editorFontSize.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) else { return }
+        let input = editorFontSize.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let size = Int(input), (6...72).contains(size) else {
+            editorFontSize.stringValue = String(settings.editorFontSize)
+            status.stringValue = NSLocalizedString("preferences.editor.font.size.invalid", value: "Font size must be a whole number from 6 to 72.", comment: "Invalid font size feedback")
+            return
+        }
+        guard size != settings.editorFontSize else {
+            editorFontSize.stringValue = String(size)
+            return
+        }
+        var proposed = settings
+        proposed.editorFontSize = size
+        startUpdate(proposed)
+    }
+
     private func startUpdate(_ proposed: AppSettings) {
         guard !isUpdating, acceptsUpdates?() ?? true else {
             NSSound.beep()
             return
         }
-        setControlsEnabled(false)
+        // A checkbox can dispatch without first moving focus out of the size field.
+        // Carry a valid draft into that same update before disabling the controls.
+        var proposed = proposed
+        if proposed.editorFontSize == settings.editorFontSize,
+           !((editorFontSize.currentEditor() as? NSTextView)?.hasMarkedText() ?? false),
+           let size = Int(editorFontSize.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)),
+           (6...72).contains(size) {
+            proposed.editorFontSize = size
+        }
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.apply(proposed)
@@ -313,6 +355,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             self.updateTask = nil
         }
         updateTask = task
+        setControlsEnabled(false)
         onUpdateTaskStarted?(task)
     }
 
@@ -336,6 +379,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     private func render(_ settings: AppSettings) {
         self.settings = settings
         editorFont.display(fontName: settings.editorFontName)
+        editorFontSize.stringValue = String(settings.editorFontSize)
         for (button, key) in booleanControls { button.state = settings[keyPath: key] ? .on : .off }
         for (popup, key) in numberControls {
             if let item = popup.itemArray.first(where: { $0.representedObject as? Int == settings[keyPath: key] }) {
@@ -355,6 +399,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         for (button, _) in booleanControls { button.isEnabled = enabled }
         for (popup, _) in numberControls { popup.isEnabled = enabled }
         editorFont.isEnabled = enabled
+        editorFontSize.isEnabled = enabled
         appearance.isEnabled = enabled
         wordWrap.isEnabled = enabled
         wrapMarkers.isEnabled = enabled && wordWrap.state == .on

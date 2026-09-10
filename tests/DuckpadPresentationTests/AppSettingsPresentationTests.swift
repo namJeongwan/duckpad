@@ -293,3 +293,92 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
     #expect(preview.fontName == tall.fontName)
     #expect(preview.ascender - preview.descender + max(0, preview.leading) <= 22.01)
 }
+
+@Test @MainActor func fontComboBoxKeepsSequentialTypingAutocompleteAndDeletion() throws {
+    _ = NSApplication.shared
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    let combo = EditorFontComboBox()
+    combo.frame = NSRect(x: 10, y: 40, width: 300, height: 26)
+    window.contentView?.addSubview(combo)
+    combo.display(fontName: "Menlo")
+    var selected: String?
+    combo.onFontSelected = { selected = $0 }
+    #expect(window.makeFirstResponder(combo))
+    let editor = try #require(combo.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    var prefix = ""
+    for character in "Monaco" {
+        prefix.append(character)
+        editor.insertText(String(character), replacementRange: editor.selectedRange())
+        #expect(editor.string.lowercased().hasPrefix(prefix.lowercased()))
+        #expect(editor.selectedRange().location == prefix.utf16.count)
+        #expect(selected == nil)
+    }
+    #expect(editor.string == "Monaco")
+    editor.deleteBackward(nil)
+    #expect(editor.string == "Monac")
+    #expect(editor.selectedRange() == NSRange(location: 5, length: 0))
+    editor.selectAll(nil)
+    prefix = ""
+    for character in "not-an-installed-font" {
+        prefix.append(character)
+        editor.insertText(String(character), replacementRange: editor.selectedRange())
+        #expect(editor.string.lowercased().hasPrefix(prefix.lowercased()))
+    }
+    #expect(editor.string.lowercased() == "not-an-installed-font")
+    #expect(combo.visibleFonts.isEmpty)
+    #expect(selected == nil)
+}
+
+@Test @MainActor func fontSizeInputCommitsOnEnterOrBlurAndRejectsInvalidValues() async throws {
+    _ = NSApplication.shared
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var saves: [AppSettings] = []
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { settings in saves.append(settings); return .saved(settings) }
+    controller.onUpdateTaskStarted = { task = $0 }
+    let field = controller.editorFontSize
+    field.stringValue = "18"
+    let action = try #require(field.action)
+    #expect(NSApp.sendAction(action, to: field.target, from: field))
+    await task?.value
+    #expect(saves.count == 1)
+    #expect(saves.last?.editorFontSize == 18)
+    #expect(saves.last?.editorFontName == "Menlo")
+    controller.selectCategory("Editing")
+    #expect(controller.window?.makeFirstResponder(field) == true)
+    let editor = try #require(field.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    for character in "24" { editor.insertText(String(character), replacementRange: editor.selectedRange()) }
+    #expect(saves.count == 1)
+    controller.window?.makeFirstResponder(nil)
+    await task?.value
+    #expect(saves.count == 2)
+    #expect(saves.last?.editorFontSize == 24)
+    for invalid in ["", "abc", "5", "73", "12.5", "999999999999999999999999999"] {
+        field.stringValue = invalid
+        #expect(NSApp.sendAction(action, to: field.target, from: field))
+        #expect(field.stringValue == "24")
+        #expect(saves.count == 2)
+    }
+    #expect(controller.window?.makeFirstResponder(field) == true)
+    let activeEditor = try #require(field.currentEditor() as? NSTextView)
+    activeEditor.selectAll(nil)
+    activeEditor.insertText("30", replacementRange: activeEditor.selectedRange())
+    func findCheckbox(_ view: NSView) -> NSButton? {
+        if let button = view as? NSButton, button.title == "Highlight current line" { return button }
+        return view.subviews.lazy.compactMap { findCheckbox($0) }.first
+    }
+    let root = try #require(controller.window?.contentView)
+    let checkbox = try #require(findCheckbox(root))
+    checkbox.state = .off
+    #expect(NSApp.sendAction(try #require(checkbox.action), to: checkbox.target, from: checkbox))
+    await task?.value
+    #expect(saves.count == 3)
+    #expect(saves.last?.editorFontSize == 30)
+    #expect(saves.last?.highlightCurrentLine == false)
+
+}
