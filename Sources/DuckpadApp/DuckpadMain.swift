@@ -14,6 +14,10 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private var windowEditors: [ObjectIdentifier: ScintillaEditorAdapter] = [:]
     private var windowRecoveryRoots: [ObjectIdentifier: URL] = [:]
     private var settingsWindowController: DuckpadSettingsWindowController?
+    private lazy var projectController: DuckpadAppInfoController = {
+        let client = GitHubReleaseClient()
+        return DuckpadAppInfoController(loadRelease: { try await client.latestRelease() })
+    }()
     private let terminationCoordinator = ApplicationTerminationCoordinator()
     private var environment: [String: String] = [:]
     private var recoveryBase: URL!
@@ -123,6 +127,9 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         runtimeIsReady = true
         drainPendingFinderOpenRequests()
         restoreAdditionalWindows()
+        if Bundle.main.bundleURL.pathExtension == "app", !environment.keys.contains(where: { $0.hasPrefix("DUCKPAD_") && $0.contains("SMOKE") }) {
+            projectController.checkInBackground()
+        }
 
         if environment["DUCKPAD_PERFORMANCE_LAUNCH_SMOKE"] == "1" {
             Task { @MainActor in
@@ -1005,6 +1012,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         let menu = DuckpadMainMenuFactory.make(
             target: target,
             applicationTarget: self,
+            projectTarget: projectController,
             recentDocumentURLs: recentDocumentURLs,
             settings: settingsUseCase.state.settings
         )

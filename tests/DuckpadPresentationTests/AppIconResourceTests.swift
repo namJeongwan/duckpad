@@ -98,6 +98,14 @@ private func normalizedRMSE(_ lhs: Data, _ rhs: Data) -> Double {
         #expect(representation.pixelsWide == pixels)
         #expect(representation.pixelsHigh == pixels)
         #expect(representation.hasAlpha)
+        // These points sit outside the rounded square but inside its bounding box.
+        // Transparent canvas corners alone missed the opaque black right-hand remnants.
+        if pixels >= 128 {
+            for point in [(0.88, 0.12), (0.88, 0.88), (0.12, 0.12), (0.12, 0.88)] {
+                let color = try #require(representation.colorAt(x: Int(Double(pixels) * point.0), y: Int(Double(pixels) * point.1)))
+                #expect(color.alphaComponent <= 1.0 / 255.0)
+            }
+        }
         for point in [
             NSPoint(x: 0, y: 0),
             NSPoint(x: pixels - 1, y: 0),
@@ -115,9 +123,10 @@ private func normalizedRMSE(_ lhs: Data, _ rhs: Data) -> Double {
         sourcePixels[name] = rgba
         if pixels == 1_024 {
             let bounds = try #require(alphaBounds(in: rgba, width: pixels, height: pixels))
-            #expect(bounds.width == 863)
+            #expect(bounds.width == 859)
             #expect(bounds.height == 865)
-            #expect(abs((bounds.minX + bounds.maxX) - (pixels - 1)) <= 1)
+            // Removing the right-hand background exposes the artwork's original 1.5px offset.
+            #expect(abs((bounds.minX + bounds.maxX) - (pixels - 1)) <= 3)
             #expect(abs((bounds.minY + bounds.maxY) - (pixels - 1)) <= 1)
         }
     }
