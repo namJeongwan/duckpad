@@ -11,6 +11,10 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
     public private(set) var leftVisualRowCount = 0
     public private(set) var rightVisualRowCount = 0
 
+    private var comparisonMenu: NSMenu?
+    private var previousMenu: NSMenu?
+    private var previousWindowsMenu: NSMenu?
+    private var comparisonWindowsMenu: NSMenu?
     private var isMirroringScroll = false
     private var completion: (() -> Void)?
     private var lastScrollWasLeft = true
@@ -26,11 +30,12 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
     public init(content: OpenDocumentCompareContent, diff: AlignedLineDiff) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 600),
-            styleMask: [.titled, .closable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = content.title
+        window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 620, height: 320)
         super.init(window: window)
         window.delegate = self
@@ -44,12 +49,14 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
         guard let window, !isDismissed else { return }
         await withCheckedContinuation { continuation in
             completion = { continuation.resume() }
+            // A comparison is a separate document window, not a modal sheet.
+            window.appearance = parent?.appearance
             if let parent {
-                parent.beginSheet(window) { [weak self] _ in self?.finishPresentation() }
-            } else {
-                showWindow(nil)
-                window.makeKeyAndOrderFront(nil)
-            }
+                window.setFrameTopLeftPoint(NSPoint(x: parent.frame.minX + 36, y: parent.frame.maxY - 36))
+            } else { window.center() }
+            showWindow(nil)
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(leftTextView)
         }
     }
 
@@ -60,6 +67,61 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
             window.orderOut(nil)
             finishPresentation()
         }
+    }
+
+    public func windowDidBecomeKey(_ notification: Notification) {
+        installComparisonMenu()
+    }
+
+    public func windowDidResignKey(_ notification: Notification) {
+        restorePreviousMenu()
+    }
+
+    private func installComparisonMenu() {
+        guard NSApplication.shared.mainMenu !== comparisonMenu || comparisonMenu == nil else { return }
+        previousMenu = NSApplication.shared.mainMenu
+        previousWindowsMenu = NSApplication.shared.windowsMenu
+        let menu = NSMenu()
+        if let app = previousMenu?.items.first?.copy() as? NSMenuItem {
+            menu.addItem(app)
+        } else {
+            let app = NSMenuItem()
+            let submenu = NSMenu(title: "Duckpad")
+            submenu.addItem(withTitle: "Quit Duckpad", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+            app.submenu = submenu
+            menu.addItem(app)
+        }
+        func section(_ title: String) -> NSMenu {
+            let root = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            let submenu = NSMenu(title: title)
+            root.submenu = submenu
+            menu.addItem(root)
+            return submenu
+        }
+        let file = section("File")
+        let close = file.addItem(withTitle: "Close Comparison", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        close.target = window
+        let edit = section("Edit")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let search = section("Search")
+        let find = search.addItem(withTitle: "Find…", action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: "f")
+        find.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
+        let windows = section("Window")
+        windows.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        comparisonMenu = menu
+        comparisonWindowsMenu = windows
+        NSApplication.shared.mainMenu = menu
+        NSApplication.shared.windowsMenu = windows
+    }
+
+    private func restorePreviousMenu() {
+        if NSApplication.shared.mainMenu === comparisonMenu { NSApplication.shared.mainMenu = previousMenu }
+        if NSApplication.shared.windowsMenu === comparisonWindowsMenu { NSApplication.shared.windowsMenu = previousWindowsMenu }
+        comparisonMenu = nil
+        comparisonWindowsMenu = nil
+        previousMenu = nil
+        previousWindowsMenu = nil
     }
 
     public func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -111,13 +173,22 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
         panes.spacing = 1
         panes.translatesAutoresizingMaskIntoConstraints = false
 
-        let done = NSButton(title: "Done", target: self, action: #selector(donePressed))
+        let done = NSButton(title: "Close", target: self, action: #selector(donePressed))
         done.keyEquivalent = "\r"
         done.translatesAutoresizingMaskIntoConstraints = false
         let root = NSView(frame: window.contentView?.bounds ?? .zero)
         root.addSubview(panes)
         root.addSubview(done)
+        let snapshotNote = NSTextField(labelWithString: "Read-only snapshot · Changes to the original documents are not reflected here.")
+        snapshotNote.textColor = .secondaryLabelColor
+        snapshotNote.font = .systemFont(ofSize: 11)
+        snapshotNote.lineBreakMode = .byTruncatingTail
+        snapshotNote.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(snapshotNote)
         NSLayoutConstraint.activate([
+            snapshotNote.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            snapshotNote.trailingAnchor.constraint(lessThanOrEqualTo: done.leadingAnchor, constant: -12),
+            snapshotNote.centerYAnchor.constraint(equalTo: done.centerYAnchor),
             panes.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             panes.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             panes.topAnchor.constraint(equalTo: root.topAnchor),
@@ -337,6 +408,7 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
     private func transitionToDismissed() -> Bool {
         guard !isDismissed else { return false }
         isDismissed = true
+        restorePreviousMenu()
         dismissTransitionCountForTesting += 1
         NotificationCenter.default.removeObserver(self)
         return true

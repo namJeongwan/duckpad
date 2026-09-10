@@ -137,7 +137,7 @@ func equalTitleExtensionShortcutCollisionUsesCommandIDAsStableTieBreak() async t
     let menu = DuckpadMainMenuFactory.make(target: controller)
     let commands = try #require(
         menu.items.compactMap(\.submenu)
-            .first(where: { $0.title == "Extensions" })?
+            .first(where: { $0.title == "Plugins" })?
             .items.filter { $0.representedObject is String }
     )
     #expect(commands.map { $0.representedObject as? String } == [
@@ -161,7 +161,7 @@ func asyncExtensionRefreshRebuildsAuthorizedMenuAndDisclosesConsentIdentity() as
     #expect(controller.extensionCommands.isEmpty)
     controller.start(); await controller.waitForStartup()
     #expect(controller.extensionCommands.map(\.id) == [ExtensionCommandID(rawValue: "com.duckpad.sample.sort")])
-    let extensions = try #require(menu.items.compactMap(\.submenu).first(where: { $0.title == "Extensions" }))
+    let extensions = try #require(menu.items.compactMap(\.submenu).first(where: { $0.title == "Plugins" }))
     let command = try #require(extensions.items.first(where: { $0.representedObject as? String == "com.duckpad.sample.sort" }))
     #expect(command.accessibilityLabel() == "Extension command: Sort")
     #expect(command.keyEquivalent == "k")
@@ -205,7 +205,7 @@ func extensionShortcutsFailClosedOnCoreCollisionOrMalformedDeclaration() async t
         let menu = DuckpadMainMenuFactory.make(target: controller)
         let command = try #require(
             menu.items.compactMap(\.submenu)
-                .first(where: { $0.title == "Extensions" })?
+                .first(where: { $0.title == "Plugins" })?
                 .items.first(where: { $0.representedObject as? String == "com.duckpad.sample.sort" })
         )
         #expect(command.keyEquivalent.isEmpty)

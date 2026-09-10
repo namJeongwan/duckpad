@@ -79,6 +79,13 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, getter=isWhitespaceVisible) BOOL whitespaceVisible;
 @property(nonatomic, getter=areLineEndingsVisible) BOOL lineEndingsVisible;
 @property(nonatomic) NSInteger zoomLevel;
+- (void)configureDisplayWithLineNumbers:(BOOL)lineNumbers
+                       bookmarkMargin:(BOOL)bookmarkMargin
+                 highlightCurrentLine:(BOOL)highlightCurrentLine
+                           caretWidth:(NSInteger)caretWidth
+                     caretBlinkPeriod:(NSInteger)caretBlinkPeriod
+                 scrollBeyondLastLine:(BOOL)scrollBeyondLastLine
+                       wrapIndentMode:(NSInteger)wrapIndentMode;
 @property(nonatomic, readonly) NSUInteger selectionCount;
 @property(nonatomic, readonly) NSUInteger caretUTF8Position;
 @property(nonatomic, readonly) NSUInteger anchorUTF8Position;

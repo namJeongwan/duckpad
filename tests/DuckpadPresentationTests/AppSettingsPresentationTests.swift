@@ -108,7 +108,7 @@ private actor SettingsSaveGate {
     #expect(state.defaultWordWrapEnabled)
     #expect(!state.defaultWrapMarkerVisible)
     #expect(state.wrapMarkerControlEnabled)
-    #expect(state.status.contains("Could not save settings"))
+    #expect(state.status.contains("Could not save preferences"))
 }
 
 @Test @MainActor func acceptedSettingsSaveIsJoinedBeforeApplicationTermination() async {
@@ -156,7 +156,7 @@ private actor SettingsSaveGate {
     for _ in 0..<1_000 where terminationReply == nil { await Task.yield() }
     #expect(terminationReply == true)
     #expect(controller.smokeState().appearanceMode == .system)
-    #expect(controller.smokeState().status.contains("Could not save settings"))
+    #expect(controller.smokeState().status.contains("Could not save preferences"))
 }
 
 @MainActor
@@ -166,4 +166,37 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
         if let found = findView(in: child, identifier: identifier) { return found }
     }
     return nil
+}
+
+@Test @MainActor func preferencesControlsPreserveOtherCategoriesAndRenderInBothAppearances() async throws {
+    _ = NSApplication.shared
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var saved = AppSettings(appearanceMode: .dark, caretWidth: 3, wrapIndentMode: 2)
+    var updateTask: Task<Void, Never>?
+    controller.onUpdateTaskStarted = { updateTask = $0 }
+    controller.present(settings: saved) { value in saved = value; return .saved(value) }
+    let root = try #require(controller.window?.contentView)
+    func button(_ view: NSView, title: String) -> NSButton? {
+        if let candidate = view as? NSButton, candidate.title == title { return candidate }
+        return view.subviews.lazy.compactMap { button($0, title: title) }.first
+    }
+    let toggle = try #require(button(root, title: "Show status bar"))
+    // Dispatch the control action directly: performClick's nested AppKit loop
+    // can stop Swift's async-main test runner after the test has returned.
+    toggle.state = .off
+    let action = try #require(toggle.action)
+    #expect(NSApplication.shared.sendAction(action, to: toggle.target, from: toggle))
+    await updateTask?.value
+    #expect(!saved.statusBarVisible)
+    #expect(saved.caretWidth == 3 && saved.wrapIndentMode == 2 && saved.appearanceMode == .dark)
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+        controller.window?.appearance = NSAppearance(named: appearance)
+        for category in DuckpadSettingsWindowController.categories {
+            controller.selectCategory(category)
+            #expect(controller.selectedCategory == category)
+            root.layoutSubtreeIfNeeded()
+
+        }
+    }
 }

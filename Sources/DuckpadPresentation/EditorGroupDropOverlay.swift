@@ -76,10 +76,15 @@ public final class EditorGroupDropOverlay: NSView {
         highlightedZone = nil
         for view in zoneViews.values { view.isHidden = true }
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor
-            layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.7).cgColor
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.10).cgColor
+            layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.38).cgColor
         }
         layer?.borderWidth = 1
+    }
+
+    public override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        if isPresenting, highlightedZone == nil { presentTransfer() }
     }
 
     public func dismiss() {

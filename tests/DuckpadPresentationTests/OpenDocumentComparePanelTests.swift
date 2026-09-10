@@ -216,6 +216,22 @@ private func compareContent(
     #expect(newError == .cancelled)
 }
 
+@Test @MainActor func comparisonOpensAnIndependentDiffWindowWhenParentExists() async throws {
+    let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+    parent.isReleasedWhenClosed = false
+    let content = compareContent()
+    let panel = OpenDocumentComparePanel(content: content, diff: try AlignedLineDiff.build(left: content.leftText, right: content.rightText))
+    let task = Task { @MainActor in await panel.present(attachedTo: parent) }
+    for _ in 0..<30 where panel.window?.isVisible != true { await Task.yield() }
+    #expect(panel.window?.isVisible == true)
+    #expect(panel.window?.sheetParent == nil)
+    #expect(parent.sheets.isEmpty)
+    #expect(panel.window?.styleMask.contains(.resizable) == true)
+    panel.dismiss()
+    await task.value
+    parent.close()
+}
+
 @Test @MainActor func standalonePanelPresentationAwaitsDismissalAndDismissIsIdempotent() async throws {
     let content = compareContent()
     let panel = OpenDocumentComparePanel(
@@ -236,6 +252,27 @@ private func compareContent(
 
     #expect(finished)
     #expect(panel.dismissTransitionCountForTesting == 1)
+}
+
+@Test @MainActor func comparisonMenuRoutesCloseAndCopyToDiffAndRestoresDocumentMenu() async throws {
+    let previous = NSApplication.shared.mainMenu
+    let content = compareContent()
+    let panel = OpenDocumentComparePanel(content: content, diff: try AlignedLineDiff.build(left: content.leftText, right: content.rightText))
+    let task = Task { @MainActor in await panel.present(attachedTo: nil) }
+    for _ in 0..<30 where panel.window?.isVisible != true { await Task.yield() }
+    panel.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification))
+    let menu = try #require(NSApplication.shared.mainMenu)
+    let close = try #require(menu.items.first { $0.submenu?.title == "File" }?.submenu?.items.first)
+    #expect(close.target === panel.window)
+    #expect(close.action == #selector(NSWindow.performClose(_:)))
+    let copy = try #require(menu.items.first { $0.submenu?.title == "Edit" }?.submenu?.items.first)
+    #expect(copy.target == nil)
+    #expect(copy.action == #selector(NSText.copy(_:)))
+    panel.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification))
+    #expect(NSApplication.shared.mainMenu === previous)
+    panel.dismiss()
+    await task.value
+    #expect(NSApplication.shared.mainMenu === previous)
 }
 
 @Test @MainActor func failureSheetIsTrackedAndCancelledWithPresenterTeardown() async throws {
@@ -288,4 +325,17 @@ private func compareContent(
         candidates: [source, candidates[1], candidates[3]]
     )
     #expect(sourceDuplicateOnly.first?.label == "same.txt — /one/same.txt")
+}
+
+@Test @MainActor func hidingComparisonPreservesThePresentedSnapshotUntilExplicitDismissal() async throws {
+    let presenter = NativeOpenDocumentComparePresenter()
+    let task = Task { @MainActor in try? await presenter.present(compareContent(), attachedTo: nil, isCurrent: { true }) }
+    for _ in 0..<200 where !presenter.hasPresentedSnapshot { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(presenter.hasPresentedSnapshot)
+    presenter.comparisonWindowForTesting?.orderOut(nil)
+    #expect(presenter.hasPresentedSnapshot)
+    #expect(!presenter.restoresEditorFocusAfterDismissal)
+    presenter.cancelOutstandingComparisons()
+    await task.value
+    #expect(!presenter.hasPresentedSnapshot)
 }

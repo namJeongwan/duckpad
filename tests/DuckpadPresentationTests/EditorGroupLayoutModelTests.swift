@@ -3,7 +3,7 @@ import DuckpadDomain
 @testable import DuckpadPresentation
 import Testing
 
-@Test @MainActor func fourDirectionalSplitsBuildAGridAndRejectAFifthPaneWithoutLosingTabs() throws {
+@Test @MainActor func fourDirectionalSplitsAllowAFifthPaneWithoutLosingTabs() throws {
     let tabs = (0..<5).map { _ in TabID() }
     let model = EditorGroupLayoutModel()
     model.reconcile(workspace: workspace(tabs))
@@ -13,10 +13,14 @@ import Testing
     #expect(model.snapshot.tree == .split(.sideBySide,
         .split(.stacked, .leaf(.primary), .leaf(.tertiary)),
         .split(.stacked, .leaf(.quaternary), .leaf(.secondary))))
-    let before = model.snapshot
-    #expect(model.splitAdjacent(tabID: tabs[4], source: .primary, target: .secondary, zone: .left, operation: .move) == nil)
-    #expect(model.snapshot == before)
-    #expect(Set(before.visibleGroups.flatMap { before.tabIDs(in: $0) }) == Set(tabs))
+    let fifth = try #require(model.splitAdjacent(tabID: tabs[4], source: .primary, target: .primary, zone: .down, operation: .move))
+    #expect(!EditorGroupID.predefined.contains(fifth))
+    #expect(model.snapshot.visibleGroups.count == 5)
+    model.reconcile(workspace: workspace(tabs, active: tabs[4]))
+    #expect(model.snapshot.tabIDs(in: fifth) == [tabs[4]])
+    #expect(model.snapshot.focusedGroup == fifth)
+    #expect(Set(model.snapshot.visibleGroups.flatMap { model.snapshot.tabIDs(in: $0) }) == Set(tabs))
+    model.closeGroup(fifth)
     model.closeGroup(.quaternary)
     #expect(model.snapshot.visibleGroups.count == 3)
     #expect(Set(model.snapshot.visibleGroups.flatMap { model.snapshot.tabIDs(in: $0) }) == Set(tabs))
@@ -257,4 +261,19 @@ private func workspace(
     #expect(model.snapshot.tabIDs(in: .secondary).isEmpty)
     #expect(model.snapshot.orientation == nil)
     #expect(model.snapshot.focusedGroup == .primary)
+}
+
+@Test @MainActor func reconcilingMoreThanFourClonesNeverAddsMembershipToAnUnrelatedPane() throws {
+    let a = TabID(), b = TabID()
+    let model = EditorGroupLayoutModel()
+    model.reconcile(workspace: workspace([a, b], active: a))
+    for _ in 0..<4 { _ = try #require(model.splitAdjacent(tabID: a, source: .primary, target: .primary, zone: .right, operation: .copy)) }
+    let unrelated = try #require(model.splitAdjacent(tabID: b, source: .primary, target: .primary, zone: .down, operation: .move))
+    #expect(model.snapshot.focusedGroup == unrelated)
+    model.reconcile(workspace: workspace([a, b], active: a))
+    #expect(model.snapshot.tabIDs(in: unrelated) == [b])
+    #expect(model.snapshot.focusedGroup != unrelated)
+    #expect(model.snapshot.visibleGroups.filter { model.snapshot.tabIDs(in: $0).contains(a) }.count == 5)
+    for group in model.snapshot.visibleGroups where !EditorGroupID.predefined.contains(group) { model.closeGroup(group) }
+    #expect(model.snapshot.additionalTabIDs.keys.allSatisfy { model.snapshot.visibleGroups.contains($0) })
 }

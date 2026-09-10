@@ -39,7 +39,7 @@ public struct EditorGroupLayoutSnapshot: Equatable, Sendable {
         switch group {
         case .primary: primaryTabIDs
         case .secondary: secondaryTabIDs
-        case .tertiary, .quaternary: additionalTabIDs[group] ?? []
+        default: additionalTabIDs[group] ?? []
         }
     }
 
@@ -47,7 +47,7 @@ public struct EditorGroupLayoutSnapshot: Equatable, Sendable {
         switch group {
         case .primary: primarySelectedTabID
         case .secondary: secondarySelectedTabID
-        case .tertiary, .quaternary: additionalSelectedTabIDs[group]
+        default: additionalSelectedTabIDs[group]
         }
     }
 }

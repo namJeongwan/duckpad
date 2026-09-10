@@ -21,7 +21,7 @@ public enum DuckpadMainMenuFactory {
         let appMenu = NSMenu()
         let settingsTarget: AnyObject = applicationTarget ?? target
         add(
-            "Settings…",
+            "Preferences…",
             #selector(DuckpadWindowController.performShowSettings(_:)),
             ",",
             settingsTarget,
@@ -38,7 +38,7 @@ public enum DuckpadMainMenuFactory {
         let fileItem = NSMenuItem()
         mainMenu.addItem(fileItem)
         let fileMenu = NSMenu(title: "File")
-        add("New Scratch", #selector(DuckpadWindowController.performNewScratch(_:)), "n", target, to: fileMenu)
+        add("New", #selector(DuckpadWindowController.performNewScratch(_:)), "n", target, to: fileMenu)
         add("New Window", #selector(DuckpadWindowController.performNewWindow(_:)), "n", target, modifiers: [.command, .shift], to: fileMenu)
         add("Open…", #selector(DuckpadWindowController.performOpenFile(_:)), "o", target, to: fileMenu)
         fileMenu.addItem(makeOpenRecentItem(
@@ -51,7 +51,7 @@ public enum DuckpadMainMenuFactory {
         add("Save a Copy As…", #selector(DuckpadWindowController.performSaveCopyAs(_:)), "s", target, modifiers: [.command, .option, .shift], to: fileMenu)
         add("Save All", #selector(DuckpadWindowController.performSaveAll(_:)), "s", target, modifiers: [.command, .option], to: fileMenu)
         fileMenu.addItem(.separator())
-        add("Close Tab", #selector(DuckpadWindowController.performCloseActiveTab(_:)), "w", target, to: fileMenu)
+        add("Close", #selector(DuckpadWindowController.performCloseActiveTab(_:)), "w", target, to: fileMenu)
         fileItem.submenu = fileMenu
 
         let formatItem = NSMenuItem()
@@ -123,7 +123,7 @@ public enum DuckpadMainMenuFactory {
         add("Find Next", #selector(DuckpadWindowController.performFindNext(_:)), "g", target, to: searchMenu)
         add("Find Previous", #selector(DuckpadWindowController.performFindPrevious(_:)), "g", target, modifiers: [.command, .shift], to: searchMenu)
         add("Replace…", #selector(DuckpadWindowController.performShowReplace(_:)), "h", target, to: searchMenu)
-        add("Find in Folder…", #selector(DuckpadWindowController.performFindInFolder(_:)), "f", target, modifiers: [.command, .shift], to: searchMenu)
+        add("Find in Files…", #selector(DuckpadWindowController.performFindInFolder(_:)), "f", target, modifiers: [.command, .shift], to: searchMenu)
         add("Close Find Panel", #selector(DuckpadWindowController.performCloseFindPanel(_:)), "\u{1b}", target, modifiers: [], to: searchMenu)
         searchMenu.addItem(.separator())
         add("Go to Line / Column…", #selector(DuckpadWindowController.performGoToLine(_:)), "g", target, modifiers: [.control], to: searchMenu)
@@ -149,7 +149,7 @@ public enum DuckpadMainMenuFactory {
         )
         viewMenu.addItem(.separator())
         add(
-            "Document Symbols…",
+            "Function List…",
             #selector(DuckpadWindowController.performShowDocumentSymbols(_:)),
             "o",
             target,
@@ -429,7 +429,93 @@ public enum DuckpadMainMenuFactory {
             item.setAccessibilityValue(accessibilityValue)
         }
         extensionsItem.submenu = extensionsMenu
+        alignNotepadMenus(mainMenu, target: target, settingsTarget: settingsTarget)
         return mainMenu
+    }
+
+    private static func alignNotepadMenus(_ mainMenu: NSMenu, target: DuckpadWindowController, settingsTarget: AnyObject) {
+        func menu(_ title: String) -> NSMenu { mainMenu.items.first { $0.submenu?.title == title }!.submenu! }
+        func move(_ item: NSMenuItem, from source: NSMenu, to destination: NSMenu) {
+            source.removeItem(item)
+            destination.addItem(item)
+        }
+        func group(_ title: String, in parent: NSMenu, actions: [Selector]) {
+            let submenu = NSMenu(title: title)
+            let matches = parent.items.filter { item in item.action.map(actions.contains) == true }
+            guard let index = matches.first.flatMap({ parent.items.firstIndex(of: $0) }) else { return }
+            for item in matches { move(item, from: parent, to: submenu) }
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.submenu = submenu
+            parent.insertItem(item, at: min(index, parent.items.count))
+        }
+        let file = menu("File"), edit = menu("Edit"), view = menu("View")
+        let format = menu("Format"), tabs = menu("Tabs"), window = menu("Window")
+        let encoding = NSMenu(title: "Encoding")
+        let conversion = NSMenuItem(title: "Convert and Save Encoding", action: nil, keyEquivalent: "")
+        conversion.submenu = makeEncodingMenu(target: target)
+        encoding.addItem(conversion)
+        if let open = format.items.first(where: { $0.title == "Open Using Encoding" }) {
+            encoding.addItem(.separator())
+            move(open, from: format, to: encoding)
+        }
+        let formatRoot = mainMenu.items.first { $0.submenu === format }!
+        formatRoot.submenu = encoding
+        let endings = NSMenuItem(title: "EOL Conversion and Save", action: nil, keyEquivalent: "")
+        endings.submenu = makeLineEndingMenu(target: target)
+        edit.addItem(.separator())
+        edit.addItem(endings)
+        group("Line Operations", in: edit, actions: [#selector(DuckpadWindowController.performDuplicateLine(_:)), #selector(DuckpadWindowController.performMoveLineUp(_:)), #selector(DuckpadWindowController.performMoveLineDown(_:)), #selector(DuckpadWindowController.performDeleteLine(_:)), #selector(DuckpadWindowController.performJoinLines(_:))])
+        group("Convert Case to", in: edit, actions: [#selector(DuckpadWindowController.performUppercase(_:)), #selector(DuckpadWindowController.performLowercase(_:))])
+        group("Blank Operations", in: edit, actions: [#selector(DuckpadWindowController.performIndent(_:)), #selector(DuckpadWindowController.performUnindent(_:)), #selector(DuckpadWindowController.performTrimTrailingWhitespace(_:))])
+        group("Show Symbol", in: view, actions: [#selector(DuckpadWindowController.performToggleWrapMarker(_:)), #selector(DuckpadWindowController.performToggleWhitespace(_:)), #selector(DuckpadWindowController.performToggleLineEndings(_:))])
+        group("Zoom", in: view, actions: [#selector(DuckpadWindowController.performZoomIn(_:)), #selector(DuckpadWindowController.performZoomOut(_:)), #selector(DuckpadWindowController.performResetZoom(_:))])
+        let closeItems = tabs.items.filter { $0.title.hasPrefix("Close ") }
+        let closeMore = NSMenu(title: "Close More")
+        for item in closeItems { move(item, from: tabs, to: closeMore) }
+        let closeItem = NSMenuItem(title: "Close More", action: nil, keyEquivalent: "")
+        closeItem.submenu = closeMore
+        file.addItem(closeItem)
+        window.insertItem(.separator(), at: 0)
+        for item in tabs.items.reversed() {
+            tabs.removeItem(item)
+            window.insertItem(item, at: 0)
+        }
+        if let root = mainMenu.items.first(where: { $0.submenu === tabs }) { mainMenu.removeItem(root) }
+        menu("Extensions").title = "Plugins"
+        menu("Plugins").items.first?.title = "Plugins Admin…"
+        let preferences = NSMenu(title: "Preferences")
+        add("Preferences…", #selector(DuckpadWindowController.performShowSettings(_:)), "", settingsTarget, modifiers: [], to: preferences)
+        if let theme = view.items.first(where: { $0.title == "Theme" }) {
+            preferences.addItem(.separator())
+            move(theme, from: view, to: preferences)
+        }
+        let tools = NSMenu(title: "Tools")
+        for item in view.items.filter({ $0.action == #selector(DuckpadWindowController.performCompareWithOpenDocument(_:)) || $0.action == #selector(DuckpadWindowController.performShowCommandPalette(_:)) }) {
+            move(item, from: view, to: tools)
+        }
+        let help = NSMenu(title: "Help")
+        add("Duckpad User Guide", #selector(DuckpadWindowController.performOpenUserGuide(_:)), "", target, modifiers: [], to: help)
+        for submenu in [preferences, tools, help] {
+            let root = NSMenuItem()
+            root.submenu = submenu
+            mainMenu.addItem(root)
+        }
+        let order = WindowCommandBarView.presentedMenuTitles
+        let roots = mainMenu.items.filter { order.contains($0.submenu?.title ?? "") }
+        for root in roots { mainMenu.removeItem(root) }
+        for title in order {
+            if let root = roots.first(where: { $0.submenu?.title == title }) { root.title = title; mainMenu.addItem(root) }
+        }
+        func tidy(_ menu: NSMenu) {
+            var previousWasSeparator = true
+            for item in menu.items {
+                if let submenu = item.submenu { tidy(submenu) }
+                if item.isSeparatorItem, previousWasSeparator { menu.removeItem(item) }
+                else { previousWasSeparator = item.isSeparatorItem }
+            }
+            if let last = menu.items.last, last.isSeparatorItem { menu.removeItem(last) }
+        }
+        tidy(mainMenu)
     }
 
     private struct ShortcutIdentity: Hashable {

@@ -26,6 +26,12 @@ public struct DuckpadSettingsSmokeState: Equatable, Sendable {
 
 @MainActor
 public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate {
+    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document"]
+    public private(set) var selectedCategory = "General"
+    private var pages: [String: NSView] = [:]
+    private var categoryButtons: [NSButton] = []
+    private var booleanControls: [(NSButton, WritableKeyPath<AppSettings, Bool>)] = []
+    private var numberControls: [(NSPopUpButton, WritableKeyPath<AppSettings, Int>)] = []
     private let appearance = NSPopUpButton(frame: .zero, pullsDown: false)
     private let wordWrap = NSButton(checkboxWithTitle: "Wrap long lines in new tabs", target: nil, action: nil)
     private let wrapMarkers = NSButton(checkboxWithTitle: "Show wrap symbols in new tabs", target: nil, action: nil)
@@ -39,12 +45,12 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
 
     public init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 450),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Duckpad Settings"
+        window.title = "Preferences"
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -105,14 +111,88 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         updateTask?.cancel()
     }
 
+    public func selectCategory(_ category: String) {
+        guard Self.categories.contains(category) else { return }
+        selectedCategory = category
+        for (name, page) in pages { page.isHidden = name != category }
+        let categoryHasKeyboardFocus = categoryButtons.contains { window?.firstResponder === $0 }
+        for button in categoryButtons { button.state = button.title == category ? .on : .off }
+        if categoryHasKeyboardFocus, let selected = categoryButtons.first(where: { $0.title == category }) {
+            window?.makeFirstResponder(selected)
+        }
+    }
+
     private func configureContent() {
         guard let content = window?.contentView else { return }
-        let heading = NSTextField(labelWithString: "Appearance and editor defaults")
-        heading.font = .systemFont(ofSize: 17, weight: .semibold)
-        heading.setAccessibilityLabel("Appearance and editor defaults")
+        let sidebar = NSStackView()
+        sidebar.orientation = .vertical
+        sidebar.alignment = .leading
+        sidebar.spacing = 4
+        sidebar.translatesAutoresizingMaskIntoConstraints = false
+        let pageHost = NSView()
+        pageHost.translatesAutoresizingMaskIntoConstraints = false
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        for category in Self.categories {
+            let button = NSButton(title: category, target: self, action: #selector(categoryChanged(_:)))
+            button.setButtonType(.pushOnPushOff)
+            button.bezelStyle = .recessed
+            button.alignment = .left
+            button.setAccessibilityLabel(category + " preferences")
+            sidebar.addArrangedSubview(button)
+            button.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
+            categoryButtons.append(button)
+            let heading = NSTextField(labelWithString: category)
+            heading.font = .systemFont(ofSize: 17, weight: .semibold)
+            let page = NSStackView(views: [heading])
+            page.orientation = .vertical
+            page.alignment = .leading
+            page.spacing = 14
+            page.translatesAutoresizingMaskIntoConstraints = false
+            pageHost.addSubview(page)
+            NSLayoutConstraint.activate([
+                page.leadingAnchor.constraint(equalTo: pageHost.leadingAnchor),
+                page.trailingAnchor.constraint(equalTo: pageHost.trailingAnchor),
+                page.topAnchor.constraint(equalTo: pageHost.topAnchor),
+                page.bottomAnchor.constraint(lessThanOrEqualTo: pageHost.bottomAnchor),
+            ])
+            pages[category] = page
+        }
+        func checkbox(_ title: String, _ key: WritableKeyPath<AppSettings, Bool>, _ category: String) {
+            let button = NSButton(checkboxWithTitle: title, target: self, action: #selector(settingChanged(_:)))
+            button.setAccessibilityLabel(title)
+            booleanControls.append((button, key))
+            (pages[category] as? NSStackView)?.addArrangedSubview(button)
+        }
+        func choices(_ title: String, _ key: WritableKeyPath<AppSettings, Int>, _ choices: [(String, Int)], _ category: String) {
+            let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+            for (label, value) in choices {
+                popup.addItem(withTitle: label)
+                popup.lastItem?.representedObject = value
+            }
+            popup.target = self
+            popup.action = #selector(settingChanged(_:))
+            popup.setAccessibilityLabel(title)
+            numberControls.append((popup, key))
+            let row = NSStackView(views: [NSTextField(labelWithString: title), popup])
+            row.orientation = .horizontal
+            row.spacing = 12
+            (pages[category] as? NSStackView)?.addArrangedSubview(row)
+        }
+        checkbox("Show menu bar in document windows", \.menuBarVisible, "General")
+        checkbox("Show status bar", \.statusBarVisible, "General")
+        checkbox("Allow tab drag and drop", \.tabDragEnabled, "Tab Bar")
+        checkbox("Show close button", \.showTabCloseButton, "Tab Bar")
+        checkbox("Show buttons on inactive tabs", \.showInactiveTabButtons, "Tab Bar")
+        checkbox("Highlight current line", \.highlightCurrentLine, "Editing")
+        choices("Caret width", \.caretWidth, [("1", 1), ("2", 2), ("3", 3)], "Editing")
+        choices("Caret blink rate", \.caretBlinkPeriod, [("Fast", 250), ("Normal", 500), ("Slow", 1000), ("No blinking", 0)], "Editing")
+        choices("Line wrap", \.wrapIndentMode, [("Default", 0), ("Aligned", 1), ("Indent", 2)], "Editing")
+        checkbox("Enable scrolling beyond last line", \.scrollBeyondLastLine, "Editing")
+        checkbox("Display line number", \.lineNumbersVisible, "Margins/Border/Edge")
+        checkbox("Display bookmark", \.bookmarkMarginVisible, "Margins/Border/Edge")
 
-        let appearanceLabel = NSTextField(labelWithString: "Appearance")
-        appearance.removeAllItems()
         for mode in AppAppearanceMode.allCases {
             appearance.addItem(withTitle: title(for: mode))
             appearance.lastItem?.representedObject = mode.rawValue
@@ -121,53 +201,60 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         appearance.action = #selector(settingChanged(_:))
         appearance.setAccessibilityIdentifier("duckpad.settings.appearance")
         appearance.setAccessibilityLabel("Application appearance")
-
-        let appearanceRow = NSStackView(views: [appearanceLabel, appearance])
-        appearanceRow.orientation = .horizontal
-        appearanceRow.alignment = .centerY
-        appearanceRow.distribution = .fill
-        appearanceLabel.setContentHuggingPriority(.required, for: .horizontal)
-
-        wordWrap.target = self
-        wordWrap.action = #selector(settingChanged(_:))
-        wordWrap.setAccessibilityIdentifier("duckpad.settings.default-word-wrap")
-        wordWrap.setAccessibilityLabel("Wrap long lines in new tabs")
-        wrapMarkers.target = self
-        wrapMarkers.action = #selector(settingChanged(_:))
-        wrapMarkers.setAccessibilityIdentifier("duckpad.settings.default-wrap-markers")
-        wrapMarkers.setAccessibilityLabel("Show wrap symbols in new tabs")
-
-        let explanation = NSTextField(wrappingLabelWithString:
-            "These editor options apply to new tabs. Existing and restored tabs keep their own view settings. High Contrast always follows macOS accessibility settings."
-        )
+        (pages["Dark Mode"] as? NSStackView)?.addArrangedSubview(appearance)
+        for (button, identifier) in [(wordWrap, "default-word-wrap"), (wrapMarkers, "default-wrap-markers")] {
+            button.target = self
+            button.action = #selector(settingChanged(_:))
+            button.setAccessibilityIdentifier("duckpad.settings." + identifier)
+            (pages["New Document"] as? NSStackView)?.addArrangedSubview(button)
+        }
+        let explanation = NSTextField(wrappingLabelWithString: "New tabs use these defaults. Open and restored tabs keep their own line wrap settings.")
         explanation.textColor = .secondaryLabelColor
+        (pages["New Document"] as? NSStackView)?.addArrangedSubview(explanation)
+        explanation.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
+
         status.textColor = .secondaryLabelColor
         status.setAccessibilityIdentifier("duckpad.settings.status")
-        status.setAccessibilityLabel("Settings status")
-
-        let stack = NSStackView(views: [heading, appearanceRow, wordWrap, wrapMarkers, explanation, status])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 14
-        stack.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(stack)
+        status.setAccessibilityLabel("Preferences status")
+        status.translatesAutoresizingMaskIntoConstraints = false
+        status.lineBreakMode = .byTruncatingTail
+        let close = NSButton(title: "Close", target: self, action: #selector(closePreferences(_:)))
+        close.keyEquivalent = "\u{1b}"
+        close.translatesAutoresizingMaskIntoConstraints = false
+        for view in [sidebar, separator, pageHost, status, close] { content.addSubview(view) }
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: content.topAnchor),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor),
-            appearanceRow.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -48),
-            explanation.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -48),
+            sidebar.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+            sidebar.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),
+            sidebar.widthAnchor.constraint(equalToConstant: 170),
+            separator.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: 12),
+            separator.widthAnchor.constraint(equalToConstant: 1),
+            separator.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
+            separator.bottomAnchor.constraint(equalTo: close.topAnchor, constant: -12),
+            pageHost.leadingAnchor.constraint(equalTo: separator.trailingAnchor, constant: 20),
+            pageHost.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            pageHost.topAnchor.constraint(equalTo: content.topAnchor, constant: 24),
+            pageHost.bottomAnchor.constraint(equalTo: close.topAnchor, constant: -18),
+            close.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            close.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
+            status.leadingAnchor.constraint(equalTo: pageHost.leadingAnchor),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: close.leadingAnchor, constant: -12),
+            status.centerYAnchor.constraint(equalTo: close.centerYAnchor),
         ])
+        selectCategory(selectedCategory)
     }
 
+    @objc private func categoryChanged(_ sender: NSButton) { selectCategory(sender.title) }
+    @objc private func closePreferences(_ sender: Any?) { close() }
+
     @objc private func settingChanged(_ sender: Any?) {
-        let proposed = AppSettings(
-            appearanceMode: selectedAppearanceMode,
-            defaultWordWrapEnabled: wordWrap.state == .on,
-            defaultWrapMarkerVisible: wrapMarkers.state == .on
-        )
+        var proposed = settings
+        proposed.appearanceMode = selectedAppearanceMode
+        proposed.defaultWordWrapEnabled = wordWrap.state == .on
+        proposed.defaultWrapMarkerVisible = wrapMarkers.state == .on
+        for (button, key) in booleanControls { proposed[keyPath: key] = button.state == .on }
+        for (popup, key) in numberControls {
+            if let value = popup.selectedItem?.representedObject as? Int { proposed[keyPath: key] = value }
+        }
         startUpdate(proposed)
     }
 
@@ -198,7 +285,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             status.stringValue = "Saved, but durability could not be confirmed: \(failure)"
         case .failed(let failure):
             render(settings)
-            status.stringValue = "Could not save settings: \(failure)"
+            status.stringValue = "Could not save preferences: \(failure)"
             NSSound.beep()
             showWindow(nil)
         }
@@ -206,6 +293,12 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
 
     private func render(_ settings: AppSettings) {
         self.settings = settings
+        for (button, key) in booleanControls { button.state = settings[keyPath: key] ? .on : .off }
+        for (popup, key) in numberControls {
+            if let item = popup.itemArray.first(where: { $0.representedObject as? Int == settings[keyPath: key] }) {
+                popup.select(item)
+            }
+        }
         if let index = AppAppearanceMode.allCases.firstIndex(of: settings.appearanceMode) {
             appearance.selectItem(at: index)
         }
@@ -216,6 +309,8 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
+        for (button, _) in booleanControls { button.isEnabled = enabled }
+        for (popup, _) in numberControls { popup.isEnabled = enabled }
         appearance.isEnabled = enabled
         wordWrap.isEnabled = enabled
         wrapMarkers.isEnabled = enabled && wordWrap.state == .on
@@ -229,9 +324,9 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
 
     private func title(for mode: AppAppearanceMode) -> String {
         switch mode {
-        case .system: "System"
-        case .light: "Light"
-        case .dark: "Dark"
+        case .system: "Follow macOS"
+        case .light: "Light Mode"
+        case .dark: "Dark Mode"
         }
     }
 }

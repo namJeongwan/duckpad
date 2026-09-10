@@ -215,6 +215,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     BOOL _publishesDocumentEdits;
     __weak DPScintillaEditorView *_documentPublisher;
     BOOL _smartEditingEnabled;
+    BOOL _highlightCurrentLine;
     BOOL _textInputSourceKnown;
     BOOL _directInputInsertion;
     BOOL _directInputByteLengthKnown;
@@ -289,6 +290,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEROPENMID lParam:SC_MARK_BOXMINUSCONNECTED];
         [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERMIDTAIL lParam:SC_MARK_TCORNER];
         [_scintilla message:SCI_SETINDENTATIONGUIDES wParam:SC_IV_LOOKBOTH];
+        _highlightCurrentLine = YES;
         [self applyPalette:DPScintillaPaletteLight];
         _requestedInputEnabled = YES;
         self.accessibilityIdentifier = @"duckpad.editor.scintilla";
@@ -1139,6 +1141,24 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     return YES;
 }
 
+- (void)configureDisplayWithLineNumbers:(BOOL)lineNumbers
+                       bookmarkMargin:(BOOL)bookmarkMargin
+                 highlightCurrentLine:(BOOL)highlightCurrentLine
+                           caretWidth:(NSInteger)caretWidth
+                     caretBlinkPeriod:(NSInteger)caretBlinkPeriod
+                 scrollBeyondLastLine:(BOOL)scrollBeyondLastLine
+                       wrapIndentMode:(NSInteger)wrapIndentMode {
+    _highlightCurrentLine = highlightCurrentLine;
+    [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:lineNumbers ? 40 : 0];
+    [_scintilla message:SCI_SETMARGINWIDTHN wParam:2 lParam:bookmarkMargin ? 12 : 0];
+    [_scintilla message:SCI_SETCARETLINEVISIBLE wParam:highlightCurrentLine lParam:0];
+    [_scintilla message:SCI_SETCARETWIDTH wParam:MIN(MAX(caretWidth, 1), 3) lParam:0];
+    [_scintilla message:SCI_SETCARETPERIOD wParam:MIN(MAX(caretBlinkPeriod, 0), 2000) lParam:0];
+    [_scintilla message:SCI_SETENDATLASTLINE wParam:!scrollBeyondLastLine lParam:0];
+    const int wrapMode = wrapIndentMode == 1 ? SC_WRAPINDENT_SAME : (wrapIndentMode == 2 ? SC_WRAPINDENT_INDENT : SC_WRAPINDENT_FIXED);
+    [_scintilla message:SCI_SETWRAPINDENTMODE wParam:wrapMode lParam:0];
+}
+
 - (void)applyPalette:(DPScintillaPalette)palette {
     _palette = palette;
     const BOOL dark = palette == DPScintillaPaletteDark || palette == DPScintillaPaletteHighContrastDark;
@@ -1204,7 +1224,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_STYLESETBOLD wParam:style lParam:highContrast && role == 3];
     }
     [_scintilla message:SCI_SETCARETFORE wParam:highContrast ? (dark ? 0xFFFFFF : 0x000000) : foreground];
-    [_scintilla message:SCI_SETCARETLINEVISIBLE wParam:1 lParam:0];
+    [_scintilla message:SCI_SETCARETLINEVISIBLE wParam:_highlightCurrentLine lParam:0];
     [_scintilla message:SCI_SETCARETLINEBACK wParam:0 lParam:caretLineBackground];
     [_scintilla message:SCI_SETCARETLINEBACKALPHA wParam:highContrast ? 42 : 24 lParam:0];
     [_scintilla message:SCI_SETSELBACK wParam:1 lParam:dark ? 0x704020 : 0xFFD8B0];

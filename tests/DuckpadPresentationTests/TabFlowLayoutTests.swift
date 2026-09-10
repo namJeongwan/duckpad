@@ -1209,7 +1209,7 @@ struct AppKitHostedTests {
         applicationTarget: applicationTarget
     )
     controller.close()
-    let settings = try #require(menuItem("Settings…", in: menu))
+    let settings = try #require(menuItem("Preferences…", in: menu))
     #expect(settings.target === applicationTarget)
 
     #expect(settings.target === applicationTarget)
@@ -1519,7 +1519,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     await controller.waitForStartup()
     let menu = DuckpadMainMenuFactory.make(target: controller)
 
-    let settings = menuItem("Settings…", in: menu)
+    let settings = menuItem("Preferences…", in: menu)
     #expect(settings?.action == #selector(DuckpadWindowController.performShowSettings(_:)))
     #expect(settings?.keyEquivalent == ",")
     #expect(settings?.keyEquivalentModifierMask == [.command])
@@ -1529,7 +1529,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     #expect(settingsRequests == 1)
     if let settings { #expect(controller.validateMenuItem(settings)) }
 
-    let newScratch = menuItem("New Scratch", in: menu)
+    let newScratch = menuItem("New", in: menu)
     #expect(newScratch?.action == #selector(DuckpadWindowController.performNewScratch(_:)))
     #expect(newScratch?.keyEquivalent == "n")
     #expect(newScratch?.keyEquivalentModifierMask == [.command])
@@ -1634,7 +1634,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
         #expect(menuItem(title, in: menu)?.keyEquivalent.isEmpty == true)
     }
 
-    let findInFolder = menuItem("Find in Folder…", in: menu)
+    let findInFolder = menuItem("Find in Files…", in: menu)
     #expect(findInFolder?.action == #selector(DuckpadWindowController.performFindInFolder(_:)))
     #expect(findInFolder?.keyEquivalent == "f")
     #expect(findInFolder?.keyEquivalentModifierMask == [.command, .shift])
@@ -1674,7 +1674,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
         #expect(!controller.validateMenuItem(nextBookmark))
     }
 
-    let close = menuItem("Close Tab", in: menu)
+    let close = menuItem("Close", in: menu)
     #expect(close?.action == #selector(DuckpadWindowController.performCloseActiveTab(_:)))
     #expect(close?.keyEquivalent == "w")
     #expect(close?.keyEquivalentModifierMask == [.command])
@@ -1768,7 +1768,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let zoomOut = menuItem("Zoom Out", in: menu)
     let actualSize = menuItem("Actual Size", in: menu)
     let workspaceSidebar = menuItem("Workspace Sidebar", in: menu)
-    let documentSymbols = menuItem("Document Symbols…", in: menu)
+    let documentSymbols = menuItem("Function List…", in: menu)
     let addWorkspaceFolder = menuItem("Add Folder to Workspace…", in: menu)
     let removeWorkspaceFolder = menuItem("Remove Folder from Workspace", in: menu)
     #expect(workspaceSidebar == nil)
@@ -1896,7 +1896,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 
     let menu = DuckpadMainMenuFactory.make(target: controller)
     let completion = try #require(menuItem("Complete Current Document Word", in: menu))
-    let symbols = try #require(menuItem("Document Symbols…", in: menu))
+    let symbols = try #require(menuItem("Function List…", in: menu))
     #expect(controller.validateMenuItem(completion))
     #expect(controller.validateMenuItem(symbols))
 
@@ -2005,7 +2005,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     #expect(!workspace.snapshot().tabs.contains(where: { $0.id == admittedClose }))
     #expect(workspace.snapshot().tabs.contains(where: { $0.id == dirty }))
     let newScratch = NSMenuItem(
-        title: "New Scratch",
+        title: "New",
         action: #selector(DuckpadWindowController.performNewScratch(_:)),
         keyEquivalent: "n"
     )

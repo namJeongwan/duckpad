@@ -77,6 +77,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     private let titleLabel = NSTextField(labelWithString: "")
     private let dirtyIndicator = NSView()
     private let pinButton = TabPinButton(frame: .zero)
+    var showCloseButton = true
+    var showInactiveButtons = false
     private let closeButton = NSButton(
         image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close") ?? NSImage(),
         target: nil,
@@ -263,8 +265,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     }
 
     private func updateActionVisibility() {
-        closeButton.isHidden = !(configuredTab?.isActive == true || isSelected || isHovered)
-        pinButton.isHidden = !(configuredTab?.isPinned == true || isHovered)
+        closeButton.isHidden = !showCloseButton || !(showInactiveButtons || configuredTab?.isActive == true || isSelected || isHovered)
+        pinButton.isHidden = !(showInactiveButtons || configuredTab?.isPinned == true || isHovered)
         if !isHovered { pinButton.resetPointerState() }
     }
 
@@ -572,6 +574,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     let hostedScrollView = TabOverflowScrollView()
     let flowLayout = MultilineTabCollectionLayout()
     let documentSwitcher = DocumentSwitcherButton(frame: .zero)
+    private var appPreferences = AppSettings.defaults
     private var tabs: [TabSnapshot] = []
     private var heightConstraint: NSLayoutConstraint!
     private var measuredContentWidth: CGFloat = 1
@@ -850,6 +853,13 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         return true
     }
 
+    public func applyPreferences(_ settings: AppSettings) {
+        guard appPreferences != settings else { return }
+        appPreferences = settings
+        if !settings.tabDragEnabled { hostedCollectionView.showInsertionMarker(nil) }
+        refreshVisibleItems()
+    }
+
     public func setInteractionsEnabled(_ isEnabled: Bool) {
         guard interactionsEnabled != isEnabled else { return }
         interactionsEnabled = isEnabled
@@ -980,7 +990,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         _ collectionView: NSCollectionView,
         pasteboardWriterForItemAt indexPath: IndexPath
     ) -> (any NSPasteboardWriting)? {
-        guard interactionsEnabled, tabs.indices.contains(indexPath.item) else { return nil }
+        guard interactionsEnabled, appPreferences.tabDragEnabled, tabs.indices.contains(indexPath.item) else { return nil }
         let item = NSPasteboardItem()
         let payload = EditorGroupDragPayload(
             tabID: tabs[indexPath.item].id,
@@ -1202,6 +1212,8 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         guard tabs.indices.contains(index) else { return }
         let tab = tabs[index]
         let row = flowLayout.row(forItemAt: index) ?? 0
+        item.showCloseButton = appPreferences.showTabCloseButton
+        item.showInactiveButtons = appPreferences.showInactiveTabButtons
         item.setInteractionsEnabled(interactionsEnabled)
         item.configure(
             tab: tab,

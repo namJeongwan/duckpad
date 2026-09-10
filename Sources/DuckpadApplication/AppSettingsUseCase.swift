@@ -61,11 +61,11 @@ public final class AppSettingsUseCase {
 
     @discardableResult
     public func update(_ settings: AppSettings) async -> AppSettingsUpdateOutcome {
-        let normalized = AppSettings(
-            appearanceMode: settings.appearanceMode,
-            defaultWordWrapEnabled: settings.defaultWordWrapEnabled,
-            defaultWrapMarkerVisible: settings.defaultWrapMarkerVisible
-        )
+        var normalized = settings
+        normalized.schemaVersion = AppSettings.currentSchemaVersion
+        normalized.caretWidth = min(max(settings.caretWidth, 1), 3)
+        normalized.caretBlinkPeriod = min(max(settings.caretBlinkPeriod, 0), 2000)
+        normalized.wrapIndentMode = min(max(settings.wrapIndentMode, 0), 2)
         do {
             try await store.save(normalized)
             state = .ready(normalized)

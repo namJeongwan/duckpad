@@ -50,11 +50,11 @@ public final class EditorGroupLayoutModel {
 
         primaryTabIDs = normalized(primaryTabIDs.filter { workspaceTabIDSet.contains($0) })
         secondaryTabIDs = normalized(secondaryTabIDs.filter { workspaceTabIDSet.contains($0) })
-        for group in [EditorGroupID.tertiary, .quaternary] {
+        for group in Array(additionalTabIDs.keys) {
             additionalTabIDs[group] = normalized(tabIDs(in: group).filter { workspaceTabIDSet.contains($0) })
         }
 
-        let knownTabIDs = Set(EditorGroupID.allCases.flatMap { tabIDs(in: $0) })
+        let knownTabIDs = Set(tree.groups.flatMap { tabIDs(in: $0) })
         let insertedTabIDs = workspaceTabIDs.filter {
             !knownTabIDs.contains($0) && (!previousTabIDs.contains($0) || primaryTabIDs.isEmpty && secondaryTabIDs.isEmpty)
         }
@@ -63,12 +63,12 @@ public final class EditorGroupLayoutModel {
         reconcileSelections()
 
         guard let activeTabID = workspace.tabs.first(where: \.isActive)?.id else { return }
-        let activeGroups = EditorGroupID.allCases.filter { tabIDs(in: $0).contains(activeTabID) }
+        let activeGroups = tree.groups.filter { tabIDs(in: $0).contains(activeTabID) }
         switch activeGroups.count {
         case 1:
             focusedGroup = activeGroups[0]
             setSelected(activeTabID, in: focusedGroup)
-        case 2...4:
+        case 2...:
             if !activeGroups.contains(focusedGroup) { focusedGroup = activeGroups[0] }
             setSelected(activeTabID, in: focusedGroup)
         default:
@@ -138,8 +138,8 @@ public final class EditorGroupLayoutModel {
         zone: EditorGroupDropOverlay.Zone, operation: EditorGroupDropOperation
     ) -> EditorGroupID? {
         guard tree.groups.contains(target), tabIDs(in: source).contains(tabID),
-              operation == .copy || tabIDs(in: source).count > 1,
-              let destination = EditorGroupID.allCases.first(where: { !tree.groups.contains($0) }) else { return nil }
+              operation == .copy || tabIDs(in: source).count > 1 else { return nil }
+        let destination = EditorGroupID.predefined.first(where: { !tree.groups.contains($0) }) ?? EditorGroupID()
         if operation == .move { remove(tabID, from: source) }
         append([tabID], to: destination)
         let old = EditorGroupLayoutTree.leaf(target)
@@ -199,7 +199,7 @@ public final class EditorGroupLayoutModel {
         switch group {
         case .primary: primaryTabIDs
         case .secondary: secondaryTabIDs
-        case .tertiary, .quaternary: additionalTabIDs[group] ?? []
+        default: additionalTabIDs[group] ?? []
         }
     }
 
@@ -209,7 +209,7 @@ public final class EditorGroupLayoutModel {
             primaryTabIDs = normalized(primaryTabIDs + tabIDs)
         case .secondary:
             secondaryTabIDs = normalized(secondaryTabIDs + tabIDs)
-        case .tertiary, .quaternary:
+        default:
             additionalTabIDs[group] = normalized((additionalTabIDs[group] ?? []) + tabIDs)
         }
     }
@@ -220,7 +220,7 @@ public final class EditorGroupLayoutModel {
             primaryTabIDs.removeAll { $0 == tabID }
         case .secondary:
             secondaryTabIDs.removeAll { $0 == tabID }
-        case .tertiary, .quaternary:
+        default:
             additionalTabIDs[group]?.removeAll { $0 == tabID }
         }
     }
@@ -229,7 +229,7 @@ public final class EditorGroupLayoutModel {
         switch group {
         case .primary: primarySelectedTabID = tabID
         case .secondary: secondarySelectedTabID = tabID
-        case .tertiary, .quaternary: additionalSelectedTabIDs[group] = tabID
+        default: additionalSelectedTabIDs[group] = tabID
         }
     }
 
@@ -250,6 +250,9 @@ public final class EditorGroupLayoutModel {
         }
         if !tree.groups.contains(focusedGroup) { focusedGroup = tree.groups.first ?? .primary }
         orientation = tree.orientation
+        let visible = Set(tree.groups)
+        additionalTabIDs = additionalTabIDs.filter { visible.contains($0.key) }
+        additionalSelectedTabIDs = additionalSelectedTabIDs.filter { visible.contains($0.key) }
     }
 
     private func reconcileSelections() {
@@ -259,7 +262,7 @@ public final class EditorGroupLayoutModel {
         if secondarySelectedTabID.map({ secondaryTabIDs.contains($0) }) != true {
             secondarySelectedTabID = secondaryTabIDs.first
         }
-        for group in [EditorGroupID.tertiary, .quaternary] {
+        for group in Array(additionalTabIDs.keys) {
             if additionalSelectedTabIDs[group].map({ tabIDs(in: group).contains($0) }) != true {
                 additionalSelectedTabIDs[group] = tabIDs(in: group).first
             }

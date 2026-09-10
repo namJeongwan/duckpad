@@ -71,3 +71,20 @@ import Testing
         try await LocalAppSettingsStore(archiveURL: archive).load()
     }
 }
+
+@Test func legacyPreferencesMigrateAndAllNewControlsSurviveRelaunch() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("duckpad-preferences-migration-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let archive = root.appendingPathComponent("Settings.json")
+    try Data(#"{"schemaVersion":1,"appearanceMode":"dark","defaultWordWrapEnabled":false,"defaultWrapMarkerVisible":true}"#.utf8).write(to: archive)
+    let store = LocalAppSettingsStore(archiveURL: archive)
+    let original = try #require(try await store.load())
+    #expect(original == AppSettings(appearanceMode: .dark, defaultWordWrapEnabled: false, defaultWrapMarkerVisible: true))
+    let updated = AppSettings(appearanceMode: .light, menuBarVisible: false, statusBarVisible: false,
+        tabDragEnabled: false, showTabCloseButton: false, showInactiveTabButtons: true,
+        lineNumbersVisible: false, bookmarkMarginVisible: false, highlightCurrentLine: false,
+        caretWidth: 3, caretBlinkPeriod: 1000, scrollBeyondLastLine: true, wrapIndentMode: 2)
+    try await store.save(updated)
+    #expect(try await LocalAppSettingsStore(archiveURL: archive).load() == updated)
+}

@@ -103,20 +103,21 @@ struct EditorGroupWorkspaceViewTests {
         #expect(overlay.zone(at: NSPoint(x: 210, y: 200)) == .left)
     }
 
-    @Test @MainActor func dropZoneDividerAxisComesFromZoneIdentityNotAspectRatio() throws {
-        let right = EditorGroupDropZoneView(zone: .right)
-        right.frame = NSRect(x: 0, y: 0, width: 400, height: 20)
-        right.layoutSubtreeIfNeeded()
-        let rightDivider = try #require(right.layer?.sublayers?.first?.frame)
-        #expect(rightDivider.width < rightDivider.height)
-        #expect(rightDivider.height == 20)
-
-        let down = EditorGroupDropZoneView(zone: .down)
-        down.frame = NSRect(x: 0, y: 0, width: 20, height: 400)
-        down.layoutSubtreeIfNeeded()
-        let downDivider = try #require(down.layer?.sublayers?.first?.frame)
-        #expect(downDivider.width == 20)
-        #expect(downDivider.height < downDivider.width)
+    @Test @MainActor func dropPreviewUsesOneUniformSubtleBorderInBothAppearances() throws {
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.appearance = NSAppearance(named: appearance)
+            for zone in EditorGroupDropOverlay.Zone.allCases {
+                let preview = EditorGroupDropZoneView(zone: zone)
+                window.contentView = preview
+                preview.setHighlighted(true)
+                #expect(preview.layer?.borderWidth == 1)
+                #expect((preview.layer?.borderColor?.alpha ?? 1) < 0.5)
+                #expect(preview.layer?.sublayers?.isEmpty ?? true)
+            }
+            window.close()
+        }
     }
 
     @Test @MainActor func edgeDropRejectsLastTabMoveButAllowsOptionClone() {

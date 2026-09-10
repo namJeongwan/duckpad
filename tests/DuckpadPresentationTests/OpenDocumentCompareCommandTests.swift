@@ -298,12 +298,12 @@ private func makeCompareController() async -> (DuckpadWindowController, ScratchW
     #expect(presenter.presented.first?.rightTitle == "On Disk")
 }
 
-@Test @MainActor func viewMenuContainsValidatedCompareCommand() async {
+@Test @MainActor func toolsMenuContainsValidatedCompareCommand() async {
     let (controller, _, _, _) = await makeCompareController()
     defer { controller.close() }
     let menu = DuckpadMainMenuFactory.make(target: controller)
-    let view = menu.items.first(where: { $0.submenu?.title == "View" })?.submenu
-    let item = view?.items.first(where: { $0.title == "Compare with Open Document…" })
+    let tools = menu.items.first(where: { $0.submenu?.title == "Tools" })?.submenu
+    let item = tools?.items.first(where: { $0.title == "Compare with Open Document…" })
 
     #expect(item?.action == #selector(DuckpadWindowController.performCompareWithOpenDocument(_:)))
     #expect(item?.target === controller)

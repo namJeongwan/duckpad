@@ -18,8 +18,12 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
     private var failureAlerts: [ObjectIdentifier: NSAlert] = [:]
     private var generation: UInt64 = 0
 
+    var comparisonWindowForTesting: NSWindow? { activePanel?.window }
     var hasPendingDiffForTesting: Bool { pendingDiff != nil }
     var failureSheetCountForTesting: Int { failureAlerts.count }
+
+    public var hasPresentedSnapshot: Bool { activePanel != nil }
+    public var restoresEditorFocusAfterDismissal: Bool { false }
 
     public init() {
         diffBuilder = { left, right in try AlignedLineDiff.build(left: left, right: right) }

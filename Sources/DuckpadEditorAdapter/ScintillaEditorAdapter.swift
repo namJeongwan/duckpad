@@ -75,6 +75,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private var recoveryBuffers: [BufferID: RecoveryBuffer] = [:]
     private var viewStates: [BufferID: EditorViewState] = [:]
     private var acceptedEdits: [BufferID: [EditorIncrementalEdit]] = [:]
+    private var displayPreferences = AppSettings.defaults
     private var bufferViews: [BufferID: DPScintillaEditorView] = [:]
     private var secondaryBufferViews: [BufferID: DPScintillaEditorView] = [:]
     private var groupPeerViews: [BufferID: [DPScintillaEditorView]] = [:]
@@ -92,9 +93,18 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     private let primaryHost = NSView(frame: .zero)
     private let internalSecondaryHost = NSView(frame: .zero)
     private let secondaryGroupHost = NSView(frame: .zero)
-    private let additionalGroupHosts: [EditorGroupID: NSView] = [.tertiary: NSView(), .quaternary: NSView()]
+    private var additionalGroupHosts: [EditorGroupID: NSView] = [.tertiary: NSView(), .quaternary: NSView()]
 
     public var additionalEditorGroupViews: [EditorGroupID: NSView] { additionalGroupHosts }
+    public func editorGroupHost(for group: EditorGroupID) -> NSView {
+        if group == .primary { return primaryHost }
+        if group == .secondary { return secondaryGroupHost }
+        if let host = additionalGroupHosts[group] { return host }
+        let host = NSView()
+        additionalGroupHosts[group] = host
+        return host
+    }
+
     private var primaryActiveView: DPScintillaEditorView?
     private var secondaryActiveView: DPScintillaEditorView?
     public private(set) var splitOrientation: EditorSplitOrientation?
@@ -208,12 +218,15 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     public func retainEditorGroups(_ groups: Set<EditorGroupID>) {
-        for group in EditorGroupID.allCases where !groups.contains(group) {
+        for group in Array(displayedGroupViews.keys) where !groups.contains(group) {
             displayedGroupViews.removeValue(forKey: group)?.removeFromSuperview()
             displayedGroupBuffers.removeValue(forKey: group)
             for bufferID in Array(bufferGroupViews.keys) {
                 bufferGroupViews[bufferID]?[group] = nil
             }
+        }
+        for group in Array(additionalGroupHosts.keys) where !groups.contains(group) && !EditorGroupID.predefined.contains(group) {
+            additionalGroupHosts.removeValue(forKey: group)?.removeFromSuperview()
         }
     }
 
@@ -397,7 +410,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         bufferOwners.removeValue(forKey: bufferID)
         bufferGroupViews.removeValue(forKey: bufferID)
         pendingGroupRecoveryViewStates.removeValue(forKey: bufferID)
-        for group in EditorGroupID.allCases where displayedGroupBuffers[group]?.bufferID == bufferID {
+        for group in Array(displayedGroupBuffers.keys) where displayedGroupBuffers[group]?.bufferID == bufferID {
             displayedGroupBuffers.removeValue(forKey: group)
             displayedGroupViews.removeValue(forKey: group)?.removeFromSuperview()
         }
@@ -592,6 +605,26 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     public func setDefaultViewOptions(wordWrapEnabled: Bool, wrapMarkerVisible: Bool) {
         defaultViewState.wordWrapEnabled = wordWrapEnabled
         defaultViewState.wrapMarkerVisible = wrapMarkerVisible
+    }
+
+    public func applyPreferences(_ settings: AppSettings) {
+        displayPreferences = settings
+        setDefaultViewOptions(wordWrapEnabled: settings.defaultWordWrapEnabled,
+                              wrapMarkerVisible: settings.defaultWrapMarkerVisible)
+        let views = Array(bufferViews.values) + Array(secondaryBufferViews.values)
+            + groupPeerViews.values.flatMap { $0 }
+        for view in views { applyDisplayPreferences(to: view) }
+    }
+
+    private func applyDisplayPreferences(to view: DPScintillaEditorView) {
+        let settings = displayPreferences
+        view.configureDisplay(withLineNumbers: settings.lineNumbersVisible,
+                              bookmarkMargin: settings.bookmarkMarginVisible,
+                              highlightCurrentLine: settings.highlightCurrentLine,
+                              caretWidth: settings.caretWidth,
+                              caretBlinkPeriod: settings.caretBlinkPeriod,
+                              scrollBeyondLastLine: settings.scrollBeyondLastLine,
+                              wrapIndentMode: settings.wrapIndentMode)
     }
 
     public var isWhitespaceVisible: Bool { activeScintillaView?.isWhitespaceVisible ?? false }
@@ -1391,6 +1424,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
         publisher: DPScintillaEditorView
     ) -> DPScintillaEditorView {
         let peer = DPScintillaEditorView(frame: secondaryGroupHost.bounds)
+        applyDisplayPreferences(to: peer)
         documentIntelligenceContextIDs[ObjectIdentifier(peer)] = DocumentIntelligenceContextID()
         navigationContextIDs[ObjectIdentifier(peer)] = EditorNavigationContextID()
         peer.shareDocument(with: publisher)
@@ -1401,11 +1435,11 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     private func attach(_ editorView: DPScintillaEditorView, to group: EditorGroupID) {
-        let host = group == .primary ? primaryHost : (additionalGroupHosts[group] ?? secondaryGroupHost)
+        let host = editorGroupHost(for: group)
         guard displayedGroupViews[group] !== editorView || editorView.superview !== host else {
             return
         }
-        for other in EditorGroupID.allCases
+        for other in Array(displayedGroupViews.keys)
         where other != group && displayedGroupViews[other] === editorView {
             displayedGroupViews.removeValue(forKey: other)
             displayedGroupBuffers.removeValue(forKey: other)
@@ -1420,7 +1454,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
 
     private func visibleGroup(containing editorView: DPScintillaEditorView) -> EditorGroupID? {
         guard hasVisibleGroups else { return nil }
-        return EditorGroupID.allCases.first { displayedGroupViews[$0] === editorView }
+        return displayedGroupViews.first { $0.value === editorView }?.key
     }
 
     private func canonicalOwnerView(for bufferID: BufferID) -> DPScintillaEditorView? {
@@ -1501,7 +1535,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
     }
 
     private func updateDisplayedRevision(_ revision: UInt64, for bufferID: BufferID) {
-        for group in EditorGroupID.allCases
+        for group in Array(displayedGroupBuffers.keys)
         where displayedGroupBuffers[group]?.bufferID == bufferID {
             displayedGroupBuffers[group] = EditorBufferDescriptor(
                 bufferID: bufferID,
@@ -1612,6 +1646,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
 
     private func makeView(for bufferID: BufferID) -> DPScintillaEditorView {
         let editorView = DPScintillaEditorView(frame: view.bounds)
+        applyDisplayPreferences(to: editorView)
         documentIntelligenceContextIDs[ObjectIdentifier(editorView)] = DocumentIntelligenceContextID()
         navigationContextIDs[ObjectIdentifier(editorView)] = EditorNavigationContextID()
         editorView.onWillModifyDocument = { [weak self, weak editorView] in
@@ -1776,6 +1811,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, LanguageEditorPort,
             secondary = existing
         } else {
             secondary = DPScintillaEditorView(frame: internalSecondaryHost.bounds)
+            applyDisplayPreferences(to: secondary)
             documentIntelligenceContextIDs[ObjectIdentifier(secondary)] = DocumentIntelligenceContextID()
             navigationContextIDs[ObjectIdentifier(secondary)] = EditorNavigationContextID()
             secondary.shareDocument(with: primary)

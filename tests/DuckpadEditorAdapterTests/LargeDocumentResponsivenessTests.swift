@@ -167,7 +167,7 @@ struct LargeDocumentResponsivenessTests {
                 window.contentView?.layoutSubtreeIfNeeded()
                 try await Task.sleep(for: .milliseconds(30))
                 window.contentView?.layoutSubtreeIfNeeded()
-                let panes = EditorGroupID.allCases.compactMap { surface.pane(for: $0) }
+                let panes = EditorGroupID.predefined.compactMap { surface.pane(for: $0) }
                 let generations = panes.map { $0.tabStrip.flowLayout.layoutGeneration }
                 let frames = panes.map(\.frame)
                 try await Task.sleep(for: .milliseconds(30))

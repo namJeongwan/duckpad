@@ -23,7 +23,7 @@ private func makeCommandBarMenu(
     let app = NSMenuItem(title: "Duckpad", action: nil, keyEquivalent: "")
     app.submenu = NSMenu(title: "Duckpad")
     main.addItem(app)
-    for title in ["File", "Format", "Edit", "Search", "View", "Tabs", "Window", "Language", "Extensions"] {
+    for title in WindowCommandBarView.presentedMenuTitles {
         let root = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         let menu = overridingMenus[title] ?? NSMenu(title: title)
         let command = NSMenuItem(
@@ -156,8 +156,8 @@ struct WindowCommandBarViewTests {
         bar.apply(mainMenu: main)
 
         #expect(bar.menuTitles == [
-            "File", "Edit", "Search", "View", "Format",
-            "Language", "Tabs", "Extensions", "Window",
+            "File", "Edit", "Search", "View", "Encoding",
+            "Language", "Preferences", "Tools", "Plugins", "Window", "Help",
         ])
         #expect(bar.menu(named: "File") === fileMenu)
         #expect(bar.menu(named: "File")?.items.first === fileCommand)

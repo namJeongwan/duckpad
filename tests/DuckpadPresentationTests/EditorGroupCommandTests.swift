@@ -191,7 +191,7 @@ private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPor
 @Suite(.serialized)
 struct EditorGroupCommandTests {
     @Test @MainActor
-    func adjacentSplitsRouteFourVisiblePanesAndKeepTheSourceEditorPopulated() async throws {
+    func adjacentSplitsRouteDynamicPanesAndKeepTheSourceEditorPopulated() async throws {
         let fixture = await makeEditorGroupController(tabCount: 5)
         defer { fixture.controller.close() }
         let tabs = fixture.workspace.snapshot().tabs
@@ -219,9 +219,17 @@ struct EditorGroupCommandTests {
             let buffer = try #require(tabs.first(where: { $0.id == selected })?.buffer)
             #expect(fixture.router.visibleBuffers[group] == buffer)
         }
-        let before = layout
-        fixture.controller.editorGroupWorkspace.onAction?(.splitAdjacent(remaining[0].id, .primary, .primary, .left, .move))
-        #expect(fixture.controller.editorGroupLayoutSnapshot == before)
+        let drop = fixture.controller.editorGroupWorkspace
+        let bottom = NSPoint(x: drop.dropOverlay.bounds.midX, y: drop.dropOverlay.bounds.minY + 2)
+        let payload = EditorGroupDragPayload(tabID: remaining[0].id, sourceGroup: .primary)
+        #expect(drop.updateEdgeDrop(payload: payload, location: bottom, optionPressed: false) == .move)
+        #expect(drop.performEdgeDrop(payload: payload, location: bottom, optionPressed: false))
+        let expanded = fixture.controller.editorGroupLayoutSnapshot
+        #expect(expanded.visibleGroups.count == 5)
+        let fifth = try #require(expanded.visibleGroups.first { !EditorGroupID.predefined.contains($0) })
+        #expect(fixture.controller.editorGroupWorkspace.pane(for: fifth) != nil)
+        #expect(fixture.router.visibleBuffers[fifth] == remaining[0].buffer)
+        fixture.controller.editorGroupWorkspace.onAction?(.context(remaining[0].id, fifth, .closeEditorGroup))
         fixture.controller.editorGroupWorkspace.onAction?(.context(active.id, .secondary, .closeEditorGroup))
         let closed = fixture.controller.editorGroupLayoutSnapshot
         #expect(closed.visibleGroups.count == 3)
@@ -1148,4 +1156,18 @@ private extension NSMenu {
             $0.item(withTitle: title, recursively: true)
         }.first
     }
+}
+
+@Test @MainActor func preferencesHideAndRestoreChromeWithoutDisablingDocumentCommands() async throws {
+    let fixture = await makeEditorGroupController(tabCount: 2)
+    defer { fixture.controller.close() }
+    fixture.controller.applyPreferences(AppSettings(menuBarVisible: false, statusBarVisible: false, tabDragEnabled: false))
+    #expect(fixture.controller.workspaceChromeSmokeState().statusBarHeight == 0)
+    #expect(fixture.controller.commandBar.isHidden)
+    #expect(fixture.controller.tabStrip.collectionView(fixture.controller.tabStrip.hostedCollectionView, pasteboardWriterForItemAt: IndexPath(item: 0, section: 0)) == nil)
+    #expect(fixture.controller.tabStrip.interactionsEnabled)
+    fixture.controller.applyPreferences(.defaults)
+    #expect(fixture.controller.workspaceChromeSmokeState().statusBarHeight == 24)
+    #expect(!fixture.controller.commandBar.isHidden)
+    #expect(fixture.controller.tabStrip.collectionView(fixture.controller.tabStrip.hostedCollectionView, pasteboardWriterForItemAt: IndexPath(item: 0, section: 0)) != nil)
 }

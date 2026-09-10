@@ -760,6 +760,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             wordWrapEnabled: settings.defaultWordWrapEnabled,
             wrapMarkerVisible: settings.defaultWrapMarkerVisible
         ))
+        editor.applyPreferences(settings)
         let recoveryStore = verifiedRecoveryRoot.map { LocalRecoveryStore(verifiedRoot: $0) }
             ?? LocalRecoveryStore(root: recoveryRoot)
         let recoveryUseCase = SessionRecoveryUseCase(
@@ -805,6 +806,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             editorView: editor.view,
             secondaryEditorView: editor.secondaryGroupView,
             additionalEditorViews: editor.additionalEditorGroupViews,
+            additionalEditorViewProvider: { [weak editor] group in editor?.editorGroupHost(for: group) ?? NSView() },
             editorGroupRouter: editor,
             fileUseCase: fileUseCase,
             filePanels: panels,
@@ -841,6 +843,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private func register(_ runtime: WindowRuntime, recoveryRoot: URL) {
         let controller = runtime.controller
         let identifier = ObjectIdentifier(controller)
+        controller.applyPreferences(settingsUseCase.state.settings)
         windowControllers[identifier] = controller
         windowEditors[identifier] = runtime.editor
         windowRecoveryRoots[identifier] = recoveryRoot.standardizedFileURL
@@ -1075,13 +1078,11 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         case .light: NSApplication.shared.appearance = NSAppearance(named: .aqua)
         case .dark: NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
         }
-        for editor in windowEditors.values {
-            editor.setDefaultViewOptions(
-                wordWrapEnabled: settings.defaultWordWrapEnabled,
-                wrapMarkerVisible: settings.defaultWrapMarkerVisible
-            )
+        for editor in windowEditors.values { editor.applyPreferences(settings) }
+        for controller in windowControllers.values {
+            controller.applyPreferences(settings)
+            controller.refreshAppearance()
         }
-        for controller in windowControllers.values { controller.refreshAppearance() }
     }
 
     private func installDevelopmentAppIcon() {

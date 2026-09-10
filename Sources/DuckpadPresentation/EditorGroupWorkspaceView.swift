@@ -24,6 +24,7 @@ public final class EditorGroupWorkspaceView: NSView {
     public var onAction: ((Action) -> Void)?
 
     private let secondaryEditorHost: NSView
+    public var additionalEditorHostProvider: ((EditorGroupID) -> NSView)?
     private let additionalEditorHosts: [EditorGroupID: NSView]
     private var additionalPanes: [EditorGroupID: EditorGroupPaneView] = [:]
     private var renderedTree: EditorGroupLayoutTree?
@@ -35,7 +36,7 @@ public final class EditorGroupWorkspaceView: NSView {
         switch group {
         case .primary: primaryPane
         case .secondary: secondaryPane
-        case .tertiary, .quaternary: additionalPanes[group]
+        default: additionalPanes[group]
         }
     }
     private let modifierFlagsProvider: () -> NSEvent.ModifierFlags
@@ -157,7 +158,6 @@ public final class EditorGroupWorkspaceView: NSView {
         optionPressed: Bool
     ) -> EditorGroupDropOperation? {
         guard let layoutSnapshot,
-              layoutSnapshot.visibleGroups.count < 4,
               layoutSnapshot.visibleGroups.contains(dropTarget),
               layoutSnapshot.tabIDs(in: payload.sourceGroup).contains(payload.tabID),
               dropOverlay.zone(at: location) != nil else { return nil }
@@ -175,7 +175,6 @@ public final class EditorGroupWorkspaceView: NSView {
         optionPressed: Bool
     ) -> EditorGroupDropOperation? {
         guard let layoutSnapshot,
-              layoutSnapshot.visibleGroups.count < 4,
               layoutSnapshot.visibleGroups.contains(dropTarget),
               layoutSnapshot.tabIDs(in: payload.sourceGroup).contains(payload.tabID) else {
             cancelDrop()
@@ -349,9 +348,9 @@ public final class EditorGroupWorkspaceView: NSView {
             secondaryPane = pane
             bind(pane)
         }
-        for group in [EditorGroupID.tertiary, .quaternary] {
+        for group in groups.union(additionalPanes.keys) where group != .primary && group != .secondary {
             if groups.contains(group), additionalPanes[group] == nil {
-                let pane = EditorGroupPaneView(groupID: group, editorHostView: additionalEditorHosts[group] ?? NSView())
+                let pane = EditorGroupPaneView(groupID: group, editorHostView: additionalEditorHosts[group] ?? additionalEditorHostProvider?(group) ?? NSView())
                 additionalPanes[group] = pane
                 bind(pane)
             } else if !groups.contains(group), let pane = additionalPanes.removeValue(forKey: group) {
@@ -455,7 +454,7 @@ public final class EditorGroupWorkspaceView: NSView {
 
     private func isTransferDrop(_ payload: EditorGroupDragPayload, at point: NSPoint) -> Bool {
         payload.sourceGroup != dropTarget && dropOverlay.bounds.contains(point)
-            && (dropOverlay.zone(at: point, edgeFraction: 0.12) == nil || (layoutSnapshot?.visibleGroups.count ?? 0) >= 4)
+            && (dropOverlay.zone(at: point, edgeFraction: 0.12) == nil)
     }
 
     private func nativePayload(from sender: any NSDraggingInfo) -> EditorGroupDragPayload? {

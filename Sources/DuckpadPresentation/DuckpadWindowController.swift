@@ -235,6 +235,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let editorGroupRouter: (any EditorGroupRoutingPort)?
     private let searchPanel = SearchPanelView(frame: .zero)
     let commandBar = WindowCommandBarView(frame: .zero)
+    private var statusBarHeightConstraint: NSLayoutConstraint!
+    private var appPreferences = AppSettings.defaults
     let statusBar = DocumentStatusBarView(frame: .zero)
     private let persistenceBanner = PersistenceErrorBanner(frame: .zero)
     private let languageStatus = StatusBarButton(title: "Plain Text", target: nil, action: nil)
@@ -327,6 +329,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         editorView: NSView? = nil,
         secondaryEditorView: NSView? = nil,
         additionalEditorViews: [EditorGroupID: NSView] = [:],
+        additionalEditorViewProvider: ((EditorGroupID) -> NSView)? = nil,
         editorGroupRouter: (any EditorGroupRoutingPort)? = nil,
         errorPresenter: (any PersistenceErrorPresenting)? = nil,
         fileUseCase: FileDocumentUseCase? = nil,
@@ -378,6 +381,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             secondaryEditorHost: secondaryEditorView ?? NSView(),
             additionalEditorHosts: additionalEditorViews
         )
+        editorGroupWorkspace.additionalEditorHostProvider = additionalEditorViewProvider
         self.fileUseCase = fileUseCase
         self.filePanels = filePanels
         self.fileConflictPresenter = fileConflictPresenter
@@ -827,11 +831,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard workspaceInteractionsAreActionable,
               provisionalEditorGroupLayout == nil else { return }
         let layout = editorGroupLayout.snapshot
-        let cachedGroups = EditorGroupID.allCases.filter {
+        let cachedGroups = layout.visibleGroups.filter {
             cachedGroupIndex(for: id, in: $0, layout: layout) != nil
         }
         let groups = cachedGroups.isEmpty
-            ? EditorGroupID.allCases.filter { layout.tabIDs(in: $0).contains(id) }
+            ? layout.visibleGroups.filter { layout.tabIDs(in: $0).contains(id) }
             : cachedGroups
         let group = groups.contains(layout.focusedGroup) ? layout.focusedGroup : (groups.first ?? .primary)
         performActivate(id, in: group)
@@ -1085,7 +1089,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 }
                 if self.openDocumentCompareFocusGeneration == generation {
                     self.openDocumentCompareFocusGeneration = nil
-                    if !self.hasTornDownWindow {
+                    if !self.hasTornDownWindow, self.openDocumentComparePresenter.restoresEditorFocusAfterDismissal {
                         self.restoreEditorFocus(to: initiatingGroup)
                     }
                 }
@@ -1127,7 +1131,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func compareContent(_ comparison: OpenDocumentComparison) -> OpenDocumentCompareContent {
         let duplicateTitle = comparison.left.title == comparison.right.title
         return OpenDocumentCompareContent(
-            title: "Compare Open Documents",
+            title: "Diff — \(comparison.left.title) ↔ \(comparison.right.title)",
             leftTitle: duplicateTitle
                 ? "\(comparison.left.title) — \(comparison.left.fullPath ?? "Untitled")"
                 : comparison.left.title,
@@ -1150,7 +1154,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func invalidateOpenDocumentCompareIfNeeded(_ snapshot: WorkspaceSnapshot) {
-        guard !openDocumentCompareRevisions.isEmpty else { return }
+        guard !openDocumentCompareRevisions.isEmpty, !openDocumentComparePresenter.hasPresentedSnapshot else { return }
         let revisions = Dictionary(uniqueKeysWithValues: snapshot.tabs.map { ($0.id, $0.buffer.revision) })
         guard openDocumentCompareRevisions.contains(where: { revisions[$0.key] != $0.value }) else { return }
         cancelOpenDocumentCompare()
@@ -1173,6 +1177,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         activeEditor.focus()
     }
 
+    @objc public func performOpenUserGuide(_ sender: Any? = nil) {
+        guard let url = URL(string: "https://github.com/namJeongwan/duckpad#readme") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     @objc public func performShowCommandPalette(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable,
               let menu = NSApplication.shared.mainMenu else { return }
@@ -1181,6 +1190,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             excludingAction: #selector(performShowCommandPalette(_:)),
             relativeTo: commandBar
         )
+    }
+
+    public func applyPreferences(_ settings: AppSettings) {
+        appPreferences = settings
+        commandBar.setBarVisible(settings.menuBarVisible)
+        statusBar.isHidden = !settings.statusBarVisible
+        statusBarHeightConstraint?.constant = settings.statusBarVisible ? 24 : 0
+        for group in editorGroupLayout.snapshot.visibleGroups { tabStrip(for: group)?.applyPreferences(settings) }
     }
 
     public func applicationMainMenuDidChange(_ menu: NSMenu) {
@@ -2760,6 +2777,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         statusBar.lineEndingButton.action = #selector(performShowLineEndingMenu(_:))
         statusBar.modeButton.target = self
         statusBar.modeButton.action = #selector(performToggleOvertype(_:))
+        statusBarHeightConstraint = statusBar.heightAnchor.constraint(equalToConstant: 24)
         NSLayoutConstraint.activate([
             persistenceBanner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             persistenceBanner.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
@@ -2777,7 +2795,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             statusBar.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             statusBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             statusBar.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),
-            statusBar.heightAnchor.constraint(equalToConstant: 24),
+            statusBarHeightConstraint,
         ])
         if let mainMenu = NSApplication.shared.mainMenu {
             commandBar.apply(mainMenu: mainMenu)
@@ -2813,10 +2831,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         if let editorGroupRouter,
            let activeTabID = snapshot.tabs.first(where: \.isActive)?.id {
             let layout = editorGroupLayout.snapshot
-            let activeGroups = EditorGroupID.allCases.filter {
+            let activeGroups = layout.visibleGroups.filter {
                 layout.tabIDs(in: $0).contains(activeTabID)
             }
-            if activeGroups.count == 2 {
+            if activeGroups.count > 1 {
                 let preferredGroup = requestedEditorGroupSelection.flatMap {
                     $0.tabID == activeTabID ? $0.group : nil
                 } ?? editorGroupRouter.activeEditorGroup
@@ -2910,7 +2928,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
             return true
         case .activeTabChanged:
-            for group in EditorGroupID.allCases {
+            for group in currentLayout.visibleGroups {
                 let previousTabID = previousLayout.selectedTabID(in: group)
                 let currentTabID = currentLayout.selectedTabID(in: group)
                 guard previousTabID != currentTabID else { continue }
@@ -2959,10 +2977,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard previousLayout.orientation == currentLayout.orientation,
               change.snapshot.tabs.indices.contains(workspaceIndex) else { return false }
         let insertedTab = change.snapshot.tabs[workspaceIndex]
-        let previousGroups = EditorGroupID.allCases.filter {
+        let previousGroups = previousLayout.visibleGroups.filter {
             previousLayout.tabIDs(in: $0).contains(insertedTab.id)
         }
-        let currentGroups = EditorGroupID.allCases.filter {
+        let currentGroups = currentLayout.visibleGroups.filter {
             currentLayout.tabIDs(in: $0).contains(insertedTab.id)
         }
         guard previousGroups.isEmpty,
@@ -3034,7 +3052,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         _ layout: EditorGroupLayoutSnapshot,
         workspace snapshot: WorkspaceSnapshot
     ) {
-        editorGroupTabIndices = Dictionary(uniqueKeysWithValues: EditorGroupID.allCases.map { group in
+        editorGroupTabIndices = Dictionary(uniqueKeysWithValues: layout.visibleGroups.map { group in
             (group, Dictionary(uniqueKeysWithValues: layout.tabIDs(in: group).enumerated().map {
                 ($0.element, $0.offset)
             }))
@@ -3131,7 +3149,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         let activeTabID = workspace.tabs[currentIndex].id
         guard workspaceTabIndices[activeTabID] == currentIndex else { return false }
         let layout = editorGroupLayout.snapshot
-        let activeGroups = EditorGroupID.allCases.filter {
+        let activeGroups = layout.visibleGroups.filter {
             cachedGroupIndex(for: activeTabID, in: $0, layout: layout) != nil
         }
         guard !activeGroups.isEmpty else { return false }
@@ -3673,6 +3691,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func bindEditorGroupContextValidation() {
+        applyPreferences(appPreferences)
         bindEditorGroupContextValidation(tabStrip, group: .primary)
         for group in editorGroupLayout.snapshot.visibleGroups where group != .primary {
             if let strip = tabStrip(for: group) { bindEditorGroupContextValidation(strip, group: group) }

@@ -8,13 +8,14 @@ import AppKit
 @MainActor
 public final class WindowCommandBarView: NSVisualEffectView {
     public static let presentedMenuTitles = [
-        "File", "Edit", "Search", "View", "Format",
-        "Language", "Tabs", "Extensions", "Window",
+        "File", "Edit", "Search", "View", "Encoding",
+        "Language", "Preferences", "Tools", "Plugins", "Window", "Help",
     ]
 
     public private(set) var menuTitles: [String] = []
     public private(set) var activeMenuTitle: String?
 
+    private var barHeight: NSLayoutConstraint!
     private let stackView = NSStackView()
     private let bottomSeparator = NSBox()
     private var menusByTitle: [String: NSMenu] = [:]
@@ -52,12 +53,13 @@ public final class WindowCommandBarView: NSVisualEffectView {
         stackView.edgeInsets = NSEdgeInsets(top: 0, left: 5, bottom: 0, right: 5)
         stackView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stackView)
+        barHeight = heightAnchor.constraint(equalToConstant: 27)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 27),
+            barHeight,
             stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
             stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             stackView.topAnchor.constraint(equalTo: topAnchor),
-            stackView.bottomAnchor.constraint(equalTo: bottomSeparator.topAnchor),
+            stackView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
             bottomSeparator.leadingAnchor.constraint(equalTo: leadingAnchor),
             bottomSeparator.trailingAnchor.constraint(equalTo: trailingAnchor),
             bottomSeparator.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -68,6 +70,12 @@ public final class WindowCommandBarView: NSVisualEffectView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
+
+    public func setBarVisible(_ visible: Bool) {
+        if !visible { dismissMenu() }
+        barHeight.constant = visible ? 27 : 0
+        isHidden = !visible
+    }
 
     public func apply(mainMenu: NSMenu) {
         dismissMenu()

@@ -4,6 +4,8 @@ import DuckpadDomain
 
 @MainActor
 public protocol OpenDocumentComparePresenting: AnyObject {
+    var hasPresentedSnapshot: Bool { get }
+    var restoresEditorFocusAfterDismissal: Bool { get }
     func chooseTarget(
         source: TabSnapshot,
         candidates: [TabSnapshot],
@@ -19,6 +21,8 @@ public protocol OpenDocumentComparePresenting: AnyObject {
 }
 
 public extension OpenDocumentComparePresenting {
+    var hasPresentedSnapshot: Bool { false }
+    var restoresEditorFocusAfterDismissal: Bool { true }
     func presentFailure(_ error: OpenDocumentComparison.Error, attachedTo window: NSWindow?) {}
     func cancelOutstandingComparisons() {}
 }

@@ -1,6 +1,6 @@
 import DuckpadDomain
 
-/// Routes the existing editor and its capabilities between at most four
+/// Routes the existing editor and its capabilities between dynamically created
 /// window-local groups without exposing presentation or AppKit types.
 @MainActor
 public protocol EditorGroupRoutingPort: EditorPort {
