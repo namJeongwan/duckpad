@@ -1,3 +1,4 @@
+import Foundation
 import DuckpadApplication
 import DuckpadDomain
 import Testing
@@ -94,4 +95,15 @@ private final class AppSettingsStoreFake: AppSettingsStore {
     _ = await settings.update(AppSettings(editorFontName: "Monaco", editorFontSize: -1))
     #expect(settings.state.settings.editorFontName == "Monaco")
     #expect(settings.state.settings.editorFontSize == 6)
+}
+
+@Test @MainActor func fractionalFontSizesNormalizeAndLegacyIntegersDecode() async throws {
+    let store = AppSettingsStoreFake()
+    let settings = AppSettingsUseCase(store: store)
+    _ = await settings.update(AppSettings(editorFontSize: 18.256))
+    #expect(settings.state.settings.editorFontSize == 18.26)
+    _ = await settings.update(AppSettings(editorFontSize: .infinity))
+    #expect(settings.state.settings.editorFontSize == 13)
+    let encoded = try JSONEncoder().encode(AppSettings(editorFontSize: 18))
+    #expect(try JSONDecoder().decode(AppSettings.self, from: encoded).editorFontSize == 18)
 }

@@ -332,7 +332,7 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
     #expect(selected == nil)
 }
 
-@Test @MainActor func fontSizeInputCommitsOnEnterOrBlurAndRejectsInvalidValues() async throws {
+@Test @MainActor func fontSizeInputAppliesWhileTypingAndValidatesPasteAndStepper() async throws {
     _ = NSApplication.shared
     let controller = DuckpadSettingsWindowController()
     defer { controller.close() }
@@ -340,45 +340,140 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
     var task: Task<Void, Never>?
     controller.configure(settings: .defaults) { settings in saves.append(settings); return .saved(settings) }
     controller.onUpdateTaskStarted = { task = $0 }
-    let field = controller.editorFontSize
-    field.stringValue = "18"
-    let action = try #require(field.action)
-    #expect(NSApp.sendAction(action, to: field.target, from: field))
-    await task?.value
-    #expect(saves.count == 1)
-    #expect(saves.last?.editorFontSize == 18)
-    #expect(saves.last?.editorFontName == "Menlo")
     controller.selectCategory("Editing")
+    let field = controller.editorFontSize
     #expect(controller.window?.makeFirstResponder(field) == true)
     let editor = try #require(field.currentEditor() as? NSTextView)
     editor.selectAll(nil)
-    for character in "24" { editor.insertText(String(character), replacementRange: editor.selectedRange()) }
-    #expect(saves.count == 1)
-    controller.window?.makeFirstResponder(nil)
-    await task?.value
-    #expect(saves.count == 2)
-    #expect(saves.last?.editorFontSize == 24)
-    for invalid in ["", "abc", "5", "73", "12.5", "999999999999999999999999999"] {
-        field.stringValue = invalid
-        #expect(NSApp.sendAction(action, to: field.target, from: field))
-        #expect(field.stringValue == "24")
-        #expect(saves.count == 2)
+    for character in "24.5" {
+        editor.insertText(String(character), replacementRange: editor.selectedRange())
+        await task?.value
+        #expect(field.isEnabled)
     }
-    #expect(controller.window?.makeFirstResponder(field) == true)
-    let activeEditor = try #require(field.currentEditor() as? NSTextView)
-    activeEditor.selectAll(nil)
-    activeEditor.insertText("30", replacementRange: activeEditor.selectedRange())
-    func findCheckbox(_ view: NSView) -> NSButton? {
-        if let button = view as? NSButton, button.title == "Highlight current line" { return button }
-        return view.subviews.lazy.compactMap { findCheckbox($0) }.first
+    #expect(saves.last?.editorFontSize == 24.5)
+    #expect(editor.string == "24.5")
+    #expect(editor.selectedRange() == NSRange(location: 4, length: 0))
+    #expect(field.currentEditor() === editor)
+    for invalid in ["a", ".", "-", "12px", "1.2.3", "한", " ", "1e3"] {
+        editor.insertText(invalid, replacementRange: editor.selectedRange())
+        #expect(editor.string == "24.5")
     }
-    let root = try #require(controller.window?.contentView)
-    let checkbox = try #require(findCheckbox(root))
-    checkbox.state = .off
-    #expect(NSApp.sendAction(try #require(checkbox.action), to: checkbox.target, from: checkbox))
+    editor.selectAll(nil)
+    editor.insertText("18.25", replacementRange: editor.selectedRange())
     await task?.value
-    #expect(saves.count == 3)
-    #expect(saves.last?.editorFontSize == 30)
-    #expect(saves.last?.highlightCurrentLine == false)
+    #expect(saves.last?.editorFontSize == 18.25)
+    let stepper = controller.editorFontSizeStepper
+    #expect(stepper.minValue == 6 && stepper.maxValue == 72 && stepper.increment == 1)
+    stepper.doubleValue += stepper.increment
+    #expect(NSApp.sendAction(try #require(stepper.action), to: stepper.target, from: stepper))
+    await task?.value
+    #expect(saves.last?.editorFontSize == 19.25)
+    #expect(field.stringValue == "19.25")
+    stepper.doubleValue -= stepper.increment
+    #expect(NSApp.sendAction(try #require(stepper.action), to: stepper.target, from: stepper))
+    await task?.value
+    #expect(saves.last?.editorFontSize == 18.25)
+    editor.selectAll(nil)
+    editor.insertText("73", replacementRange: editor.selectedRange())
+    #expect(saves.last?.editorFontSize == 18.25)
+    #expect(NSApp.sendAction(try #require(field.action), to: field.target, from: field))
+    #expect(field.stringValue == "18.25")
+}
 
+@Test @MainActor func fontSizeLiveSavesKeepLatestTypingWhilePersistenceIsPending() async throws {
+    _ = NSApplication.shared
+    let gate = SettingsSaveGate()
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var saves: [Double] = []
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { settings in
+        await gate.wait()
+        saves.append(settings.editorFontSize)
+        return .saved(settings)
+    }
+    controller.onUpdateTaskStarted = { task = $0 }
+    controller.selectCategory("Editing")
+    let field = controller.editorFontSize
+    #expect(controller.window?.makeFirstResponder(field) == true)
+    let editor = try #require(field.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    editor.insertText("18", replacementRange: editor.selectedRange())
+    #expect(controller.isUpdating)
+    #expect(field.isEnabled && controller.editorFontSizeStepper.isEnabled)
+    editor.selectAll(nil)
+    editor.insertText("24.5", replacementRange: editor.selectedRange())
+    #expect(editor.string == "24.5")
+    await gate.open()
+    await task?.value
+    #expect(saves == [18, 24.5])
+    #expect(editor.string == "24.5")
+    #expect(editor.selectedRange() == NSRange(location: 4, length: 0))
+}
+
+@Test @MainActor func fontSizeStepperDoesNotLoseClicksAcrossSlowSaves() async throws {
+    _ = NSApplication.shared
+    let first = SettingsSaveGate()
+    let second = SettingsSaveGate()
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var attempts = 0
+    var saved: [Double] = []
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { settings in
+        attempts += 1
+        if attempts == 1 { await first.wait() }
+        if attempts == 2 { await second.wait() }
+        saved.append(settings.editorFontSize)
+        return .saved(settings)
+    }
+    controller.onUpdateTaskStarted = { task = $0 }
+    let stepper = controller.editorFontSizeStepper
+    let action = try #require(stepper.action)
+    stepper.doubleValue = 22
+    #expect(NSApp.sendAction(action, to: stepper.target, from: stepper))
+    stepper.doubleValue += 1
+    #expect(NSApp.sendAction(action, to: stepper.target, from: stepper))
+    await first.open()
+    for _ in 0..<1_000 where attempts < 2 { await Task.yield() }
+    #expect(attempts == 2)
+    #expect(controller.editorFontSize.stringValue == "23")
+    #expect(stepper.doubleValue == 23)
+    stepper.doubleValue += 1
+    #expect(NSApp.sendAction(action, to: stepper.target, from: stepper))
+    await second.open()
+    await task?.value
+    #expect(saved == [22, 23, 24])
+    #expect(controller.editorFontSize.stringValue == "24")
+    #expect(stepper.doubleValue == 24)
+}
+
+@Test @MainActor func fontSizeFailedSavePreservesNewerQueuedTyping() async throws {
+    _ = NSApplication.shared
+    let gate = SettingsSaveGate()
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var attempts = 0
+    var saved: Double?
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { settings in
+        attempts += 1
+        if attempts == 1 { await gate.wait(); return .failed(.writeFailed("fixture")) }
+        saved = settings.editorFontSize
+        return .saved(settings)
+    }
+    controller.onUpdateTaskStarted = { task = $0 }
+    controller.selectCategory("Editing")
+    let field = controller.editorFontSize
+    #expect(controller.window?.makeFirstResponder(field) == true)
+    let editor = try #require(field.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    editor.insertText("18", replacementRange: editor.selectedRange())
+    editor.selectAll(nil)
+    editor.insertText("24.5", replacementRange: editor.selectedRange())
+    await gate.open()
+    await task?.value
+    #expect(saved == 24.5)
+    #expect(field.stringValue == "24.5")
+    #expect(controller.editorFontSizeStepper.doubleValue == 24.5)
 }

@@ -34,6 +34,9 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     private var numberControls: [(NSPopUpButton, WritableKeyPath<AppSettings, Int>)] = []
     let editorFont = EditorFontComboBox()
     let editorFontSize = NSTextField(string: "13")
+    let editorFontSizeStepper = NSStepper()
+    private var preservesFontSizeDraft = false
+    private var pendingFontSize: Double?
     private let appearance = NSPopUpButton(frame: .zero, pullsDown: false)
     private let wordWrap = NSButton(checkboxWithTitle: "Wrap long lines in new tabs", target: nil, action: nil)
     private let wrapMarkers = NSButton(checkboxWithTitle: "Show wrap symbols in new tabs", target: nil, action: nil)
@@ -221,11 +224,20 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         editorFontSize.action = #selector(fontSizeChanged(_:))
         editorFontSize.delegate = self
         editorFontSize.alignment = .right
+        editorFontSize.formatter = FontSizeFormatter()
         editorFontSize.setAccessibilityLabel(fontSizeLabel)
         editorFontSize.setAccessibilityIdentifier("duckpad.settings.editor-font-size")
-        editorFontSize.toolTip = NSLocalizedString("preferences.editor.font.size.range", value: "Enter a whole number from 6 to 72", comment: "Valid editor font size range")
+        editorFontSize.toolTip = NSLocalizedString("preferences.editor.font.size.range", value: "Enter a size from 6 to 72 points", comment: "Valid editor font size range")
         editorFontSize.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        let fontSizeRow = NSStackView(views: [NSTextField(labelWithString: fontSizeLabel), editorFontSize])
+        editorFontSizeStepper.minValue = 6
+        editorFontSizeStepper.maxValue = 72
+        editorFontSizeStepper.increment = 1
+        editorFontSizeStepper.valueWraps = false
+        editorFontSizeStepper.target = self
+        editorFontSizeStepper.action = #selector(stepFontSize(_:))
+        editorFontSizeStepper.setAccessibilityLabel(fontSizeLabel)
+        editorFontSizeStepper.setAccessibilityIdentifier("duckpad.settings.editor-font-size-stepper")
+        let fontSizeRow = NSStackView(views: [NSTextField(labelWithString: fontSizeLabel), editorFontSize, editorFontSizeStepper])
         fontSizeRow.spacing = 12
         (pages["Editing"] as? NSStackView)?.addArrangedSubview(fontSizeRow)
         checkbox("Automatically reload files changed on disk", \.liveFileReloadEnabled, "General")
@@ -312,29 +324,60 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         startUpdate(proposed)
     }
 
+    private var enteredFontSize: Double? {
+        let text = editorFontSize.stringValue
+        guard FontSizeFormatter.accepts(text), let value = Double(text), value.isFinite,
+              (6...72).contains(value) else { return nil }
+        return (value * 100).rounded() / 100
+    }
+
+    private func sizeText(_ value: Double) -> String {
+        let value = value.isFinite ? min(max(value, 6), 72) : 13
+        return value.rounded() == value ? String(Int(value)) : String(value)
+    }
+
+    public func controlTextDidChange(_ notification: Notification) {
+        guard notification.object as? NSTextField === editorFontSize,
+              !((editorFontSize.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) else { return }
+        guard let size = enteredFontSize else { pendingFontSize = nil; return }
+        editorFontSizeStepper.doubleValue = size
+        submitFontSize(size)
+    }
+
     public func controlTextDidEndEditing(_ notification: Notification) {
         guard notification.object as? NSTextField === editorFontSize else { return }
         fontSizeChanged(editorFontSize)
     }
 
-    @objc private func fontSizeChanged(_ sender: Any?) {
-        guard !isUpdating, !((editorFontSize.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) else { return }
-        let input = editorFontSize.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let size = Int(input), (6...72).contains(size) else {
-            editorFontSize.stringValue = String(settings.editorFontSize)
-            status.stringValue = NSLocalizedString("preferences.editor.font.size.invalid", value: "Font size must be a whole number from 6 to 72.", comment: "Invalid font size feedback")
-            return
-        }
-        guard size != settings.editorFontSize else {
-            editorFontSize.stringValue = String(size)
-            return
-        }
-        var proposed = settings
-        proposed.editorFontSize = size
-        startUpdate(proposed)
+    @objc private func stepFontSize(_ sender: NSStepper) {
+        editorFontSize.stringValue = sizeText(sender.doubleValue)
+        submitFontSize(sender.doubleValue)
     }
 
-    private func startUpdate(_ proposed: AppSettings) {
+    @objc private func fontSizeChanged(_ sender: Any?) {
+        guard !((editorFontSize.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) else { return }
+        guard let size = enteredFontSize else {
+            if !isUpdating { editorFontSize.stringValue = sizeText(settings.editorFontSize) }
+            status.stringValue = NSLocalizedString("preferences.editor.font.size.invalid", value: "Font size must be between 6 and 72 points.", comment: "Invalid font size feedback")
+            return
+        }
+        editorFontSize.stringValue = sizeText(size)
+        submitFontSize(size)
+    }
+
+    private func submitFontSize(_ size: Double) {
+        guard acceptsUpdates?() ?? true else { return }
+        if isUpdating {
+            pendingFontSize = size
+            return
+        }
+        guard size != settings.editorFontSize else { return }
+        var proposed = settings
+        proposed.editorFontSize = size
+        startUpdate(proposed, editingSize: true)
+    }
+
+    private func startUpdate(_ proposed: AppSettings, editingSize: Bool = false) {
         guard !isUpdating, acceptsUpdates?() ?? true else {
             NSSound.beep()
             return
@@ -344,13 +387,25 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         var proposed = proposed
         if proposed.editorFontSize == settings.editorFontSize,
            !((editorFontSize.currentEditor() as? NSTextView)?.hasMarkedText() ?? false),
-           let size = Int(editorFontSize.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)),
-           (6...72).contains(size) {
+           let size = enteredFontSize {
             proposed.editorFontSize = size
         }
+        preservesFontSizeDraft = editingSize
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.apply(proposed)
+            var next = proposed
+            while true {
+                await self.apply(next)
+                guard let size = self.pendingFontSize else { break }
+                self.pendingFontSize = nil
+                guard size != self.settings.editorFontSize else { break }
+                next = self.settings
+                next.editorFontSize = size
+            }
+            self.preservesFontSizeDraft = false
+            if self.editorFontSize.currentEditor() == nil {
+                self.editorFontSize.stringValue = self.sizeText(self.settings.editorFontSize)
+            }
             self.setControlsEnabled(true)
             self.updateTask = nil
         }
@@ -369,7 +424,10 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             render(saved)
             status.stringValue = "Saved, but durability could not be confirmed: \(failure)"
         case .failed(let failure):
+            let preserveDraft = preservesFontSizeDraft
+            if pendingFontSize == nil { preservesFontSizeDraft = false }
             render(settings)
+            preservesFontSizeDraft = preserveDraft
             status.stringValue = "Could not save preferences: \(failure)"
             NSSound.beep()
             showWindow(nil)
@@ -379,7 +437,10 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     private func render(_ settings: AppSettings) {
         self.settings = settings
         editorFont.display(fontName: settings.editorFontName)
-        editorFontSize.stringValue = String(settings.editorFontSize)
+        if !preservesFontSizeDraft {
+            editorFontSize.stringValue = sizeText(settings.editorFontSize)
+        }
+        editorFontSizeStepper.doubleValue = enteredFontSize ?? settings.editorFontSize
         for (button, key) in booleanControls { button.state = settings[keyPath: key] ? .on : .off }
         for (popup, key) in numberControls {
             if let item = popup.itemArray.first(where: { $0.representedObject as? Int == settings[keyPath: key] }) {
@@ -399,7 +460,8 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         for (button, _) in booleanControls { button.isEnabled = enabled }
         for (popup, _) in numberControls { popup.isEnabled = enabled }
         editorFont.isEnabled = enabled
-        editorFontSize.isEnabled = enabled
+        editorFontSize.isEnabled = enabled || preservesFontSizeDraft
+        editorFontSizeStepper.isEnabled = enabled || preservesFontSizeDraft
         appearance.isEnabled = enabled
         wordWrap.isEnabled = enabled
         wrapMarkers.isEnabled = enabled && wordWrap.state == .on
