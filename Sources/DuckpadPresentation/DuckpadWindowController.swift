@@ -1383,7 +1383,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performShowFileFormatMenu(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable, fileUseCase != nil else { return }
-        let menu = DuckpadMainMenuFactory.makeEncodingMenu(target: self)
+        let menu = DuckpadMainMenuFactory.makeFileFormatStatusMenu(target: self)
         menu.popUp(
             positioning: nil,
             at: NSPoint(x: 0, y: fileFormatStatus.bounds.height + 2),
@@ -4259,7 +4259,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case .mixed: statusBar.lineEndingButton.title = "Mixed EOL"
         }
         statusBar.lineEndingButton.toolTip = "Line endings: \(ending). Choose to convert and save."
-        fileFormatStatus.toolTip = "Encoding: \(encoding). Choose to convert and save."
+        fileFormatStatus.toolTip = "Encoding: \(encoding). Choose to reopen a file with another encoding or convert and save the displayed text."
         fileFormatStatus.setAccessibilityValue("\(encoding), \(ending)")
     }
 

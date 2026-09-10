@@ -252,6 +252,7 @@ UndoHistory::~UndoHistory() noexcept = default;
 
 const char *UndoHistory::AppendAction(ActionType at, Sci::Position position, const char *data, Sci::Position lengthData,
 	bool &startSequence, bool mayCoalesce) {
+	const auto now = std::chrono::steady_clock::now();
 	//Platform::DebugPrintf("%% %d action %d %d %d\n", at, position, lengthData, currentAction);
 	//Platform::DebugPrintf("^ %d action %d %d\n", actions[currentAction - 1].at,
 	//	actions[currentAction - 1].position, actions[currentAction - 1].lenData);
@@ -284,6 +285,9 @@ const char *UndoHistory::AppendAction(ActionType at, Sci::Position position, con
 				coalesce = false;
 			} else if (at == ActionType::container || actions.types[targetAct].at == ActionType::container) {
 				;	// A coalescible containerAction
+			} else if (!TentativeActive() && now - lastEditTime >= std::chrono::milliseconds(300)) {
+				// Duckpad: split idle typing/deletion without splitting explicit groups or IME composition.
+				coalesce = false;
 			} else if ((at != actions.types[targetAct].at)) { // } && (!actions.AtStart(targetAct))) {
 				coalesce = false;
 			} else if ((at == ActionType::insert) &&
@@ -329,6 +333,8 @@ const char *UndoHistory::AppendAction(ActionType at, Sci::Position position, con
 	}
 	actions.Create(currentAction, at, position, lengthData, mayCoalesce);
 	currentAction++;
+	if (at != ActionType::container)
+		lastEditTime = now;
 	return dataNew;
 }
 

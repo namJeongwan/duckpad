@@ -18,6 +18,7 @@ public struct FileWorkspaceContext: Equatable, Sendable {
 public enum FileOperationFailure: Error, Equatable, Sendable {
     case cancelled
     case noActiveDocument
+    case unsavedChanges(TabID)
     case editorSnapshotUnavailable(BufferID)
     case editorRevisionMismatch(bufferID: BufferID, expected: UInt64, actual: UInt64)
     case codec(TextFileCodecError)
@@ -367,7 +368,7 @@ public final class FileDocumentUseCase {
                 encodingHint: encodingHint,
                 securityScopedBookmark: access.bookmark
             )
-            if case .failed = outcome {
+            if case .failed = outcome, workspace.tabID(canonicalPath: canonical.path) == nil {
                 await store.releaseSecurityScopedAccess(
                     forCanonicalPath: canonical.path,
                     ownerID: securityScopeOwnerID
@@ -375,7 +376,7 @@ public final class FileDocumentUseCase {
             }
             return outcome
         } catch let error {
-            if let preparedPath {
+            if let preparedPath, workspace.tabID(canonicalPath: preparedPath) == nil {
                 await store.releaseSecurityScopedAccess(
                     forCanonicalPath: preparedPath,
                     ownerID: securityScopeOwnerID
@@ -415,7 +416,7 @@ public final class FileDocumentUseCase {
                 encodingHint: encodingHint,
                 securityScopedBookmark: access.bookmark
             )
-            if case .failed = outcome {
+            if case .failed = outcome, workspace.tabID(canonicalPath: canonical.path) == nil {
                 await store.releaseSecurityScopedAccess(
                     forCanonicalPath: canonical.path,
                     ownerID: securityScopeOwnerID
@@ -423,7 +424,7 @@ public final class FileDocumentUseCase {
             }
             return outcome
         } catch let error {
-            if let preparedPath {
+            if let preparedPath, workspace.tabID(canonicalPath: preparedPath) == nil {
                 await store.releaseSecurityScopedAccess(
                     forCanonicalPath: preparedPath,
                     ownerID: securityScopeOwnerID
@@ -439,27 +440,69 @@ public final class FileDocumentUseCase {
         encodingHint: TextFileEncoding?,
         securityScopedBookmark: Data?
     ) async throws(TextFileStoreError) -> FileOpenOutcome {
-        if let existing = workspace.tabID(canonicalPath: canonical.path) {
+        let existing = workspace.tabID(canonicalPath: canonical.path)
+        if let existing, encodingHint == nil {
             switch await workspace.activate(tabID: existing) {
             case .applied: return .activatedExisting(existing)
             case .persistenceFailed(let failure): return .failed(.workspace(failure))
             case .rejected(let error): return .failed(.session(error))
             }
         }
+        let reopening = existing.flatMap { workspace.fileContext(tabID: $0) }
+        if let existing, workspace.snapshot().tabs.first(where: { $0.id == existing })?.isDirty != false {
+            return .failed(.unsavedChanges(existing))
+        }
         let read: FileReadResult
         if let prepared { read = prepared }
         else { read = try await store.read(from: canonical) }
         guard !Task.isCancelled else { return .failed(.cancelled) }
-        let decoded = TextFileCodec.decodeForDisplay(read.data, assuming: encodingHint)
+        let decoded: DecodedTextFile
+        if let encodingHint {
+            do {
+                decoded = try TextFileCodec.decode(read.data, assuming: encodingHint)
+            } catch { return .failed(.codec(error)) }
+        } else {
+            decoded = TextFileCodec.decodeForDisplay(read.data)
+        }
         let binding = FileBinding(
             canonicalPath: read.identity.canonicalPath,
             encoding: decoded.encoding,
             byteOrderMark: decoded.byteOrderMark,
             lineEnding: decoded.lineEnding,
             observedIdentity: read.identity,
-            securityScopedBookmark: securityScopedBookmark
+            securityScopedBookmark: securityScopedBookmark ?? reopening?.binding?.securityScopedBookmark
         )
         guard !Task.isCancelled else { return .failed(.cancelled) }
+        if let reopening {
+            switch await workspace.replaceFileContents(
+                tabID: reopening.tabID,
+                binding: binding,
+                title: canonical.lastPathComponent,
+                expectedRevision: reopening.buffer.revision,
+                expectedBinding: reopening.binding
+            ) {
+            case .applied:
+                guard let refreshed = workspace.fileContext(tabID: reopening.tabID) else {
+                    return .failed(.comparisonInvalidated)
+                }
+                editor.install(EditorTextSnapshot(
+                    bufferID: refreshed.buffer.bufferID,
+                    revision: refreshed.buffer.revision,
+                    text: decoded.text
+                ))
+                switch await workspace.activate(tabID: reopening.tabID) {
+                case .applied: return .activatedExisting(reopening.tabID)
+                case .persistenceFailed(let failure): return .failed(.workspace(failure))
+                case .rejected(let error): return .failed(.session(error))
+                }
+            case .persistenceFailed(let failure): return .failed(.workspace(failure))
+            case .rejected(.revisionConflict(let bufferID, let expected, let actual)):
+                return .failed(.editorRevisionMismatch(bufferID: bufferID, expected: expected, actual: actual))
+            case .rejected(.unknownTab), .rejected(.fileBindingConflict):
+                return .failed(.comparisonInvalidated)
+            case .rejected(let error): return .failed(.session(error))
+            }
+        }
         switch await workspace.addOpenedFile(binding: binding, title: canonical.lastPathComponent) {
         case .applied:
             guard let context = workspace.activeFileContext() else { return .failed(.noActiveDocument) }

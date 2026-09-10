@@ -204,6 +204,12 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
         alert.messageText = "Duckpad could not complete the file operation."
         alert.informativeText = String(describing: failure)
         switch failure {
+        case .unsavedChanges:
+            alert.messageText = "This document has unsaved changes."
+            alert.informativeText = "Reopening with another encoding reads the file from disk and replaces the displayed text. Save your edits, or use Save As to keep a separate copy, before reopening."
+        case .codec:
+            alert.messageText = "The file could not be read using the selected encoding."
+            alert.informativeText = "Choose another encoding. The file and any open document contents have been kept unchanged."
         case .store(.permissionDenied(let path)):
             alert.messageText = "Duckpad cannot access this file."
             alert.informativeText = "\(path)\n\nUse File > Open to grant access again. To keep a recovered tab's contents in another location, use File > Save As."

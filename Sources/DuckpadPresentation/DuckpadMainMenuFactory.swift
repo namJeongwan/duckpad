@@ -455,7 +455,7 @@ public enum DuckpadMainMenuFactory {
         let conversion = NSMenuItem(title: "Convert and Save Encoding", action: nil, keyEquivalent: "")
         conversion.submenu = makeEncodingMenu(target: target)
         encoding.addItem(conversion)
-        if let open = format.items.first(where: { $0.title == "Open Using Encoding" }) {
+        if let open = format.items.first(where: { $0.title == "Open or Reopen Using Encoding" }) {
             encoding.addItem(.separator())
             move(open, from: format, to: encoding)
         }
@@ -693,14 +693,31 @@ public enum DuckpadMainMenuFactory {
         formatMenu.addItem(endingsItem)
 
         formatMenu.addItem(.separator())
-        let openItem = NSMenuItem(title: "Open Using Encoding", action: nil, keyEquivalent: "")
-        let openMenu = NSMenu(title: "Open Using Encoding")
+        let openItem = NSMenuItem(title: "Open or Reopen Using Encoding", action: nil, keyEquivalent: "")
+        openItem.submenu = makeOpenEncodingMenu(target: target)
+        formatMenu.addItem(openItem)
+        return formatMenu
+    }
+
+    static func makeFileFormatStatusMenu(target: DuckpadWindowController) -> NSMenu {
+        let menu = NSMenu(title: "Encoding")
+        let open = NSMenuItem(title: "Open or Reopen Using Encoding", action: nil, keyEquivalent: "")
+        open.submenu = makeOpenEncodingMenu(target: target)
+        open.toolTip = "Read the file from disk using another encoding without saving."
+        menu.addItem(open)
+        let save = NSMenuItem(title: "Convert and Save Encoding", action: nil, keyEquivalent: "")
+        save.submenu = makeEncodingMenu(target: target)
+        save.toolTip = "Save the displayed text using another encoding; this does not repair garbled text."
+        menu.addItem(save)
+        return menu
+    }
+
+    private static func makeOpenEncodingMenu(target: DuckpadWindowController) -> NSMenu {
+        let openMenu = NSMenu(title: "Open or Reopen Using Encoding")
         add("Open as UTF-8…", #selector(DuckpadWindowController.performOpenAsUTF8(_:)), "", target, modifiers: [], to: openMenu)
         add("Open as UTF-16 LE…", #selector(DuckpadWindowController.performOpenAsUTF16LittleEndian(_:)), "", target, modifiers: [], to: openMenu)
         add("Open as UTF-16 BE…", #selector(DuckpadWindowController.performOpenAsUTF16BigEndian(_:)), "", target, modifiers: [], to: openMenu)
-        openItem.submenu = openMenu
-        formatMenu.addItem(openItem)
-        return formatMenu
+        return openMenu
     }
 
     static func makeEncodingMenu(target: DuckpadWindowController) -> NSMenu {
