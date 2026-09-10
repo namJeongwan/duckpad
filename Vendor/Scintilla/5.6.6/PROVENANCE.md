@@ -31,7 +31,7 @@ tar -xzf "$tmp_dir/scintilla566.tgz" -C "$tmp_dir"
 ```
 
 The allowlist is normative in `Package.swift`; files not named by that target
-are not compiled. Duckpad carries five narrow Cocoa integration and compatibility patches:
+are not compiled. Duckpad carries six narrow integration and behavior patches:
 
 1. The two Xcode-generated TIFF cursor lookups in `cocoa/ScintillaView.mm` use
    Duckpad's configured SwiftPM resource directory and the official PNG names.
@@ -57,10 +57,15 @@ are not compiled. Duckpad carries five narrow Cocoa integration and compatibilit
    This prevents reconfirmed text from adding delete/insert pairs to native
    undo history. Active IME composition follows the original commit path.
 
+6. `src/UndoHistory.h` and `src/UndoHistory.cxx` split otherwise coalescible
+   typing and deletion after at least 300 ms without an edit, using a monotonic
+   clock per document. Explicit undo groups and tentative IME composition are
+   not split by elapsed time. Container actions do not restart the clock.
+
 The four packaged cursor PNGs are byte-identical copies from `cocoa/res`.
 
 Fold-state capture, restore, commands, and recovery-progress callbacks are
-implemented only in Duckpad-owned `bridge/` code. Apart from the five patches
+implemented only in Duckpad-owned `bridge/` code. Apart from the six patches
 listed above, no byte from the official Scintilla 5.6.6 archive was modified
 for that façade.
 

@@ -345,6 +345,72 @@ struct ScintillaBridgeTests {
         #expect(text(view) == sample)
     }
 
+    @Test(arguments: [false, true]) @MainActor
+    func typingPauseSplitsUndoUnlessExplicitlyGrouped(grouped: Bool) throws {
+        let view = makeHostedView()
+        try view.loadUTF8(Data(), revision: 0)
+        view.focusEditor()
+        let client = try #require(view.window?.firstResponder as? any NSTextInputClient)
+        if grouped { view.beginGroupedUndo() }
+        for character in "asdasd" {
+            client.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0))
+            // A burst may last over 300 ms as long as each edit arrives sooner.
+            Thread.sleep(forTimeInterval: 0.08)
+        }
+        Thread.sleep(forTimeInterval: 0.35)
+        // Reconfirming text is not an edit and must not restart the grouping clock.
+        client.insertText("d", replacementRange: NSRange(location: 5, length: 1))
+        for character in "한🙂e\u{301}" {
+            client.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0))
+        }
+        if grouped { view.endGroupedUndo() }
+        view.undo()
+        #expect(text(view) == (grouped ? "" : "asdasd"))
+        if !grouped { view.undo() }
+        #expect(text(view) == "")
+        #expect(!view.canUndo)
+        view.redo()
+        if !grouped {
+            #expect(text(view) == "asdasd")
+            view.redo()
+        }
+        #expect(text(view) == "asdasd한🙂e\u{301}")
+        #expect(!view.canRedo)
+    }
+
+    @Test @MainActor
+    func deletionPauseSplitsUndoGroups() throws {
+        let view = makeHostedView()
+        try view.loadUTF8(Data("asdasd".utf8), revision: 0)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 6, length: 0))
+        view.focusEditor()
+        let window = try #require(view.window)
+        let responder = try #require(window.firstResponder)
+        let backspace = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil,
+            characters: "\u{7F}", charactersIgnoringModifiers: "\u{7F}",
+            isARepeat: true, keyCode: 51
+        ))
+        responder.keyDown(with: backspace)
+        responder.keyDown(with: backspace)
+        Thread.sleep(forTimeInterval: 0.35)
+        responder.keyDown(with: backspace)
+        responder.keyDown(with: backspace)
+        #expect(text(view) == "as")
+        view.undo()
+        #expect(text(view) == "asda")
+        view.undo()
+        #expect(text(view) == "asdasd")
+        #expect(!view.canUndo)
+        view.redo()
+        #expect(text(view) == "asda")
+        view.redo()
+        #expect(text(view) == "as")
+        #expect(!view.canRedo)
+    }
+
     @Test @MainActor
     func typingUndoRedoAndMultiselectionEmitOwnedEdits() throws {
         let view = makeHostedView()
@@ -385,14 +451,22 @@ struct ScintillaBridgeTests {
         #expect(view.isWordWrapEnabled)
     }
 
-    @Test @MainActor
-    func koreanMarkedTextCopyPasteAndLargeUTF8RemainValid() throws {
+    @Test(arguments: [false, true]) @MainActor
+    func koreanMarkedTextCopyPasteAndLargeUTF8RemainValid(commitThroughInput: Bool) throws {
         let view = makeHostedView()
         try view.loadUTF8(Data(), revision: 0)
         view.setMarkedText("ㅎ", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
         #expect(view.hasMarkedText())
+        Thread.sleep(forTimeInterval: 0.35)
         view.setMarkedText("한", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
-        view.unmarkText()
+        Thread.sleep(forTimeInterval: 0.35)
+        if commitThroughInput {
+            view.focusEditor()
+            let client = try #require(view.window?.firstResponder as? any NSTextInputClient)
+            client.insertText("한", replacementRange: NSRange(location: NSNotFound, length: 0))
+        } else {
+            view.unmarkText()
+        }
         #expect(!view.hasMarkedText())
         #expect(text(view) == "한")
 
@@ -401,6 +475,16 @@ struct ScintillaBridgeTests {
         view.setPrimarySelectionUTF8Range(NSRange(location: 3, length: 0))
         view.paste()
         #expect(text(view) == "한 붙여넣기")
+        view.undo()
+        #expect(text(view) == "한")
+        view.undo()
+        #expect(text(view) == "")
+        #expect(!view.canUndo)
+        view.redo()
+        #expect(text(view) == "한")
+        view.redo()
+        #expect(text(view) == "한 붙여넣기")
+        #expect(!view.canRedo)
         view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 3))
         view.copySelection()
         #expect(NSPasteboard.general.string(forType: .string) == "한")

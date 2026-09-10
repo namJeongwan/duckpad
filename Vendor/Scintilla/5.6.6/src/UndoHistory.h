@@ -8,6 +8,8 @@
 #ifndef UNDOHISTORY_H
 #define UNDOHISTORY_H
 
+#include <chrono>
+
 namespace Scintilla::Internal {
 
 // ScaledVector is a vector of unsigned integers that uses elements sized to hold the largest value.
@@ -82,6 +84,7 @@ constexpr int coalesceFlag = 0x100;
  */
 class UndoHistory {
 	UndoActions actions;
+	std::chrono::steady_clock::time_point lastEditTime {};
 	int currentAction = 0;
 	int undoSequenceDepth = 0;
 	int savePoint = 0;
