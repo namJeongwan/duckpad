@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -80,7 +81,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     var showCloseButton = true
     var showInactiveButtons = false
     private let closeButton = NSButton(
-        image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close") ?? NSImage(),
+        image: NSImage(systemSymbolName: "xmark", accessibilityDescription: L10n.text("Close")) ?? NSImage(),
         target: nil,
         action: nil
     )
@@ -134,7 +135,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         titleLabel.cell?.usesSingleLineMode = true
         titleLabel.font = .systemFont(ofSize: 12, weight: .regular)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        fileIconImage.imageScaling = .scaleProportionallyDown
+        fileIconImage.imageScaling = .scaleProportionallyUpOrDown
         fileIconImage.setAccessibilityElement(false)
         fileIconImage.translatesAutoresizingMaskIntoConstraints = false
         dirtyIndicator.identifier = NSUserInterfaceItemIdentifier("duckpad.tab.dirty-indicator")
@@ -163,8 +164,8 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         NSLayoutConstraint.activate([
             fileIconImage.leadingAnchor.constraint(equalTo: dirtyIndicator.trailingAnchor, constant: 2),
             fileIconImage.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            fileIconImage.widthAnchor.constraint(equalToConstant: 13),
-            fileIconImage.heightAnchor.constraint(equalToConstant: 13),
+            fileIconImage.widthAnchor.constraint(equalToConstant: 17),
+            fileIconImage.heightAnchor.constraint(equalToConstant: 17),
             dirtyIndicator.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 5),
             dirtyIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             dirtyIndicator.widthAnchor.constraint(equalToConstant: 5),
@@ -219,32 +220,32 @@ private final class DuckpadTabItem: NSCollectionViewItem {
 
         let stableID = tab.id.rawValue.uuidString.lowercased()
         let state = [
-            tab.isActive ? "selected" : "not selected",
-            tab.isDirty ? "modified" : "unmodified",
-            tab.isPinned ? "pinned" : "not pinned",
-            "index \(index + 1)",
-            "row \(row + 1)",
+            tab.isActive ? L10n.text("selected") : L10n.text("not selected"),
+            tab.isDirty ? L10n.text("modified") : L10n.text("unmodified"),
+            tab.isPinned ? L10n.text("pinned") : L10n.text("not pinned"),
+            L10n.text("index %1$@", L10n.argument(index + 1)),
+            L10n.text("row %1$@", L10n.argument(row + 1)),
         ].joined(separator: ", ")
         view.setAccessibilityElement(true)
         view.setAccessibilityRole(.button)
         view.setAccessibilityIdentifier("duckpad.tab.\(stableID)")
-        view.setAccessibilityLabel("\(tab.title) tab")
+        view.setAccessibilityLabel(L10n.text("%1$@ tab", L10n.argument(tab.title)))
         view.setAccessibilityValue(state)
-        view.setAccessibilityHelp("Activate \(tab.title) tab")
+        view.setAccessibilityHelp(L10n.text("Activate %1$@ tab", L10n.argument(tab.title)))
         closeButton.setAccessibilityIdentifier("duckpad.tab.close.\(stableID)")
-        closeButton.setAccessibilityLabel("Close \(tab.title)")
-        closeButton.setAccessibilityValue(tab.isDirty ? "modified tab" : "unmodified tab")
+        closeButton.setAccessibilityLabel(L10n.text("Close %1$@", L10n.argument(tab.title)))
+        closeButton.setAccessibilityValue(tab.isDirty ? L10n.text("modified tab") : L10n.text("unmodified tab"))
         pinButton.setAccessibilityIdentifier("duckpad.tab.pin.\(stableID)")
-        pinButton.setAccessibilityLabel(tab.isPinned ? "Unpin \(tab.title)" : "Pin \(tab.title)")
-        pinButton.setAccessibilityValue(tab.isPinned ? "pinned" : "unpinned")
-        pinButton.toolTip = tab.isPinned ? "Unpin Tab" : "Pin Tab"
+        pinButton.setAccessibilityLabel(tab.isPinned ? L10n.text("Unpin %1$@", L10n.argument(tab.title)) : L10n.text("Pin %1$@", L10n.argument(tab.title)))
+        pinButton.setAccessibilityValue(tab.isPinned ? L10n.text("pinned") : L10n.text("unpinned"))
+        pinButton.toolTip = tab.isPinned ? L10n.text("Unpin Tab") : L10n.text("Pin Tab")
         view.setAccessibilityCustomActions([
-            NSAccessibilityCustomAction(name: "Close \(tab.title)") { [weak self] in
+            NSAccessibilityCustomAction(name: L10n.text("Close %1$@", L10n.argument(tab.title))) { [weak self] in
                 guard let self, self.closeButton.isEnabled else { return false }
                 self.onClose?()
                 return true
             },
-            NSAccessibilityCustomAction(name: tab.isPinned ? "Unpin \(tab.title)" : "Pin \(tab.title)") { [weak self] in
+            NSAccessibilityCustomAction(name: tab.isPinned ? L10n.text("Unpin %1$@", L10n.argument(tab.title)) : L10n.text("Pin %1$@", L10n.argument(tab.title))) { [weak self] in
                 self?.pinButton.accessibilityPerformPress() ?? false
             },
         ])
@@ -355,34 +356,34 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     private func makeContextMenu() -> NSMenu? {
         guard let tab = configuredTab else { return nil }
         let menu = NSMenu(title: tab.title)
-        add("Close", action: #selector(closeCurrent), to: menu)
-        add("Close Others", action: #selector(closeOthers), to: menu)
-        add("Close to Left", action: #selector(closeLeft), to: menu)
-        add("Close to Right", action: #selector(closeRight), to: menu)
+        add(L10n.text("Close"), action: #selector(closeCurrent), to: menu)
+        add(L10n.text("Close Others"), action: #selector(closeOthers), to: menu)
+        add(L10n.text("Close to Left"), action: #selector(closeLeft), to: menu)
+        add(L10n.text("Close to Right"), action: #selector(closeRight), to: menu)
         menu.addItem(.separator())
-        add("Close All", action: #selector(closeAll), to: menu)
-        add("Close Unchanged", action: #selector(closeUnchanged), to: menu)
-        add("Close Unpinned", action: #selector(closeUnpinned), to: menu)
+        add(L10n.text("Close All"), action: #selector(closeAll), to: menu)
+        add(L10n.text("Close Unchanged"), action: #selector(closeUnchanged), to: menu)
+        add(L10n.text("Close Unpinned"), action: #selector(closeUnpinned), to: menu)
         menu.addItem(.separator())
-        add(tab.isPinned ? "Unpin Tab" : "Pin Tab", action: #selector(togglePinned), to: menu)
+        add(tab.isPinned ? L10n.text("Unpin Tab") : L10n.text("Pin Tab"), action: #selector(togglePinned), to: menu)
         menu.addItem(.separator())
-        add("Move to Group Right", action: #selector(moveToGroupRight), to: menu, contextAction: .moveToEditorGroup(.sideBySide))
-        add("Move to Group Down", action: #selector(moveToGroupDown), to: menu, contextAction: .moveToEditorGroup(.stacked))
-        add("Clone to Group Right", action: #selector(cloneToGroupRight), to: menu, contextAction: .cloneToEditorGroup(.sideBySide))
-        add("Clone to Group Down", action: #selector(cloneToGroupDown), to: menu, contextAction: .cloneToEditorGroup(.stacked))
-        add("Focus Other Group", action: #selector(focusOtherEditorGroup), to: menu, contextAction: .focusOtherEditorGroup)
-        add("Close Editor Group", action: #selector(closeEditorGroup), to: menu, contextAction: .closeEditorGroup)
+        add(L10n.text("Move to Group Right"), action: #selector(moveToGroupRight), to: menu, contextAction: .moveToEditorGroup(.sideBySide))
+        add(L10n.text("Move to Group Down"), action: #selector(moveToGroupDown), to: menu, contextAction: .moveToEditorGroup(.stacked))
+        add(L10n.text("Clone to Group Right"), action: #selector(cloneToGroupRight), to: menu, contextAction: .cloneToEditorGroup(.sideBySide))
+        add(L10n.text("Clone to Group Down"), action: #selector(cloneToGroupDown), to: menu, contextAction: .cloneToEditorGroup(.stacked))
+        add(L10n.text("Focus Other Group"), action: #selector(focusOtherEditorGroup), to: menu, contextAction: .focusOtherEditorGroup)
+        add(L10n.text("Close Editor Group"), action: #selector(closeEditorGroup), to: menu, contextAction: .closeEditorGroup)
         menu.addItem(.separator())
         add(
-            "Compare with Open Document…",
+            L10n.text("Compare with Open Document…"),
             action: #selector(compareWithOpenDocument),
             to: menu,
             contextAction: .compareWithOpenDocument
         )
         if tab.fullPath != nil {
             menu.addItem(.separator())
-            add("Copy Full Path", action: #selector(copyFullPath), to: menu)
-            add("Open Containing Folder", action: #selector(openContainingFolder), to: menu)
+            add(L10n.text("Copy Full Path"), action: #selector(copyFullPath), to: menu)
+            add(L10n.text("Open Containing Folder"), action: #selector(openContainingFolder), to: menu)
         }
         return menu
     }
@@ -631,7 +632,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedCollectionView.registerForDraggedTypes([Self.tabPasteboardType])
         hostedCollectionView.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
         hostedCollectionView.setAccessibilityIdentifier("duckpad.tab.collection")
-        hostedCollectionView.setAccessibilityLabel("Open document tabs")
+        hostedCollectionView.setAccessibilityLabel(L10n.text("Open document tabs"))
         hostedCollectionView.register(
             DuckpadTabItem.self,
             forItemWithIdentifier: DuckpadTabItem.identifier
@@ -651,7 +652,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedScrollView.borderType = .noBorder
         hostedScrollView.translatesAutoresizingMaskIntoConstraints = false
         hostedScrollView.setAccessibilityIdentifier("duckpad.tab.overflow")
-        hostedScrollView.setAccessibilityLabel("Multiline tab rows")
+        hostedScrollView.setAccessibilityLabel(L10n.text("Multiline tab rows"))
 
         documentSwitcher.onActivate = { [weak self] id in
             guard self?.interactionsEnabled == true else { return }
@@ -664,8 +665,8 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         navigator.isHidden = true
         navigator.setAccessibilityIdentifier("duckpad.tab.navigator")
         for (button, symbol, label, action) in [
-            (previousTabsButton, "chevron.left", "Scroll tabs left", #selector(scrollTabsLeft(_:))),
-            (nextTabsButton, "chevron.right", "Scroll tabs right", #selector(scrollTabsRight(_:)))
+            (previousTabsButton, "chevron.left", L10n.text("Scroll tabs left"), #selector(scrollTabsLeft(_:))),
+            (nextTabsButton, "chevron.right", L10n.text("Scroll tabs right"), #selector(scrollTabsRight(_:)))
         ] {
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
             button.imagePosition = .imageOnly
@@ -924,7 +925,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             hostedScrollView.multilineEnabled = settings.multilineTabsEnabled
             updateNavigatorLayout()
             flowLayout.engine.multilineEnabled = settings.multilineTabsEnabled
-            hostedScrollView.setAccessibilityLabel(settings.multilineTabsEnabled ? "Multiline tab rows" : "Scrollable document tabs")
+            hostedScrollView.setAccessibilityLabel(settings.multilineTabsEnabled ? L10n.text("Multiline tab rows") : L10n.text("Scrollable document tabs"))
             needsRevealActiveTab = true
             needsLayout = true
             needsUpdateConstraints = true
@@ -1383,7 +1384,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             withAttributes: [.font: NSFont.systemFont(ofSize: 12)]
         ).width
         // Reserve icon, status, pin, and close slots so hover never moves the title.
-        return ceil(width) + 69
+        return ceil(width) + 73
     }
 
     public override func viewDidChangeEffectiveAppearance() {

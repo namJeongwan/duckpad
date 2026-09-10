@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -88,8 +89,8 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
 
     public func chooseSaveAccessURL(for url: URL, attachedTo window: NSWindow?) async -> URL? {
         let panel = NSSavePanel()
-        panel.title = "Allow Access and Save"
-        panel.message = "Choose this file again to restore access and save your edits. If it was moved or deleted, choose a new location."
+        panel.title = L10n.text("Allow Access and Save")
+        panel.message = L10n.text("Choose this file again to restore access and save your edits. If it was moved or deleted, choose a new location.")
         panel.directoryURL = url.deletingLastPathComponent()
         panel.nameFieldStringValue = url.lastPathComponent
         return await run(panel, attachedTo: window) == .OK ? panel.url : nil
@@ -101,8 +102,8 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
-        panel.prompt = "Search"
-        panel.message = "Choose a folder to search recursively. Hidden files, packages, and symbolic links are skipped."
+        panel.prompt = L10n.text("Search")
+        panel.message = L10n.text("Choose a folder to search recursively. Hidden files, packages, and symbolic links are skipped.")
         return await run(panel, attachedTo: window) == .OK ? panel.url : nil
     }
 
@@ -112,8 +113,8 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
-        panel.prompt = "Add"
-        panel.message = "Choose a folder to keep in the Duckpad workspace sidebar."
+        panel.prompt = L10n.text("Add")
+        panel.message = L10n.text("Choose a folder to keep in the Duckpad workspace sidebar.")
         return await run(panel, attachedTo: window.window) == .OK ? panel.url : nil
     }
 
@@ -126,12 +127,12 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
     public func resolveExternalConflict(attachedTo window: NSWindow?) async -> FileConflictResolution {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "The file changed outside Duckpad."
-        alert.informativeText = "Compare both versions, overwrite the external version, reload it, or cancel and keep your edits."
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Compare")
-        alert.addButton(withTitle: "Reload")
-        alert.addButton(withTitle: "Overwrite")
+        alert.messageText = L10n.text("The file changed outside Duckpad.")
+        alert.informativeText = L10n.text("Compare both versions, overwrite the external version, reload it, or cancel and keep your edits.")
+        alert.addButton(withTitle: L10n.text("Cancel"))
+        alert.addButton(withTitle: L10n.text("Compare"))
+        alert.addButton(withTitle: L10n.text("Reload"))
+        alert.addButton(withTitle: L10n.text("Overwrite"))
         switch await run(alert, attachedTo: window) {
         case .alertSecondButtonReturn: return .compare
         case .alertThirdButtonReturn: return .reload
@@ -145,9 +146,9 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
         attachedTo window: NSWindow?
     ) async {
         let content = OpenDocumentCompareContent(
-            title: "Compare External Changes — \(comparison.path)",
-            leftTitle: "Duckpad — revision \(comparison.localRevision)",
-            rightTitle: "On Disk",
+            title: L10n.text("Compare External Changes — %1$@", L10n.argument(comparison.path)),
+            leftTitle: L10n.text("Duckpad — revision %1$@", L10n.argument(comparison.localRevision)),
+            rightTitle: L10n.text("On Disk"),
             leftText: comparison.localText,
             rightText: comparison.externalText
         )
@@ -201,26 +202,26 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
     ) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Duckpad could not complete the file operation."
-        alert.informativeText = String(describing: failure)
+        alert.messageText = L10n.text("Duckpad could not complete the file operation.")
+        alert.informativeText = PresentationErrorText.message(failure)
         switch failure {
         case .unsavedChanges:
-            alert.messageText = "This document has unsaved changes."
-            alert.informativeText = "Reopening with another encoding reads the file from disk and replaces the displayed text. Save your edits, or use Save As to keep a separate copy, before reopening."
+            alert.messageText = L10n.text("This document has unsaved changes.")
+            alert.informativeText = L10n.text("Reopening with another encoding reads the file from disk and replaces the displayed text. Save your edits, or use Save As to keep a separate copy, before reopening.")
         case .codec:
-            alert.messageText = "The file could not be read using the selected encoding."
-            alert.informativeText = "Choose another encoding. The file and any open document contents have been kept unchanged."
+            alert.messageText = L10n.text("The file could not be read using the selected encoding.")
+            alert.informativeText = L10n.text("Choose another encoding. The file and any open document contents have been kept unchanged.")
         case .store(.permissionDenied(let path)):
-            alert.messageText = "Duckpad cannot access this file."
-            alert.informativeText = "\(path)\n\nUse File > Open to grant access again. To keep a recovered tab's contents in another location, use File > Save As."
+            alert.messageText = L10n.text("Duckpad cannot access this file.")
+            alert.informativeText = L10n.text("%1$@\n\nUse File > Open to grant access again. To keep a recovered tab's contents in another location, use File > Save As.", L10n.argument(path))
         case .store(.notFound(let path)):
-            alert.messageText = "This file is no longer available."
-            alert.informativeText = "\(path)\n\nThe file may have been moved or deleted. Use File > Save As to keep a recovered tab's contents in another location."
+            alert.messageText = L10n.text("This file is no longer available.")
+            alert.informativeText = L10n.text("%1$@\n\nThe file may have been moved or deleted. Use File > Save As to keep a recovered tab's contents in another location.", L10n.argument(path))
         default:
             break
         }
-        alert.addButton(withTitle: "Retry")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.text("Retry"))
+        alert.addButton(withTitle: L10n.text("Cancel"))
         if let window {
             alert.beginSheetModal(for: window) { response in
                 if response == .alertFirstButtonReturn { retry() }
@@ -233,11 +234,11 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
     public func decision(for tab: TabSnapshot, saveAvailable: Bool, attachedTo window: NSWindow?) async -> CloseDecision {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Save changes to \(tab.title)?"
-        alert.informativeText = "Unsaved changes will be lost if you discard them."
-        if saveAvailable { alert.addButton(withTitle: "Save") }
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Discard")
+        alert.messageText = L10n.text("Save changes to %1$@?", L10n.argument(tab.title))
+        alert.informativeText = L10n.text("Unsaved changes will be lost if you discard them.")
+        if saveAvailable { alert.addButton(withTitle: L10n.text("Save")) }
+        alert.addButton(withTitle: L10n.text("Cancel"))
+        alert.addButton(withTitle: L10n.text("Discard"))
         let response = await run(alert, attachedTo: window)
         if saveAvailable {
             if response == .alertFirstButtonReturn { return .save }
@@ -251,16 +252,17 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
     static func allDocumentsAlert(_ tabs: [TabSnapshot], saveAvailable: Bool) -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Save changes to \(tabs.count) documents before closing?"
+        alert.messageText = L10n.text("documents.saveBeforeClosing", tabs.count)
         let names = tabs.prefix(5).map { $0.fullPath ?? $0.title }.joined(separator: "\n")
-        let remaining = tabs.count > 5 ? "\n…and \(tabs.count - 5) more." : ""
-        alert.informativeText = names + remaining + "\n\nDiscard All loses the unsaved changes in these documents."
+        let remaining = tabs.count > 5 ? L10n.text("\n…and %1$@ more.", L10n.argument(tabs.count - 5)) : ""
+        alert.informativeText = saveAvailable
+            ? L10n.text("%1$@%2$@\n\nDiscard All loses the unsaved changes in these documents. Documents without a saved location will ask where to save.", names, remaining)
+            : L10n.text("%1$@%2$@\n\nDiscard All loses the unsaved changes in these documents.", names, remaining)
         if saveAvailable {
-            alert.informativeText += " Documents without a saved location will ask where to save."
-            alert.addButton(withTitle: "Save All")
+            alert.addButton(withTitle: L10n.text("Save All"))
         }
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Discard All")
+        alert.addButton(withTitle: L10n.text("Cancel"))
+        alert.addButton(withTitle: L10n.text("Discard All"))
         // Return never discards a batch, including when saving is unavailable.
         alert.buttons[saveAvailable ? 1 : 0].keyEquivalent = "\u{1b}"
         return alert

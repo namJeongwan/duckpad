@@ -4,6 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "Duckpad",
+    defaultLocalization: "en",
     platforms: [.macOS(.v13)],
     products: [
         .library(name: "DuckpadDomain", targets: ["DuckpadDomain"]),
@@ -163,6 +164,7 @@ let package = Package(
             ]
         ),
         .target(name: "DuckpadDomain"),
+        .target(name: "DuckpadLocalization", dependencies: ["DuckpadDomain"], resources: [.process("Resources")]),
         .target(name: "DuckpadApplication", dependencies: ["DuckpadDomain"]),
         .target(
             name: "DuckpadInfrastructure",
@@ -174,7 +176,7 @@ let package = Package(
         ),
         .target(
             name: "DuckpadPresentation",
-            dependencies: ["DuckpadApplication", "DuckpadDomain"],
+            dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadLocalization"],
             resources: [.copy("Resources/MaterialIconTheme")]
         ),
         .target(
@@ -183,6 +185,7 @@ let package = Package(
                 "DuckpadApplication",
                 "DuckpadDomain",
                 "DuckpadScintillaBridge",
+                "DuckpadLocalization",
             ],
             resources: [.copy("Resources/ScintillaCursors")]
         ),
@@ -194,6 +197,7 @@ let package = Package(
                 "DuckpadInfrastructure",
                 "DuckpadPresentation",
                 "DuckpadEditorAdapter",
+                "DuckpadLocalization",
             ],
             resources: [
                 .copy("Resources/AppIcon.iconset"),
@@ -258,6 +262,7 @@ let package = Package(
                 "DuckpadDomain",
                 "DuckpadInfrastructure",
                 "DuckpadPresentation",
+                "DuckpadLocalization",
                 .product(name: "Testing", package: "swift-testing"),
             ]
         ),

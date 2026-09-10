@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 
 /// A compact, window-local route into Duckpad's native menu tree.
@@ -44,7 +45,7 @@ public final class WindowCommandBarView: NSVisualEffectView {
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityIdentifier("duckpad.window.command-bar")
-        setAccessibilityLabel("Application commands")
+        setAccessibilityLabel(L10n.text("Application commands"))
 
         stackView.orientation = .horizontal
         stackView.alignment = .centerY
@@ -85,7 +86,7 @@ public final class WindowCommandBarView: NSVisualEffectView {
             uniqueKeysWithValues: mainMenu.items.compactMap {
                 item -> (String, (NSMenuItem, NSMenu))? in
                 guard let submenu = item.submenu, !submenu.title.isEmpty else { return nil }
-                return (submenu.title, (item, submenu))
+                return (item.identifier?.rawValue ?? submenu.title, (item, submenu))
             }
         )
         for title in Self.presentedMenuTitles {
@@ -171,9 +172,10 @@ public final class WindowCommandBarView: NSVisualEffectView {
         }
         if let cell = button.cell as? NSPopUpButtonCell {
             cell.usesItemFromMenu = false
-            cell.menuItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            cell.menuItem = NSMenuItem(title: menu.title, action: nil, keyEquivalent: "")
             cell.arrowPosition = .noArrow
         }
+        button.identifier = NSUserInterfaceItemIdentifier(title)
         button.target = self
         button.action = #selector(showMenu(_:))
         button.bezelStyle = .inline
@@ -184,8 +186,8 @@ public final class WindowCommandBarView: NSVisualEffectView {
         button.layer?.cornerRadius = 7
         button.setAccessibilityRole(.popUpButton)
         button.setAccessibilityIdentifier("duckpad.window.command.\(title.lowercased())")
-        button.setAccessibilityLabel("\(title) menu")
-        button.setAccessibilityHelp("Show the \(title) menu")
+        button.setAccessibilityLabel(L10n.text("%1$@ menu", L10n.argument(menu.title)))
+        button.setAccessibilityHelp(L10n.text("Show the %1$@ menu", L10n.argument(menu.title)))
         button.translatesAutoresizingMaskIntoConstraints = false
         button.heightAnchor.constraint(equalToConstant: 23).isActive = true
         applyVisualState(to: button, title: title)
@@ -203,7 +205,7 @@ public final class WindowCommandBarView: NSVisualEffectView {
             setActiveMenuTitle(nil)
             synchronizeHoverWithPointer()
         }
-        var nextTitle: String? = sender.title
+        var nextTitle: String? = sender.identifier?.rawValue
         while let title = nextTitle, let button = buttonsByTitle[title],
               button.isEnabled, let menu = prepareMenuForPresentation(named: title) {
             pendingMenuTitle = nil

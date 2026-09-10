@@ -1,4 +1,5 @@
 import AppKit
+import DuckpadLocalization
 
 @MainActor
 final class MaterialFileIconTheme {
@@ -59,7 +60,7 @@ final class MaterialFileIconTheme {
         }
         return (
             fallbackName,
-            NSImage(systemSymbolName: "doc", accessibilityDescription: "File") ?? NSImage()
+            NSImage(systemSymbolName: "doc", accessibilityDescription: L10n.text("File")) ?? NSImage()
         )
     }
 

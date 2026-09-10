@@ -1,4 +1,5 @@
 import AppKit
+import DuckpadLocalization
 import DuckpadApplication
 import DuckpadDomain
 import DuckpadScintillaBridge
@@ -146,9 +147,9 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
         splitView.dividerStyle = .thin
         splitView.isVertical = true
         splitView.addArrangedSubview(primaryHost)
-        primaryHost.setAccessibilityLabel("Primary editor pane")
-        internalSecondaryHost.setAccessibilityLabel("Secondary editor pane")
-        secondaryGroupHost.setAccessibilityLabel("Secondary editor group")
+        primaryHost.setAccessibilityLabel(L10n.text("Primary editor pane"))
+        internalSecondaryHost.setAccessibilityLabel(L10n.text("Secondary editor pane"))
+        secondaryGroupHost.setAccessibilityLabel(L10n.text("Secondary editor group"))
         secondaryGroupHost.translatesAutoresizingMaskIntoConstraints = false
         secondaryGroupHost.setAccessibilityIdentifier("duckpad.editor.secondary-group-host")
         view.translatesAutoresizingMaskIntoConstraints = false

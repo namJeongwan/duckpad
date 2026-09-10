@@ -9,6 +9,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public static let defaults = AppSettings()
 
     public var schemaVersion: Int
+    public var appLanguage: AppLanguage
     public var appearanceMode: AppAppearanceMode
     public var defaultWordWrapEnabled: Bool
     public var defaultWrapMarkerVisible: Bool
@@ -49,6 +50,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public init(
         schemaVersion: Int = AppSettings.currentSchemaVersion,
+        appLanguage: AppLanguage = .system,
         appearanceMode: AppAppearanceMode = .system,
         defaultWordWrapEnabled: Bool = true,
         defaultWrapMarkerVisible: Bool = false,
@@ -83,6 +85,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         monospacedFindFields: Bool = false
     ) {
         self.schemaVersion = schemaVersion
+        self.appLanguage = appLanguage
         self.appearanceMode = appearanceMode
         self.defaultWordWrapEnabled = defaultWordWrapEnabled
         self.defaultWrapMarkerVisible = defaultWrapMarkerVisible
@@ -120,6 +123,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        appLanguage = (try values.decodeIfPresent(String.self, forKey: .appLanguage)).flatMap(AppLanguage.init(rawValue:)) ?? .system
         appearanceMode = try values.decode(AppAppearanceMode.self, forKey: .appearanceMode)
         defaultWordWrapEnabled = try values.decode(Bool.self, forKey: .defaultWordWrapEnabled)
         defaultWrapMarkerVisible = try values.decode(Bool.self, forKey: .defaultWrapMarkerVisible)

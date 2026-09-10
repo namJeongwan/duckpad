@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 
 @MainActor
@@ -87,7 +88,7 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
         } else {
             let app = NSMenuItem()
             let submenu = NSMenu(title: "Duckpad")
-            submenu.addItem(withTitle: "Quit Duckpad", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+            submenu.addItem(withTitle: L10n.text("Quit Duckpad"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             app.submenu = submenu
             menu.addItem(app)
         }
@@ -98,17 +99,17 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
             menu.addItem(root)
             return submenu
         }
-        let file = section("File")
-        let close = file.addItem(withTitle: "Close Comparison", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let file = section(L10n.text("File"))
+        let close = file.addItem(withTitle: L10n.text("Close Comparison"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         close.target = window
-        let edit = section("Edit")
-        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        let search = section("Search")
-        let find = search.addItem(withTitle: "Find…", action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: "f")
+        let edit = section(L10n.text("Edit"))
+        edit.addItem(withTitle: L10n.text("Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: L10n.text("Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let search = section(L10n.text("Search"))
+        let find = search.addItem(withTitle: L10n.text("Find…"), action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: "f")
         find.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
-        let windows = section("Window")
-        windows.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        let windows = section(L10n.text("Window"))
+        windows.addItem(withTitle: L10n.text("Minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         comparisonMenu = menu
         comparisonWindowsMenu = windows
         NSApplication.shared.mainMenu = menu
@@ -173,13 +174,13 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
         panes.spacing = 1
         panes.translatesAutoresizingMaskIntoConstraints = false
 
-        let done = NSButton(title: "Close", target: self, action: #selector(donePressed))
+        let done = NSButton(title: L10n.text("Close"), target: self, action: #selector(donePressed))
         done.keyEquivalent = "\r"
         done.translatesAutoresizingMaskIntoConstraints = false
         let root = NSView(frame: window.contentView?.bounds ?? .zero)
         root.addSubview(panes)
         root.addSubview(done)
-        let snapshotNote = NSTextField(labelWithString: "Read-only snapshot · Changes to the original documents are not reflected here.")
+        let snapshotNote = NSTextField(labelWithString: L10n.text("Read-only snapshot · Changes to the original documents are not reflected here."))
         snapshotNote.textColor = .secondaryLabelColor
         snapshotNote.font = .systemFont(ofSize: 11)
         snapshotNote.lineBreakMode = .byTruncatingTail
@@ -220,8 +221,8 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
             width: CGFloat.greatestFiniteMagnitude,
             height: CGFloat.greatestFiniteMagnitude
         )
-        textView.setAccessibilityLabel("\(title), read-only comparison")
-        textView.setAccessibilityHelp("Changed rows use plus, minus, or tilde markers and semantic highlighting.")
+        textView.setAccessibilityLabel(L10n.text("%1$@, read-only comparison", L10n.argument(title)))
+        textView.setAccessibilityHelp(L10n.text("Changed rows use plus, minus, or tilde markers and semantic highlighting."))
 
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
@@ -231,7 +232,7 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
         scrollView.verticalScrollElasticity = .none
         scrollView.horizontalScrollElasticity = .none
         scrollView.contentView.postsBoundsChangedNotifications = true
-        scrollView.setAccessibilityLabel("\(title) comparison pane")
+        scrollView.setAccessibilityLabel(L10n.text("%1$@ comparison pane", L10n.argument(title)))
     }
 
     private func makePane(title: String, scrollView: NSScrollView) -> NSView {

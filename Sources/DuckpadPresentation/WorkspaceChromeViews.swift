@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -60,14 +61,14 @@ final class DocumentSwitcherButton: NSButton {
         bezelStyle = .roundRect
         controlSize = .small
         isBordered = true
-        image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Show All Documents")
+        image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: L10n.text("Show All Documents"))
         imagePosition = .imageTrailing
         imageScaling = .scaleProportionallyDown
         font = .systemFont(ofSize: 11, weight: .medium)
         contentTintColor = .secondaryLabelColor
-        toolTip = "Open Documents"
+        toolTip = L10n.text("Open Documents")
         setAccessibilityIdentifier("duckpad.tab.documents")
-        setAccessibilityLabel("Open Documents")
+        setAccessibilityLabel(L10n.text("Open Documents"))
         translatesAutoresizingMaskIntoConstraints = false
         documentPanel.onActivate = { [weak self] id in
             guard self?.isEnabled == true else { return }
@@ -152,8 +153,8 @@ final class DocumentSwitcherButton: NSButton {
     }
 
     private func updateButtonLabel() {
-        title = tabs.isEmpty ? "Documents" : "Documents (\(tabs.count))"
-        toolTip = tabs.isEmpty ? "No Open Documents" : "Open Documents (\(tabs.count))"
-        setAccessibilityValue(tabs.isEmpty ? "No open documents" : "\(tabs.count) open documents")
+        title = tabs.isEmpty ? L10n.text("Documents") : L10n.text("Documents (%1$@)", L10n.argument(tabs.count))
+        toolTip = tabs.isEmpty ? L10n.text("No Open Documents") : L10n.text("Open Documents (%1$@)", L10n.argument(tabs.count))
+        setAccessibilityValue(tabs.isEmpty ? L10n.text("No open documents") : L10n.text("documents.open", tabs.count))
     }
 }

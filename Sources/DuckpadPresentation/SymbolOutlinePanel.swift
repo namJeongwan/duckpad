@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 
@@ -8,7 +9,7 @@ struct SymbolOutlineSearch {
         guard !terms.isEmpty else { return Array(symbols.indices) }
         return symbols.indices.filter { index in
             let symbol = symbols[index]
-            let searchable = folded("\(symbol.name) \(symbol.kind.rawValue) \(symbol.line)")
+            let searchable = folded("\(symbol.name) \(symbol.kind.rawValue) \(L10n.text(symbol.kind.rawValue.capitalized)) \(symbol.line)")
             return terms.allSatisfy(searchable.contains)
         }
     }
@@ -32,7 +33,7 @@ final class SymbolOutlinePanel: NSObject,
     private let searchField = NSSearchField(frame: .zero)
     private let tableView = NSTableView(frame: .zero)
     private let scrollView = NSScrollView(frame: .zero)
-    private let emptyLabel = NSTextField(labelWithString: "No symbols in this document")
+    private let emptyLabel = NSTextField(labelWithString: L10n.text("No symbols in this document"))
     private let countLabel = NSTextField(labelWithString: "")
     private let contentController = NSViewController()
     private let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 390, height: 360))
@@ -46,11 +47,11 @@ final class SymbolOutlinePanel: NSObject,
         super.init()
         rootView.setAccessibilityIdentifier("duckpad.symbols.panel")
 
-        searchField.placeholderString = "Search symbols"
+        searchField.placeholderString = L10n.text("Search symbols")
         searchField.sendsSearchStringImmediately = true
         searchField.delegate = self
         searchField.setAccessibilityIdentifier("duckpad.symbols.search")
-        searchField.setAccessibilityLabel("Search current document symbols")
+        searchField.setAccessibilityLabel(L10n.text("Search current document symbols"))
         searchField.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("symbol"))
@@ -65,7 +66,7 @@ final class SymbolOutlinePanel: NSObject,
         tableView.target = self
         tableView.doubleAction = #selector(activateSelection)
         tableView.setAccessibilityIdentifier("duckpad.symbols.results")
-        tableView.setAccessibilityLabel("Current document symbol results")
+        tableView.setAccessibilityLabel(L10n.text("Current document symbol results"))
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -171,12 +172,12 @@ final class SymbolOutlinePanel: NSObject,
             systemSymbolName: imageName(for: symbol.kind),
             accessibilityDescription: nil
         )
-        cell.toolTip = "\(symbol.kind.rawValue.capitalized), line \(symbol.line)"
+        cell.toolTip = L10n.text("%1$@, line %2$@", L10n.text(symbol.kind.rawValue.capitalized), L10n.argument(symbol.line))
         cell.setAccessibilityLabel(
-            "\(symbol.name), \(symbol.kind.rawValue), line \(symbol.line)"
+            L10n.text("%1$@, %2$@, line %3$@", L10n.argument(symbol.name), L10n.text(symbol.kind.rawValue.capitalized), L10n.argument(symbol.line))
         )
         if let detail = cell.viewWithTag(42) as? NSTextField {
-            detail.stringValue = "Line \(symbol.line)"
+            detail.stringValue = L10n.text("Line %1$@", L10n.argument(symbol.line))
         }
         return cell
     }
@@ -218,7 +219,7 @@ final class SymbolOutlinePanel: NSObject,
         filteredIndices = SymbolOutlineSearch.matchingIndices(in: symbols, query: searchField.stringValue)
         tableView.reloadData()
         emptyLabel.isHidden = !filteredIndices.isEmpty
-        countLabel.stringValue = "\(filteredIndices.count) of \(symbols.count)"
+        countLabel.stringValue = L10n.text("%1$@ of %2$@", L10n.argument(filteredIndices.count), L10n.argument(symbols.count))
         if !filteredIndices.isEmpty { selectResult(at: 0) }
     }
 

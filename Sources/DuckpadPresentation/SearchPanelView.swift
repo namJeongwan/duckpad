@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadDomain
 
@@ -30,13 +31,13 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
 
     private let findField = NSSearchField()
     private let replaceField = NSTextField()
-    private let mode = NSSegmentedControl(labels: ["Normal", "Extended", "Regex"], trackingMode: .selectOne, target: nil, action: nil)
-    private let matchCase = NSButton(checkboxWithTitle: "Match case", target: nil, action: nil)
-    private let wholeWord = NSButton(checkboxWithTitle: "Whole word", target: nil, action: nil)
-    private let dotMatchesNewline = NSButton(checkboxWithTitle: ". matches newline", target: nil, action: nil)
-    private let wrap = NSButton(checkboxWithTitle: "Wrap", target: nil, action: nil)
-    private let inSelection = NSButton(checkboxWithTitle: "In selection", target: nil, action: nil)
-    private let allDocuments = NSButton(checkboxWithTitle: "All open documents", target: nil, action: nil)
+    private let mode = NSSegmentedControl(labels: [L10n.text("Normal"), L10n.text("Extended"), L10n.text("Regex")], trackingMode: .selectOne, target: nil, action: nil)
+    private let matchCase = NSButton(checkboxWithTitle: L10n.text("Match case"), target: nil, action: nil)
+    private let wholeWord = NSButton(checkboxWithTitle: L10n.text("Whole word"), target: nil, action: nil)
+    private let dotMatchesNewline = NSButton(checkboxWithTitle: L10n.text(". matches newline"), target: nil, action: nil)
+    private let wrap = NSButton(checkboxWithTitle: L10n.text("Wrap"), target: nil, action: nil)
+    private let inSelection = NSButton(checkboxWithTitle: L10n.text("In selection"), target: nil, action: nil)
+    private let allDocuments = NSButton(checkboxWithTitle: L10n.text("All open documents"), target: nil, action: nil)
     private let status = NSTextField(labelWithString: "")
     private let table = SearchResultsTable()
     private let resultsScroll = NSScrollView()
@@ -54,26 +55,26 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         setAccessibilityIdentifier("duckpad.search.panel")
         mode.selectedSegment = 0
         wrap.state = .on
-        findField.placeholderString = "Find"
+        findField.placeholderString = L10n.text("Find")
         findField.delegate = self
         findField.setAccessibilityIdentifier("duckpad.search.find")
-        replaceField.placeholderString = "Replace with"
+        replaceField.placeholderString = L10n.text("Replace with")
         replaceField.delegate = self
         replaceField.setAccessibilityIdentifier("duckpad.search.replace")
         status.setAccessibilityIdentifier("duckpad.search.status")
         status.lineBreakMode = .byTruncatingTail
 
-        let findNext = button("Next", #selector(findNextPressed))
-        let findPrevious = button("Previous", #selector(findPreviousPressed))
-        let replace = button("Replace", #selector(replacePressed))
+        let findNext = button(L10n.text("Next"), #selector(findNextPressed))
+        let findPrevious = button(L10n.text("Previous"), #selector(findPreviousPressed))
+        let replace = button(L10n.text("Replace"), #selector(replacePressed))
         replace.setAccessibilityIdentifier("duckpad.search.replace-current")
-        let replaceAll = button("Replace All", #selector(replaceAllPressed))
-        let findAll = button("Find All", #selector(findAllPressed))
-        let findInFolder = button("Folder…", #selector(findInFolderPressed))
-        findInFolder.setAccessibilityLabel("Find in Folder")
-        let cancel = button("Cancel", #selector(cancelPressed))
+        let replaceAll = button(L10n.text("Replace All"), #selector(replaceAllPressed))
+        let findAll = button(L10n.text("Find All"), #selector(findAllPressed))
+        let findInFolder = button(L10n.text("Folder…"), #selector(findInFolderPressed))
+        findInFolder.setAccessibilityLabel(L10n.text("Find in Folder"))
+        let cancel = button(L10n.text("Cancel"), #selector(cancelPressed))
         let close = button("×", #selector(closePressed))
-        close.setAccessibilityLabel("Close Find and Replace")
+        close.setAccessibilityLabel(L10n.text("Close Find and Replace"))
 
         let top = NSStackView(views: [findField, replaceField, findNext, findPrevious, replace, replaceAll, findAll, findInFolder, cancel, close])
         top.orientation = .horizontal
@@ -85,7 +86,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         options.spacing = 10
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("result"))
-        column.title = "Search Results"
+        column.title = L10n.text("Search Results")
         table.addTableColumn(column)
         table.headerView = nil
         table.delegate = self
@@ -99,7 +100,19 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         resultsScroll.translatesAutoresizingMaskIntoConstraints = false
         resultsScroll.heightAnchor.constraint(equalToConstant: 130).isActive = true
 
-        let stack = NSStackView(views: [top, options, resultsScroll])
+        let controls = NSStackView(views: [top, options])
+        controls.orientation = .vertical
+        controls.alignment = .leading
+        controls.spacing = 6
+        controls.translatesAutoresizingMaskIntoConstraints = false
+        let controlsScroll = NSScrollView()
+        controlsScroll.documentView = controls
+        controlsScroll.hasHorizontalScroller = true
+        controlsScroll.autohidesScrollers = true
+        controlsScroll.drawsBackground = false
+        controlsScroll.translatesAutoresizingMaskIntoConstraints = false
+        controlsScroll.heightAnchor.constraint(equalToConstant: 70).isActive = true
+        let stack = NSStackView(views: [controlsScroll, resultsScroll])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
@@ -113,8 +126,8 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            top.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
-            options.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
+            controlsScroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
+            controls.widthAnchor.constraint(greaterThanOrEqualTo: controlsScroll.contentView.widthAnchor),
             resultsScroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
         ] + expandedVerticalConstraints)
         replaceField.isHidden = true
@@ -152,10 +165,10 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         allDocuments.isEnabled = !replace
         if replace { allDocuments.state = .off }
         replaceField.isHidden = !replace
-        subviewsRecursiveButtons(named: ["Replace", "Replace All"]).forEach { $0.isHidden = !replace }
+        subviewsRecursiveButtons(actions: [#selector(replacePressed), #selector(replaceAllPressed)]).forEach { $0.isHidden = !replace }
         NSLayoutConstraint.activate(expandedVerticalConstraints)
         isHidden = false
-        collapsedHeight.constant = 76
+        collapsedHeight.constant = 88
         window?.makeFirstResponder(findField)
     }
 
@@ -177,15 +190,15 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         folderResult = nil
         folderRowOffsets = []
         rows = result.documents.flatMap { document in
-            [("\(document.title) — \(document.matches.count) match(es)", nil)]
+            [(L10n.text("%1$@ — %2$@", document.title, L10n.text("search.matches", document.matches.count)), nil)]
                 + document.matches.map { ("  \($0.line):\($0.column)  \($0.snippet)", Optional(.openDocument($0))) }
         }
         table.reloadData()
         resultsScroll.isHidden = rows.isEmpty
-        collapsedHeight.constant = rows.isEmpty ? 76 : 212
+        collapsedHeight.constant = rows.isEmpty ? 88 : 224
         status.stringValue = result.isTruncated
-            ? "\(result.matchCount)+ matches (truncated)"
-            : "\(result.matchCount) matches"
+            ? L10n.text("%1$@+ matches (truncated)", L10n.argument(result.matchCount))
+            : L10n.text("search.matches", result.matchCount)
     }
 
     func present(_ result: FolderSearchResultSet) {
@@ -200,11 +213,10 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         }
         table.reloadData()
         resultsScroll.isHidden = nextOffset == 0
-        collapsedHeight.constant = nextOffset == 0 ? 76 : 212
-        let suffix = result.skippedFileCount > 0 ? "; \(result.skippedFileCount) skipped" : ""
+        collapsedHeight.constant = nextOffset == 0 ? 88 : 224
         status.stringValue = result.isTruncated
-            ? "\(result.matchCount)+ matches in \(result.searchedFileCount) files (truncated\(suffix))"
-            : "\(result.matchCount) matches in \(result.searchedFileCount) files\(suffix)"
+            ? L10n.text("Matches: %1$@+ · Files: %2$@ · Skipped: %3$@ (results truncated)", L10n.argument(result.matchCount), L10n.argument(result.searchedFileCount), L10n.argument(result.skippedFileCount))
+            : L10n.text("Matches: %1$@ · Files: %2$@ · Skipped: %3$@", L10n.argument(result.matchCount), L10n.argument(result.searchedFileCount), L10n.argument(result.skippedFileCount))
     }
 
     func presentStatus(_ message: String) { status.stringValue = message }
@@ -220,7 +232,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
             folderRowOffsets = []
             table.reloadData()
             resultsScroll.isHidden = true
-            collapsedHeight.constant = 76
+            collapsedHeight.constant = 88
             status.stringValue = ""
             return
         }
@@ -243,7 +255,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
                 let match = document.matches[matchIndex]
                 label = "  \(match.line):\(match.column)  \(match.snippet)"
             } else {
-                label = "\(document.relativePath) — \(document.matches.count) match(es)"
+                label = L10n.text("%1$@ — %2$@", document.relativePath, L10n.text("search.matches", document.matches.count))
             }
         } else {
             label = rows[row].0
@@ -260,7 +272,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     @objc private func replaceAllPressed() { onReplaceAll?(currentQuery()) }
     @objc private func findAllPressed() { onFindAll?(currentQuery()) }
     @objc private func findInFolderPressed() { onFindInFolder?(currentQuery()) }
-    @objc private func cancelPressed() { status.stringValue = "Cancelled"; onCancel?() }
+    @objc private func cancelPressed() { status.stringValue = L10n.text("Cancelled"); onCancel?() }
     @objc private func closePressed() { hide(); onClose?() }
     @objc private func resultActivated() {
         let row = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
@@ -309,9 +321,9 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         return button
     }
 
-    private func subviewsRecursiveButtons(named names: Set<String>) -> [NSButton] {
+    private func subviewsRecursiveButtons(actions: Set<Selector>) -> [NSButton] {
         func collect(_ view: NSView) -> [NSButton] {
-            let own = (view as? NSButton).map { names.contains($0.title) ? [$0] : [] } ?? []
+            let own = (view as? NSButton).map { $0.action.map(actions.contains) == true ? [$0] : [] } ?? []
             return own + view.subviews.flatMap(collect)
         }
         return collect(self)

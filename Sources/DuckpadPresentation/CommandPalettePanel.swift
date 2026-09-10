@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import AppKit
 
 @MainActor
@@ -121,7 +122,7 @@ struct CommandPaletteSearch {
         return commands.indices.compactMap { index -> (Int, Int)? in
             let command = commands[index]
             let title = folded(command.title)
-            let searchable = "\(title) \(folded(command.path)) \(folded(command.shortcut))"
+            let searchable = "\(title) \(folded(MenuLocalization.sourceKey(for: command.item) ?? "")) \(folded(command.path)) \(folded(command.shortcut))"
             guard terms.allSatisfy(searchable.contains) else { return nil }
             let tier: Int
             if title == phrase { tier = 0 }
@@ -153,7 +154,7 @@ final class CommandPalettePanel: NSObject,
     private let searchField = NSSearchField(frame: .zero)
     private let tableView = NSTableView(frame: .zero)
     private let scrollView = NSScrollView(frame: .zero)
-    private let emptyLabel = NSTextField(labelWithString: "No matching commands")
+    private let emptyLabel = NSTextField(labelWithString: L10n.text("No matching commands"))
     private let countLabel = NSTextField(labelWithString: "")
     private let contentController = NSViewController()
     private let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 460, height: 390))
@@ -167,11 +168,11 @@ final class CommandPalettePanel: NSObject,
         super.init()
         rootView.setAccessibilityIdentifier("duckpad.commands.panel")
 
-        searchField.placeholderString = "Search commands"
+        searchField.placeholderString = L10n.text("Search commands")
         searchField.sendsSearchStringImmediately = true
         searchField.delegate = self
         searchField.setAccessibilityIdentifier("duckpad.commands.search")
-        searchField.setAccessibilityLabel("Search Duckpad commands")
+        searchField.setAccessibilityLabel(L10n.text("Search Duckpad commands"))
         searchField.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("command"))
@@ -186,7 +187,7 @@ final class CommandPalettePanel: NSObject,
         tableView.target = self
         tableView.doubleAction = #selector(activateSelection)
         tableView.setAccessibilityIdentifier("duckpad.commands.results")
-        tableView.setAccessibilityLabel("Duckpad command search results")
+        tableView.setAccessibilityLabel(L10n.text("Duckpad command search results"))
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -297,7 +298,7 @@ final class CommandPalettePanel: NSObject,
         cell.textField?.textColor = enabled ? .labelColor : .disabledControlTextColor
         cell.toolTip = command.qualifiedTitle
         cell.setAccessibilityLabel(command.qualifiedTitle)
-        cell.setAccessibilityValue(enabled ? "Available" : "Unavailable")
+        cell.setAccessibilityValue(enabled ? L10n.text("Available") : L10n.text("Unavailable"))
         if let detail = cell.viewWithTag(42) as? NSTextField { detail.stringValue = command.path }
         if let shortcut = cell.viewWithTag(43) as? NSTextField { shortcut.stringValue = command.shortcut }
         return cell
@@ -346,7 +347,7 @@ final class CommandPalettePanel: NSObject,
         filteredIndices = CommandPaletteSearch.matchingIndices(in: commands, query: searchField.stringValue)
         tableView.reloadData()
         emptyLabel.isHidden = !filteredIndices.isEmpty
-        countLabel.stringValue = "\(filteredIndices.count) of \(commands.count) commands"
+        countLabel.stringValue = L10n.text("%1$@ of %2$@ commands", L10n.argument(filteredIndices.count), L10n.argument(commands.count))
         if !filteredIndices.isEmpty { selectResult(at: 0) }
     }
 

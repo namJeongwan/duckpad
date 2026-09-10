@@ -1,11 +1,12 @@
+import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 
 /// The familiar Notepad status order, kept outside the editor's scrolling area.
 @MainActor
 final class DocumentStatusBarView: NSView {
-    let lengthLabel = NSTextField(labelWithString: "Length: 0   Lines: 1")
-    let positionButton = StatusBarButton(title: "Ln: 1   Col: 1   Sel: 0 | 0", target: nil, action: nil)
+    let lengthLabel = NSTextField(labelWithString: L10n.text("Length: 0   Lines: 1"))
+    let positionButton = StatusBarButton(title: L10n.text("Ln: 1   Col: 1   Sel: 0 | 0"), target: nil, action: nil)
     let lineEndingButton = StatusBarButton(title: "Unix (LF)", target: nil, action: nil)
     let modeButton = StatusBarButton(title: "INS", target: nil, action: nil)
     private var fields: [NSView] = []
@@ -17,7 +18,7 @@ final class DocumentStatusBarView: NSView {
         wantsLayer = true
         setAccessibilityIdentifier("duckpad.status.bar")
         setAccessibilityRole(.group)
-        setAccessibilityLabel("Document status")
+        setAccessibilityLabel(L10n.text("Document status"))
         lengthLabel.lineBreakMode = .byTruncatingTail
         lengthLabel.setAccessibilityIdentifier("duckpad.status.length")
         positionButton.setAccessibilityIdentifier("duckpad.status.position")
@@ -43,16 +44,16 @@ final class DocumentStatusBarView: NSView {
             }
             addSubview(field)
         }
-        positionButton.toolTip = "Go to line and column"
-        modeButton.toolTip = "Toggle insert / overwrite mode"
+        positionButton.toolTip = L10n.text("Go to line and column")
+        modeButton.toolTip = L10n.text("Toggle insert / overwrite mode")
         needsLayout = true
     }
 
     func apply(_ status: EditorStatusSnapshot) {
         guard statistics != status else { return }
         statistics = status
-        lengthLabel.stringValue = "Length: \(status.length)   Lines: \(status.lines)"
-        positionButton.title = "Ln: \(status.line)   Col: \(status.column)   Sel: \(status.selectedCharacters) | \(status.selectedLines)"
+        lengthLabel.stringValue = L10n.text("Length: %1$@   Lines: %2$@", L10n.argument(status.length), L10n.argument(status.lines))
+        positionButton.title = L10n.text("Ln: %1$@   Col: %2$@   Sel: %3$@ | %4$@", L10n.argument(status.line), L10n.argument(status.column), L10n.argument(status.selectedCharacters), L10n.argument(status.selectedLines))
         modeButton.title = status.isOvertype ? "OVR" : "INS"
         lengthLabel.toolTip = lengthLabel.stringValue
         lengthLabel.setAccessibilityValue(lengthLabel.stringValue)
