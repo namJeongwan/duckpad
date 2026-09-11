@@ -561,3 +561,25 @@
 "unpinned" = "固定解除済み";
 "App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad." = "アプリの言語はすぐに適用されます。「開く」と「保存」ダイアログには、Duckpadの再起動後に新しい言語が適用されます。";
 "Restart Duckpad to apply the selected language to Open and Save dialogs." = "「開く」と「保存」ダイアログに選択した言語を適用するには、Duckpadを再起動してください。";
+
+/* Search dialog */
+"Directory" = "フォルダ";
+"Browse…" = "参照…";
+"Search mode" = "検索モード";
+"Search options" = "検索オプション";
+"Find all in current document" = "現在の文書ですべて検索";
+"Find all in open documents" = "開いている文書ですべて検索";
+"Search includes subfolders. Hidden files, packages, and symbolic links are skipped." = "サブフォルダも検索します。隠しファイル、パッケージ、シンボリックリンクは除外されます。";
+"Find in Files" = "ファイル内を検索";
+"Bookmarks" = "ブックマーク";
+"Bookmark matching lines" = "一致する行をブックマーク";
+"Clear previous bookmarks" = "以前のブックマークを消去";
+"Bookmarks cleared" = "ブックマークを消去しました";
+"Bookmarked %1$@ of %2$@ matching lines" = "一致する%2$@行中%1$@行をブックマーク";
+"Bookmarked %1$@ of %2$@ matching lines (results truncated)" = "一致する%2$@行中%1$@行をブックマーク（結果は省略されています）";
+"Search backwards" = "前方を検索";
+"Count matches" = "一致数を数える";
+"Transparency" = "透明度";
+"When inactive" = "非アクティブ時";
+"Always" = "常時";
+"Window opacity" = "ウインドウの不透明度";

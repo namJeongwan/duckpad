@@ -20,6 +20,7 @@
 
 NSErrorDomain const DPScintillaErrorDomain = @"app.duckpad.scintilla";
 static NSURL *DPScintillaResourceDirectory;
+static constexpr int DPSearchIndicator = 8;
 static constexpr int DPBookmarkMarker = 20;
 static constexpr int DPBookmarkMask = 1 << DPBookmarkMarker;
 static constexpr NSInteger DPSmartIndentScanLimit = 4096;
@@ -942,6 +943,38 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 - (BOOL)hasEditorFocus { return self.window.firstResponder == [_scintilla content]; }
 
+- (BOOL)setSearchHighlights:(NSArray<NSValue *> *)ranges revision:(uint64_t)revision {
+    if (_binaryDocument || _revision != revision || ranges.count > 100000) return NO;
+    const NSUInteger length = self.documentByteLength;
+    for (NSValue *value in ranges) {
+        const NSRange range = value.rangeValue;
+        if (range.location > length || range.length > length - range.location
+            || ![self isUTF8Boundary:range.location documentLength:length]
+            || ![self isUTF8Boundary:NSMaxRange(range) documentLength:length]) return NO;
+    }
+    [self clearSearchHighlights];
+    [_scintilla message:SCI_SETINDICATORCURRENT wParam:DPSearchIndicator];
+    [_scintilla message:SCI_SETINDICATORVALUE wParam:1];
+    for (NSValue *value in ranges) {
+        const NSRange range = value.rangeValue;
+        if (range.length > 0) {
+            [_scintilla message:SCI_INDICATORFILLRANGE wParam:range.location lParam:range.length];
+        }
+    }
+    return YES;
+}
+
+- (void)clearSearchHighlights {
+    if (_binaryDocument) return;
+    [_scintilla message:SCI_SETINDICATORCURRENT wParam:DPSearchIndicator];
+    [_scintilla message:SCI_INDICATORCLEARRANGE wParam:0 lParam:self.documentByteLength];
+}
+
+- (BOOL)isSearchHighlightedAtUTF8Position:(NSUInteger)position {
+    if (_binaryDocument || position >= self.documentByteLength) return NO;
+    return [_scintilla message:SCI_INDICATORVALUEAT wParam:DPSearchIndicator lParam:position] != 0;
+}
+
 - (void)setPrimarySelectionUTF8Range:(NSRange)range {
     [_scintilla message:SCI_SETSEL wParam:(uptr_t)range.location lParam:(sptr_t)NSMaxRange(range)];
     [_scintilla message:SCI_SCROLLCARET];
@@ -1314,6 +1347,12 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     // fonts that fail the width check retain the normal shaping path.
     [_scintilla message:SCI_STYLESETCHECKMONOSPACED wParam:STYLE_DEFAULT lParam:1];
     [_scintilla message:SCI_STYLECLEARALL];
+    // Search decorations belong to the document, while their appearance belongs to each pane.
+    [_scintilla message:SCI_INDICSETSTYLE wParam:DPSearchIndicator lParam:INDIC_ROUNDBOX];
+    [_scintilla message:SCI_INDICSETFORE wParam:DPSearchIndicator lParam:dark ? 0x86CB63 : 0x70D880];
+    [_scintilla message:SCI_INDICSETALPHA wParam:DPSearchIndicator lParam:highContrast ? 160 : 110];
+    [_scintilla message:SCI_INDICSETOUTLINEALPHA wParam:DPSearchIndicator lParam:180];
+    [_scintilla message:SCI_INDICSETUNDER wParam:DPSearchIndicator lParam:1];
     [_scintilla message:SCI_STYLESETFORE wParam:STYLE_LINENUMBER lParam:gutterForeground];
     [_scintilla message:SCI_STYLESETBACK wParam:STYLE_LINENUMBER lParam:gutterBackground];
     [_scintilla message:SCI_STYLESETFONT wParam:STYLE_LINENUMBER lParam:reinterpret_cast<sptr_t>(_editorFontName.UTF8String)];
@@ -2299,7 +2338,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     }
     if (notification->nmhdr.code != SCN_MODIFIED) return;
     const int flags = notification->modificationType;
-    if (flags & (SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT)) ++_statusContentGeneration;
+    if (flags & (SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT)) {
+        ++_statusContentGeneration;
+        [self clearSearchHighlights];
+    }
     if (!_suppressEdit
         && (flags & (SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE)) != 0) {
         if (_publishesDocumentEdits && self.onWillModifyDocument) {

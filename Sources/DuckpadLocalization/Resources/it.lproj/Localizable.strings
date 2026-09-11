@@ -561,3 +561,25 @@
 "unpinned" = "sbloccato";
 "App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad." = "La lingua dell’app viene applicata subito. Le finestre Apri e Salva useranno la nuova lingua dopo il riavvio di Duckpad.";
 "Restart Duckpad to apply the selected language to Open and Save dialogs." = "Riavvia Duckpad per applicare la lingua selezionata alle finestre Apri e Salva.";
+
+/* Search dialog */
+"Directory" = "Cartella";
+"Browse…" = "Sfoglia…";
+"Search mode" = "Modalità di ricerca";
+"Search options" = "Opzioni di ricerca";
+"Find all in current document" = "Trova nel documento corrente";
+"Find all in open documents" = "Trova nei documenti aperti";
+"Search includes subfolders. Hidden files, packages, and symbolic links are skipped." = "La ricerca include le sottocartelle. File nascosti, pacchetti e collegamenti simbolici vengono ignorati.";
+"Find in Files" = "Trova nei file";
+"Bookmarks" = "Segnalibri";
+"Bookmark matching lines" = "Segna le righe corrispondenti";
+"Clear previous bookmarks" = "Cancella i segnalibri precedenti";
+"Bookmarks cleared" = "Segnalibri cancellati";
+"Bookmarked %1$@ of %2$@ matching lines" = "Segnate %1$@ di %2$@ righe corrispondenti";
+"Bookmarked %1$@ of %2$@ matching lines (results truncated)" = "Segnate %1$@ di %2$@ righe corrispondenti (risultati troncati)";
+"Search backwards" = "Cerca all’indietro";
+"Count matches" = "Conta corrispondenze";
+"Transparency" = "Trasparenza";
+"When inactive" = "Se inattiva";
+"Always" = "Sempre";
+"Window opacity" = "Opacità della finestra";

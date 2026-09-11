@@ -112,3 +112,9 @@ Binary views use Scintilla's viewport-sized line-layout cache so incremental
 repaints reuse measured glyph positions. Selection and viewport restoration
 only sends setters when values changed, avoiding unconditional redraws per
 chunk. Regular text reload restores the default uncached layout policy.
+
+Search highlighting uses reserved indicator 8 in the Duckpad-owned bridge/header.
+It validates revision and UTF-8 ranges, applies palette-aware green decorations
+without changing selections or text, and clears decorations on native edits.
+The vendor import script leaves `bridge/` untouched; these are not generated
+files. No upstream Scintilla/Lexilla source is changed.

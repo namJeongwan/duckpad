@@ -302,6 +302,21 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorFindTextPo
         return !(viewStates[bufferID]?.bookmarkedLines.isEmpty ?? true)
     }
 
+    @discardableResult
+    public func addBookmarks(on lines: [Int]) -> Int {
+        guard let bufferID = activeBuffer?.bufferID else { return 0 }
+        let lastLine = lineNumber(atUTF16: (textView.string as NSString).length, in: textView.string)
+        let requested = Set(lines.filter { $0 >= 0 && $0 <= lastLine })
+        var state = viewStates[bufferID] ?? EditorViewState()
+        let existing = Set(state.bookmarkedLines)
+        let additions = requested.subtracting(existing).sorted().prefix(max(0, EditorViewState.maximumBookmarkCount - existing.count))
+        let merged = existing.union(additions)
+        state.bookmarkedLines = merged.sorted()
+        viewStates[bufferID] = state
+        renderBookmarks()
+        return requested.intersection(merged).count
+    }
+
     public func toggleBookmarkAtCaret() {
         guard let bufferID = activeBuffer?.bufferID else { return }
         let line = lineNumber(atUTF16: textView.selectedRange().location, in: textView.string)

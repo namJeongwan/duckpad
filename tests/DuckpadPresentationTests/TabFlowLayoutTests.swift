@@ -4174,12 +4174,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     await controller.waitForStartup()
     let editor = controller.editor.textView
     editor.insertText("alpha beta", replacementRange: NSRange(location: 0, length: 0))
-    func searchPanel(in view: NSView) -> SearchPanelView? {
-        if let panel = view as? SearchPanelView { return panel }
-        return view.subviews.lazy.compactMap { searchPanel(in: $0) }.first
-    }
-    let root = try #require(controller.window?.contentView)
-    let panel = try #require(searchPanel(in: root))
+    let panel = controller.searchPanel
     editor.setSelectedRange(NSRange(location: 0, length: 5))
     controller.performShowFind()
     #expect(panel.currentQuery().pattern == "alpha")

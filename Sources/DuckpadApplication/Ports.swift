@@ -141,6 +141,8 @@ public protocol EditorDefaultViewOptionsPort: EditorViewOptionsPort {
 @MainActor
 public protocol BookmarkEditorPort: EditorPort {
     var hasBookmarks: Bool { get }
+    /// Adds zero-based lines without changing selections or text. Returns the number of requested lines now bookmarked.
+    @discardableResult func addBookmarks(on lines: [Int]) -> Int
     func toggleBookmarkAtCaret()
     @discardableResult func navigateToBookmark(forward: Bool) -> Bool
     func clearBookmarks()

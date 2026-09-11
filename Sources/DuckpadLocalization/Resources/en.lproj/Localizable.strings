@@ -568,3 +568,25 @@
 
 "Binary files are read-only and cannot be saved." = "Binary files are read-only and cannot be saved.";
 "Loading: %1$@%%" = "Loading: %1$@%%";
+
+/* Search dialog */
+"Directory" = "Directory";
+"Browse…" = "Browse…";
+"Search mode" = "Search mode";
+"Search options" = "Search options";
+"Find all in current document" = "Find all in current document";
+"Find all in open documents" = "Find all in open documents";
+"Search includes subfolders. Hidden files, packages, and symbolic links are skipped." = "Search includes subfolders. Hidden files, packages, and symbolic links are skipped.";
+"Find in Files" = "Find in Files";
+"Bookmarks" = "Bookmarks";
+"Bookmark matching lines" = "Bookmark matching lines";
+"Clear previous bookmarks" = "Clear previous bookmarks";
+"Bookmarks cleared" = "Bookmarks cleared";
+"Bookmarked %1$@ of %2$@ matching lines" = "Bookmarked %1$@ of %2$@ matching lines";
+"Bookmarked %1$@ of %2$@ matching lines (results truncated)" = "Bookmarked %1$@ of %2$@ matching lines (results truncated)";
+"Search backwards" = "Search backwards";
+"Count matches" = "Count matches";
+"Transparency" = "Transparency";
+"When inactive" = "When inactive";
+"Always" = "Always";
+"Window opacity" = "Window opacity";
