@@ -105,6 +105,8 @@ public protocol EditorPort: AnyObject {
     func display(_ buffer: EditorBufferDescriptor)
     /// Explicit file-open/reload boundary. Never called on the normal edit path.
     func install(_ snapshot: EditorTextSnapshot)
+    /// Replaces an open file as one undoable edit, retaining its prior history.
+    func reload(_ snapshot: EditorTextSnapshot)
     func snapshot(for bufferID: BufferID) -> EditorTextSnapshot?
     func retire(bufferID: BufferID)
     func setInputEnabled(_ isEnabled: Bool)
@@ -312,6 +314,10 @@ public extension EditorPort {
     }
 
     func acknowledgeRecoverySnapshot(_ snapshot: EditorRecoverySnapshot) {}
+
+    func reload(_ snapshot: EditorTextSnapshot) {
+        install(snapshot)
+    }
 
     func installRecovery(_ snapshot: EditorRecoverySnapshot) {
         guard let text = String(data: snapshot.utf8, encoding: .utf8) else { return }

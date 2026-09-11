@@ -80,3 +80,9 @@ pre-mutation callback in `bridge/`. The callback is driven by Scintilla's public
 event mask is installed during bridge-view construction and reused for later
 mask reconfiguration. This adds no upstream Scintilla or Lexilla changes beyond
 the patches listed above.
+
+External file reloads use an undo-preserving load option in Duckpad-owned
+`bridge/DuckpadScintillaBridge.mm` and its public header. Changed contents form
+one native undo group; identical contents retain the existing undo/redo stack.
+Initial loads and recovery still clear history. No upstream files or generated
+files are changed by this option.

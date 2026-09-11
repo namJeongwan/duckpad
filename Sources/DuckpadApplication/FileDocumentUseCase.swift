@@ -225,13 +225,11 @@ public final class FileDocumentUseCase {
                 byteOrderMark: decoded.byteOrderMark, lineEnding: decoded.lineEnding,
                 observedIdentity: read.identity, securityScopedBookmark: retained.bookmark ?? binding.securityScopedBookmark)
             guard !Task.isCancelled, !liveReloadSuspended else { return }
-            let state = editor.recoveryCapture(for: current.buffer.bufferID)?.viewState ?? EditorViewState()
-            let bytes = Data(decoded.text.utf8)
             let result = await workspace.replaceFileContents(tabID: tabID, binding: updated, title: current.title,
                 expectedRevision: current.buffer.revision, expectedBinding: binding,
                 installContents: { [editor] descriptor in
-                    editor.installRecovery(EditorRecoverySnapshot(bufferID: descriptor.bufferID,
-                        revision: descriptor.revision, utf8: bytes, viewState: state))
+                    editor.reload(EditorTextSnapshot(bufferID: descriptor.bufferID,
+                        revision: descriptor.revision, text: decoded.text))
                 })
             switch result {
             case .applied: externalChanges.removeValue(forKey: tabID)
@@ -485,7 +483,7 @@ public final class FileDocumentUseCase {
                 guard let refreshed = workspace.fileContext(tabID: reopening.tabID) else {
                     return .failed(.comparisonInvalidated)
                 }
-                editor.install(EditorTextSnapshot(
+                editor.reload(EditorTextSnapshot(
                     bufferID: refreshed.buffer.bufferID,
                     revision: refreshed.buffer.revision,
                     text: decoded.text
@@ -699,7 +697,7 @@ public final class FileDocumentUseCase {
                 ) {
                 case .applied:
                     guard let refreshed = workspace.fileContext(tabID: context.tabID) else { return .failed(.noActiveDocument) }
-                    editor.install(EditorTextSnapshot(bufferID: refreshed.buffer.bufferID, revision: refreshed.buffer.revision, text: decoded.text))
+                    editor.reload(EditorTextSnapshot(bufferID: refreshed.buffer.bufferID, revision: refreshed.buffer.revision, text: decoded.text))
                     self.pendingConflict = nil
                     return .saved(context.tabID)
                 case .persistenceFailed(let failure): return .failed(.workspace(failure))
