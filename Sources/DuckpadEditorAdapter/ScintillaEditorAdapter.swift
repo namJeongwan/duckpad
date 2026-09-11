@@ -7,7 +7,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+public final class ScintillaEditorAdapter: BinaryEditorPort, SearchEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -73,6 +73,8 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
 
     private var activeBuffer: EditorBufferDescriptor?
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
+    private var binaryDocuments: [BufferID: DPScintillaBinaryDocument] = [:]
+    private var pendingBinaryViewStates: [BufferID: EditorViewState] = [:]
     private var recoveryBuffers: [BufferID: RecoveryBuffer] = [:]
     private var viewStates: [BufferID: EditorViewState] = [:]
     private var acceptedEdits: [BufferID: [EditorIncrementalEdit]] = [:]
@@ -123,6 +125,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
     private var defaultViewState: EditorViewState
     private var isRecovering = false
     private var inputEnabled = true
+    private var readOnlyBuffers: Set<BufferID> = []
     private var lifecycleGeneration: UInt64 = 0
     private var isInvalidated = false
     private var editCallbackDepth = 0
@@ -308,12 +311,114 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
         }
     }
 
+    public func prepareBinary(_ data: Data) async throws -> @MainActor (EditorBufferDescriptor) -> Void {
+        let document = try await DPScintillaBinaryDocument.begin(data: data)
+        return { [weak self] buffer in self?.installBinary(document, for: buffer) }
+    }
+
+    public func hasBinaryContent(for bufferID: BufferID) -> Bool {
+        guard let document = binaryDocuments[bufferID] else { return false }
+        return document.byteLength == document.totalByteLength
+    }
+
+    public func finishBinaryLoad(
+        for buffer: EditorBufferDescriptor,
+        progress: @escaping @MainActor (Int, Int) -> Void
+    ) async throws {
+        guard let document = binaryDocuments[buffer.bufferID],
+              let primary = bufferViews[buffer.bufferID] else { throw CancellationError() }
+        defer {
+            if document.byteLength < document.totalByteLength { document.cancelLoading() }
+        }
+        let initialViews = allViews(for: buffer.bufferID).map {
+            (view: $0, state: capturedSecondaryViewState($0), bookmarks: $0.bookmarkedLines)
+        }
+        var lastPercent = -1
+        repeat {
+            try Task.checkCancellation()
+            guard !isInvalidated, binaryDocuments[buffer.bufferID] === document,
+                  currentRevision(for: buffer.bufferID) == buffer.revision else { throw CancellationError() }
+            let loaded = Int(document.byteLength)
+            let total = Int(document.totalByteLength)
+            let percent = total == 0 ? 100 : Int(Double(loaded) / Double(total) * 100)
+            if percent != lastPercent {
+                lastPercent = percent
+                progress(loaded, total)
+            }
+            if loaded == total { break }
+            // Yield between bounded native appends so AppKit can draw and accept scrolling.
+            try await Task.sleep(for: .milliseconds(1))
+            try Task.checkCancellation()
+            guard !isInvalidated, binaryDocuments[buffer.bufferID] === document,
+                  currentRevision(for: buffer.bufferID) == buffer.revision else { throw CancellationError() }
+            _ = try primary.appendBinaryDocumentChunk(document, maximumBytes: 1_024 * 1_024)
+        } while true
+        if let restored = pendingBinaryViewStates.removeValue(forKey: buffer.bufferID) {
+            let currentViews = allViews(for: buffer.bufferID)
+            for initial in initialViews where currentViews.contains(where: { $0 === initial.view }) {
+                guard capturedSecondaryViewState(initial.view) == initial.state,
+                      initial.view.bookmarkedLines == initial.bookmarks else { continue }
+                if initial.view !== primary, let secondary = restored.secondaryViewState {
+                    restoreSecondaryViewState(secondary, in: initial.view)
+                } else {
+                    restoreViewState(restored, in: initial.view)
+                }
+            }
+        }
+        onEditorStatusChange?()
+    }
+
+    private func installBinary(_ document: DPScintillaBinaryDocument, for buffer: EditorBufferDescriptor) {
+        guard !isInvalidated else { return }
+        let bufferID = buffer.bufferID
+        if binaryDocuments[bufferID] != nil { storeViewState(bufferID: bufferID) }
+        if let restoredState = pendingBinaryViewStates.removeValue(forKey: bufferID) {
+            viewStates[bufferID] = restoredState
+        }
+        binaryDocuments[bufferID] = document
+        readOnlyBuffers.insert(bufferID)
+        pendingRecoveryBuffers.remove(bufferID)
+        snapshots[bufferID] = EditorTextSnapshot(bufferID: bufferID, revision: buffer.revision, text: "")
+        // Read-only file contents are reloaded from disk; recovery stores only view state.
+        recoveryBuffers[bufferID] = RecoveryBuffer(baseRevision: buffer.revision,
+            revision: buffer.revision, baseUTF8: Data(), deltas: [], byteCount: 0)
+        acceptedEdits[bufferID] = []
+        let primary = preparePrimaryView(for: buffer)
+        isRecovering = true
+        primary.load(document, revision: buffer.revision)
+        for peer in allViews(for: bufferID) where peer !== primary {
+            peer.shareDocument(with: primary)
+            peer.isInputEnabled = false
+        }
+        isRecovering = false
+        updateDisplayedRevision(buffer.revision, for: bufferID)
+        if activeBuffer?.bufferID == bufferID { activeBuffer = buffer }
+        for view in allViews(for: bufferID) {
+            applyStoredLanguage(to: view, bufferID: bufferID)
+            restoreViewState(for: bufferID, in: view)
+            view.isWordWrapEnabled = false
+        }
+        if document.byteLength < document.totalByteLength,
+           let state = viewStates[bufferID],
+           state.caretUTF8 > Int(document.byteLength) || state.anchorUTF8 > Int(document.byteLength)
+                || state.firstVisibleLine >= Int(primary.lineCount)
+                || state.bookmarkedLines.contains(where: { $0 >= Int(primary.lineCount) })
+                || (state.secondaryViewState?.caretUTF8 ?? 0) > Int(document.byteLength)
+                || (state.secondaryViewState?.anchorUTF8 ?? 0) > Int(document.byteLength)
+                || (state.secondaryViewState?.firstVisibleLine ?? 0) >= Int(primary.lineCount) {
+            pendingBinaryViewStates[bufferID] = state
+        }
+        onEditorStatusChange?()
+    }
+
     public func install(_ snapshot: EditorTextSnapshot) {
         install(snapshot, preservingUndo: false)
     }
 
     private func install(_ snapshot: EditorTextSnapshot, preservingUndo: Bool) {
         guard !isInvalidated else { return }
+        pendingBinaryViewStates.removeValue(forKey: snapshot.bufferID)
+        let replacedBinary = binaryDocuments.removeValue(forKey: snapshot.bufferID) != nil
         pendingRecoveryBuffers.remove(snapshot.bufferID)
         updateRevisionExhaustion(bufferID: snapshot.bufferID, revision: snapshot.revision)
         if canonicalOwnerView(for: snapshot.bufferID) != nil {
@@ -334,7 +439,12 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
         )
         acceptedEdits[snapshot.bufferID] = []
         guard let editorView = bufferViews[snapshot.bufferID] else { return }
-        load(snapshot, into: editorView, preservingUndo: preservingUndo)
+        load(snapshot, into: editorView, preservingUndo: preservingUndo && !replacedBinary)
+        if replacedBinary {
+            for peer in allViews(for: snapshot.bufferID) where peer !== editorView {
+                peer.shareDocument(with: editorView)
+            }
+        }
         synchronizeRevision(snapshot.revision, for: snapshot.bufferID, excluding: editorView)
         updateDisplayedRevision(snapshot.revision, for: snapshot.bufferID)
         if activeBuffer?.bufferID == snapshot.bufferID {
@@ -346,6 +456,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
     }
 
     public func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? {
+        guard binaryDocuments[bufferID] == nil else { return nil }
         guard !isInvalidated else { return nil }
         guard recoverPendingBufferIfNeeded(bufferID) else { return snapshots[bufferID] }
         if bufferViews[bufferID] != nil {
@@ -369,7 +480,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
             revision: recovery.revision,
             baseUTF8: recovery.baseUTF8,
             deltas: recovery.deltas,
-            viewState: viewStates[bufferID] ?? defaultViewState
+            viewState: pendingBinaryViewStates[bufferID] ?? viewStates[bufferID] ?? defaultViewState
         )
     }
 
@@ -409,6 +520,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
         install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text),
             preservingUndo: preservingUndo)
         viewStates[snapshot.bufferID] = recoveredViewState
+        if snapshot.utf8.isEmpty { pendingBinaryViewStates[snapshot.bufferID] = snapshot.viewState }
         let recoveryView = canonicalOwnerView(for: snapshot.bufferID)
             ?? (hasVisibleGroups ? nil : bufferViews[snapshot.bufferID])
         if let editorView = recoveryView {
@@ -422,6 +534,8 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
     }
 
     public func retire(bufferID: BufferID) {
+        binaryDocuments.removeValue(forKey: bufferID)
+        pendingBinaryViewStates.removeValue(forKey: bufferID)
         snapshots.removeValue(forKey: bufferID)
         recoveryBuffers.removeValue(forKey: bufferID)
         viewStates.removeValue(forKey: bufferID)
@@ -429,6 +543,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
         languageConfigurations.removeValue(forKey: bufferID)
         pendingRecoveryBuffers.remove(bufferID)
         revisionExhaustedBuffers.remove(bufferID)
+        readOnlyBuffers.remove(bufferID)
         bufferOwners.removeValue(forKey: bufferID)
         bufferGroupViews.removeValue(forKey: bufferID)
         pendingGroupRecoveryViewStates.removeValue(forKey: bufferID)
@@ -535,12 +650,15 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
             internalSecondaryHost.removeFromSuperview()
         }
         snapshots.removeAll()
+        binaryDocuments.removeAll()
+        pendingBinaryViewStates.removeAll()
         recoveryBuffers.removeAll()
         viewStates.removeAll()
         acceptedEdits.removeAll()
         languageConfigurations.removeAll()
         pendingRecoveryBuffers.removeAll()
         revisionExhaustedBuffers.removeAll()
+        readOnlyBuffers.removeAll()
         deferredEditorGroupCloseRequestGeneration = nil
         scheduledEditorGroupCloseRequestGeneration = nil
         onEdit = nil
@@ -899,7 +1017,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
 
     public func captureDocumentIntelligence(maximumBytes: Int) -> DocumentIntelligenceCapture? {
         guard maximumBytes >= 0,
-              let activeBuffer,
+              let activeBuffer, binaryDocuments[activeBuffer.bufferID] == nil,
               let editorView = activeScintillaView,
               editorView.revision == activeBuffer.revision,
               editorView.documentByteLength <= maximumBytes,
@@ -1302,6 +1420,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
     }
 
     private func storeSnapshot(bufferID: BufferID, revision: UInt64) {
+        guard binaryDocuments[bufferID] == nil else { return }
         guard !isInvalidated, let editorView = bufferViews[bufferID],
               let text = String(data: editorView.contentUTF8, encoding: .utf8) else { return }
         snapshots[bufferID] = EditorTextSnapshot(bufferID: bufferID, revision: revision, text: text)
@@ -1420,7 +1539,11 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
         }
         let editorView = makeView(for: buffer.bufferID)
         bufferViews[buffer.bufferID] = editorView
-        load(snapshot, into: editorView)
+        if let binary = binaryDocuments[buffer.bufferID] {
+            editorView.load(binary, revision: buffer.revision)
+        } else {
+            load(snapshot, into: editorView)
+        }
         return editorView
     }
 
@@ -1896,7 +2019,15 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
     }
 
     private func isInputEnabled(for bufferID: BufferID) -> Bool {
-        inputEnabled && !revisionExhaustedBuffers.contains(bufferID)
+        inputEnabled && !readOnlyBuffers.contains(bufferID) && !revisionExhaustedBuffers.contains(bufferID)
+    }
+
+    public func setReadOnly(_ isReadOnly: Bool, for bufferID: BufferID) {
+        if !isReadOnly { pendingBinaryViewStates.removeValue(forKey: bufferID) }
+        guard readOnlyBuffers.contains(bufferID) != isReadOnly else { return }
+        if isReadOnly { readOnlyBuffers.insert(bufferID) }
+        else { readOnlyBuffers.remove(bufferID) }
+        allViews(for: bufferID).forEach { $0.isInputEnabled = isInputEnabled(for: bufferID) }
     }
 
     private func configureSplit(

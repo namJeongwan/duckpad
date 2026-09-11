@@ -11,6 +11,8 @@ final class DocumentStatusBarView: NSView {
     let modeButton = StatusBarButton(title: "INS", target: nil, action: nil)
     private var fields: [NSView] = []
     private var statistics: EditorStatusSnapshot?
+    private var binarySummary: String?
+    private var loadingProgress: FileLoadingProgress?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -34,9 +36,9 @@ final class DocumentStatusBarView: NSView {
         modeButton.toolTip = catalog.text("Toggle insert / overwrite mode")
         if let statistics {
             self.statistics = nil
-            apply(statistics, catalog: catalog)
+            apply(statistics, binarySummary: binarySummary, catalog: catalog)
         } else {
-            lengthLabel.stringValue = catalog.text("Length: 0   Lines: 1")
+            renderLength(catalog: catalog)
             positionButton.title = catalog.text("Ln: 1   Col: 1   Sel: 0 | 0")
         }
         needsLayout = true
@@ -63,16 +65,32 @@ final class DocumentStatusBarView: NSView {
         needsLayout = true
     }
 
-    func apply(_ status: EditorStatusSnapshot, catalog: LocalizationCatalog = L10n.catalog) {
-        guard statistics != status else { return }
+    func apply(_ status: EditorStatusSnapshot, binarySummary: String? = nil, catalog: LocalizationCatalog = L10n.catalog) {
+        guard statistics != status || self.binarySummary != binarySummary else { return }
         statistics = status
-        lengthLabel.stringValue = catalog.text("Length: %1$@   Lines: %2$@", arguments: [status.length.formatted(.number.locale(catalog.locale)), status.lines.formatted(.number.locale(catalog.locale))])
+        self.binarySummary = binarySummary
+        renderLength(catalog: catalog)
         positionButton.title = catalog.text("Ln: %1$@   Col: %2$@   Sel: %3$@ | %4$@", arguments: [status.line, status.column, status.selectedCharacters, status.selectedLines].map { $0.formatted(.number.locale(catalog.locale)) })
-        modeButton.title = status.isOvertype ? "OVR" : "INS"
-        lengthLabel.toolTip = lengthLabel.stringValue
-        lengthLabel.setAccessibilityValue(lengthLabel.stringValue)
+        modeButton.title = binarySummary == nil ? (status.isOvertype ? "OVR" : "INS") : "—"
         positionButton.setAccessibilityValue(positionButton.title)
         modeButton.setAccessibilityValue(modeButton.title)
+    }
+
+    func showLoading(_ progress: FileLoadingProgress?) {
+        guard progress != loadingProgress else { return }
+        loadingProgress = progress
+        renderLength()
+    }
+
+    private func renderLength(catalog: LocalizationCatalog = L10n.catalog) {
+        let loadingSummary = loadingProgress.map {
+            catalog.text("Loading: %1$@%%", arguments: [$0.percent.formatted(.number.locale(catalog.locale))])
+        }
+        lengthLabel.stringValue = loadingSummary ?? binarySummary ?? statistics.map {
+            catalog.text("Length: %1$@   Lines: %2$@", arguments: [$0.length, $0.lines].map { $0.formatted(.number.locale(catalog.locale)) })
+        } ?? catalog.text("Length: 0   Lines: 1")
+        lengthLabel.toolTip = loadingProgress?.path ?? lengthLabel.stringValue
+        lengthLabel.setAccessibilityValue(lengthLabel.stringValue)
     }
 
     override func layout() {

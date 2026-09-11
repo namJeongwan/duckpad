@@ -110,6 +110,7 @@ public protocol EditorPort: AnyObject {
     func snapshot(for bufferID: BufferID) -> EditorTextSnapshot?
     func retire(bufferID: BufferID)
     func setInputEnabled(_ isEnabled: Bool)
+    func setReadOnly(_ isReadOnly: Bool, for bufferID: BufferID)
     func focus()
     func recoverySnapshot(for bufferID: BufferID) -> EditorRecoverySnapshot?
     func recoveryCapture(for bufferID: BufferID) -> EditorRecoveryCapture?
@@ -293,6 +294,8 @@ public protocol LanguageEditorPort: EditorPort {
 }
 
 public extension EditorPort {
+    func setReadOnly(_ isReadOnly: Bool, for bufferID: BufferID) {}
+
     func recoverySnapshot(for bufferID: BufferID) -> EditorRecoverySnapshot? {
         guard let snapshot = snapshot(for: bufferID) else { return nil }
         return EditorRecoverySnapshot(

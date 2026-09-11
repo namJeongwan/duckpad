@@ -1004,7 +1004,7 @@ private actor FileSessionStoreFake: SessionStore {
         #expect(editor.snapshot(for: buffer.bufferID)?.text == String(decoding: bytes, as: UTF8.self))
         #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == false)
         #expect(await files.data(at: url) == bytes)
-        #expect(await useCase.saveActive() == .saved(workspace.activeFileContext()!.tabID))
+        #expect(await useCase.saveActive() == .failed(.readOnly))
         #expect(await files.data(at: url) == bytes)
     }
 }

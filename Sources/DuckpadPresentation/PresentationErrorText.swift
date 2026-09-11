@@ -44,6 +44,7 @@ enum PresentationErrorText {
             }
         case let failure as FileOperationFailure:
             switch failure {
+            case .readOnly: return catalog.text("Binary files are read-only and cannot be saved.")
             case .store(let nested): return message(nested, catalog: catalog)
             case .workspace(let nested): return message(nested, catalog: catalog)
             case .cancelled: return catalog.text("Cancelled")

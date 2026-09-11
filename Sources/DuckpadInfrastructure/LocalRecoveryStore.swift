@@ -510,7 +510,7 @@ public actor LocalRecoveryStore: RecoveryStore {
             guard blob.count == record.byteCount, digest(blob) == record.sha256,
                   String(data: blob, encoding: .utf8) != nil,
                   restoredSession.buffers[record.bufferID]?.revision == record.revision,
-                  valid(record.viewState, for: blob) else {
+                  valid(record.viewState, for: blob, bufferID: record.bufferID, session: restoredSession) else {
                 throw SessionStoreError.corrupt("blob validation failed")
             }
             buffers[record.bufferID] = EditorRecoverySnapshot(
@@ -627,7 +627,7 @@ public actor LocalRecoveryStore: RecoveryStore {
             guard blob.count == record.byteCount, digest(blob) == record.sha256,
                   String(data: blob, encoding: .utf8) != nil,
                   restoredSession.buffers[record.bufferID]?.revision == record.revision,
-                  valid(record.viewState, for: blob) else {
+                  valid(record.viewState, for: blob, bufferID: record.bufferID, session: restoredSession) else {
                 throw SessionStoreError.corrupt("blob validation failed")
             }
             buffers[record.bufferID] = EditorRecoverySnapshot(
@@ -667,7 +667,7 @@ public actor LocalRecoveryStore: RecoveryStore {
         for (index, snapshot) in ordered.enumerated() {
             guard archive.session.buffers[snapshot.bufferID]?.revision == snapshot.revision,
                   String(data: snapshot.utf8, encoding: .utf8) != nil,
-                  valid(snapshot.viewState, for: snapshot.utf8) else {
+                  valid(snapshot.viewState, for: snapshot.utf8, bufferID: snapshot.bufferID, session: archive.session) else {
                 throw SessionStoreError.corrupt("invalid archive buffer")
             }
             let file = "\(snapshot.bufferID.rawValue.uuidString.lowercased()).utf8"
@@ -774,7 +774,7 @@ public actor LocalRecoveryStore: RecoveryStore {
         for (index, snapshot) in ordered.enumerated() {
             guard archive.session.buffers[snapshot.bufferID]?.revision == snapshot.revision,
                   String(data: snapshot.utf8, encoding: .utf8) != nil,
-                  valid(snapshot.viewState, for: snapshot.utf8) else {
+                  valid(snapshot.viewState, for: snapshot.utf8, bufferID: snapshot.bufferID, session: archive.session) else {
                 throw SessionStoreError.corrupt("invalid archive buffer")
             }
             let file = "\(snapshot.bufferID.rawValue.uuidString.lowercased()).utf8"
@@ -990,15 +990,28 @@ public actor LocalRecoveryStore: RecoveryStore {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func valid(_ state: EditorViewState, for utf8: Data) -> Bool {
+    private static func valid(
+        _ state: EditorViewState, for utf8: Data, bufferID: BufferID, session: ScratchSession
+    ) -> Bool {
+        let document = session.documents.values.first { $0.bufferID == bufferID }
+        let binding = document.flatMap { session.fileBindings[$0.id] }
+        // Native binary recovery contains no text; positions refer to the
+        // original bytes and are clamped again after the file is reopened.
+        let binaryByteCount = utf8.isEmpty ? binding?.binaryByteCount : nil
+        if let binaryByteCount {
+            guard let binding, binaryByteCount >= 0,
+                  UInt64(binaryByteCount) <= binding.observedIdentity.byteCount else { return false }
+        }
+        let byteCount = binaryByteCount ?? utf8.count
         guard state.anchorUTF8 >= 0,
               state.caretUTF8 >= 0,
               state.firstVisibleLine >= 0,
               state.horizontalScrollOffset >= 0,
-              state.anchorUTF8 <= utf8.count,
-              state.caretUTF8 <= utf8.count,
+              state.anchorUTF8 <= byteCount,
+              state.caretUTF8 <= byteCount,
               state.bookmarkedLines.count <= EditorViewState.maximumBookmarkCount else { return false }
-        var maximumLine = 0
+        var maximumLine = binaryByteCount ?? 0
+        if binaryByteCount != nil, state.firstVisibleLine > byteCount { return false }
         var index = 0
         while index < utf8.count {
             if utf8[index] == 0x0D {
@@ -1010,18 +1023,22 @@ public actor LocalRecoveryStore: RecoveryStore {
             index += 1
         }
         guard state.bookmarkedLines.allSatisfy({ $0 >= 0 && $0 <= maximumLine }) else { return false }
-        guard isUTF8Boundary(state.anchorUTF8, in: utf8),
-              isUTF8Boundary(state.caretUTF8, in: utf8) else { return false }
+        if binaryByteCount == nil {
+            guard isUTF8Boundary(state.anchorUTF8, in: utf8),
+                  isUTF8Boundary(state.caretUTF8, in: utf8) else { return false }
+        }
         if let secondary = state.secondaryViewState {
             guard state.splitOrientation != nil,
                   secondary.anchorUTF8 >= 0,
                   secondary.caretUTF8 >= 0,
                   secondary.firstVisibleLine >= 0,
                   secondary.horizontalScrollOffset >= 0,
-                  secondary.anchorUTF8 <= utf8.count,
-                  secondary.caretUTF8 <= utf8.count,
-                  isUTF8Boundary(secondary.anchorUTF8, in: utf8),
-                  isUTF8Boundary(secondary.caretUTF8, in: utf8) else { return false }
+                  secondary.anchorUTF8 <= byteCount,
+                  secondary.caretUTF8 <= byteCount else { return false }
+            if binaryByteCount == nil {
+                guard isUTF8Boundary(secondary.anchorUTF8, in: utf8),
+                      isUTF8Boundary(secondary.caretUTF8, in: utf8) else { return false }
+            } else if secondary.firstVisibleLine > byteCount { return false }
         } else if state.splitOrientation != nil {
             return false
         }

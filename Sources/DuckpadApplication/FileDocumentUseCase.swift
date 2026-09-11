@@ -17,6 +17,7 @@ public struct FileWorkspaceContext: Equatable, Sendable {
 
 public enum FileOperationFailure: Error, Equatable, Sendable {
     case cancelled
+    case readOnly
     case noActiveDocument
     case unsavedChanges(TabID)
     case editorSnapshotUnavailable(BufferID)
@@ -91,6 +92,12 @@ public enum FolderSearchActivationOutcome: Equatable, Sendable {
 @MainActor
 public final class FileDocumentUseCase {
     public static let defaultMaximumComparisonBytes = 32 * 1_024 * 1_024
+    private typealias PreparedContents = (
+        decoded: DecodedTextFile,
+        install: @MainActor (EditorBufferDescriptor) -> Void,
+        finish: @MainActor (EditorBufferDescriptor) async throws -> Void
+    )
+
     private struct PendingConflict {
         let context: FileWorkspaceContext
         let url: URL
@@ -106,6 +113,10 @@ public final class FileDocumentUseCase {
     private var pendingLivePaths = Set<String>()
     public private(set) var externalChanges: [TabID: LiveFileChange] = [:]
     public var onExternalChanges: (() -> Void)?
+    public private(set) var loadingProgress: FileLoadingProgress? {
+        didSet { if oldValue != loadingProgress { onLoadingProgress?() } }
+    }
+    public var onLoadingProgress: (() -> Void)?
     private let workspace: ScratchWorkspaceUseCase
     private let editor: any EditorPort
     private let store: any TextFileStore
@@ -201,11 +212,16 @@ public final class FileDocumentUseCase {
         await acquireOperation()
         defer { releaseOperation() }
         guard !Task.isCancelled, !liveReloadSuspended, let context = workspace.fileContext(tabID: tabID), let binding = context.binding else { return }
+        loadingProgress = FileLoadingProgress(path: binding.canonicalPath, loadedByteCount: 0, totalByteCount: nil)
+        defer { loadingProgress = nil }
         do {
             let url = URL(fileURLWithPath: binding.canonicalPath)
-            let read = try await store.read(from: url)
+            let read = try await store.readForDisplay(from: url, assuming: binding.isReadOnly ? nil : binding.encoding)
+            guard UInt64(read.data.count) == read.identity.byteCount else {
+                throw TextFileStoreError.io("\(url.path): incomplete file read")
+            }
             guard !Task.isCancelled, !liveReloadSuspended, let current = workspace.fileContext(tabID: tabID), current.binding == binding else { return }
-            if read.identity == binding.observedIdentity {
+            if read.identity == binding.observedIdentity, !needsBinaryContent(context) {
                 externalChanges.removeValue(forKey: tabID)
                 onExternalChanges?()
                 return
@@ -216,23 +232,25 @@ public final class FileDocumentUseCase {
                 onExternalChanges?()
                 return
             }
-            let decoded = await Task.detached(priority: .utility) {
-                TextFileCodec.decodeForDisplay(read.data, assuming: binding.encoding)
-            }.value
+            let contents = try await prepareContents(read.data,
+                assuming: binding.isReadOnly ? nil : binding.encoding, preservingUndo: true)
+            let decoded = contents.decoded
             guard !Task.isCancelled, !liveReloadSuspended else { return }
             let retained = try await store.prepareSecurityScopedAccess(to: url, ownerID: securityScopeOwnerID)
             let updated = FileBinding(canonicalPath: read.identity.canonicalPath, encoding: decoded.encoding,
                 byteOrderMark: decoded.byteOrderMark, lineEnding: decoded.lineEnding,
-                observedIdentity: read.identity, securityScopedBookmark: retained.bookmark ?? binding.securityScopedBookmark)
+                observedIdentity: read.identity, securityScopedBookmark: retained.bookmark ?? binding.securityScopedBookmark,
+                binaryByteCount: decoded.binaryByteCount)
             guard !Task.isCancelled, !liveReloadSuspended else { return }
             let result = await workspace.replaceFileContents(tabID: tabID, binding: updated, title: current.title,
                 expectedRevision: current.buffer.revision, expectedBinding: binding,
-                installContents: { [editor] descriptor in
-                    editor.reload(EditorTextSnapshot(bufferID: descriptor.bufferID,
-                        revision: descriptor.revision, text: decoded.text))
-                })
+                installContents: contents.install)
             switch result {
-            case .applied: externalChanges.removeValue(forKey: tabID)
+            case .applied:
+                if let refreshed = workspace.fileContext(tabID: tabID),
+                   await finishLoading(contents.finish, context: refreshed) == nil {
+                    externalChanges.removeValue(forKey: tabID)
+                }
             case .rejected(.unknownTab): externalChanges.removeValue(forKey: tabID)
             case .rejected: externalChanges[tabID] = .conflict
             case .persistenceFailed: externalChanges[tabID] = .unavailable
@@ -282,7 +300,29 @@ public final class FileDocumentUseCase {
                 failures.append("\(binding.canonicalPath): \(error)")
             }
         }
+        await restoreBinaryContentIfNeeded()
         return failures
+    }
+
+    /// Recovery stores view state only for native binary documents. Reopen the
+    /// authoritative file before exposing the recovered tab as fully loaded.
+    public func restoreBinaryContentIfNeeded() async {
+        for tab in workspace.snapshot().tabs {
+            guard let context = workspace.fileContext(tabID: tab.id), needsBinaryContent(context),
+                  let binding = context.binding else { continue }
+            do {
+                _ = try await store.restoreSecurityScopedAccess(for: binding, ownerID: securityScopeOwnerID)
+                await refreshFromDisk(tabID: tab.id)
+            } catch {
+                externalChanges[tab.id] = .unavailable
+                onExternalChanges?()
+            }
+        }
+    }
+
+    private func needsBinaryContent(_ context: FileWorkspaceContext) -> Bool {
+        guard context.binding?.isReadOnly == true, let binaryEditor = editor as? any BinaryEditorPort else { return false }
+        return !binaryEditor.hasBinaryContent(for: context.buffer.bufferID)
     }
 
     public func releaseSecurityScopedAccess(for binding: FileBinding) async {
@@ -344,6 +384,8 @@ public final class FileDocumentUseCase {
         assuming encodingHint: TextFileEncoding?
     ) async -> FileOpenOutcome {
         guard !Task.isCancelled else { return .failed(.cancelled) }
+        loadingProgress = FileLoadingProgress(path: url.standardizedFileURL.path, loadedByteCount: 0, totalByteCount: nil)
+        defer { loadingProgress = nil }
         var preparedPath: String?
         do {
             let access = try await store.prepareSecurityScopedAccess(
@@ -391,6 +433,8 @@ public final class FileDocumentUseCase {
         await acquireOperation()
         defer { releaseOperation() }
         guard !Task.isCancelled else { return .failed(.cancelled) }
+        loadingProgress = FileLoadingProgress(path: workspaceRead.url.path, loadedByteCount: 0, totalByteCount: nil)
+        defer { loadingProgress = nil }
         var preparedPath: String?
         do {
             let access = try await store.prepareSecurityScopedAccess(
@@ -439,7 +483,8 @@ public final class FileDocumentUseCase {
         securityScopedBookmark: Data?
     ) async throws(TextFileStoreError) -> FileOpenOutcome {
         let existing = workspace.tabID(canonicalPath: canonical.path)
-        if let existing, encodingHint == nil {
+        if let existing, encodingHint == nil,
+           let context = workspace.fileContext(tabID: existing), !needsBinaryContent(context) {
             switch await workspace.activate(tabID: existing) {
             case .applied: return .activatedExisting(existing)
             case .persistenceFailed(let failure): return .failed(.workspace(failure))
@@ -450,25 +495,37 @@ public final class FileDocumentUseCase {
         if let existing, workspace.snapshot().tabs.first(where: { $0.id == existing })?.isDirty != false {
             return .failed(.unsavedChanges(existing))
         }
+        loadingProgress = FileLoadingProgress(path: canonical.path, loadedByteCount: 0, totalByteCount: nil)
         let read: FileReadResult
-        if let prepared { read = prepared }
-        else { read = try await store.read(from: canonical) }
-        guard !Task.isCancelled else { return .failed(.cancelled) }
-        let decoded: DecodedTextFile
-        if let encodingHint {
-            do {
-                decoded = try TextFileCodec.decode(read.data, assuming: encodingHint)
-            } catch { return .failed(.codec(error)) }
+        if let prepared {
+            guard UInt64(prepared.data.count) == prepared.identity.byteCount else {
+                return .failed(.store(.io("\(canonical.path): incomplete file read")))
+            }
+            // An explicit text encoding needs the store's full overwrite identity.
+            if encodingHint != nil, BinaryFileContent.isBinary(prepared.data) {
+                read = try await store.readForDisplay(from: canonical, assuming: encodingHint)
+            } else {
+                read = prepared
+            }
         } else {
-            decoded = TextFileCodec.decodeForDisplay(read.data)
+            read = try await store.readForDisplay(from: canonical, assuming: encodingHint)
         }
+        guard UInt64(read.data.count) == read.identity.byteCount else {
+            return .failed(.store(.io("\(canonical.path): incomplete file read")))
+        }
+        guard !Task.isCancelled else { return .failed(.cancelled) }
+        let contents: PreparedContents
+        do { contents = try await prepareContents(read.data, assuming: encodingHint, strictEncoding: true, preservingUndo: reopening != nil) }
+        catch { return .failed(error) }
+        let decoded = contents.decoded
         let binding = FileBinding(
             canonicalPath: read.identity.canonicalPath,
             encoding: decoded.encoding,
             byteOrderMark: decoded.byteOrderMark,
             lineEnding: decoded.lineEnding,
             observedIdentity: read.identity,
-            securityScopedBookmark: securityScopedBookmark ?? reopening?.binding?.securityScopedBookmark
+            securityScopedBookmark: securityScopedBookmark ?? reopening?.binding?.securityScopedBookmark,
+            binaryByteCount: decoded.binaryByteCount
         )
         guard !Task.isCancelled else { return .failed(.cancelled) }
         if let reopening {
@@ -477,18 +534,14 @@ public final class FileDocumentUseCase {
                 binding: binding,
                 title: canonical.lastPathComponent,
                 expectedRevision: reopening.buffer.revision,
-                expectedBinding: reopening.binding
+                expectedBinding: reopening.binding,
+                installContents: contents.install
             ) {
             case .applied:
-                guard let refreshed = workspace.fileContext(tabID: reopening.tabID) else {
-                    return .failed(.comparisonInvalidated)
-                }
-                editor.reload(EditorTextSnapshot(
-                    bufferID: refreshed.buffer.bufferID,
-                    revision: refreshed.buffer.revision,
-                    text: decoded.text
-                ))
-                switch await workspace.activate(tabID: reopening.tabID) {
+                let activation = await workspace.activate(tabID: reopening.tabID)
+                guard let refreshed = workspace.fileContext(tabID: reopening.tabID) else { return .failed(.cancelled) }
+                if let failure = await finishLoading(contents.finish, context: refreshed) { return .failed(failure) }
+                switch activation {
                 case .applied: return .activatedExisting(reopening.tabID)
                 case .persistenceFailed(let failure): return .failed(.workspace(failure))
                 case .rejected(let error): return .failed(.session(error))
@@ -504,11 +557,8 @@ public final class FileDocumentUseCase {
         switch await workspace.addOpenedFile(binding: binding, title: canonical.lastPathComponent) {
         case .applied:
             guard let context = workspace.activeFileContext() else { return .failed(.noActiveDocument) }
-            editor.install(EditorTextSnapshot(
-                bufferID: context.buffer.bufferID,
-                revision: context.buffer.revision,
-                text: decoded.text
-            ))
+            contents.install(context.buffer)
+            if let failure = await finishLoading(contents.finish, context: context) { return .failed(failure) }
             return .opened(context.tabID)
         case .persistenceFailed(let failure): return .failed(.workspace(failure))
         case .rejected(let error): return .failed(.session(error))
@@ -556,6 +606,7 @@ public final class FileDocumentUseCase {
             return .failed(.comparisonInvalidated)
         }
         guard let binding = context.binding else { return .requiresDestination(context.tabID) }
+        guard !binding.isReadOnly else { return .failed(.readOnly) }
         // Merely viewing a permissively decoded file must not rewrite its
         // original bytes when Save is pressed without an edit or conversion.
         if conversion == nil,
@@ -597,6 +648,7 @@ public final class FileDocumentUseCase {
         guard expectedContext == nil || expectedContext == context else {
             return .failed(.comparisonInvalidated)
         }
+        guard context.binding?.isReadOnly != true else { return .failed(.readOnly) }
         let transientOwnerID = UUID()
         let access: SecurityScopedFileAccess
         let canonical: URL
@@ -673,12 +725,20 @@ public final class FileDocumentUseCase {
         case .compare:
             return .conflict(tabID: context.tabID, current: pendingConflict.currentIdentity)
         case .reload:
+            loadingProgress = FileLoadingProgress(path: pendingConflict.url.path, loadedByteCount: 0, totalByteCount: nil)
+            defer { loadingProgress = nil }
             do {
-                let read = try await store.read(from: pendingConflict.url)
+                let read = try await store.readForDisplay(from: pendingConflict.url, assuming: nil)
+                guard UInt64(read.data.count) == read.identity.byteCount else {
+                    return .failed(.store(.io("\(pendingConflict.url.path): incomplete file read")))
+                }
                 let retainedAccess = try await store.prepareSecurityScopedAccess(
                     to: pendingConflict.url, ownerID: securityScopeOwnerID
                 )
-                let decoded = TextFileCodec.decodeForDisplay(read.data)
+                let contents: PreparedContents
+                do { contents = try await prepareContents(read.data, assuming: nil, preservingUndo: true) }
+                catch { return .failed(error) }
+                let decoded = contents.decoded
                 let updated = FileBinding(
                     canonicalPath: read.identity.canonicalPath,
                     encoding: decoded.encoding,
@@ -686,19 +746,21 @@ public final class FileDocumentUseCase {
                     lineEnding: decoded.lineEnding,
                     observedIdentity: read.identity,
                     securityScopedBookmark: retainedAccess.bookmark ?? pendingConflict.securityScopedBookmark
-                        ?? (context.binding?.canonicalPath == pendingConflict.url.path ? context.binding?.securityScopedBookmark : nil)
+                        ?? (context.binding?.canonicalPath == pendingConflict.url.path ? context.binding?.securityScopedBookmark : nil),
+                    binaryByteCount: decoded.binaryByteCount
                 )
                 switch await workspace.replaceFileContents(
                     tabID: context.tabID,
                     binding: updated,
                     title: URL(fileURLWithPath: updated.canonicalPath).lastPathComponent,
                     expectedRevision: context.buffer.revision,
-                    expectedBinding: context.binding
+                    expectedBinding: context.binding,
+                    installContents: contents.install
                 ) {
                 case .applied:
-                    guard let refreshed = workspace.fileContext(tabID: context.tabID) else { return .failed(.noActiveDocument) }
-                    editor.reload(EditorTextSnapshot(bufferID: refreshed.buffer.bufferID, revision: refreshed.buffer.revision, text: decoded.text))
                     self.pendingConflict = nil
+                    guard let refreshed = workspace.fileContext(tabID: context.tabID) else { return .failed(.cancelled) }
+                    if let failure = await finishLoading(contents.finish, context: refreshed) { return .failed(failure) }
                     return .saved(context.tabID)
                 case .persistenceFailed(let failure): return .failed(.workspace(failure))
                 case .rejected(.revisionConflict(let bufferID, let expected, let actual)):
@@ -778,6 +840,7 @@ public final class FileDocumentUseCase {
         overwrite: Bool,
         renewingAccess: Bool = false
     ) async -> FileSaveOutcome {
+        guard context.binding?.isReadOnly != true else { return .failed(.readOnly) }
         let access: SecurityScopedFileAccess
         let canonical: URL
         do {
@@ -888,6 +951,89 @@ public final class FileDocumentUseCase {
             return .conflict(tabID: context.tabID, current: current)
         } catch let error {
             return .failed(.store(error))
+        }
+    }
+
+    private func prepareContents(
+        _ data: Data,
+        assuming encoding: TextFileEncoding?,
+        strictEncoding: Bool = false,
+        preservingUndo: Bool = false
+    ) async throws(FileOperationFailure) -> PreparedContents {
+        let path = loadingProgress?.path ?? ""
+        loadingProgress = FileLoadingProgress(path: path, loadedByteCount: 0, totalByteCount: data.count)
+        let binaryEditor = editor as? any BinaryEditorPort
+        let decodesBinaryText = binaryEditor == nil
+        let decoded: DecodedTextFile
+        do {
+            decoded = try await Task.detached(priority: .utility) {
+                if strictEncoding, let encoding {
+                    let text = try TextFileCodec.decode(data, assuming: encoding)
+                    return BinaryFileContent.isBinary(data, assuming: encoding)
+                        ? BinaryFileContent.decode(data, decodingText: decodesBinaryText) : text
+                }
+                if BinaryFileContent.isBinary(data, assuming: encoding) {
+                    return BinaryFileContent.decode(data, decodingText: decodesBinaryText)
+                }
+                do { return try TextFileCodec.decode(data, assuming: encoding) }
+                catch {
+                    return BinaryFileContent.decode(data, decodingText: decodesBinaryText)
+                }
+            }.value
+        } catch let error as TextFileCodecError { throw .codec(error) }
+        catch { throw .store(.io(String(describing: error))) }
+        if decoded.binaryByteCount != nil, let binaryEditor {
+            do {
+                let install = try await binaryEditor.prepareBinary(data)
+                return (decoded, install, { [weak self] descriptor in
+                    try await binaryEditor.finishBinaryLoad(for: descriptor) { loaded, total in
+                        self?.loadingProgress = FileLoadingProgress(path: path,
+                            loadedByteCount: loaded, totalByteCount: total)
+                    }
+                })
+            } catch is CancellationError { throw .cancelled }
+            catch { throw .store(.io(String(describing: error))) }
+        }
+        return (decoded, { [editor] descriptor in
+            if preservingUndo {
+                editor.reload(EditorTextSnapshot(bufferID: descriptor.bufferID,
+                    revision: descriptor.revision, text: decoded.text))
+            } else {
+                editor.install(EditorTextSnapshot(bufferID: descriptor.bufferID,
+                    revision: descriptor.revision, text: decoded.text))
+            }
+        }, { [weak self] _ in
+            self?.loadingProgress = FileLoadingProgress(path: path,
+                loadedByteCount: data.count, totalByteCount: data.count)
+        })
+    }
+
+    private func finishLoading(
+        _ finish: @MainActor (EditorBufferDescriptor) async throws -> Void,
+        context: FileWorkspaceContext
+    ) async -> FileOperationFailure? {
+        if context.binding?.isReadOnly != true {
+            if let progress = loadingProgress, let total = progress.totalByteCount {
+                loadingProgress = FileLoadingProgress(path: progress.path, loadedByteCount: total, totalByteCount: total)
+            }
+            return nil
+        }
+        do {
+            try await finish(context.buffer)
+            guard !Task.isCancelled,
+                  workspace.fileContext(tabID: context.tabID)?.buffer == context.buffer else {
+                throw CancellationError()
+            }
+            externalChanges.removeValue(forKey: context.tabID)
+            onExternalChanges?()
+            return nil
+        } catch {
+            if workspace.fileContext(tabID: context.tabID)?.buffer == context.buffer {
+                externalChanges[context.tabID] = .unavailable
+                onExternalChanges?()
+            }
+            return error is CancellationError || Task.isCancelled
+                ? .cancelled : .store(.io(String(describing: error)))
         }
     }
 

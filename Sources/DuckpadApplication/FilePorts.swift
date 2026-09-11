@@ -71,6 +71,8 @@ public protocol TextFileStore: Sendable {
     func clearPersistedSecurityScopedBookmarks() async throws(TextFileStoreError)
     func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL
     func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult
+    /// Returns the complete bytes for text or read-only binary display.
+    func readForDisplay(from url: URL, assuming encoding: TextFileEncoding?) async throws(TextFileStoreError) -> FileReadResult
     func currentIdentity(for url: URL) async throws(TextFileStoreError) -> FileIdentity?
     func writeAtomically(
         _ data: Data,
@@ -81,6 +83,10 @@ public protocol TextFileStore: Sendable {
 }
 
 public extension TextFileStore {
+    func readForDisplay(from url: URL, assuming encoding: TextFileEncoding?) async throws(TextFileStoreError) -> FileReadResult {
+        try await read(from: url)
+    }
+
     func renewSecurityScopedAccess(to url: URL, ownerID: UUID) async throws(TextFileStoreError) -> SecurityScopedFileAccess {
         try await prepareSecurityScopedAccess(to: url, ownerID: ownerID)
     }
@@ -113,12 +119,14 @@ public struct DecodedTextFile: Equatable, Sendable {
     public let encoding: TextFileEncoding
     public let byteOrderMark: ByteOrderMark
     public let lineEnding: LineEnding
+    public let binaryByteCount: Int?
 
-    public init(text: String, encoding: TextFileEncoding, byteOrderMark: ByteOrderMark, lineEnding: LineEnding) {
+    public init(text: String, encoding: TextFileEncoding, byteOrderMark: ByteOrderMark, lineEnding: LineEnding, binaryByteCount: Int? = nil) {
         self.text = text
         self.encoding = encoding
         self.byteOrderMark = byteOrderMark
         self.lineEnding = lineEnding
+        self.binaryByteCount = binaryByteCount
     }
 }
 
@@ -149,15 +157,9 @@ public enum TextFileCodec {
         _ data: Data,
         assuming explicitEncoding: TextFileEncoding? = nil
     ) -> DecodedTextFile {
-        if let decoded = try? decode(data, assuming: explicitEncoding) { return decoded }
-        let hasBOM = data.starts(with: utf8BOM)
-        let text = String(decoding: hasBOM ? data.dropFirst(3) : data[...], as: UTF8.self)
-        return DecodedTextFile(
-            text: text,
-            encoding: .utf8,
-            byteOrderMark: hasBOM ? .present : .absent,
-            lineEnding: detectLineEnding(text)
-        )
+        if !BinaryFileContent.isBinary(data, assuming: explicitEncoding),
+           let decoded = try? decode(data, assuming: explicitEncoding) { return decoded }
+        return BinaryFileContent.decode(data)
     }
 
     public static func decode(

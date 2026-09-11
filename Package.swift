@@ -44,6 +44,7 @@ let package = Package(
             path: "Vendor/Scintilla/5.6.6",
             sources: [
                 "bridge/DuckpadScintillaBridge.mm",
+                "bridge/DPScintillaBinaryDocument.mm",
                 "cocoa/InfoBar.mm",
                 "cocoa/PlatCocoa.mm",
                 "cocoa/ScintillaCocoa.mm",
