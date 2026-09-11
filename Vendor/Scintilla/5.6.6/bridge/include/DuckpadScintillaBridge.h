@@ -134,6 +134,10 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (BOOL)loadUTF8:(NSData *)content
          revision:(uint64_t)revision
             error:(NSError * _Nullable * _Nullable)error;
+- (BOOL)loadUTF8:(NSData *)content
+         revision:(uint64_t)revision
+   preservingUndo:(BOOL)preservingUndo
+            error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)replaceUTF8Range:(NSRange)range
          withReplacement:(NSData *)replacement
         expectedRevision:(uint64_t)expectedRevision

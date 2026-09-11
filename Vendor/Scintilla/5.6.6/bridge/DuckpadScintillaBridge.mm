@@ -394,6 +394,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (BOOL)loadUTF8:(NSData *)content revision:(uint64_t)revision error:(NSError **)error {
+    return [self loadUTF8:content revision:revision preservingUndo:NO error:error];
+}
+
+- (BOOL)loadUTF8:(NSData *)content revision:(uint64_t)revision
+   preservingUndo:(BOOL)preservingUndo error:(NSError **)error {
     if ([[NSString alloc] initWithData:content encoding:NSUTF8StringEncoding] == nil) {
         return [self fail:DPScintillaErrorInvalidUTF8 description:@"Content is not valid UTF-8" error:error];
     }
@@ -404,13 +409,17 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _pendingSmartCharacter = 0;
     [_scintilla setEditable:YES];
     [_scintilla message:SCI_SETEOLMODE wParam:DPEOLModeForUTF8(content)];
-    [_scintilla message:SCI_CLEARALL];
-    if (content.length > 0) {
-        [_scintilla message:SCI_ADDTEXT
-                     wParam:(uptr_t)content.length
-                     lParam:(sptr_t)content.bytes];
+    if (!preservingUndo || ![content isEqualToData:self.contentUTF8]) {
+        if (preservingUndo) [_scintilla message:SCI_BEGINUNDOACTION];
+        [_scintilla message:SCI_CLEARALL];
+        if (content.length > 0) {
+            [_scintilla message:SCI_ADDTEXT
+                         wParam:(uptr_t)content.length
+                         lParam:(sptr_t)content.bytes];
+        }
+        if (preservingUndo) [_scintilla message:SCI_ENDUNDOACTION];
     }
-    [_scintilla message:SCI_EMPTYUNDOBUFFER];
+    if (!preservingUndo) [_scintilla message:SCI_EMPTYUNDOBUFFER];
     _suppressEdit = NO;
     _revision = revision;
     _lastSearchWasZeroLength = NO;

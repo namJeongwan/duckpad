@@ -303,6 +303,10 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
     }
 
     public func install(_ snapshot: EditorTextSnapshot) {
+        install(snapshot, preservingUndo: false)
+    }
+
+    private func install(_ snapshot: EditorTextSnapshot, preservingUndo: Bool) {
         guard !isInvalidated else { return }
         pendingRecoveryBuffers.remove(snapshot.bufferID)
         updateRevisionExhaustion(bufferID: snapshot.bufferID, revision: snapshot.revision)
@@ -324,7 +328,7 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
         )
         acceptedEdits[snapshot.bufferID] = []
         guard let editorView = bufferViews[snapshot.bufferID] else { return }
-        load(snapshot, into: editorView)
+        load(snapshot, into: editorView, preservingUndo: preservingUndo)
         synchronizeRevision(snapshot.revision, for: snapshot.bufferID, excluding: editorView)
         updateDisplayedRevision(snapshot.revision, for: snapshot.bufferID)
         if activeBuffer?.bufferID == snapshot.bufferID {
@@ -383,10 +387,21 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
     }
 
     public func installRecovery(_ snapshot: EditorRecoverySnapshot) {
+        installRecovery(snapshot, preservingUndo: false)
+    }
+
+    public func reload(_ snapshot: EditorTextSnapshot) {
+        let state = recoveryCapture(for: snapshot.bufferID)?.viewState ?? defaultViewState
+        installRecovery(EditorRecoverySnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision,
+            utf8: Data(snapshot.text.utf8), viewState: state), preservingUndo: true)
+    }
+
+    private func installRecovery(_ snapshot: EditorRecoverySnapshot, preservingUndo: Bool) {
         guard !isInvalidated else { return }
         guard let text = String(data: snapshot.utf8, encoding: .utf8) else { return }
         let recoveredViewState = sanitized(snapshot.viewState, for: snapshot.utf8)
-        install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text))
+        install(EditorTextSnapshot(bufferID: snapshot.bufferID, revision: snapshot.revision, text: text),
+            preservingUndo: preservingUndo)
         viewStates[snapshot.bufferID] = recoveredViewState
         let recoveryView = canonicalOwnerView(for: snapshot.bufferID)
             ?? (hasVisibleGroups ? nil : bufferViews[snapshot.bufferID])
@@ -2146,10 +2161,10 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
         return EditorTextSnapshot(bufferID: checkpoint.bufferID, revision: revision, text: text)
     }
 
-    private func load(_ snapshot: EditorTextSnapshot, into editorView: DPScintillaEditorView) {
+    private func load(_ snapshot: EditorTextSnapshot, into editorView: DPScintillaEditorView, preservingUndo: Bool = false) {
         cancelPendingSmartIndentation(for: snapshot.bufferID)
         isRecovering = true
         defer { isRecovering = false }
-        try? editorView.loadUTF8(Data(snapshot.text.utf8), revision: snapshot.revision)
+        try? editorView.loadUTF8(Data(snapshot.text.utf8), revision: snapshot.revision, preservingUndo: preservingUndo)
     }
 }
