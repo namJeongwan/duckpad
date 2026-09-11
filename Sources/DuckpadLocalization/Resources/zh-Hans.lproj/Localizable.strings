@@ -559,3 +559,5 @@
 "unmodified" = "未修改";
 "unmodified tab" = "未修改的标签页";
 "unpinned" = "已取消固定";
+"App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad." = "应用语言会立即生效。打开和保存对话框将在重启 Duckpad 后使用新语言。";
+"Restart Duckpad to apply the selected language to Open and Save dialogs." = "请重启 Duckpad，将所选语言应用于打开和保存对话框。";

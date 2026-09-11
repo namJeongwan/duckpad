@@ -44,6 +44,18 @@ final class EditorGroupDropZoneView: NSView {
         }
     }
 
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        let key: String
+        switch zone {
+        case .left: key = "Split editor to the left"
+        case .up: key = "Split editor up"
+        case .right: key = "Split editor to the right"
+        case .down: key = "Split editor down"
+        }
+        setAccessibilityLabel(catalog.text(key))
+        setAccessibilityHelp(catalog.text("Drop a document tab here to create another editor group"))
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         setHighlighted(highlighted)

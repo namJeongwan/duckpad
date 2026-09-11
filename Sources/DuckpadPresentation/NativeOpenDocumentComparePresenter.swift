@@ -13,10 +13,12 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
     }
 
     private let diffBuilder: DiffBuilder
+    private var activeSourceTitle = ""
     private var activeAlert: NSAlert?
     private var activePanel: OpenDocumentComparePanel?
     private var pendingDiff: PendingDiff?
     private var failureAlerts: [ObjectIdentifier: NSAlert] = [:]
+    private var failureErrors: [ObjectIdentifier: OpenDocumentComparison.Error] = [:]
     private var generation: UInt64 = 0
 
     var comparisonWindowForTesting: NSWindow? { activePanel?.window }
@@ -26,12 +28,38 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
     public var hasPresentedSnapshot: Bool { activePanel != nil }
     public var restoresEditorFocusAfterDismissal: Bool { false }
 
+    private var catalog = L10n.catalog
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        catalog.text(key, arguments: arguments)
+    }
+
     public init() {
         diffBuilder = { left, right in try AlignedLineDiff.build(left: left, right: right) }
     }
 
     init(diffBuilder: @escaping DiffBuilder) {
         self.diffBuilder = diffBuilder
+    }
+
+    public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
+        activePanel?.refreshLocalization(catalog: catalog)
+        if let alert = activeAlert {
+            alert.messageText = localized("Compare %1$@", activeSourceTitle)
+            alert.informativeText = localized("Choose another open document.")
+            alert.buttons[0].title = localized("Compare")
+            alert.buttons[1].title = localized("Cancel")
+            alert.accessoryView?.setAccessibilityLabel(localized("Open document to compare"))
+            alert.accessoryView?.setAccessibilityHelp(localized("Choose a different open document for a read-only comparison."))
+        }
+        for (identifier, alert) in failureAlerts {
+            alert.messageText = localized("Duckpad could not compare these documents.")
+            if let error = failureErrors[identifier] {
+                alert.informativeText = PresentationErrorText.message(error, catalog: catalog)
+            }
+            alert.buttons[0].title = localized("OK")
+        }
     }
 
     public static func choices(
@@ -59,16 +87,17 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
         let choices = Self.choices(source: source, candidates: candidates)
         guard !choices.isEmpty, !Task.isCancelled else { return nil }
         let alert = NSAlert()
-        alert.messageText = L10n.text("Compare %1$@", L10n.argument(source.title))
-        alert.informativeText = L10n.text("Choose another open document.")
-        alert.addButton(withTitle: L10n.text("Compare"))
-        alert.addButton(withTitle: L10n.text("Cancel"))
+        alert.messageText = localized("Compare %1$@", L10n.argument(source.title))
+        alert.informativeText = localized("Choose another open document.")
+        alert.addButton(withTitle: localized("Compare"))
+        alert.addButton(withTitle: localized("Cancel"))
         let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 28), pullsDown: false)
         choices.forEach { picker.addItem(withTitle: $0.label) }
-        picker.setAccessibilityLabel(L10n.text("Open document to compare"))
-        picker.setAccessibilityHelp(L10n.text("Choose a different open document for a read-only comparison."))
+        picker.setAccessibilityLabel(localized("Open document to compare"))
+        picker.setAccessibilityHelp(localized("Choose a different open document for a read-only comparison."))
         alert.accessoryView = picker
         if let previous = activeAlert { dismissActiveAlert(previous) }
+        activeSourceTitle = source.title
         activeAlert = alert
         let response = await run(alert, attachedTo: window)
         if activeAlert === alert { activeAlert = nil }
@@ -123,7 +152,9 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
             guard pendingDiff?.token == token, !task.isCancelled, !Task.isCancelled else {
                 throw OpenDocumentComparison.Error.cancelled
             }
-            return OpenDocumentComparePanel(content: content, diff: diff)
+            let panel = OpenDocumentComparePanel(content: content, diff: diff)
+            panel.refreshLocalization(catalog: catalog)
+            return panel
         } catch is CancellationError {
             throw OpenDocumentComparison.Error.cancelled
         } catch let error as OpenDocumentComparison.Error {
@@ -135,18 +166,21 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
         guard error != .cancelled else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = L10n.text("Duckpad could not compare these documents.")
-        alert.informativeText = PresentationErrorText.message(error)
-        alert.addButton(withTitle: L10n.text("OK"))
+        alert.messageText = localized("Duckpad could not compare these documents.")
+        alert.informativeText = PresentationErrorText.message(error, catalog: catalog)
+        alert.addButton(withTitle: localized("OK"))
         let identifier = ObjectIdentifier(alert)
         failureAlerts[identifier] = alert
+        failureErrors[identifier] = error
         if let window {
             alert.beginSheetModal(for: window) { [weak self] _ in
                 self?.failureAlerts.removeValue(forKey: identifier)
+                self?.failureErrors.removeValue(forKey: identifier)
             }
         } else {
             _ = alert.runModal()
             failureAlerts.removeValue(forKey: identifier)
+            failureErrors.removeValue(forKey: identifier)
         }
     }
 
@@ -174,6 +208,7 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
     private func dismissFailureAlert(_ alert: NSAlert) {
         let identifier = ObjectIdentifier(alert)
         guard failureAlerts.removeValue(forKey: identifier) != nil else { return }
+        failureErrors.removeValue(forKey: identifier)
         dismiss(alert)
     }
 

@@ -164,15 +164,40 @@ final class CommandPalettePanel: NSObject,
     var isPresented: Bool { popover?.isShown == true }
     var filteredCommands: [CommandPaletteCommand] { filteredIndices.map { commands[$0] } }
 
+    private weak var sourceMenu: NSMenu?
+    private var excludedAction: Selector?
+    private var catalog = L10n.catalog
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        catalog.text(key, arguments: arguments)
+    }
+
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
+        searchField.placeholderString = localized("Search commands")
+        searchField.setAccessibilityLabel(localized("Search Duckpad commands"))
+        tableView.setAccessibilityLabel(localized("Duckpad command search results"))
+        emptyLabel.stringValue = localized("No matching commands")
+        if let sourceMenu {
+            let visibleItems = filteredCommands.map { $0.item }
+            commands = CommandPaletteRegistry.commands(in: sourceMenu, excludingAction: excludedAction)
+            filteredIndices = visibleItems.compactMap { item in commands.firstIndex { $0.item === item } }
+        }
+        let selection = tableView.selectedRowIndexes
+        tableView.reloadData()
+        tableView.selectRowIndexes(selection, byExtendingSelection: false)
+        countLabel.stringValue = localized("%1$@ of %2$@ commands", L10n.argument(filteredIndices.count), L10n.argument(commands.count))
+    }
+
     override init() {
         super.init()
         rootView.setAccessibilityIdentifier("duckpad.commands.panel")
 
-        searchField.placeholderString = L10n.text("Search commands")
+        searchField.placeholderString = localized("Search commands")
         searchField.sendsSearchStringImmediately = true
         searchField.delegate = self
         searchField.setAccessibilityIdentifier("duckpad.commands.search")
-        searchField.setAccessibilityLabel(L10n.text("Search Duckpad commands"))
+        searchField.setAccessibilityLabel(localized("Search Duckpad commands"))
         searchField.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("command"))
@@ -187,7 +212,7 @@ final class CommandPalettePanel: NSObject,
         tableView.target = self
         tableView.doubleAction = #selector(activateSelection)
         tableView.setAccessibilityIdentifier("duckpad.commands.results")
-        tableView.setAccessibilityLabel(L10n.text("Duckpad command search results"))
+        tableView.setAccessibilityLabel(localized("Duckpad command search results"))
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -229,13 +254,20 @@ final class CommandPalettePanel: NSObject,
     }
 
     func apply(menu: NSMenu, excludingAction: Selector? = nil) {
+        sourceMenu = menu
+        excludedAction = excludingAction
         commands = CommandPaletteRegistry.commands(in: menu, excludingAction: excludingAction)
         refilter()
     }
 
     func refreshIfPresented(menu: NSMenu, excludingAction: Selector?) {
         guard isPresented else { return }
+        let row = tableView.selectedRow
+        let selectedItem = filteredCommands.indices.contains(row) ? filteredCommands[row].item : nil
         apply(menu: menu, excludingAction: excludingAction)
+        if let selectedItem, let index = filteredCommands.firstIndex(where: { $0.item === selectedItem }) {
+            selectResult(at: index)
+        }
     }
 
     func present(menu: NSMenu, excludingAction: Selector?, relativeTo positioningView: NSView) {
@@ -298,7 +330,7 @@ final class CommandPalettePanel: NSObject,
         cell.textField?.textColor = enabled ? .labelColor : .disabledControlTextColor
         cell.toolTip = command.qualifiedTitle
         cell.setAccessibilityLabel(command.qualifiedTitle)
-        cell.setAccessibilityValue(enabled ? L10n.text("Available") : L10n.text("Unavailable"))
+        cell.setAccessibilityValue(enabled ? localized("Available") : localized("Unavailable"))
         if let detail = cell.viewWithTag(42) as? NSTextField { detail.stringValue = command.path }
         if let shortcut = cell.viewWithTag(43) as? NSTextField { shortcut.stringValue = command.shortcut }
         return cell
@@ -347,7 +379,7 @@ final class CommandPalettePanel: NSObject,
         filteredIndices = CommandPaletteSearch.matchingIndices(in: commands, query: searchField.stringValue)
         tableView.reloadData()
         emptyLabel.isHidden = !filteredIndices.isEmpty
-        countLabel.stringValue = L10n.text("%1$@ of %2$@ commands", L10n.argument(filteredIndices.count), L10n.argument(commands.count))
+        countLabel.stringValue = localized("%1$@ of %2$@ commands", L10n.argument(filteredIndices.count), L10n.argument(commands.count))
         if !filteredIndices.isEmpty { selectResult(at: 0) }
     }
 

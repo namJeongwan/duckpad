@@ -92,15 +92,33 @@ final class DocumentSwitcherPanel: NSObject,
         return tabs[filteredIndices[row]].id
     }
 
+    private var catalog = L10n.catalog
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        catalog.text(key, arguments: arguments)
+    }
+
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
+        searchField.placeholderString = localized("Search open documents")
+        searchField.setAccessibilityLabel(localized("Search open documents"))
+        tableView.setAccessibilityLabel(localized("Open document search results"))
+        emptyLabel.stringValue = localized("No matching documents")
+        let selection = tableView.selectedRowIndexes
+        tableView.reloadData()
+        tableView.selectRowIndexes(selection, byExtendingSelection: false)
+        updateResultChrome()
+    }
+
     override init() {
         super.init()
         rootView.setAccessibilityIdentifier("duckpad.documents.panel")
 
-        searchField.placeholderString = L10n.text("Search open documents")
+        searchField.placeholderString = localized("Search open documents")
         searchField.sendsSearchStringImmediately = true
         searchField.delegate = self
         searchField.setAccessibilityIdentifier("duckpad.documents.search")
-        searchField.setAccessibilityLabel(L10n.text("Search open documents"))
+        searchField.setAccessibilityLabel(localized("Search open documents"))
         searchField.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("document"))
@@ -116,7 +134,7 @@ final class DocumentSwitcherPanel: NSObject,
         tableView.target = self
         tableView.doubleAction = #selector(activateSelection)
         tableView.setAccessibilityIdentifier("duckpad.documents.results")
-        tableView.setAccessibilityLabel(L10n.text("Open document search results"))
+        tableView.setAccessibilityLabel(localized("Open document search results"))
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -287,16 +305,16 @@ final class DocumentSwitcherPanel: NSObject,
             systemSymbolName: tab.isPinned ? "pin.fill" : (tab.fullPath == nil ? "note.text" : "doc.text"),
             accessibilityDescription: nil
         )
-        cell.toolTip = tab.fullPath ?? L10n.text("Unsaved scratch document")
+        cell.toolTip = tab.fullPath ?? localized("Unsaved scratch document")
         cell.setAccessibilityLabel(
             tab.title
-                + (tab.isActive ? L10n.text(", current document") : "")
-                + (tab.isDirty ? L10n.text(", modified") : "")
-                + (tab.isPinned ? L10n.text(", pinned") : "")
-                + (tab.fullPath.map { ", \($0)" } ?? L10n.text(", unsaved scratch document"))
+                + (tab.isActive ? localized(", current document") : "")
+                + (tab.isDirty ? localized(", modified") : "")
+                + (tab.isPinned ? localized(", pinned") : "")
+                + (tab.fullPath.map { ", \($0)" } ?? localized(", unsaved scratch document"))
         )
         if let detail = cell.viewWithTag(41) as? NSTextField {
-            detail.stringValue = tab.fullPath ?? L10n.text("Unsaved scratch document")
+            detail.stringValue = tab.fullPath ?? localized("Unsaved scratch document")
         }
         return cell
     }
@@ -420,8 +438,8 @@ final class DocumentSwitcherPanel: NSObject,
     private func updateResultChrome() {
         emptyLabel.isHidden = !filteredIndices.isEmpty
         countLabel.stringValue = filteredIndices.count == tabs.count
-            ? L10n.text("%1$@ open", L10n.argument(tabs.count))
-            : L10n.text("%1$@ of %2$@", L10n.argument(filteredIndices.count), L10n.argument(tabs.count))
+            ? localized("%1$@ open", L10n.argument(tabs.count))
+            : localized("%1$@ of %2$@", L10n.argument(filteredIndices.count), L10n.argument(tabs.count))
     }
 
     private func moveSelection(by delta: Int) {

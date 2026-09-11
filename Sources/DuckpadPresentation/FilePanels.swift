@@ -71,6 +71,10 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
             ?? NativeOpenDocumentComparePresenter()
     }
 
+    public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        (openDocumentComparePresenter as? NativeOpenDocumentComparePresenter)?.refreshLocalization(catalog: catalog)
+    }
+
     public func chooseOpenURL(attachedTo window: NSWindow?) async -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -150,7 +154,12 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
             leftTitle: L10n.text("Duckpad — revision %1$@", L10n.argument(comparison.localRevision)),
             rightTitle: L10n.text("On Disk"),
             leftText: comparison.localText,
-            rightText: comparison.externalText
+            rightText: comparison.externalText,
+            titleKey: "Compare External Changes — %1$@",
+            titleArguments: [comparison.path],
+            leftTitleKey: "Duckpad — revision %1$@",
+            leftTitleArguments: [String(comparison.localRevision)],
+            rightTitleKey: "On Disk"
         )
         do {
             try await openDocumentComparePresenter.present(

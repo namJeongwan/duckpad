@@ -559,3 +559,5 @@
 "unmodified" = "unmodified";
 "unmodified tab" = "unmodified tab";
 "unpinned" = "unpinned";
+"App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad." = "App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad.";
+"Restart Duckpad to apply the selected language to Open and Save dialogs." = "Restart Duckpad to apply the selected language to Open and Save dialogs.";

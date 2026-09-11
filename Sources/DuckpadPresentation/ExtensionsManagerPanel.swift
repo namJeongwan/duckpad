@@ -14,12 +14,18 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
     var onGrantRequested: ((ExtensionRegistryItem) -> Void)?
     var onRevoke: ((ExtensionRegistryItem) -> Void)?
 
+    private var catalog = L10n.catalog
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        catalog.text(key, arguments: arguments)
+    }
+
     init() {
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 620, height: 340),
                             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         panel.title = L10n.text("Duckpad Extensions")
         super.init(window: panel)
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("extension")); column.title = L10n.text("Extension")
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("extension")); column.title = localized("Extension")
         table.addTableColumn(column); table.headerView = nil; table.delegate = self; table.dataSource = self
         table.setAccessibilityIdentifier("duckpad.extensions.list")
         let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
@@ -37,6 +43,17 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
 
     @available(*, unavailable) required init?(coder: NSCoder) { nil }
 
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
+        window?.title = localized("Duckpad Extensions")
+        table.tableColumns.first?.title = localized("Extension")
+        grantButton.title = localized("Grant Requested Capabilities")
+        let selection = table.selectedRowIndexes
+        table.reloadData()
+        table.selectRowIndexes(selection, byExtendingSelection: false)
+        updateButtons()
+    }
+
     func render(_ state: ExtensionRegistryState) {
         items = state.items
         table.reloadData()
@@ -53,9 +70,9 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let item = items[row]
-        let field = NSTextField(labelWithString: "\(item.manifest.name)  \(item.manifest.version)  ·  \(item.enabled ? L10n.text("Enabled") : L10n.text("Disabled"))")
-        field.toolTip = L10n.text("Publisher %1$@ · fingerprint %2$@ · package %3$@", L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint), L10n.argument(item.packageDigest))
-        field.setAccessibilityLabel(L10n.text("%1$@, version %2$@, publisher %3$@, fingerprint %4$@, %5$@, %6$@ exact capability scopes granted", L10n.argument(item.manifest.name), L10n.argument(item.manifest.version), L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint), L10n.argument(item.enabled ? L10n.text("Enabled") : L10n.text("Disabled")), L10n.argument(item.granted.count)))
+        let field = NSTextField(labelWithString: "\(item.manifest.name)  \(item.manifest.version)  ·  \(item.enabled ? localized("Enabled") : localized("Disabled"))")
+        field.toolTip = localized("Publisher %1$@ · fingerprint %2$@ · package %3$@", L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint), L10n.argument(item.packageDigest))
+        field.setAccessibilityLabel(localized("%1$@, version %2$@, publisher %3$@, fingerprint %4$@, %5$@, %6$@ exact capability scopes granted", L10n.argument(item.manifest.name), L10n.argument(item.manifest.version), L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint), L10n.argument(item.enabled ? localized("Enabled") : localized("Disabled")), L10n.argument(item.granted.count)))
         return field
     }
 
@@ -71,9 +88,9 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
 
     private var selected: ExtensionRegistryItem? { items.indices.contains(table.selectedRow) ? items[table.selectedRow] : nil }
     private func updateButtons() {
-        enableButton.isEnabled = selected != nil; enableButton.title = selected?.enabled == true ? L10n.text("Disable") : L10n.text("Enable")
+        enableButton.isEnabled = selected != nil; enableButton.title = selected?.enabled == true ? localized("Disable") : localized("Enable")
         grantButton.isEnabled = selected?.enabled == true && selected?.issue == nil
         revokeButton.isEnabled = selected?.issue != nil || (selected?.enabled == true && !(selected?.granted.isEmpty ?? true))
-        revokeButton.title = selected?.issue == .untrustedPublisher ? L10n.text("Reset Publisher Revocation…") : L10n.text("Revoke Publisher…")
+        revokeButton.title = selected?.issue == .untrustedPublisher ? localized("Reset Publisher Revocation…") : localized("Revoke Publisher…")
     }
 }

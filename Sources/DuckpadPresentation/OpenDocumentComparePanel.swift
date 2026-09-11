@@ -12,6 +12,11 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
     public private(set) var leftVisualRowCount = 0
     public private(set) var rightVisualRowCount = 0
 
+    private let content: OpenDocumentCompareContent
+    private let leftTitleLabel = NSTextField(labelWithString: "")
+    private let rightTitleLabel = NSTextField(labelWithString: "")
+    private let done = NSButton()
+    private let snapshotNote = NSTextField(labelWithString: "")
     private var comparisonMenu: NSMenu?
     private var previousMenu: NSMenu?
     private var previousWindowsMenu: NSMenu?
@@ -28,7 +33,14 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
     public var leftNormalizedVerticalPosition: CGFloat { normalizedPosition(of: leftScrollView) }
     public var rightNormalizedVerticalPosition: CGFloat { normalizedPosition(of: rightScrollView) }
 
+    private var catalog = L10n.catalog
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        catalog.text(key, arguments: arguments)
+    }
+
     public init(content: OpenDocumentCompareContent, diff: AlignedLineDiff) {
+        self.content = content
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 600),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -41,10 +53,32 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
         super.init(window: window)
         window.delegate = self
         configure(content: content, diff: diff)
+        refreshLocalization()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
+
+    public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
+        window?.title = content.titleKey.map { catalog.text($0, arguments: content.titleArguments) } ?? content.title
+        let leftTitle = content.leftTitleKey.map { catalog.text($0, arguments: content.leftTitleArguments) } ?? content.leftTitle
+        let rightTitle = content.rightTitleKey.map { catalog.text($0, arguments: content.rightTitleArguments) } ?? content.rightTitle
+        leftTitleLabel.stringValue = leftTitle
+        rightTitleLabel.stringValue = rightTitle
+        done.title = localized("Close")
+        snapshotNote.stringValue = localized("Read-only snapshot · Changes to the original documents are not reflected here.")
+        for (textView, scrollView, title) in [(leftTextView, leftScrollView, leftTitle),
+                                            (rightTextView, rightScrollView, rightTitle)] {
+            textView.setAccessibilityLabel(localized("%1$@, read-only comparison", title))
+            textView.setAccessibilityHelp(localized("Changed rows use plus, minus, or tilde markers and semantic highlighting."))
+            scrollView.setAccessibilityLabel(localized("%1$@ comparison pane", title))
+        }
+        if comparisonMenu != nil {
+            restorePreviousMenu()
+            installComparisonMenu()
+        }
+    }
 
     public func present(attachedTo parent: NSWindow?) async {
         guard let window, !isDismissed else { return }
@@ -88,7 +122,7 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
         } else {
             let app = NSMenuItem()
             let submenu = NSMenu(title: "Duckpad")
-            submenu.addItem(withTitle: L10n.text("Quit Duckpad"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+            submenu.addItem(withTitle: localized("Quit Duckpad"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             app.submenu = submenu
             menu.addItem(app)
         }
@@ -99,17 +133,17 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
             menu.addItem(root)
             return submenu
         }
-        let file = section(L10n.text("File"))
-        let close = file.addItem(withTitle: L10n.text("Close Comparison"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let file = section(localized("File"))
+        let close = file.addItem(withTitle: localized("Close Comparison"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         close.target = window
-        let edit = section(L10n.text("Edit"))
-        edit.addItem(withTitle: L10n.text("Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: L10n.text("Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        let search = section(L10n.text("Search"))
-        let find = search.addItem(withTitle: L10n.text("Find…"), action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: "f")
+        let edit = section(localized("Edit"))
+        edit.addItem(withTitle: localized("Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: localized("Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let search = section(localized("Search"))
+        let find = search.addItem(withTitle: localized("Find…"), action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: "f")
         find.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
-        let windows = section(L10n.text("Window"))
-        windows.addItem(withTitle: L10n.text("Minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        let windows = section(localized("Window"))
+        windows.addItem(withTitle: localized("Minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         comparisonMenu = menu
         comparisonWindowsMenu = windows
         NSApplication.shared.mainMenu = menu
@@ -166,21 +200,23 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
         rightVisualRowCount = diff.rows.count
 
         let panes = NSStackView(views: [
-            makePane(title: content.leftTitle, scrollView: leftScrollView),
-            makePane(title: content.rightTitle, scrollView: rightScrollView),
+            makePane(title: content.leftTitle, label: leftTitleLabel, scrollView: leftScrollView),
+            makePane(title: content.rightTitle, label: rightTitleLabel, scrollView: rightScrollView),
         ])
         panes.orientation = .horizontal
         panes.distribution = .fillEqually
         panes.spacing = 1
         panes.translatesAutoresizingMaskIntoConstraints = false
 
-        let done = NSButton(title: L10n.text("Close"), target: self, action: #selector(donePressed))
+        done.title = localized("Close")
+        done.target = self
+        done.action = #selector(donePressed)
         done.keyEquivalent = "\r"
         done.translatesAutoresizingMaskIntoConstraints = false
         let root = NSView(frame: window.contentView?.bounds ?? .zero)
         root.addSubview(panes)
         root.addSubview(done)
-        let snapshotNote = NSTextField(labelWithString: L10n.text("Read-only snapshot · Changes to the original documents are not reflected here."))
+        snapshotNote.stringValue = localized("Read-only snapshot · Changes to the original documents are not reflected here.")
         snapshotNote.textColor = .secondaryLabelColor
         snapshotNote.font = .systemFont(ofSize: 11)
         snapshotNote.lineBreakMode = .byTruncatingTail
@@ -221,8 +257,8 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
             width: CGFloat.greatestFiniteMagnitude,
             height: CGFloat.greatestFiniteMagnitude
         )
-        textView.setAccessibilityLabel(L10n.text("%1$@, read-only comparison", L10n.argument(title)))
-        textView.setAccessibilityHelp(L10n.text("Changed rows use plus, minus, or tilde markers and semantic highlighting."))
+        textView.setAccessibilityLabel(localized("%1$@, read-only comparison", L10n.argument(title)))
+        textView.setAccessibilityHelp(localized("Changed rows use plus, minus, or tilde markers and semantic highlighting."))
 
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
@@ -232,11 +268,11 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
         scrollView.verticalScrollElasticity = .none
         scrollView.horizontalScrollElasticity = .none
         scrollView.contentView.postsBoundsChangedNotifications = true
-        scrollView.setAccessibilityLabel(L10n.text("%1$@ comparison pane", L10n.argument(title)))
+        scrollView.setAccessibilityLabel(localized("%1$@ comparison pane", L10n.argument(title)))
     }
 
-    private func makePane(title: String, scrollView: NSScrollView) -> NSView {
-        let label = NSTextField(labelWithString: title)
+    private func makePane(title: String, label: NSTextField, scrollView: NSScrollView) -> NSView {
+        label.stringValue = title
         label.font = .systemFont(ofSize: 12, weight: .semibold)
         label.lineBreakMode = .byTruncatingMiddle
         let separator = NSBox()

@@ -28,6 +28,11 @@ final class LiveFileChangeBanner: NSView {
     }
     required init?(coder: NSCoder) { nil }
 
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        reload.title = catalog.text("Reload from Disk…")
+        dismiss.title = catalog.text("Keep Editing")
+    }
+
     func show(_ text: String?) {
         message.stringValue = text ?? ""
         message.toolTip = text

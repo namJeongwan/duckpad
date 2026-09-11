@@ -28,7 +28,7 @@ final class WorkspaceSidebarNode: NSObject {
     weak var parent: WorkspaceSidebarNode?
     var children: [WorkspaceSidebarNode]?
     var isLoading = false
-    var failureMessage: String?
+    var failure: WorkspaceBrowserFailure?
 
     init(root: WorkspaceRoot) {
         rootID = root.id
@@ -74,6 +74,8 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     private var isRestoringNavigation = false
     private var interactionsEnabled = true
     private var contextNode: WorkspaceSidebarNode?
+    private var displayedFailure: WorkspaceBrowserFailure?
+    private var localizationCatalog = L10n.catalog
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -159,6 +161,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
 
     @discardableResult
     func apply(roots: [WorkspaceRoot]) -> Bool {
+        displayedFailure = nil
         let structureChanged = self.roots.count != roots.count || !zip(self.roots, roots).allSatisfy {
             $0.id == $1.id && $0.canonicalPath == $1.canonicalPath && $0.isAvailable == $1.isAvailable
         }
@@ -182,7 +185,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     ) {
         guard let parent = node(rootID: rootID, relativePath: relativeDirectory) else { return }
         parent.isLoading = false
-        parent.failureMessage = nil
+        parent.failure = nil
         parent.children = entries.map { WorkspaceSidebarNode(entry: $0, parent: parent) }
         outline.reloadItem(parent, reloadChildren: true)
     }
@@ -193,8 +196,9 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         failure: WorkspaceBrowserFailure
     ) {
         guard let parent = node(rootID: rootID, relativePath: relativeDirectory) else { return }
+        displayedFailure = failure
         parent.isLoading = false
-        parent.failureMessage = PresentationErrorText.message(failure)
+        parent.failure = failure
         parent.children = nil
         title.stringValue = L10n.text("Workspace ⚠")
         title.toolTip = PresentationErrorText.message(failure)
@@ -209,6 +213,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     }
 
     func presentFailure(_ failure: WorkspaceBrowserFailure) {
+        displayedFailure = failure
         title.stringValue = L10n.text("Workspace ⚠")
         title.toolTip = PresentationErrorText.message(failure)
         if roots.isEmpty {
@@ -218,6 +223,32 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     }
 
     var selectedRootID: WorkspaceRootID? { selectedNode?.rootID }
+
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        localizationCatalog = catalog
+        for row in 0..<outline.numberOfRows {
+            guard let node = outline.item(atRow: row) as? WorkspaceSidebarNode,
+                  let failure = node.failure,
+                  let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) else { continue }
+            cell.toolTip = PresentationErrorText.message(failure, catalog: catalog)
+        }
+        setAccessibilityLabel(catalog.text("Workspace"))
+        title.stringValue = catalog.text(displayedFailure == nil ? "Workspace" : "Workspace ⚠")
+        addButton.setAccessibilityLabel(catalog.text("Add Folder"))
+        addButton.toolTip = catalog.text("Add Folder")
+        removeButton.setAccessibilityLabel(catalog.text("Remove Folder"))
+        removeButton.toolTip = catalog.text("Remove Folder")
+        outline.setAccessibilityLabel(catalog.text("Workspace files"))
+        outline.tableColumns.first?.title = catalog.text("Workspace")
+        outline.menu?.title = catalog.text("Workspace")
+        if let displayedFailure {
+            let detail = PresentationErrorText.message(displayedFailure, catalog: catalog)
+            title.toolTip = detail
+            if roots.isEmpty { emptyLabel.stringValue = catalog.text("Workspace unavailable\n%1$@", arguments: [detail]) }
+        } else {
+            emptyLabel.stringValue = catalog.text("Add a folder to browse files here.")
+        }
+    }
 
     func restoreNavigation(for root: WorkspaceRoot) {
         isRestoringNavigation = true
@@ -290,7 +321,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         cell.textField?.font = .systemFont(ofSize: 12, weight: node.kind == .root ? .semibold : .regular)
         cell.textField?.textColor = node.isAvailable ? .labelColor : .secondaryLabelColor
         let symbol: String
-        if node.failureMessage != nil {
+        if node.failure != nil {
             symbol = "exclamationmark.triangle"
         } else {
             switch node.kind {
@@ -300,7 +331,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             }
         }
         cell.imageView?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        cell.toolTip = node.failureMessage ?? (node.kind == .root
+        cell.toolTip = node.failure.map { PresentationErrorText.message($0, catalog: localizationCatalog) } ?? (node.kind == .root
             ? roots.first(where: { $0.id == node.rootID })?.canonicalPath
             : node.relativePath)
         cell.setAccessibilityLabel(node.name)

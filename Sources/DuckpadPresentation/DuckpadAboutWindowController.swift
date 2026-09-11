@@ -8,8 +8,24 @@ public final class DuckpadAboutWindowController: NSWindowController {
     let updateButton: NSButton
     private let updateIcon = NSImageView()
     private let progress = NSProgressIndicator()
+    private let appInfo: DuckpadAppInfo
+    private let version = NSTextField(labelWithString: "")
+    private var updateState: DuckpadAppInfoController.UpdateState = .idle
+    private let tagline = NSTextField(wrappingLabelWithString: "")
+    private let copy = NSButton()
+    private let star = NSButton()
+    private let releases = NSButton()
+    private let footer = NSTextField(labelWithString: "")
+    private let report = NSButton()
+
+    private var catalog = L10n.catalog
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        catalog.text(key, arguments: arguments)
+    }
 
     public init(target: DuckpadAppInfoController) {
+        appInfo = target.appInfo
         updateButton = NSButton(title: L10n.text("Check for Updates"), target: target, action: #selector(target.performUpdate(_:)))
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 620, height: 430),
@@ -34,17 +50,20 @@ public final class DuckpadAboutWindowController: NSWindowController {
 
         let title = NSTextField(labelWithString: "Duckpad")
         title.font = .systemFont(ofSize: 27, weight: .bold)
-        let tagline = NSTextField(wrappingLabelWithString: L10n.text("A focused text editor for macOS."))
+        tagline.stringValue = localized("A focused text editor for macOS.")
         tagline.font = .systemFont(ofSize: 13)
         tagline.textColor = .secondaryLabelColor
-        let version = NSTextField(labelWithString: target.appInfo.versionDescription)
+        version.stringValue = target.appInfo.versionDescription
         version.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         version.textColor = .secondaryLabelColor
         version.setAccessibilityIdentifier("duckpad.about.version")
-        let copy = NSButton(image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: L10n.text("Copy app info"))!, target: target, action: #selector(target.performCopyAppInfo(_:)))
+        copy.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
+        copy.target = target
+        copy.action = #selector(target.performCopyAppInfo(_:))
+        copy.imagePosition = .imageOnly
         copy.isBordered = false
         copy.controlSize = .small
-        copy.toolTip = L10n.text("Copy version and macOS information")
+        copy.toolTip = localized("Copy version and macOS information")
         copy.setAccessibilityIdentifier("duckpad.about.copy-info")
         let versionRow = NSStackView(views: [version, copy])
         versionRow.alignment = .centerY
@@ -85,22 +104,25 @@ public final class DuckpadAboutWindowController: NSWindowController {
         cardRow.spacing = 10
         card.contentView = cardRow
 
-        let star = NSButton(title: L10n.text("Star on GitHub"), target: target, action: #selector(target.performStarOnGitHub(_:)))
+        star.target = target
+        star.action = #selector(target.performStarOnGitHub(_:))
         star.image = NSImage(systemSymbolName: "star", accessibilityDescription: nil)
         star.imagePosition = .imageLeading
         star.bezelStyle = .rounded
-        star.toolTip = L10n.text("Support Duckpad with a star on GitHub")
+        star.toolTip = localized("Support Duckpad with a star on GitHub")
         star.setAccessibilityIdentifier("duckpad.about.star")
-        let releases = NSButton(title: L10n.text("Release Notes"), target: target, action: #selector(target.performOpenReleaseNotes(_:)))
+        releases.target = target
+        releases.action = #selector(target.performOpenReleaseNotes(_:))
         releases.bezelStyle = .rounded
         let links = NSStackView(views: [star, releases])
         links.spacing = 10
         let separator = NSBox()
         separator.boxType = .separator
-        let footer = NSTextField(labelWithString: L10n.text("Built for macOS."))
+        footer.stringValue = localized("Built for macOS.")
         footer.font = .systemFont(ofSize: 11)
         footer.textColor = .tertiaryLabelColor
-        let report = NSButton(title: L10n.text("Report an Issue ↗"), target: target, action: #selector(target.performReportIssue(_:)))
+        report.target = target
+        report.action = #selector(target.performReportIssue(_:))
         report.isBordered = false
         report.font = .systemFont(ofSize: 11)
         report.contentTintColor = .secondaryLabelColor
@@ -127,49 +149,68 @@ public final class DuckpadAboutWindowController: NSWindowController {
             separator.widthAnchor.constraint(equalTo: stack.widthAnchor),
             footerRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
-        render(target.state)
+        updateState = target.state
+        refreshLocalization()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
+    public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
+        window?.title = localized("About Duckpad")
+        tagline.stringValue = localized("A focused text editor for macOS.")
+        version.stringValue = appInfo.version.map {
+            localized("Version %1$@", L10n.argument($0)) + (appInfo.build.map { " (\($0))" } ?? "")
+        } ?? localized("Development build")
+        copy.setAccessibilityLabel(localized("Copy app info"))
+        copy.toolTip = localized("Copy version and macOS information")
+        star.title = localized("Star on GitHub")
+        star.toolTip = localized("Support Duckpad with a star on GitHub")
+        releases.title = localized("Release Notes")
+        footer.stringValue = localized("Built for macOS.")
+        report.title = localized("Report an Issue ↗")
+        render(updateState)
+    }
+
     func render(_ state: DuckpadAppInfoController.UpdateState) {
+        updateState = state
         updateButton.isEnabled = state != .checking
-        updateButton.title = L10n.text("Check for Updates")
+        updateButton.title = localized("Check for Updates")
         updateIcon.contentTintColor = .secondaryLabelColor
         var symbol = "arrow.triangle.2.circlepath"
         progress.stopAnimation(nil)
         progress.isHidden = state != .checking
         switch state {
         case .idle:
-            updateTitle.stringValue = L10n.text("Keep Duckpad up to date")
-            updateDetail.stringValue = L10n.text("Get the latest improvements from GitHub Releases.")
+            updateTitle.stringValue = localized("Keep Duckpad up to date")
+            updateDetail.stringValue = localized("Get the latest improvements from GitHub Releases.")
         case .checking:
-            updateTitle.stringValue = L10n.text("Checking for updates…")
-            updateDetail.stringValue = L10n.text("Looking for the latest Duckpad release.")
+            updateTitle.stringValue = localized("Checking for updates…")
+            updateDetail.stringValue = localized("Looking for the latest Duckpad release.")
             progress.startAnimation(nil)
         case .current:
-            updateTitle.stringValue = L10n.text("You're up to date")
-            updateDetail.stringValue = L10n.text("No newer release is available.")
+            updateTitle.stringValue = localized("You're up to date")
+            updateDetail.stringValue = localized("No newer release is available.")
             updateIcon.contentTintColor = .systemGreen
             symbol = "checkmark.circle.fill"
         case .available(let release):
-            updateTitle.stringValue = L10n.text("Duckpad %1$@ is available", L10n.argument(release.version))
-            updateDetail.stringValue = L10n.text("Download the update from GitHub Releases.")
-            updateButton.title = L10n.text("Download Update")
+            updateTitle.stringValue = localized("Duckpad %1$@ is available", L10n.argument(release.version))
+            updateDetail.stringValue = localized("Download the update from GitHub Releases.")
+            updateButton.title = localized("Download Update")
             updateIcon.contentTintColor = .controlAccentColor
             symbol = "arrow.down.circle.fill"
         case .development(let release):
-            updateTitle.stringValue = L10n.text("Latest release: %1$@", L10n.argument(release.version))
-            updateDetail.stringValue = L10n.text("You're running a development build.")
-            updateButton.title = L10n.text("View Release")
+            updateTitle.stringValue = localized("Latest release: %1$@", L10n.argument(release.version))
+            updateDetail.stringValue = localized("You're running a development build.")
+            updateButton.title = localized("View Release")
         case .noRelease:
-            updateTitle.stringValue = L10n.text("No releases yet")
-            updateDetail.stringValue = L10n.text("Published releases will appear here.")
+            updateTitle.stringValue = localized("No releases yet")
+            updateDetail.stringValue = localized("Published releases will appear here.")
         case .failed:
-            updateTitle.stringValue = L10n.text("Couldn't check for updates")
-            updateDetail.stringValue = L10n.text("Try again, or open Release Notes below.")
-            updateButton.title = L10n.text("Try Again")
+            updateTitle.stringValue = localized("Couldn't check for updates")
+            updateDetail.stringValue = localized("Try again, or open Release Notes below.")
+            updateButton.title = localized("Try Again")
             updateIcon.contentTintColor = .systemOrange
             symbol = "exclamationmark.circle"
         }

@@ -559,3 +559,5 @@
 "unmodified" = "unverändert";
 "unmodified tab" = "unveränderter Tab";
 "unpinned" = "gelöst";
+"App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad." = "Die App-Sprache wird sofort übernommen. Die Dialoge „Öffnen“ und „Sichern“ verwenden die neue Sprache nach einem Neustart von Duckpad.";
+"Restart Duckpad to apply the selected language to Open and Save dialogs." = "Starte Duckpad neu, um die ausgewählte Sprache auf die Dialoge „Öffnen“ und „Sichern“ anzuwenden.";

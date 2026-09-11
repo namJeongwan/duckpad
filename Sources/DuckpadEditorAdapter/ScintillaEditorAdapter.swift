@@ -156,6 +156,12 @@ public final class ScintillaEditorAdapter: SearchEditorPort, EditorFindTextPort,
         view.setAccessibilityIdentifier("duckpad.editor.host")
     }
 
+    public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        primaryHost.setAccessibilityLabel(catalog.text("Primary editor pane"))
+        internalSecondaryHost.setAccessibilityLabel(catalog.text("Secondary editor pane"))
+        secondaryGroupHost.setAccessibilityLabel(catalog.text("Secondary editor group"))
+    }
+
     public func display(_ buffer: EditorBufferDescriptor) {
         guard !isInvalidated else { return }
         if hasVisibleGroups {

@@ -42,6 +42,9 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     private let table = SearchResultsTable()
     private let resultsScroll = NSScrollView()
     private var rows: [(String, ResultTarget?)] = []
+    private var openResult: SearchResultSet?
+    private var statusRenderer: ((LocalizationCatalog) -> String)?
+    private var localizedButtons: [(NSButton, String)] = []
     private var folderResult: FolderSearchResultSet?
     private var folderRowOffsets: [Int] = []
     private var incrementalTask: Task<Void, Never>?
@@ -49,32 +52,38 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     private lazy var collapsedHeight = heightAnchor.constraint(equalToConstant: 0)
     private var expandedVerticalConstraints: [NSLayoutConstraint] = []
 
+    private var catalog = L10n.catalog
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        catalog.text(key, arguments: arguments)
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityIdentifier("duckpad.search.panel")
         mode.selectedSegment = 0
         wrap.state = .on
-        findField.placeholderString = L10n.text("Find")
+        findField.placeholderString = localized("Find")
         findField.delegate = self
         findField.setAccessibilityIdentifier("duckpad.search.find")
-        replaceField.placeholderString = L10n.text("Replace with")
+        replaceField.placeholderString = localized("Replace with")
         replaceField.delegate = self
         replaceField.setAccessibilityIdentifier("duckpad.search.replace")
         status.setAccessibilityIdentifier("duckpad.search.status")
         status.lineBreakMode = .byTruncatingTail
 
-        let findNext = button(L10n.text("Next"), #selector(findNextPressed))
-        let findPrevious = button(L10n.text("Previous"), #selector(findPreviousPressed))
-        let replace = button(L10n.text("Replace"), #selector(replacePressed))
+        let findNext = button("Next", #selector(findNextPressed))
+        let findPrevious = button("Previous", #selector(findPreviousPressed))
+        let replace = button("Replace", #selector(replacePressed))
         replace.setAccessibilityIdentifier("duckpad.search.replace-current")
-        let replaceAll = button(L10n.text("Replace All"), #selector(replaceAllPressed))
-        let findAll = button(L10n.text("Find All"), #selector(findAllPressed))
-        let findInFolder = button(L10n.text("Folder…"), #selector(findInFolderPressed))
-        findInFolder.setAccessibilityLabel(L10n.text("Find in Folder"))
-        let cancel = button(L10n.text("Cancel"), #selector(cancelPressed))
+        let replaceAll = button("Replace All", #selector(replaceAllPressed))
+        let findAll = button("Find All", #selector(findAllPressed))
+        let findInFolder = button("Folder…", #selector(findInFolderPressed))
+        findInFolder.setAccessibilityLabel(localized("Find in Folder"))
+        let cancel = button("Cancel", #selector(cancelPressed))
         let close = button("×", #selector(closePressed))
-        close.setAccessibilityLabel(L10n.text("Close Find and Replace"))
+        close.setAccessibilityLabel(localized("Close Find and Replace"))
 
         let top = NSStackView(views: [findField, replaceField, findNext, findPrevious, replace, replaceAll, findAll, findInFolder, cancel, close])
         top.orientation = .horizontal
@@ -86,7 +95,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         options.spacing = 10
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("result"))
-        column.title = L10n.text("Search Results")
+        column.title = localized("Search Results")
         table.addTableColumn(column)
         table.headerView = nil
         table.delegate = self
@@ -142,6 +151,31 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
+        findField.placeholderString = localized("Find")
+        replaceField.placeholderString = localized("Replace with")
+        for (index, key) in ["Normal", "Extended", "Regex"].enumerated() {
+            mode.setLabel(localized(key), forSegment: index)
+        }
+        for (button, key) in [(matchCase, "Match case"), (wholeWord, "Whole word"),
+                              (dotMatchesNewline, ". matches newline"), (wrap, "Wrap"),
+                              (inSelection, "In selection"), (allDocuments, "All open documents")] {
+            button.title = localized(key)
+        }
+        for (button, key) in localizedButtons { button.title = localized(key) }
+        subviewsRecursiveButtons(actions: [#selector(findInFolderPressed)]).first?
+            .setAccessibilityLabel(localized("Find in Folder"))
+        subviewsRecursiveButtons(actions: [#selector(closePressed)]).first?
+            .setAccessibilityLabel(localized("Close Find and Replace"))
+        table.tableColumns.first?.title = localized("Search Results")
+        let selection = table.selectedRowIndexes
+        if let openResult { renderRows(openResult) }
+        table.reloadData()
+        table.selectRowIndexes(selection, byExtendingSelection: false)
+        if let statusRenderer { status.stringValue = statusRenderer(catalog) }
+    }
+
     func applyPreferences(_ settings: AppSettings) {
         let font = settings.monospacedFindFields
             ? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular) : NSFont.systemFont(ofSize: 13)
@@ -154,6 +188,8 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
             incrementalTask?.cancel()
             onQueryInvalidated?()
             findField.stringValue = selectedText
+            openResult = nil
+            statusRenderer = nil
             rows = []
             folderResult = nil
             folderRowOffsets = []
@@ -187,21 +223,30 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     }
 
     func present(_ result: SearchResultSet) {
+        openResult = result
         folderResult = nil
         folderRowOffsets = []
-        rows = result.documents.flatMap { document in
-            [(L10n.text("%1$@ — %2$@", document.title, L10n.text("search.matches", document.matches.count)), nil)]
-                + document.matches.map { ("  \($0.line):\($0.column)  \($0.snippet)", Optional(.openDocument($0))) }
-        }
+        renderRows(result)
         table.reloadData()
         resultsScroll.isHidden = rows.isEmpty
         collapsedHeight.constant = rows.isEmpty ? 88 : 224
-        status.stringValue = result.isTruncated
-            ? L10n.text("%1$@+ matches (truncated)", L10n.argument(result.matchCount))
-            : L10n.text("search.matches", result.matchCount)
+        statusRenderer = { catalog in
+            result.isTruncated
+                ? catalog.text("%1$@+ matches (truncated)", arguments: [String(result.matchCount)])
+                : catalog.text("search.matches", arguments: [result.matchCount])
+        }
+        status.stringValue = statusRenderer?(catalog) ?? ""
+    }
+
+    private func renderRows(_ result: SearchResultSet) {
+        rows = result.documents.flatMap { document in
+            [(localized("%1$@ — %2$@", document.title, localized("search.matches", document.matches.count)), nil)]
+                + document.matches.map { ("  \($0.line):\($0.column)  \($0.snippet)", Optional(.openDocument($0))) }
+        }
     }
 
     func present(_ result: FolderSearchResultSet) {
+        openResult = nil
         rows = []
         folderResult = result
         folderRowOffsets = []
@@ -214,12 +259,31 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         table.reloadData()
         resultsScroll.isHidden = nextOffset == 0
         collapsedHeight.constant = nextOffset == 0 ? 88 : 224
-        status.stringValue = result.isTruncated
-            ? L10n.text("Matches: %1$@+ · Files: %2$@ · Skipped: %3$@ (results truncated)", L10n.argument(result.matchCount), L10n.argument(result.searchedFileCount), L10n.argument(result.skippedFileCount))
-            : L10n.text("Matches: %1$@ · Files: %2$@ · Skipped: %3$@", L10n.argument(result.matchCount), L10n.argument(result.searchedFileCount), L10n.argument(result.skippedFileCount))
+        statusRenderer = { catalog in
+            catalog.text(result.isTruncated
+                ? "Matches: %1$@+ · Files: %2$@ · Skipped: %3$@ (results truncated)"
+                : "Matches: %1$@ · Files: %2$@ · Skipped: %3$@",
+                arguments: [String(result.matchCount), String(result.searchedFileCount), String(result.skippedFileCount)])
+        }
+        status.stringValue = statusRenderer?(catalog) ?? ""
     }
 
-    func presentStatus(_ message: String) { status.stringValue = message }
+    func presentStatus(_ message: String) {
+        statusRenderer = nil
+        status.stringValue = message
+    }
+
+    func presentStatus(key: String, arguments: [CVarArg] = []) {
+        statusRenderer = { $0.text(key, arguments: arguments) }
+        status.stringValue = statusRenderer?(catalog) ?? ""
+    }
+
+    func presentFailure(prefix: String, error: any Error) {
+        statusRenderer = { catalog in
+            catalog.text(prefix, arguments: [PresentationErrorText.message(error, catalog: catalog)])
+        }
+        status.stringValue = statusRenderer?(catalog) ?? ""
+    }
     func focusFind() { window?.makeFirstResponder(findField) }
 
     func controlTextDidChange(_ obj: Notification) {
@@ -227,6 +291,8 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         incrementalTask?.cancel()
         onQueryInvalidated?()
         if findField.stringValue.isEmpty {
+            openResult = nil
+            statusRenderer = nil
             rows = []
             folderResult = nil
             folderRowOffsets = []
@@ -255,7 +321,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
                 let match = document.matches[matchIndex]
                 label = "  \(match.line):\(match.column)  \(match.snippet)"
             } else {
-                label = L10n.text("%1$@ — %2$@", document.relativePath, L10n.text("search.matches", document.matches.count))
+                label = localized("%1$@ — %2$@", document.relativePath, localized("search.matches", document.matches.count))
             }
         } else {
             label = rows[row].0
@@ -272,7 +338,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     @objc private func replaceAllPressed() { onReplaceAll?(currentQuery()) }
     @objc private func findAllPressed() { onFindAll?(currentQuery()) }
     @objc private func findInFolderPressed() { onFindInFolder?(currentQuery()) }
-    @objc private func cancelPressed() { status.stringValue = L10n.text("Cancelled"); onCancel?() }
+    @objc private func cancelPressed() { presentStatus(key: "Cancelled"); onCancel?() }
     @objc private func closePressed() { hide(); onClose?() }
     @objc private func resultActivated() {
         let row = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
@@ -315,8 +381,9 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         return (document, offset == 0 ? nil : offset - 1)
     }
 
-    private func button(_ title: String, _ action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
+    private func button(_ key: String, _ action: Selector) -> NSButton {
+        let button = NSButton(title: localized(key), target: self, action: action)
+        localizedButtons.append((button, key))
         button.bezelStyle = .rounded
         return button
     }

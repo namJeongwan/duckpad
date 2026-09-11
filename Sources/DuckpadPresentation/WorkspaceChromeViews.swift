@@ -152,9 +152,17 @@ final class DocumentSwitcherButton: NSButton {
         documentPanel.present(relativeTo: self)
     }
 
-    private func updateButtonLabel() {
-        title = tabs.isEmpty ? L10n.text("Documents") : L10n.text("Documents (%1$@)", L10n.argument(tabs.count))
-        toolTip = tabs.isEmpty ? L10n.text("No Open Documents") : L10n.text("Open Documents (%1$@)", L10n.argument(tabs.count))
-        setAccessibilityValue(tabs.isEmpty ? L10n.text("No open documents") : L10n.text("documents.open", tabs.count))
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        setAccessibilityLabel(catalog.text("Open Documents"))
+        image?.accessibilityDescription = catalog.text("Show All Documents")
+        updateButtonLabel(catalog: catalog)
+        documentPanel.refreshLocalization(catalog: catalog)
+    }
+
+    private func updateButtonLabel(catalog: LocalizationCatalog = L10n.catalog) {
+        func text(_ key: String, _ arguments: CVarArg...) -> String { catalog.text(key, arguments: arguments) }
+        title = tabs.isEmpty ? text("Documents") : text("Documents (%1$@)", L10n.argument(tabs.count))
+        toolTip = tabs.isEmpty ? text("No Open Documents") : text("Open Documents (%1$@)", L10n.argument(tabs.count))
+        setAccessibilityValue(tabs.isEmpty ? text("No open documents") : text("documents.open", tabs.count))
     }
 }

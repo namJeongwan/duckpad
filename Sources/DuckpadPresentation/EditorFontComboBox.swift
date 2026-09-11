@@ -38,14 +38,18 @@ final class EditorFontComboBox: NSComboBox, NSComboBoxDataSource, NSComboBoxDele
         itemHeight = 28
         target = self
         action = #selector(commitTypedFont(_:))
-        placeholderString = L10n.text("Search fonts")
-        setAccessibilityLabel(L10n.text("Editor font"))
+        refreshLocalization()
         setAccessibilityIdentifier("duckpad.settings.editor-font")
         reloadInstalledFonts()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
+
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        placeholderString = catalog.text("Search fonts")
+        setAccessibilityLabel(catalog.text("Editor font"))
+    }
 
     func reloadInstalledFonts() {
         installedFonts = NSFontManager.shared.availableFontFamilies

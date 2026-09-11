@@ -14,9 +14,9 @@ public enum L10n {
         return storage.catalog
     }
 
-    /// Called once after settings load and before constructing any application UI.
-    /// Preference changes are persisted for the next launch, keeping native panels
-    /// and every open window on the same language for the lifetime of the process.
+    /// Called after settings load and after an app-language preference change.
+    /// Existing app-owned UI must then refresh its strings. Native file panels
+    /// retain their launch language until the next process launch.
     public static func configure(language: AppLanguage, preferredLanguages: [String] = Locale.preferredLanguages) {
         let catalog = LocalizationCatalog(language: language, preferredLanguages: preferredLanguages)
         storage.lock.lock()

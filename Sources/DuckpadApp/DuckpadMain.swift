@@ -11,6 +11,7 @@ import DuckpadLocalization
 final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     DuckpadApplicationCommandTarget {
     private var windowController: DuckpadWindowController?
+    private weak var mainMenuTarget: DuckpadWindowController?
     private var windowControllers: [ObjectIdentifier: DuckpadWindowController] = [:]
     private var windowEditors: [ObjectIdentifier: ScintillaEditorAdapter] = [:]
     private var windowRecoveryRoots: [ObjectIdentifier: URL] = [:]
@@ -1004,6 +1005,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     }
 
     private func installMainMenu(target: DuckpadWindowController) {
+        mainMenuTarget = target
         let recentDocumentURLs: [URL]
         if environment["DUCKPAD_PERFORMANCE_LAUNCH_SMOKE"] == "1" {
             recentDocumentURLs = []
@@ -1093,18 +1095,39 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     }
 
     private func apply(_ settings: AppSettings) {
+        let nextCatalog = LocalizationCatalog(language: settings.appLanguage)
+        let languageChanged = nextCatalog.language != L10n.catalog.language
+        if languageChanged { L10n.configure(language: settings.appLanguage) }
         switch settings.appearanceMode {
         case .system: NSApplication.shared.appearance = nil
         case .light: NSApplication.shared.appearance = NSAppearance(named: .aqua)
         case .dark: NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
         }
-        for editor in windowEditors.values { editor.applyPreferences(settings) }
+        for editor in windowEditors.values {
+            editor.applyPreferences(settings)
+            if languageChanged { editor.refreshLocalization() }
+        }
         for controller in windowControllers.values {
             controller.applyPreferences(settings)
             controller.refreshAppearance()
         }
         if let target = windowControllers.values.first(where: { $0.window?.isKeyWindow == true }) {
             installMainMenu(target: target)
+        }
+        if languageChanged {
+            settingsWindowController?.refreshLocalization()
+            projectController.refreshLocalization()
+            for controller in windowControllers.values where controller.window?.isKeyWindow != true {
+                let menu = DuckpadMainMenuFactory.make(target: controller, applicationTarget: self,
+                    projectTarget: projectController, recentDocumentURLs: NSDocumentController.shared.recentDocumentURLs,
+                    settings: settings)
+                controller.applicationMainMenuDidChange(menu)
+            }
+            // Preferences may be key, so the app menu still needs a document target.
+            if !windowControllers.values.contains(where: { $0.window?.isKeyWindow == true }),
+               let target = mainMenuTarget ?? windowController ?? windowControllers.values.first {
+                installMainMenu(target: target)
+            }
         }
     }
 
