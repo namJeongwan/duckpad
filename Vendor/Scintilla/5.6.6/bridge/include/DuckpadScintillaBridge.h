@@ -1,4 +1,5 @@
 #import <AppKit/AppKit.h>
+#import "DPScintillaBinaryDocument.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -138,6 +139,12 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
          revision:(uint64_t)revision
    preservingUndo:(BOOL)preservingUndo
             error:(NSError * _Nullable * _Nullable)error;
+- (void)loadBinaryDocument:(DPScintillaBinaryDocument *)document revision:(uint64_t)revision;
+- (BOOL)appendBinaryDocumentChunk:(DPScintillaBinaryDocument *)document
+                    maximumBytes:(NSUInteger)maximumBytes
+                           error:(NSError * _Nullable * _Nullable)error
+    __attribute__((swift_error(nonnull_error)))
+    NS_SWIFT_NAME(appendBinaryDocumentChunk(_:maximumBytes:));
 - (BOOL)replaceUTF8Range:(NSRange)range
          withReplacement:(NSData *)replacement
         expectedRevision:(uint64_t)expectedRevision

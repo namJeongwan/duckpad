@@ -9,8 +9,9 @@ public struct TabSnapshot: Equatable, Sendable {
     public let isPinned: Bool
     public let buffer: EditorBufferDescriptor
     public let fullPath: String?
+    public let isReadOnly: Bool
 
-    public init(id: TabID, title: String, isActive: Bool, isDirty: Bool, isPinned: Bool, buffer: EditorBufferDescriptor, fullPath: String? = nil) {
+    public init(id: TabID, title: String, isActive: Bool, isDirty: Bool, isPinned: Bool, buffer: EditorBufferDescriptor, fullPath: String? = nil, isReadOnly: Bool = false) {
         self.id = id
         self.title = title
         self.isActive = isActive
@@ -18,6 +19,7 @@ public struct TabSnapshot: Equatable, Sendable {
         self.isPinned = isPinned
         self.buffer = buffer
         self.fullPath = fullPath
+        self.isReadOnly = isReadOnly
     }
 }
 
@@ -649,6 +651,14 @@ public final class ScratchWorkspaceUseCase {
             return .rejected(.invalidRecoveryState("no recently closed tab"))
         }
 
+        // A binary preview must never become an editable, unbound scratch copy.
+        if let binding = closed.state.fileBinding, binding.isReadOnly,
+           let existing = session.tabID(canonicalPath: binding.canonicalPath) {
+            let outcome = await activateLocked(tabID: existing)
+            if case .applied = outcome { recentlyClosedTabs.removeLast() }
+            return outcome
+        }
+
         let editorSnapshot: EditorRecoverySnapshot
         do {
             editorSnapshot = try await Task.detached(priority: .utility) {
@@ -746,6 +756,9 @@ public final class ScratchWorkspaceUseCase {
             return .rejected(currentRevision: edit.expectedRevision)
         }
         let tabID = session.tabs[index].id
+        guard (try? session.fileBinding(for: tabID))?.isReadOnly != true else {
+            return .rejected(currentRevision: (try? session.buffer(for: tabID).revision) ?? edit.expectedRevision)
+        }
         do {
             let revision = try session.recordEdit(in: tabID, expectedRevision: edit.expectedRevision)
             persistenceState = .pending
@@ -767,6 +780,7 @@ public final class ScratchWorkspaceUseCase {
         await acquireTransaction()
         guard !Task.isCancelled, startupState == .ready,
               let activeTab = session.activeTabID,
+              (try? session.fileBinding(for: activeTab))?.isReadOnly != true,
               let buffer = try? session.buffer(for: activeTab),
               buffer.id == bufferID, buffer.revision == expectedRevision else {
             releaseTransaction()
@@ -838,7 +852,8 @@ public final class ScratchWorkspaceUseCase {
                 isDirty: buffer.isDirty,
                 isPinned: tab.isPinned,
                 buffer: EditorBufferDescriptor(bufferID: buffer.id, revision: buffer.revision),
-                fullPath: session.fileBindings[document.id]?.canonicalPath
+                fullPath: session.fileBindings[document.id]?.canonicalPath,
+                isReadOnly: session.fileBindings[document.id]?.isReadOnly == true
             )
         }
         return WorkspaceSnapshot(sessionID: session.id, tabs: tabs, activeBuffer: tabs.first(where: \.isActive)?.buffer, persistence: persistenceState, startup: startupState)
@@ -1200,6 +1215,7 @@ public final class EditorBindingUseCase {
     }
 
     public func render(_ change: WorkspaceChange, requestFocus: Bool = false) {
+        for tab in change.snapshot.tabs { editor?.setReadOnly(tab.isReadOnly, for: tab.buffer.bufferID) }
         if case .tabRemoved(_, let bufferID) = change.kind { editor?.retire(bufferID: bufferID) }
         if case .tabsRemoved(let bufferIDs) = change.kind {
             for bufferID in bufferIDs { editor?.retire(bufferID: bufferID) }
@@ -1222,6 +1238,7 @@ public final class EditorBindingUseCase {
     }
 
     public func render(_ snapshot: WorkspaceSnapshot, requestFocus: Bool = false) {
+        for tab in snapshot.tabs { editor?.setReadOnly(tab.isReadOnly, for: tab.buffer.bufferID) }
         editor?.setInputEnabled(snapshot.startup == .ready)
         if let activeBuffer = snapshot.activeBuffer { editor?.display(activeBuffer) }
         if requestFocus, snapshot.startup == .ready { editor?.focus() }

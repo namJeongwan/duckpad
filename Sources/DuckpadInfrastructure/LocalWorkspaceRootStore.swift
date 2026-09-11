@@ -361,24 +361,35 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
         }
         guard before.st_size >= 0 else { throw WorkspaceBrowserFailure.invalidPath(entry.relativePath) }
         let observedSize = UInt64(before.st_size)
-        guard observedSize <= maximumOpenFileBytes else {
-            throw WorkspaceBrowserFailure.fileTooLarge(actual: observedSize, limit: maximumOpenFileBytes)
-        }
+        let analysisLimit = UInt64(BinaryFileContent.analysisByteCount + 4)
+        var readLimit = analysisLimit
+        var classified = false
+        var isBinary = false
         var data = Data()
-        data.reserveCapacity(Int(observedSize))
+        data.reserveCapacity(Int(min(observedSize, analysisLimit)))
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
         while true {
             if Task.isCancelled { throw WorkspaceBrowserFailure.cancelled }
-            let permitted = maximumOpenFileBytes - UInt64(data.count)
+            if !classified, UInt64(data.count) == analysisLimit {
+                isBinary = BinaryFileContent.isBinary(data)
+                guard isBinary || observedSize <= maximumOpenFileBytes else {
+                    throw WorkspaceBrowserFailure.fileTooLarge(actual: observedSize, limit: maximumOpenFileBytes)
+                }
+                classified = true
+                readLimit = isBinary ? max(observedSize, analysisLimit) : maximumOpenFileBytes
+                data.reserveCapacity(Int(observedSize))
+            }
+            let permitted = readLimit - UInt64(data.count)
             guard permitted > 0 else {
                 var byte: UInt8 = 0
                 let extra = Darwin.read(descriptor, &byte, 1)
                 if extra == 0 { break }
                 if extra < 0, errno == EINTR { continue }
-                throw WorkspaceBrowserFailure.fileTooLarge(
-                    actual: maximumOpenFileBytes + 1,
-                    limit: maximumOpenFileBytes
-                )
+                if extra < 0 { throw mapErrno(path: entry.relativePath) }
+                if !isBinary {
+                    throw WorkspaceBrowserFailure.fileTooLarge(actual: readLimit + 1, limit: maximumOpenFileBytes)
+                }
+                throw WorkspaceBrowserFailure.io("\(entry.relativePath): file changed while reading")
             }
             let request = min(buffer.count, Int(permitted))
             let count = buffer.withUnsafeMutableBytes {
@@ -393,21 +404,20 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
         }
         var after = stat()
         guard fstat(descriptor, &after) == 0,
-              sameSnapshot(before, after),
-              UInt64(after.st_size) == UInt64(data.count) else {
+              BinaryFileIdentity.sameSnapshot(before, after),
+              UInt64(data.count) == observedSize else {
             throw WorkspaceBrowserFailure.io("\(entry.relativePath): file changed while reading")
         }
         let path = joinedPath(root: access.url.path, relative: entry.relativePath)
-        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        let nanos = Int64(after.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(after.st_mtimespec.tv_nsec)
-        let identity = FileIdentity(
-            canonicalPath: path,
-            device: UInt64(after.st_dev),
-            inode: UInt64(after.st_ino),
-            byteCount: UInt64(after.st_size),
-            modifiedNanoseconds: nanos,
-            contentToken: digest
-        )
+        let identity: FileIdentity
+        if BinaryFileContent.isBinary(data) {
+            identity = BinaryFileIdentity.make(path: path, data: data, info: after)
+        } else {
+            let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            let nanos = Int64(after.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(after.st_mtimespec.tv_nsec)
+            identity = FileIdentity(canonicalPath: path, device: UInt64(after.st_dev), inode: UInt64(after.st_ino),
+                byteCount: UInt64(after.st_size), modifiedNanoseconds: nanos, contentToken: digest)
+        }
         return WorkspaceFileRead(
             url: URL(fileURLWithPath: path),
             result: FileReadResult(data: data, identity: identity)
@@ -477,15 +487,6 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
         return packageExtensions.contains(URL(fileURLWithPath: name).pathExtension.lowercased())
     }
 
-    private static func sameSnapshot(_ lhs: stat, _ rhs: stat) -> Bool {
-        lhs.st_dev == rhs.st_dev
-            && lhs.st_ino == rhs.st_ino
-            && lhs.st_size == rhs.st_size
-            && lhs.st_mtimespec.tv_sec == rhs.st_mtimespec.tv_sec
-            && lhs.st_mtimespec.tv_nsec == rhs.st_mtimespec.tv_nsec
-            && lhs.st_ctimespec.tv_sec == rhs.st_ctimespec.tv_sec
-            && lhs.st_ctimespec.tv_nsec == rhs.st_ctimespec.tv_nsec
-    }
 
     private static func joinedPath(root: String, relative: String) -> String {
         root == "/" ? "/" + relative : root + "/" + relative
@@ -544,7 +545,7 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
             }
         }
         var after = stat()
-        guard fstat(descriptor, &after) == 0, sameSnapshot(before, after), after.st_size == data.count else {
+        guard fstat(descriptor, &after) == 0, BinaryFileIdentity.sameSnapshot(before, after), after.st_size == data.count else {
             throw .corruptStore("workspace archive changed while reading")
         }
         return data

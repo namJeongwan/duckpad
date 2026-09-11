@@ -58,6 +58,14 @@ public struct FileBinding: Codable, Equatable, Sendable {
     /// authority after a sandboxed relaunch. Nil remains valid for legacy
     /// recovery archives and unsandboxed development builds.
     public var securityScopedBookmark: Data?
+    /// Nil for editable text. Optional so older recovery archives remain readable.
+    public var binaryByteCount: Int?
+    public var isReadOnly: Bool { binaryByteCount != nil }
+
+    private enum CodingKeys: String, CodingKey {
+        case canonicalPath, encoding, byteOrderMark, lineEnding, observedIdentity, securityScopedBookmark
+        case binaryByteCount = "binaryPreviewByteCount"
+    }
 
     public init(
         canonicalPath: String,
@@ -65,7 +73,8 @@ public struct FileBinding: Codable, Equatable, Sendable {
         byteOrderMark: ByteOrderMark,
         lineEnding: LineEnding,
         observedIdentity: FileIdentity,
-        securityScopedBookmark: Data? = nil
+        securityScopedBookmark: Data? = nil,
+        binaryByteCount: Int? = nil
     ) {
         self.canonicalPath = canonicalPath
         self.encoding = encoding
@@ -73,5 +82,6 @@ public struct FileBinding: Codable, Equatable, Sendable {
         self.lineEnding = lineEnding
         self.observedIdentity = observedIdentity
         self.securityScopedBookmark = securityScopedBookmark
+        self.binaryByteCount = binaryByteCount
     }
 }

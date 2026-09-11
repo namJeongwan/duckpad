@@ -561,3 +561,10 @@
 "unpinned" = "고정 해제됨";
 "App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad." = "앱 언어는 즉시 적용됩니다. 열기 및 저장 대화상자는 Duckpad를 재시작한 후 새 언어를 사용합니다.";
 "Restart Duckpad to apply the selected language to Open and Save dialogs." = "열기 및 저장 대화상자에 선택한 언어를 적용하려면 Duckpad를 재시작하세요.";
+
+"Binary" = "바이너리";
+
+"Read-only" = "읽기 전용";
+
+"Binary files are read-only and cannot be saved." = "바이너리 파일은 읽기 전용이며 저장할 수 없습니다.";
+"Loading: %1$@%%" = "불러오는 중: %1$@%%";

@@ -561,3 +561,10 @@
 "unpinned" = "unpinned";
 "App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad." = "App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad.";
 "Restart Duckpad to apply the selected language to Open and Save dialogs." = "Restart Duckpad to apply the selected language to Open and Save dialogs.";
+
+"Binary" = "Binary";
+
+"Read-only" = "Read-only";
+
+"Binary files are read-only and cannot be saved." = "Binary files are read-only and cannot be saved.";
+"Loading: %1$@%%" = "Loading: %1$@%%";

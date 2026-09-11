@@ -86,3 +86,29 @@ External file reloads use an undo-preserving load option in Duckpad-owned
 one native undo group; identical contents retain the existing undo/redo stack.
 Initial loads and recovery still clear history. No upstream files or generated
 files are changed by this option.
+Full binary display adds the Duckpad-owned `bridge/DPScintillaBinaryDocument`
+wrapper and attachment methods in `bridge/`. The wrapper constructs a standalone
+Scintilla `Document` with the same loading sequence as `SCI_CREATELOADER`, on a
+background queue, using `StylesNone | TextLarge`, disabled undo collection, and
+single-byte code page. No UTF-8 conversion or full-file validation is performed.
+Prepared documents are attached on the main thread, which also owns subsequent
+reference-count changes. Text reload creates a regular document
+to restore style storage. No additional upstream source changes are made.
+The bridge also measures the line-number margin using the actual line-count
+digit width (at least five digits), refreshing it on document attachment,
+text reload, font or zoom changes, and display configuration so multi-million
+line binary files retain fully visible line numbers.
+
+Incremental binary opening additionally prepares capacity and the first 64 KiB
+off the main thread, then appends bounded raw-byte chunks to the attached
+document on the main thread. The wrapper retains immutable source data only
+until loading completes or is cancelled. Appends restore read-only state before returning and
+do not publish editor edits or advance revisions in any shared pane. Each pane
+updates its line-number margin and selection cache from the native insertion
+notification; status publication occurs after read-only state is restored.
+Native selection serialization preserves multi-selections (including the loaded
+end of file), virtual space, and viewport positions through each chunk append.
+Binary views use Scintilla's viewport-sized line-layout cache so incremental
+repaints reuse measured glyph positions. Selection and viewport restoration
+only sends setters when values changed, avoiding unconditional redraws per
+chunk. Regular text reload restores the default uncached layout policy.

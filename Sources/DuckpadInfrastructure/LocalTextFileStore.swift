@@ -242,7 +242,8 @@ public actor LocalTextFileStore: TextFileStore {
                     byteOrderMark: binding.byteOrderMark,
                     lineEnding: binding.lineEnding,
                     observedIdentity: Self.rebased(binding.observedIdentity, canonicalPath: canonical.path),
-                    securityScopedBookmark: refreshed
+                    securityScopedBookmark: refreshed,
+                    binaryByteCount: binding.binaryByteCount
                 )
             }
             return updated
@@ -362,6 +363,30 @@ public actor LocalTextFileStore: TextFileStore {
         do { return try await Task.detached(priority: .utility) { try Self.readBlocking(url) }.value }
         catch let error as TextFileStoreError { throw error }
         catch { throw .io(String(describing: error)) }
+    }
+
+    public func readForDisplay(from url: URL, assuming encoding: TextFileEncoding?) async throws(TextFileStoreError) -> FileReadResult {
+        do {
+            return try await Task.detached(priority: .utility) {
+                let canonical = try Self.canonicalize(url)
+                var before = stat()
+                guard Darwin.lstat(canonical.path, &before) == 0 else { throw Self.mapErrno(path: canonical.path) }
+                guard before.st_size >= 0 else { throw TextFileStoreError.invalidPath(canonical.path) }
+                let data = try Data(contentsOf: canonical, options: [.mappedIfSafe])
+                guard BinaryFileContent.isBinary(data, assuming: encoding) else {
+                    return FileReadResult(data: data, identity: try Self.identity(for: canonical, data: data))
+                }
+                let identity = BinaryFileIdentity.make(path: canonical.path, data: data, info: before)
+                var after = stat()
+                guard Darwin.lstat(canonical.path, &after) == 0,
+                      BinaryFileIdentity.sameSnapshot(before, after),
+                      UInt64(data.count) == UInt64(before.st_size) else {
+                    throw TextFileStoreError.io("\(canonical.path): file changed while reading")
+                }
+                return FileReadResult(data: data, identity: identity)
+            }.value
+        } catch let error as TextFileStoreError { throw error }
+        catch { throw Self.map(error: error, path: url.path) }
     }
 
     public func writeAtomically(

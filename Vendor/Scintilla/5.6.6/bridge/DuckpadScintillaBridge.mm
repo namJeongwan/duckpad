@@ -12,6 +12,12 @@
 #include "ILexer.h"
 #include "Lexilla.h"
 
+@interface DPScintillaBinaryDocument (DuckpadAttachment)
+- (void)attachToScintillaView:(ScintillaView *)view;
+- (BOOL)isAttachedToScintillaView:(ScintillaView *)view;
+- (BOOL)appendMaximumBytes:(NSUInteger)maximumBytes error:(NSError **)error;
+@end
+
 NSErrorDomain const DPScintillaErrorDomain = @"app.duckpad.scintilla";
 static NSURL *DPScintillaResourceDirectory;
 static constexpr int DPBookmarkMarker = 20;
@@ -190,6 +196,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     uint64_t _revision;
     BOOL _suppressEdit;
     BOOL _requestedInputEnabled;
+    BOOL _binaryDocument;
+    std::string _binarySelectionBeforeAppend;
+    NSInteger _binaryFirstVisibleLine;
+    NSInteger _binaryHorizontalScroll;
     NSError *_lastMutationError;
     NSUInteger _snapshotReadCount;
     NSUInteger _incrementalNotificationCount;
@@ -407,6 +417,15 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _pendingSmartCaretPosition = -1;
     _pendingSmartInsertionEnd = -1;
     _pendingSmartCharacter = 0;
+    if (_binaryDocument) {
+        // StylesNone cannot be changed in place; text reload needs a regular document.
+        [_scintilla message:SCI_SETDOCPOINTER wParam:0 lParam:0];
+        [_scintilla message:SCI_SETLAYOUTCACHE wParam:SC_CACHE_NONE];
+        [_scintilla message:SCI_SETCODEPAGE wParam:SC_CP_UTF8];
+        [_scintilla message:SCI_SETUNDOSELECTIONHISTORY wParam:SC_UNDO_SELECTION_HISTORY_ENABLED];
+        _binaryDocument = NO;
+        [self updateModificationEventMask];
+    }
     [_scintilla setEditable:YES];
     [_scintilla message:SCI_SETEOLMODE wParam:DPEOLModeForUTF8(content)];
     if (!preservingUndo || ![content isEqualToData:self.contentUTF8]) {
@@ -420,6 +439,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         if (preservingUndo) [_scintilla message:SCI_ENDUNDOACTION];
     }
     if (!preservingUndo) [_scintilla message:SCI_EMPTYUNDOBUFFER];
+    [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
     _suppressEdit = NO;
     _revision = revision;
     _lastSearchWasZeroLength = NO;
@@ -427,6 +447,45 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla setEditable:_requestedInputEnabled && revision != UINT64_MAX];
     _lastMutationError = nil;
     return YES;
+}
+
+- (void)loadBinaryDocument:(DPScintillaBinaryDocument *)document revision:(uint64_t)revision {
+    [self cancelPendingSmartIndentation];
+    _suppressEdit = YES;
+    _binaryDocument = YES;
+    _pendingSmartCaretPosition = -1;
+    _pendingSmartInsertionEnd = -1;
+    _pendingSmartCharacter = 0;
+    _smartEditingEnabled = NO;
+    _braceMatchingEnabled = NO;
+    _foldingEnabled = NO;
+    _foldRecoveryProgressPending = NO;
+    [self updateModificationEventMask];
+    [_scintilla message:SCI_SETWRAPMODE wParam:SC_WRAP_NONE];
+    [_scintilla message:SCI_SETLAYOUTCACHE wParam:SC_CACHE_PAGE];
+    [_scintilla message:SCI_SETUNDOSELECTIONHISTORY wParam:SC_UNDO_SELECTION_HISTORY_DISABLED];
+    [document attachToScintillaView:_scintilla];
+    [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
+    [_scintilla setEditable:NO];
+    _revision = revision;
+    _lastSearchWasZeroLength = NO;
+    _completionItemCount = 0;
+    _lastMutationError = nil;
+    _lexerName = @"null";
+    _languageStylingFallback = NO;
+    _statusContentGeneration += 1;
+    _suppressEdit = NO;
+}
+
+- (BOOL)appendBinaryDocumentChunk:(DPScintillaBinaryDocument *)document
+                    maximumBytes:(NSUInteger)maximumBytes error:(NSError **)error {
+    if (!_binaryDocument || maximumBytes == 0 || ![document isAttachedToScintillaView:_scintilla]) {
+        return [self fail:DPScintillaErrorInvalidRange
+               description:@"Binary chunk requires its attached document and a positive byte count" error:error];
+    }
+    const BOOL complete = [document appendMaximumBytes:maximumBytes error:error];
+    if (self.onStatusChange) self.onStatusChange();
+    return complete;
 }
 
 - (BOOL)showCompletionItems:(NSArray<NSString *> *)items
@@ -637,11 +696,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (BOOL)isInputEnabled { return [_scintilla isEditable]; }
 - (void)setInputEnabled:(BOOL)value {
     _requestedInputEnabled = value;
-    [_scintilla setEditable:value && _revision != UINT64_MAX];
+    [_scintilla setEditable:value && !_binaryDocument && _revision != UINT64_MAX];
 }
 - (BOOL)isWordWrapEnabled { return [_scintilla message:SCI_GETWRAPMODE] != SC_WRAP_NONE; }
 - (void)setWordWrapEnabled:(BOOL)value {
-    [_scintilla message:SCI_SETWRAPMODE wParam:value ? SC_WRAP_WORD : SC_WRAP_NONE];
+    [_scintilla message:SCI_SETWRAPMODE wParam:value && !_binaryDocument ? SC_WRAP_WORD : SC_WRAP_NONE];
 }
 - (BOOL)isWrapMarkerVisible {
     return [_scintilla message:SCI_GETWRAPVISUALFLAGS] != SC_WRAPVISUALFLAG_NONE;
@@ -673,14 +732,22 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_STYLESETSIZEFRACTIONAL wParam:style lParam:std::lround(_editorFontSize * 100)];
     }
     [_scintilla message:SCI_STYLESETSIZEFRACTIONAL wParam:STYLE_LINENUMBER lParam:std::lround(MAX(6.0, _editorFontSize - 2) * 100)];
-    if ([_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0) {
-        [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:[_scintilla message:SCI_TEXTWIDTH wParam:STYLE_LINENUMBER lParam:reinterpret_cast<sptr_t>("99999")] + 8];
-    }
+    [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
+}
+
+- (void)updateLineNumberMargin:(BOOL)visible {
+    const std::string digits(std::max<size_t>(5, std::to_string(self.lineCount).size()), '9');
+    const sptr_t width = visible
+        ? [_scintilla message:SCI_TEXTWIDTH wParam:STYLE_LINENUMBER
+                       lParam:reinterpret_cast<sptr_t>(digits.c_str())] + 8
+        : 0;
+    [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:width];
 }
 
 - (NSInteger)zoomLevel { return [_scintilla message:SCI_GETZOOM]; }
 - (void)setZoomLevel:(NSInteger)level {
     [_scintilla message:SCI_SETZOOM wParam:(uptr_t)MAX(-10, MIN(20, level))];
+    [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
 }
 - (NSUInteger)lineCount { return (NSUInteger)MAX(1, [_scintilla message:SCI_GETLINECOUNT]); }
 - (BOOL)overtype { return [_scintilla message:SCI_GETOVERTYPE] != 0; }
@@ -699,7 +766,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     if (_selectedCountGeneration != _statusContentGeneration || ranges != _countedSelections) {
         _selectedCharacterCount = 0;
         for (const auto &range : ranges) {
-            _selectedCharacterCount += [_scintilla message:SCI_COUNTCHARACTERS wParam:range.first lParam:range.second];
+            _selectedCharacterCount += _binaryDocument ? range.second - range.first
+                : [_scintilla message:SCI_COUNTCHARACTERS wParam:range.first lParam:range.second];
         }
         _selectedCountGeneration = _statusContentGeneration;
         _countedSelections = std::move(ranges);
@@ -723,6 +791,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     return (NSUInteger)MAX(0, [_scintilla message:SCI_LINEFROMPOSITION wParam:self.caretUTF8Position]);
 }
 - (NSUInteger)caretColumn {
+    if (_binaryDocument) {
+        const NSUInteger position = self.caretUTF8Position;
+        const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:position];
+        return position - [_scintilla message:SCI_POSITIONFROMLINE wParam:line];
+    }
     return (NSUInteger)MAX(0, [_scintilla message:SCI_GETCOLUMN wParam:self.caretUTF8Position]);
 }
 - (BOOL)goToOneBasedLine:(NSUInteger)line column:(NSUInteger)column {
@@ -810,6 +883,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)updateModificationEventMask {
+    if (_binaryDocument) {
+        // Every pane needs fresh layout/cache state, but binary appends never become user edits.
+        [_scintilla message:SCI_SETMODEVENTMASK wParam:SC_MOD_BEFOREINSERT | SC_MOD_INSERTTEXT];
+        return;
+    }
     uptr_t mask = _publishesDocumentEdits
         ? SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT
             | SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE
@@ -820,8 +898,15 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)shareDocumentWithView:(DPScintillaEditorView *)source {
     if (source == nil || source == self) return;
+    _binaryDocument = source->_binaryDocument;
+    [_scintilla message:SCI_SETLAYOUTCACHE wParam:_binaryDocument ? SC_CACHE_PAGE : SC_CACHE_NONE];
+    [_scintilla message:SCI_SETUNDOSELECTIONHISTORY
+                 wParam:_binaryDocument ? SC_UNDO_SELECTION_HISTORY_DISABLED : SC_UNDO_SELECTION_HISTORY_ENABLED];
+    if (_binaryDocument) [_scintilla message:SCI_SETWRAPMODE wParam:SC_WRAP_NONE];
     const sptr_t document = [source->_scintilla message:SCI_GETDOCPOINTER];
     [_scintilla message:SCI_SETDOCPOINTER wParam:0 lParam:document];
+    [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
+    _statusContentGeneration += 1;
     // The primary view remains the sole document-modification observer. A
     // shared document notifies every attached Scintilla view, so enabling this
     // mask here would publish each edit twice to Application.
@@ -833,7 +918,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)synchronizeRevision:(uint64_t)revision {
     _revision = revision;
-    [_scintilla setEditable:_requestedInputEnabled && revision != UINT64_MAX];
+    [_scintilla setEditable:_requestedInputEnabled && !_binaryDocument && revision != UINT64_MAX];
 }
 - (BOOL)canUndo { return [[_scintilla content] canUndo]; }
 - (BOOL)canRedo { return [[_scintilla content] canRedo]; }
@@ -873,7 +958,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETSEL wParam:(uptr_t)safeAnchor lParam:(sptr_t)safeCaret];
     [_scintilla message:SCI_SETFIRSTVISIBLELINE wParam:(uptr_t)firstVisibleLine];
     [_scintilla message:SCI_SETXOFFSET wParam:(uptr_t)horizontalScrollOffset];
-    [_scintilla message:SCI_SETWRAPMODE wParam:wordWrapEnabled ? SC_WRAP_WORD : SC_WRAP_NONE];
+    [_scintilla message:SCI_SETWRAPMODE wParam:wordWrapEnabled && !_binaryDocument ? SC_WRAP_WORD : SC_WRAP_NONE];
 }
 
 - (BOOL)addSelectionUTF8Range:(NSRange)range {
@@ -1108,7 +1193,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         maximumStyleBytes:(NSUInteger)maximumStyleBytes {
     _languageConfigurationCount += 1;
     _maximumStyleBytes = maximumStyleBytes;
-    const BOOL overBudget = self.documentByteLength > maximumStyleBytes;
+    const BOOL overBudget = _binaryDocument || self.documentByteLength > maximumStyleBytes;
     const BOOL nextBraceMatchingEnabled = braceMatching && !overBudget;
     NSString *effectiveName = overBudget ? @"null" : lexerName;
     Scintilla::ILexer5 *lexer = CreateLexer(effectiveName.UTF8String);
@@ -1152,7 +1237,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETAUTOMATICFOLD
                  wParam:effectiveFolding ? SC_AUTOMATICFOLD_CHANGE : SC_AUTOMATICFOLD_NONE];
     if (!effectiveFolding) {
-        [_scintilla message:SCI_FOLDALL wParam:SC_FOLDACTION_EXPAND];
+        if (!_binaryDocument) [_scintilla message:SCI_FOLDALL wParam:SC_FOLDACTION_EXPAND];
         _foldRecoveryProgressPending = NO;
     }
     if (!_braceMatchingEnabled) [self updateBraceHighlight];
@@ -1182,7 +1267,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                  scrollBeyondLastLine:(BOOL)scrollBeyondLastLine
                        wrapIndentMode:(NSInteger)wrapIndentMode {
     _highlightCurrentLine = highlightCurrentLine;
-    [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:lineNumbers ? [_scintilla message:SCI_TEXTWIDTH wParam:STYLE_LINENUMBER lParam:reinterpret_cast<sptr_t>("99999")] + 8 : 0];
+    [self updateLineNumberMargin:lineNumbers];
     [_scintilla message:SCI_SETMARGINWIDTHN wParam:2 lParam:bookmarkMargin ? 12 : 0];
     [_scintilla message:SCI_SETCARETLINEVISIBLE wParam:highlightCurrentLine lParam:0];
     [_scintilla message:SCI_SETCARETWIDTH wParam:MIN(MAX(caretWidth, 1), 3) lParam:0];
@@ -2159,6 +2244,39 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)notification:(SCNotification *)notification {
+    if (_binaryDocument && notification->nmhdr.code == SCN_MODIFIED) {
+        if (notification->modificationType & SC_MOD_BEFOREINSERT) {
+            const NSUInteger length = [_scintilla message:SCI_GETSELECTIONSERIALIZED];
+            _binarySelectionBeforeAppend.resize(length + 1);
+            [_scintilla message:SCI_GETSELECTIONSERIALIZED wParam:0
+                        lParam:reinterpret_cast<sptr_t>(_binarySelectionBeforeAppend.data())];
+            _binaryFirstVisibleLine = [_scintilla message:SCI_GETFIRSTVISIBLELINE];
+            _binaryHorizontalScroll = [_scintilla message:SCI_GETXOFFSET];
+        }
+        if (notification->modificationType & SC_MOD_INSERTTEXT) {
+            ++_statusContentGeneration;
+            if (!_binarySelectionBeforeAppend.empty()) {
+                const NSUInteger length = [_scintilla message:SCI_GETSELECTIONSERIALIZED];
+                std::string currentSelection(length + 1, '\0');
+                [_scintilla message:SCI_GETSELECTIONSERIALIZED wParam:0
+                            lParam:reinterpret_cast<sptr_t>(currentSelection.data())];
+                if (currentSelection != _binarySelectionBeforeAppend) {
+                    [_scintilla message:SCI_SETSELECTIONSERIALIZED wParam:0
+                                lParam:reinterpret_cast<sptr_t>(_binarySelectionBeforeAppend.c_str())];
+                }
+                if ([_scintilla message:SCI_GETFIRSTVISIBLELINE] != _binaryFirstVisibleLine) {
+                    [_scintilla message:SCI_SETFIRSTVISIBLELINE wParam:_binaryFirstVisibleLine];
+                }
+                if ([_scintilla message:SCI_GETXOFFSET] != _binaryHorizontalScroll) {
+                    [_scintilla message:SCI_SETXOFFSET wParam:_binaryHorizontalScroll];
+                }
+                _binarySelectionBeforeAppend.clear();
+            }
+            [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
+        }
+        return;
+    }
+    if (_binaryDocument && notification->nmhdr.code == SCN_UPDATEUI && self.isInputEnabled) return;
     if (notification->nmhdr.code == SCN_FOCUSIN) {
         [self publishFocus];
         return;

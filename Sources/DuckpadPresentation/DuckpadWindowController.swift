@@ -320,6 +320,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var pendingFileCommandTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingWorkspaceBrowserTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingWorkspaceFileOpenTasks: [UUID: Task<Void, Never>] = [:]
+    private var pendingWorkspaceFileReads: [UUID: FileLoadingProgress] = [:]
     private var editorGroupActivationTask: Task<Void, Never>?
     private var openDocumentCompareTask: Task<Void, Never>?
     private var openDocumentCompareGeneration: UInt64 = 0
@@ -589,6 +590,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         window?.delegate = nil
         fileUseCase?.setLiveReloadEnabled(false)
         fileUseCase?.onExternalChanges = nil
+        fileUseCase?.onLoadingProgress = nil
         workspace.onChange = nil
         editorGroupRouter?.onEditorGroupFocus = nil
         activeEditor.onEdit = nil
@@ -1488,7 +1490,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performSaveFile(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable,
-              let context = workspace.activeFileContext() else { return }
+              let context = workspace.activeFileContext(),
+              context.binding?.isReadOnly != true else { return }
         beginFileCommandTask { [weak self] in
             await self?.routeAcceptedSaveFile(expectedContext: context)
         }
@@ -1496,7 +1499,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performSaveFileAs(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable,
-              let context = workspace.activeFileContext() else { return }
+              let context = workspace.activeFileContext(),
+              context.binding?.isReadOnly != true else { return }
         beginFileCommandTask { [weak self] in
             await self?.routeAcceptedSaveFileAs(expectedContext: context)
         }
@@ -1504,7 +1508,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performSaveCopyAs(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable,
-              let context = workspace.activeFileContext() else { return }
+              let context = workspace.activeFileContext(),
+              context.binding?.isReadOnly != true else { return }
         beginFileCommandTask { [weak self] in
             await self?.routeSaveCopyAs(expectedContext: context)
         }
@@ -1787,10 +1792,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             menuItem.state = current.encoding == choice.encoding
                 && current.byteOrderMark == choice.byteOrderMark ? .on : .off
             return workspaceInteractionsAreActionable && fileUseCase != nil
+                && workspace.activeFileContext()?.binding?.isReadOnly != true
         }
         if let lineEnding = fileLineEndingChoice(for: menuItem.action) {
             menuItem.state = activeTextFileFormat.lineEnding == lineEnding ? .on : .off
             return workspaceInteractionsAreActionable && fileUseCase != nil
+                && workspace.activeFileContext()?.binding?.isReadOnly != true
         }
         if isOpenUsingEncodingAction(menuItem.action) {
             return workspaceInteractionsAreActionable && fileUseCase != nil && filePanels != nil
@@ -1829,9 +1836,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performMoveActiveTabLeft(_:)),
              #selector(performMoveActiveTabRight(_:)),
              #selector(performOpenFile(_:)),
-             #selector(performSaveFile(_:)),
-             #selector(performSaveFileAs(_:)),
-             #selector(performSaveCopyAs(_:)),
              #selector(performToggleLineComment(_:)),
              #selector(performShowLanguageChooser(_:)),
              #selector(performShowExtensions(_:)):
@@ -1839,6 +1843,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 return workspaceInteractionsAreActionable && workspace.snapshot().tabs.count >= 2
             }
             return workspaceInteractionsAreActionable
+        case #selector(performSaveFile(_:)), #selector(performSaveFileAs(_:)), #selector(performSaveCopyAs(_:)):
+            return workspaceInteractionsAreActionable && fileUseCase != nil
+                && workspace.activeFileContext()?.binding?.isReadOnly != true
         case #selector(performSaveAll(_:)):
             return workspaceInteractionsAreActionable && fileUseCase != nil
                 && workspace.snapshot().tabs.contains(where: \.isDirty)
@@ -2255,7 +2262,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard workspaceBrowserCommandsAreActionable,
               let workspaceBrowserUseCase,
               let fileUseCase else { return }
+        let loadingID = UUID()
+        pendingWorkspaceFileReads[loadingID] = FileLoadingProgress(path: entry.relativePath,
+            loadedByteCount: 0, totalByteCount: nil)
+        renderEditorStatus()
         beginWorkspaceBrowserTask { [weak self] in
+            defer {
+                self?.pendingWorkspaceFileReads.removeValue(forKey: loadingID)
+                self?.renderEditorStatus()
+            }
             do {
                 let read = try await workspaceBrowserUseCase.readFile(entry)
                 guard let self, self.workspaceInteractionsAreActionable, !Task.isCancelled else { return }
@@ -2317,6 +2332,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func cancelWorkspaceBrowserTasks() {
+        pendingWorkspaceFileReads.removeAll()
+        renderEditorStatus()
         filePanels?.cancelOutstandingPanels()
         let tasks = Array(pendingWorkspaceBrowserTasks.values)
         pendingWorkspaceBrowserTasks.removeAll()
@@ -2421,6 +2438,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               workspaceInteractionsAreActionable || acceptedBeforeTermination,
               let fileUseCase,
               let context = expectedContext ?? workspace.activeFileContext(),
+              context.binding?.isReadOnly != true,
               workspace.activeFileContext() == context,
               let url = await filePanels?.chooseSaveURL(suggestedName: context.title, attachedTo: window),
               workspaceInteractionsAreActionable || acceptedBeforeTermination,
@@ -2443,7 +2461,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func routeSaveCopyAs(expectedContext: FileWorkspaceContext) async {
-        guard !hasTornDownWindow,
+        guard !hasTornDownWindow, expectedContext.binding?.isReadOnly != true,
               let fileUseCase,
               workspace.activeFileContext() == expectedContext,
               let url = await filePanels?.chooseSaveURL(
@@ -2863,6 +2881,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         liveFileBanner.dismiss.target = self
         liveFileBanner.dismiss.action = #selector(performKeepEditingExternalFile(_:))
         fileUseCase?.onExternalChanges = { [weak self] in self?.refreshLiveFileBanner() }
+        fileUseCase?.onLoadingProgress = { [weak self] in self?.renderEditorStatus() }
         workspaceContentSplit.isVertical = true
         workspaceContentSplit.dividerStyle = .thin
         workspaceContentSplit.translatesAutoresizingMaskIntoConstraints = false
@@ -3485,10 +3504,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceSidebar.setInteractionsEnabled(enabled && workspaceBrowserUseCase?.acceptsCommands == true)
         languageStatus.isEnabled = enabled
         symbolStatus.isEnabled = enabled && documentIntelligenceUseCase != nil
-        fileFormatStatus.isEnabled = enabled && fileUseCase != nil
+        let isReadOnly = workspace.activeFileContext()?.binding?.isReadOnly == true
+        fileFormatStatus.isEnabled = enabled && fileUseCase != nil && !isReadOnly
         statusBar.lineEndingButton.isEnabled = fileFormatStatus.isEnabled
         statusBar.positionButton.isEnabled = enabled && actionableNavigationEditor != nil
-        statusBar.modeButton.isEnabled = enabled && activeEditor is any EditorStatusReportingPort
+        statusBar.modeButton.isEnabled = enabled && !isReadOnly && activeEditor is any EditorStatusReportingPort
         extensionStatus.isEnabled = enabled
     }
 
@@ -4277,8 +4297,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func renderEditorStatus() {
+        statusBar.showLoading(fileUseCase?.loadingProgress ?? pendingWorkspaceFileReads.values.first)
         guard let status = (activeEditor as? any EditorStatusReportingPort)?.editorStatus else { return }
-        statusBar.apply(status)
+        let binding = workspace.activeFileContext()?.binding
+        let binarySummary = binding?.binaryByteCount.map { count in
+            ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .file)
+        }
+        statusBar.apply(status, binarySummary: binarySummary)
     }
 
     @objc private func performToggleOvertype(_ sender: Any?) {
@@ -4288,6 +4313,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func renderFileFormatStatus() {
+        if workspace.activeFileContext()?.binding?.isReadOnly == true {
+            setStatus(fileFormatStatus, text: L10n.text("Binary"), warning: false)
+            statusBar.lineEndingButton.title = L10n.text("Read-only")
+            statusBar.lineEndingButton.toolTip = L10n.text("Binary files are read-only and cannot be saved.")
+            fileFormatStatus.toolTip = statusBar.lineEndingButton.toolTip
+            fileFormatStatus.setAccessibilityValue(L10n.text("Read-only"))
+            return
+        }
         let format = activeTextFileFormat
         let hasFileBinding = workspace.activeFileContext()?.binding != nil
         let encoding: String

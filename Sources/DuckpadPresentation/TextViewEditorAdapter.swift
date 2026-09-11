@@ -22,6 +22,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorFindTextPo
     private var isProcessingTextStorageEdit = false
     private var bookmarkRenderScheduled = false
     private var requestedInputEnabled = true
+    private var readOnlyBuffers: Set<BufferID> = []
     private var defaultViewState = EditorViewState()
     private let navigationContextID = EditorNavigationContextID()
     private static let bookmarkTemporaryAttribute = NSAttributedString.Key("app.duckpad.bookmark")
@@ -144,6 +145,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorFindTextPo
     }
 
     public func retire(bufferID: BufferID) {
+        readOnlyBuffers.remove(bufferID)
         snapshots.removeValue(forKey: bufferID)
         undoManagers.removeValue(forKey: bufferID)
         viewStates.removeValue(forKey: bufferID)
@@ -156,6 +158,12 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorFindTextPo
 
     public func setInputEnabled(_ isEnabled: Bool) {
         requestedInputEnabled = isEnabled
+        applyInputAvailability()
+    }
+
+    public func setReadOnly(_ isReadOnly: Bool, for bufferID: BufferID) {
+        if isReadOnly { readOnlyBuffers.insert(bufferID) }
+        else { readOnlyBuffers.remove(bufferID) }
         applyInputAvailability()
     }
 
@@ -837,6 +845,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorFindTextPo
     private func applyInputAvailability() {
         let hasActiveBuffer = activeBuffer != nil
         textView.isEditable = requestedInputEnabled
+            && activeBuffer.map { !readOnlyBuffers.contains($0.bufferID) } == true
             && (activeBuffer?.revision ?? .max) < .max
         textView.isSelectable = requestedInputEnabled && hasActiveBuffer
         scrollView.alphaValue = requestedInputEnabled ? 1 : 0.65
