@@ -7,7 +7,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: BinaryEditorPort, SearchEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+public final class ScintillaEditorAdapter: BinaryEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -852,6 +852,18 @@ public final class ScintillaEditorAdapter: BinaryEditorPort, SearchEditorPort, E
         !(activeScintillaView?.bookmarkedLines.isEmpty ?? true)
     }
 
+    @discardableResult
+    public func addBookmarks(on lines: [Int]) -> Int {
+        guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return 0 }
+        let requested = Set(lines.filter { $0 >= 0 && $0 < Int(editorView.lineCount) })
+        let existing = Set(editorView.bookmarkedLines.map(\.intValue))
+        let additions = requested.subtracting(existing).sorted().prefix(max(0, EditorViewState.maximumBookmarkCount - existing.count))
+        let merged = existing.union(additions)
+        editorView.restoreBookmarkedLines(merged.sorted().map { NSNumber(value: $0) })
+        storeViewState(bufferID: bufferID)
+        return requested.intersection(merged).count
+    }
+
     public func toggleBookmarkAtCaret() {
         guard let bufferID = activeBuffer?.bufferID, let editorView = activeScintillaView else { return }
         editorView.toggleBookmarkAtCaret()
@@ -1224,6 +1236,22 @@ public final class ScintillaEditorAdapter: BinaryEditorPort, SearchEditorPort, E
         }
         guard range.location != NSNotFound else { return nil }
         return SearchUTF8Range(location: range.location, length: range.length)
+    }
+
+    public func setSearchHighlights(_ result: SearchResultSet) {
+        guard !isInvalidated else { return }
+        clearSearchHighlights()
+        let matchesByBuffer = Dictionary(grouping: result.documents.flatMap(\.matches), by: \.bufferID)
+        for (bufferID, matches) in matchesByBuffer {
+            guard let view = bufferViews[bufferID],
+                  matches.allSatisfy({ $0.revision == view.revision && $0.range.location >= 0 && $0.range.length >= 0 }) else { continue }
+            let ranges = matches.map { NSValue(range: NSRange(location: $0.range.location, length: $0.range.length)) }
+            _ = view.setSearchHighlights(ranges, revision: view.revision)
+        }
+    }
+
+    public func clearSearchHighlights() {
+        bufferViews.values.forEach { $0.clearSearchHighlights() }
     }
 
     public func selectAndReveal(_ range: SearchUTF8Range) {

@@ -6,6 +6,18 @@ Phase 6 implements the first macOS-native, non-modal search/replace vertical sli
 
 Delivered operations are Find Next/Previous, Replace current then find, Replace All in the current document, and Find All in the current or all open documents. Results retain stable `TabID`, `BufferID`, revision, UTF-8 byte range, one-based line, one-based UTF-8 byte column, and a bounded snippet. Activating a stale/closed/edited result fails before tab activation; a valid result activates the tab, selects/reveals the range, and focuses the editor.
 
+## Search dialog layout (2026-09-11)
+
+Matching text receives a palette-aware green Scintilla indicator, independent of the active selection. Incremental search, explicit count/results, and directional find update it. Navigation retains all matches; query/scope changes, edits, and close invalidate decorations. Edits/Undo and active-buffer changes schedule a refresh. Native range application checks UTF-8 boundaries and revision and does not read full document contents or change selections, text, or Undo.
+
+The search controls now live in a separate, non-modal macOS window. Four tabs — Find, Replace, Find in Files, and Bookmarks — share the search text and common options. The compact form fits a 640-point-wide window: inputs sit at the top left, selection scope immediately below them, unboxed match options in the middle left, and three search mode rows at the bottom left. Context-specific actions occupy the right, with optional transparency controls below them. Only explicit Find All and folder search expand the result list. Typing, Count matches, and Bookmarks update the status without expanding it. Opening or closing search no longer resizes the editor.
+
+Find provides separate count and result-list actions for the current document (or selection), plus an all-open-documents action. The backward-search checkbox controls the primary Find action; explicit previous/next menu commands keep their specified direction. Replace keeps current-document/selection scope. Find in Files displays a reusable folder selection and invokes the existing recursive, read-only folder search; file filters, folder replacement, and project search are outside this change. Regex-only dot/newline matching is disabled in other modes. Changes to query options invalidate stale results and refresh the current-document search after the existing debounce.
+
+Bookmarks adds markers to distinct matching lines without moving the selection or changing text, revision, dirty state, or Undo. Existing markers are retained unless “Clear previous bookmarks” is selected. Results are checked against the current buffer, revision, and editor context before markers are applied. The existing bookmark limit remains in force, and the status reports accepted versus matched lines. Clear All Bookmarks uses the existing metadata/recovery path.
+
+Verification covers English/Korean light/dark window captures, tab state retention, bounded control layouts, window close/reopen, search option refresh, explicit search scopes, native bookmark integration, bookmark capacity, and selection/revision/Undo preservation. The pre-change controls overflow and missing option-refresh callbacks were reproduced before implementation. A second regression reproduced the oversized form, misplaced selection scope, and automatic result expansion. Compact sizing, count-only incremental search, backward direction, opacity modes, and idle cancellation visibility are now covered. Transparency can apply while inactive or always; it defaults off, stays at least 50% opaque, and returns to full opacity while its slider is dragged. The slider uses opaque track/thumb drawing. Search-field editing completion never navigates: Return is handled explicitly so clicking selection scope retains the editor selection.
+
 ## Architecture
 
 - `DuckpadDomain/SearchModels.swift` contains AppKit-free mode, option, scope, range, result, limit, and typed failure values.
@@ -13,7 +25,7 @@ Delivered operations are Find Next/Previous, Replace current then find, Replace 
 - `DuckpadInfrastructure/ICURegexEngine.swift` implements `RegexEnginePort`. Its narrow C bridge sets ICU time and stack limits for every operation and maps invalid pattern, timeout, and complexity separately. ICU handles regular-expression semantics; C/ICU handles never leave Infrastructure.
 - `DuckpadEditorAdapter/ScintillaEditorAdapter.swift` implements the active-editor port. Literal/extended Find uses the narrow Scintilla target/search façade. Replacement ranges are prevalidated as descending/non-overlapping UTF-8 boundaries and applied as one Scintilla undo group.
 - `ScratchWorkspaceUseCase` reserves the exact active buffer/revision and holds the serialized workspace transaction across native apply and metadata commit. A cancelled queued reservation is released before native mutation. This prevents close/save/edit reentrancy from observing a partial Replace All.
-- `SearchPanelView` is an AppKit-only non-modal bar/results view. It collapses to zero height when closed, is keyboard accessible, supports Return/double-click result activation, exposes progress/Cancel, and routes every status/result through the controller's operation token.
+- `SearchPanelView` supplies the form and results inside `SearchWindowController`. It is keyboard accessible, supports Return/double-click result activation, exposes progress/Cancel, and routes every status/result through the controller's operation token.
 
 The existing editor recovery capture is an immutable checkpoint plus bounded deltas. Search copies this value on `MainActor` without reading Scintilla's full native document, then materializes bytes in a utility task. Search therefore does not reintroduce a per-keystroke snapshot path.
 
@@ -29,11 +41,11 @@ Search ranges and selections are UTF-8 byte offsets. Invalid, overflowing, or co
 
 Defaults cap a document at 64 MiB, regex input at 8 MiB, a pattern at 64 KiB, results at 100,000 matches/32 MiB, aggregate replacement bytes at 16 MiB, and final document size at 128 MiB. ICU receives a 100 ms time limit and 8 MiB stack limit per operation. Search cancellation cancels the actual detached task; loops check cancellation and never publish a superseded generation. Multi-document scan uses one in-flight materialization (within the configured concurrency ceiling) rather than eagerly materializing all buffers.
 
-Replace All is intentionally current-document only. All-open Replace All, folder/workspace replacement, mark/style operations, named replacement groups, and persistent search history are deferred. Incremental count/results are delivered after a 150 ms debounce; persistent all-match editor indicators are not yet claimed.
+Replace All is intentionally current-document only. All-open Replace All, folder/workspace replacement, text mark/style operations, named replacement groups, and persistent search history are deferred. Incremental count/results are delivered after a 150 ms debounce; all non-empty matches are decorated with the native search indicator, within the existing scan limits.
 
 ## macOS command surface
 
-The Search menu routes `⌘F` Find, `⌘G` Find Next, `⇧⌘G` Find Previous, `⌘H` Replace, and Escape Close Find Panel. Closing by Escape or the close button cancels the owned operation, collapses the bar, and returns focus to the editor. Replace mode disables “All open documents” because Replace All is deliberately limited to the current buffer.
+The Search menu routes `⌘F` Find, `⌘G` Find Next, `⇧⌘G` Find Previous, `⌘H` Replace, and Escape Close Find Panel. Closing by Escape or the close button cancels the owned operation, hides the search window, and returns focus to the editor. All-open-document search is an explicit action on the Find tab; Replace All is limited to the current buffer.
 
 ## Verification
 

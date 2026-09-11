@@ -162,6 +162,10 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
           restrictToRange:(NSRange)restriction
             wrapAround:(BOOL)wrapAround
                  error:(NSError * _Nullable * _Nullable)error;
+- (BOOL)setSearchHighlights:(NSArray<NSValue *> *)ranges revision:(uint64_t)revision
+    NS_SWIFT_NAME(setSearchHighlights(_:revision:));
+- (void)clearSearchHighlights;
+- (BOOL)isSearchHighlightedAtUTF8Position:(NSUInteger)position NS_SWIFT_NAME(isSearchHighlighted(atUTF8Position:));
 - (void)setPrimarySelectionUTF8Range:(NSRange)range;
 - (void)restoreCaretUTF8Position:(NSUInteger)caret
                   anchorPosition:(NSUInteger)anchor

@@ -561,3 +561,25 @@
 "unpinned" = "已取消固定";
 "App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad." = "应用语言会立即生效。打开和保存对话框将在重启 Duckpad 后使用新语言。";
 "Restart Duckpad to apply the selected language to Open and Save dialogs." = "请重启 Duckpad，将所选语言应用于打开和保存对话框。";
+
+/* Search dialog */
+"Directory" = "文件夹";
+"Browse…" = "浏览…";
+"Search mode" = "搜索模式";
+"Search options" = "搜索选项";
+"Find all in current document" = "在当前文档中查找全部";
+"Find all in open documents" = "在打开的文档中查找全部";
+"Search includes subfolders. Hidden files, packages, and symbolic links are skipped." = "搜索包括子文件夹。隐藏文件、软件包和符号链接将被跳过。";
+"Find in Files" = "在文件中查找";
+"Bookmarks" = "书签";
+"Bookmark matching lines" = "为匹配行添加书签";
+"Clear previous bookmarks" = "清除之前的书签";
+"Bookmarks cleared" = "书签已清除";
+"Bookmarked %1$@ of %2$@ matching lines" = "已为 %2$@ 个匹配行中的 %1$@ 行添加书签";
+"Bookmarked %1$@ of %2$@ matching lines (results truncated)" = "已为 %2$@ 个匹配行中的 %1$@ 行添加书签（结果已截断）";
+"Search backwards" = "向前搜索";
+"Count matches" = "统计匹配数";
+"Transparency" = "透明度";
+"When inactive" = "非活动时";
+"Always" = "始终";
+"Window opacity" = "窗口不透明度";
