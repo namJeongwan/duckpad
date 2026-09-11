@@ -559,3 +559,5 @@
 "unmodified" = "non modifié";
 "unmodified tab" = "onglet non modifié";
 "unpinned" = "désépinglé";
+"App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad." = "La langue de l’application change immédiatement. Les boîtes de dialogue Ouvrir et Enregistrer utiliseront la nouvelle langue après le redémarrage de Duckpad.";
+"Restart Duckpad to apply the selected language to Open and Save dialogs." = "Redémarrez Duckpad pour appliquer la langue sélectionnée aux boîtes de dialogue Ouvrir et Enregistrer.";

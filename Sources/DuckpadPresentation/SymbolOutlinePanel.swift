@@ -4,12 +4,12 @@ import DuckpadApplication
 
 @MainActor
 struct SymbolOutlineSearch {
-    static func matchingIndices(in symbols: [DocumentSymbol], query: String) -> [Int] {
+    static func matchingIndices(in symbols: [DocumentSymbol], query: String, catalog: LocalizationCatalog = L10n.catalog) -> [Int] {
         let terms = folded(query).split(whereSeparator: \.isWhitespace).map(String.init)
         guard !terms.isEmpty else { return Array(symbols.indices) }
         return symbols.indices.filter { index in
             let symbol = symbols[index]
-            let searchable = folded("\(symbol.name) \(symbol.kind.rawValue) \(L10n.text(symbol.kind.rawValue.capitalized)) \(symbol.line)")
+            let searchable = folded("\(symbol.name) \(symbol.kind.rawValue) \(catalog.text(symbol.kind.rawValue.capitalized)) \(symbol.line)")
             return terms.allSatisfy(searchable.contains)
         }
     }
@@ -43,15 +43,33 @@ final class SymbolOutlinePanel: NSObject,
     var isPresented: Bool { popover?.isShown == true }
     var filteredSymbols: [DocumentSymbol] { filteredIndices.map { symbols[$0] } }
 
+    private var catalog = L10n.catalog
+
+    private func localized(_ key: String, _ arguments: CVarArg...) -> String {
+        catalog.text(key, arguments: arguments)
+    }
+
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
+        searchField.placeholderString = localized("Search symbols")
+        searchField.setAccessibilityLabel(localized("Search current document symbols"))
+        tableView.setAccessibilityLabel(localized("Current document symbol results"))
+        emptyLabel.stringValue = localized("No symbols in this document")
+        let selection = tableView.selectedRowIndexes
+        tableView.reloadData()
+        tableView.selectRowIndexes(selection, byExtendingSelection: false)
+        countLabel.stringValue = localized("%1$@ of %2$@", L10n.argument(filteredIndices.count), L10n.argument(symbols.count))
+    }
+
     override init() {
         super.init()
         rootView.setAccessibilityIdentifier("duckpad.symbols.panel")
 
-        searchField.placeholderString = L10n.text("Search symbols")
+        searchField.placeholderString = localized("Search symbols")
         searchField.sendsSearchStringImmediately = true
         searchField.delegate = self
         searchField.setAccessibilityIdentifier("duckpad.symbols.search")
-        searchField.setAccessibilityLabel(L10n.text("Search current document symbols"))
+        searchField.setAccessibilityLabel(localized("Search current document symbols"))
         searchField.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("symbol"))
@@ -66,7 +84,7 @@ final class SymbolOutlinePanel: NSObject,
         tableView.target = self
         tableView.doubleAction = #selector(activateSelection)
         tableView.setAccessibilityIdentifier("duckpad.symbols.results")
-        tableView.setAccessibilityLabel(L10n.text("Current document symbol results"))
+        tableView.setAccessibilityLabel(localized("Current document symbol results"))
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -172,12 +190,12 @@ final class SymbolOutlinePanel: NSObject,
             systemSymbolName: imageName(for: symbol.kind),
             accessibilityDescription: nil
         )
-        cell.toolTip = L10n.text("%1$@, line %2$@", L10n.text(symbol.kind.rawValue.capitalized), L10n.argument(symbol.line))
+        cell.toolTip = localized("%1$@, line %2$@", localized(symbol.kind.rawValue.capitalized), L10n.argument(symbol.line))
         cell.setAccessibilityLabel(
-            L10n.text("%1$@, %2$@, line %3$@", L10n.argument(symbol.name), L10n.text(symbol.kind.rawValue.capitalized), L10n.argument(symbol.line))
+            localized("%1$@, %2$@, line %3$@", L10n.argument(symbol.name), localized(symbol.kind.rawValue.capitalized), L10n.argument(symbol.line))
         )
         if let detail = cell.viewWithTag(42) as? NSTextField {
-            detail.stringValue = L10n.text("Line %1$@", L10n.argument(symbol.line))
+            detail.stringValue = localized("Line %1$@", L10n.argument(symbol.line))
         }
         return cell
     }
@@ -216,10 +234,10 @@ final class SymbolOutlinePanel: NSObject,
     }
 
     private func refilter() {
-        filteredIndices = SymbolOutlineSearch.matchingIndices(in: symbols, query: searchField.stringValue)
+        filteredIndices = SymbolOutlineSearch.matchingIndices(in: symbols, query: searchField.stringValue, catalog: catalog)
         tableView.reloadData()
         emptyLabel.isHidden = !filteredIndices.isEmpty
-        countLabel.stringValue = L10n.text("%1$@ of %2$@", L10n.argument(filteredIndices.count), L10n.argument(symbols.count))
+        countLabel.stringValue = localized("%1$@ of %2$@", L10n.argument(filteredIndices.count), L10n.argument(symbols.count))
         if !filteredIndices.isEmpty { selectResult(at: 0) }
     }
 

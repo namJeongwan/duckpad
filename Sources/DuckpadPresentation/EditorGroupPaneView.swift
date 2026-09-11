@@ -84,4 +84,12 @@ public final class EditorGroupPaneView: NSView {
         editorHostView.removeFromSuperview()
     }
 
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        tabStrip.refreshLocalization(catalog: catalog)
+        let group = catalog.text(groupID.rawValue.capitalized)
+        setAccessibilityLabel(catalog.text("%1$@ editor group", arguments: [group]))
+        setAccessibilityValue(catalog.text(isFocused ? "focused" : "not focused"))
+        tabStrip.hostedCollectionView.setAccessibilityLabel(catalog.text("%1$@ editor group tabs", arguments: [group]))
+    }
+
 }

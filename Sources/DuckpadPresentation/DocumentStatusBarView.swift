@@ -28,6 +28,20 @@ final class DocumentStatusBarView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        setAccessibilityLabel(catalog.text("Document status"))
+        positionButton.toolTip = catalog.text("Go to line and column")
+        modeButton.toolTip = catalog.text("Toggle insert / overwrite mode")
+        if let statistics {
+            self.statistics = nil
+            apply(statistics, catalog: catalog)
+        } else {
+            lengthLabel.stringValue = catalog.text("Length: 0   Lines: 1")
+            positionButton.title = catalog.text("Ln: 1   Col: 1   Sel: 0 | 0")
+        }
+        needsLayout = true
+    }
+
     func install(language: NSButton, encoding: NSButton) {
         fields = [language, lengthLabel, positionButton, lineEndingButton, encoding, modeButton]
         for field in fields {
@@ -49,11 +63,11 @@ final class DocumentStatusBarView: NSView {
         needsLayout = true
     }
 
-    func apply(_ status: EditorStatusSnapshot) {
+    func apply(_ status: EditorStatusSnapshot, catalog: LocalizationCatalog = L10n.catalog) {
         guard statistics != status else { return }
         statistics = status
-        lengthLabel.stringValue = L10n.text("Length: %1$@   Lines: %2$@", L10n.argument(status.length), L10n.argument(status.lines))
-        positionButton.title = L10n.text("Ln: %1$@   Col: %2$@   Sel: %3$@ | %4$@", L10n.argument(status.line), L10n.argument(status.column), L10n.argument(status.selectedCharacters), L10n.argument(status.selectedLines))
+        lengthLabel.stringValue = catalog.text("Length: %1$@   Lines: %2$@", arguments: [status.length.formatted(.number.locale(catalog.locale)), status.lines.formatted(.number.locale(catalog.locale))])
+        positionButton.title = catalog.text("Ln: %1$@   Col: %2$@   Sel: %3$@ | %4$@", arguments: [status.line, status.column, status.selectedCharacters, status.selectedLines].map { $0.formatted(.number.locale(catalog.locale)) })
         modeButton.title = status.isOvertype ? "OVR" : "INS"
         lengthLabel.toolTip = lengthLabel.stringValue
         lengthLabel.setAccessibilityValue(lengthLabel.stringValue)

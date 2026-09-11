@@ -559,3 +559,5 @@
 "unmodified" = "変更なし";
 "unmodified tab" = "変更のないタブ";
 "unpinned" = "固定解除済み";
+"App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad." = "アプリの言語はすぐに適用されます。「開く」と「保存」ダイアログには、Duckpadの再起動後に新しい言語が適用されます。";
+"Restart Duckpad to apply the selected language to Open and Save dialogs." = "「開く」と「保存」ダイアログに選択した言語を適用するには、Duckpadを再起動してください。";

@@ -29,6 +29,9 @@ public struct DuckpadSettingsSmokeState: Equatable, Sendable {
 public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
     public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation", "Searching"]
     public private(set) var selectedCategory = "General"
+    private var catalog = L10n.catalog
+    private var localizationBindings: [(LocalizationCatalog) -> Void] = []
+    private var statusLocalization: ((LocalizationCatalog) -> String)?
     private var pages: [String: NSView] = [:]
     private var categoryButtons: [NSButton] = []
     private var booleanControls: [(NSButton, WritableKeyPath<AppSettings, Bool>)] = []
@@ -39,7 +42,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     private var preservesFontSizeDraft = false
     private var pendingFontSize: Double?
     let appLanguage = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let languageNote = NSTextField(wrappingLabelWithString: L10n.text("Language changes take effect after restarting Duckpad."))
+    private let languageNote = NSTextField(wrappingLabelWithString: "")
     private let launchLanguage = L10n.catalog.language
     private let appearance = NSPopUpButton(frame: .zero, pullsDown: false)
     private let wordWrap = NSButton(checkboxWithTitle: L10n.text("Wrap long lines in new tabs"), target: nil, action: nil)
@@ -121,6 +124,40 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         updateTask?.cancel()
     }
 
+    public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
+        window?.title = catalog.text("Preferences")
+        for binding in localizationBindings { binding(catalog) }
+        editorFont.refreshLocalization(catalog: catalog)
+        refreshLanguageNote()
+        status.stringValue = statusLocalization?(catalog) ?? ""
+    }
+
+    private func localize(_ binding: @escaping (LocalizationCatalog) -> Void) {
+        binding(catalog)
+        localizationBindings.append(binding)
+    }
+
+    private func label(_ key: String, wrapping: Bool = false) -> NSTextField {
+        let field = wrapping ? NSTextField(wrappingLabelWithString: "") : NSTextField(labelWithString: "")
+        localize { field.stringValue = $0.text(key) }
+        return field
+    }
+
+    private func setStatus(_ key: String, failure: AppSettingsStoreError? = nil) {
+        statusLocalization = { catalog in
+            catalog.text(key, arguments: failure.map { [PresentationErrorText.message($0, catalog: catalog)] } ?? [])
+        }
+        status.stringValue = statusLocalization?(catalog) ?? ""
+    }
+
+    private func refreshLanguageNote() {
+        let nextLanguage = LocalizationCatalog(language: settings.appLanguage).language
+        languageNote.stringValue = catalog.text(nextLanguage == launchLanguage
+            ? "App language changes apply immediately. Open and Save dialogs use the new language after restarting Duckpad."
+            : "Restart Duckpad to apply the selected language to Open and Save dialogs.")
+    }
+
     public func selectCategory(_ category: String) {
         guard Self.categories.contains(category) else { return }
         selectedCategory = category
@@ -150,11 +187,14 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             button.setButtonType(.pushOnPushOff)
             button.bezelStyle = .recessed
             button.alignment = .left
-            button.setAccessibilityLabel(L10n.text("%1$@ preferences", L10n.text(category)))
+            localize { catalog in
+                button.title = catalog.text(category)
+                button.setAccessibilityLabel(catalog.text("%1$@ preferences", arguments: [catalog.text(category)]))
+            }
             sidebar.addArrangedSubview(button)
             button.widthAnchor.constraint(equalTo: sidebar.widthAnchor).isActive = true
             categoryButtons.append(button)
-            let heading = NSTextField(labelWithString: L10n.text(category))
+            let heading = label(category)
             heading.font = .systemFont(ofSize: 17, weight: .semibold)
             let page = NSStackView(views: [heading])
             page.orientation = .vertical
@@ -172,7 +212,10 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         }
         func checkbox(_ title: String, _ key: WritableKeyPath<AppSettings, Bool>, _ category: String) {
             let button = NSButton(checkboxWithTitle: L10n.text(title), target: self, action: #selector(settingChanged(_:)))
-            button.setAccessibilityLabel(L10n.text(title))
+            localize { catalog in
+                button.title = catalog.text(title)
+                button.setAccessibilityLabel(catalog.text(title))
+            }
             booleanControls.append((button, key))
             (pages[category] as? NSStackView)?.addArrangedSubview(button)
         }
@@ -180,42 +223,48 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             let popup = NSPopUpButton(frame: .zero, pullsDown: false)
             for (label, value) in choices {
                 popup.addItem(withTitle: L10n.text(label))
-                popup.lastItem?.representedObject = value
+                if let item = popup.lastItem {
+                    item.representedObject = value
+                    localize { item.title = $0.text(label) }
+                }
             }
             popup.target = self
             popup.action = #selector(settingChanged(_:))
-            popup.setAccessibilityLabel(L10n.text(title))
+            localize { popup.setAccessibilityLabel($0.text(title)) }
             numberControls.append((popup, key))
-            let row = NSStackView(views: [NSTextField(labelWithString: L10n.text(title)), popup])
+            let row = NSStackView(views: [label(title), popup])
             row.orientation = .horizontal
             row.spacing = 12
             (pages[category] as? NSStackView)?.addArrangedSubview(row)
         }
         checkbox("Follow the current document’s directory", \.fileDialogFollowsDocument, "Default Directory")
-        let directoryNote = NSTextField(wrappingLabelWithString: L10n.text("Open and Save As start beside the active file. When turned off, or for an untitled tab, macOS remembers the last used location."))
+        let directoryNote = label("Open and Save As start beside the active file. When turned off, or for an untitled tab, macOS remembers the last used location.", wrapping: true)
         (pages["Default Directory"] as? NSStackView)?.addArrangedSubview(directoryNote)
         directoryNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
         choices("Maximum entries", \.recentFileLimit, [("None", 0), ("5", 5), ("10", 10), ("15", 15), ("20", 20), ("30", 30), ("50", 50)], "Recent Files History")
         choices("Display", \.recentFilePathMode, [("File name only", 0), ("Full path", 1), ("Disambiguate duplicates", 2)], "Recent Files History")
-        let recentNote = NSTextField(wrappingLabelWithString: L10n.text("Open Recent shows up to this many entries from macOS recent document history. Changing the limit does not delete that history."))
+        let recentNote = label("Open Recent shows up to this many entries from macOS recent document history. Changing the limit does not delete that history.", wrapping: true)
         (pages["Recent Files History"] as? NSStackView)?.addArrangedSubview(recentNote)
         recentNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
         checkbox("Fill Find field with selected text", \.fillFindWithSelection, "Searching")
         choices("Maximum selected characters", \.findSelectionMaximumCharacters,
                 [("256", 256), ("512", 512), ("1024", 1024), ("4096", 4096), ("16383", 16383)], "Searching")
         checkbox("Use monospaced font in Find and Replace", \.monospacedFindFields, "Searching")
-        let searchNote = NSTextField(wrappingLabelWithString: L10n.text("An empty or oversized selection keeps the previous search text. The selection and document stay unchanged."))
+        let searchNote = label("An empty or oversized selection keeps the previous search text. The selection and document stay unchanged.", wrapping: true)
         (pages["Searching"] as? NSStackView)?.addArrangedSubview(searchNote)
         searchNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
         for language in AppLanguage.allCases {
             appLanguage.addItem(withTitle: language == .system ? L10n.text("Follow macOS") : language.nativeName)
             appLanguage.lastItem?.representedObject = language.rawValue
+            if language == .system, let item = appLanguage.lastItem {
+                localize { item.title = $0.text("Follow macOS") }
+            }
         }
         appLanguage.target = self
         appLanguage.action = #selector(languageChanged(_:))
         appLanguage.setAccessibilityIdentifier("duckpad.settings.app-language")
-        appLanguage.setAccessibilityLabel(L10n.text("App Language"))
-        let languageRow = NSStackView(views: [NSTextField(labelWithString: L10n.text("App Language")), appLanguage])
+        localize { [appLanguage] in appLanguage.setAccessibilityLabel($0.text("App Language")) }
+        let languageRow = NSStackView(views: [label("App Language"), appLanguage])
         languageRow.spacing = 12
         (pages["General"] as? NSStackView)?.addArrangedSubview(languageRow)
         languageNote.textColor = .secondaryLabelColor
@@ -233,20 +282,20 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             proposed.editorFontName = name
             self.startUpdate(proposed)
         }
-        let fontLabel = L10n.text("Font")
-        let fontRow = NSStackView(views: [NSTextField(labelWithString: fontLabel), editorFont])
+        let fontRow = NSStackView(views: [label("Font"), editorFont])
         fontRow.spacing = 12
         editorFont.widthAnchor.constraint(equalToConstant: 260).isActive = true
         (pages["Editing"] as? NSStackView)?.addArrangedSubview(fontRow)
-        let fontSizeLabel = L10n.text("Font size (pt)")
         editorFontSize.target = self
         editorFontSize.action = #selector(fontSizeChanged(_:))
         editorFontSize.delegate = self
         editorFontSize.alignment = .right
         editorFontSize.formatter = FontSizeFormatter()
-        editorFontSize.setAccessibilityLabel(fontSizeLabel)
+        localize { [editorFontSize] in
+            editorFontSize.setAccessibilityLabel($0.text("Font size (pt)"))
+            editorFontSize.toolTip = $0.text("Enter a size from 6 to 72 points")
+        }
         editorFontSize.setAccessibilityIdentifier("duckpad.settings.editor-font-size")
-        editorFontSize.toolTip = L10n.text("Enter a size from 6 to 72 points")
         editorFontSize.widthAnchor.constraint(equalToConstant: 80).isActive = true
         editorFontSizeStepper.minValue = 6
         editorFontSizeStepper.maxValue = 72
@@ -254,9 +303,9 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         editorFontSizeStepper.valueWraps = false
         editorFontSizeStepper.target = self
         editorFontSizeStepper.action = #selector(stepFontSize(_:))
-        editorFontSizeStepper.setAccessibilityLabel(fontSizeLabel)
+        localize { [editorFontSizeStepper] in editorFontSizeStepper.setAccessibilityLabel($0.text("Font size (pt)")) }
         editorFontSizeStepper.setAccessibilityIdentifier("duckpad.settings.editor-font-size-stepper")
-        let fontSizeRow = NSStackView(views: [NSTextField(labelWithString: fontSizeLabel), editorFontSize, editorFontSizeStepper])
+        let fontSizeRow = NSStackView(views: [label("Font size (pt)"), editorFontSize, editorFontSizeStepper])
         fontSizeRow.spacing = 12
         (pages["Editing"] as? NSStackView)?.addArrangedSubview(fontSizeRow)
         checkbox("Automatically reload files changed on disk", \.liveFileReloadEnabled, "General")
@@ -274,36 +323,51 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         choices("Tab size", \.indentationWidth, (1...16).map { (String($0), $0) }, "Indentation")
         checkbox("Use tab characters instead of spaces", \.indentationUsesTabs, "Indentation")
         checkbox("Show indent guide", \.indentationGuidesVisible, "Indentation")
-        let indentNote = NSTextField(wrappingLabelWithString: L10n.text("The override applies to all languages. Turn it off to restore each language’s defaults. Existing text is not converted."))
+        let indentNote = label("The override applies to all languages. Turn it off to restore each language’s defaults. Existing text is not converted.", wrapping: true)
         (pages["Indentation"] as? NSStackView)?.addArrangedSubview(indentNote)
         indentNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
 
         for mode in AppAppearanceMode.allCases {
-            appearance.addItem(withTitle: title(for: mode))
-            appearance.lastItem?.representedObject = mode.rawValue
+            let key = titleKey(for: mode)
+            appearance.addItem(withTitle: catalog.text(key))
+            if let item = appearance.lastItem {
+                item.representedObject = mode.rawValue
+                localize { item.title = $0.text(key) }
+            }
         }
         appearance.target = self
         appearance.action = #selector(settingChanged(_:))
         appearance.setAccessibilityIdentifier("duckpad.settings.appearance")
-        appearance.setAccessibilityLabel(L10n.text("Application appearance"))
+        localize { [appearance] in appearance.setAccessibilityLabel($0.text("Application appearance")) }
         (pages["Dark Mode"] as? NSStackView)?.addArrangedSubview(appearance)
-        for (button, identifier) in [(wordWrap, "default-word-wrap"), (wrapMarkers, "default-wrap-markers")] {
+        for (button, identifier, key) in [
+            (wordWrap, "default-word-wrap", "Wrap long lines in new tabs"),
+            (wrapMarkers, "default-wrap-markers", "Show wrap symbols in new tabs"),
+        ] {
+            localize { catalog in
+                button.title = catalog.text(key)
+                button.setAccessibilityLabel(catalog.text(key))
+            }
             button.target = self
             button.action = #selector(settingChanged(_:))
             button.setAccessibilityIdentifier("duckpad.settings." + identifier)
             (pages["New Document"] as? NSStackView)?.addArrangedSubview(button)
         }
-        let explanation = NSTextField(wrappingLabelWithString: L10n.text("New tabs use these defaults. Open and restored tabs keep their own line wrap settings."))
+        let explanation = label("New tabs use these defaults. Open and restored tabs keep their own line wrap settings.", wrapping: true)
         explanation.textColor = .secondaryLabelColor
         (pages["New Document"] as? NSStackView)?.addArrangedSubview(explanation)
         explanation.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
 
         status.textColor = .secondaryLabelColor
         status.setAccessibilityIdentifier("duckpad.settings.status")
-        status.setAccessibilityLabel(L10n.text("Preferences status"))
+        localize { [status] in status.setAccessibilityLabel($0.text("Preferences status")) }
         status.translatesAutoresizingMaskIntoConstraints = false
         status.lineBreakMode = .byTruncatingTail
         let close = NSButton(title: L10n.text("Close"), target: self, action: #selector(closePreferences(_:)))
+        localize { catalog in
+            close.title = catalog.text("Close")
+            close.setAccessibilityLabel(catalog.text("Close"))
+        }
         close.keyEquivalent = "\u{1b}"
         close.translatesAutoresizingMaskIntoConstraints = false
         for view in [sidebar, separator, pageHost, status, close] { content.addSubview(view) }
@@ -326,6 +390,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             status.centerYAnchor.constraint(equalTo: close.centerYAnchor),
         ])
         selectCategory(selectedCategory)
+        refreshLocalization(catalog: catalog)
     }
 
     @objc private func categoryChanged(_ sender: NSButton) {
@@ -388,7 +453,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         guard !((editorFontSize.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) else { return }
         guard let size = enteredFontSize else {
             if !isUpdating { editorFontSize.stringValue = sizeText(settings.editorFontSize) }
-            status.stringValue = L10n.text("Font size must be between 6 and 72 points.")
+            setStatus("Font size must be between 6 and 72 points.")
             return
         }
         editorFontSize.stringValue = sizeText(size)
@@ -449,16 +514,16 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         switch await update(proposed) {
         case .saved(let saved):
             render(saved)
-            status.stringValue = L10n.text("Saved")
+            setStatus("Saved")
         case .savedWithWarning(let saved, let failure):
             render(saved)
-            status.stringValue = L10n.text("Saved, but durability could not be confirmed: %1$@", PresentationErrorText.message(failure))
+            setStatus("Saved, but durability could not be confirmed: %1$@", failure: failure)
         case .failed(let failure):
             let preserveDraft = preservesFontSizeDraft
             if pendingFontSize == nil { preservesFontSizeDraft = false }
             render(settings)
             preservesFontSizeDraft = preserveDraft
-            status.stringValue = L10n.text("Could not save preferences: %1$@", PresentationErrorText.message(failure))
+            setStatus("Could not save preferences: %1$@", failure: failure)
             NSSound.beep()
             showWindow(nil)
         }
@@ -469,10 +534,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         if let item = appLanguage.itemArray.first(where: { $0.representedObject as? String == settings.appLanguage.rawValue }) {
             appLanguage.select(item)
         }
-        let nextLanguage = LocalizationCatalog(language: settings.appLanguage).language
-        languageNote.stringValue = nextLanguage == launchLanguage
-            ? L10n.text("Language changes take effect after restarting Duckpad.")
-            : L10n.text("Restart Duckpad to apply the selected language.")
+        refreshLanguageNote()
         editorFont.display(fontName: settings.editorFontName)
         if !preservesFontSizeDraft {
             editorFontSize.stringValue = sizeText(settings.editorFontSize)
@@ -490,6 +552,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         wordWrap.state = settings.defaultWordWrapEnabled ? .on : .off
         wrapMarkers.state = settings.defaultWrapMarkerVisible ? .on : .off
         wrapMarkers.isEnabled = settings.defaultWordWrapEnabled
+        statusLocalization = nil
         status.stringValue = ""
     }
 
@@ -511,11 +574,11 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         return mode
     }
 
-    private func title(for mode: AppAppearanceMode) -> String {
+    private func titleKey(for mode: AppAppearanceMode) -> String {
         switch mode {
-        case .system: L10n.text("Follow macOS")
-        case .light: L10n.text("Light Mode")
-        case .dark: L10n.text("Dark Mode")
+        case .system: "Follow macOS"
+        case .light: "Light Mode"
+        case .dark: "Dark Mode"
         }
     }
 }

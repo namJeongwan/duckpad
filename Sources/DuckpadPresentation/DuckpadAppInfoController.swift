@@ -1,5 +1,6 @@
 import AppKit
 import DuckpadDomain
+import DuckpadLocalization
 
 @MainActor
 public final class DuckpadAppInfoController: NSObject, NSMenuItemValidation {
@@ -37,6 +38,10 @@ public final class DuckpadAppInfoController: NSObject, NSMenuItemValidation {
     }
 
     deinit { checkTask?.cancel() }
+
+    public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        aboutWindow?.refreshLocalization(catalog: catalog)
+    }
 
     public func checkInBackground() {
         guard checkTask == nil else { return }

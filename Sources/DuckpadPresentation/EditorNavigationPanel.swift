@@ -45,16 +45,31 @@ public protocol EditorNavigationPresenting: AnyObject {
 
 @MainActor
 final class NativeEditorNavigationPresenter: EditorNavigationPresenting {
+    private var catalog = L10n.catalog
+    private var activeAlerts: [ObjectIdentifier: (alert: NSAlert, title: String, message: String, maximum: Int, accessibility: String)] = [:]
+
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
+        for entry in activeAlerts.values {
+            entry.alert.messageText = catalog.text(entry.title)
+            entry.alert.informativeText = catalog.text(entry.message, arguments: [String(entry.maximum)])
+            entry.alert.accessoryView?.setAccessibilityLabel(catalog.text(entry.accessibility))
+            entry.alert.buttons[0].title = catalog.text("Go")
+            entry.alert.buttons[1].title = catalog.text("Cancel")
+        }
+    }
+
     func presentLineAndColumn(
         current: EditorNavigationPosition,
         in window: NSWindow,
         completion: @escaping @MainActor (Int, Int) -> Void
     ) {
         present(
-            title: L10n.text("Go to Line / Column"),
-            message: L10n.text("Enter line or line:column (1…%1$@).", L10n.argument(current.lineCount)),
+            title: "Go to Line / Column",
+            message: "Enter line or line:column (1…%1$@).",
+            maximum: current.lineCount,
             initialValue: "\(current.line):\(current.column)",
-            accessibilityLabel: L10n.text("Line and column"),
+            accessibilityLabel: "Line and column",
             in: window
         ) { value in
             guard let destination = EditorNavigationInput.lineAndColumn(
@@ -71,10 +86,11 @@ final class NativeEditorNavigationPresenter: EditorNavigationPresenting {
         completion: @escaping @MainActor (Int) -> Void
     ) {
         present(
-            title: L10n.text("Go to UTF-8 Offset"),
-            message: L10n.text("Enter a byte offset (0…%1$@).", L10n.argument(current.utf8Length)),
+            title: "Go to UTF-8 Offset",
+            message: "Enter a byte offset (0…%1$@).",
+            maximum: current.utf8Length,
             initialValue: "\(current.utf8Offset)",
-            accessibilityLabel: L10n.text("UTF-8 byte offset"),
+            accessibilityLabel: "UTF-8 byte offset",
             in: window
         ) { value in
             guard let offset = EditorNavigationInput.utf8Offset(
@@ -88,6 +104,7 @@ final class NativeEditorNavigationPresenter: EditorNavigationPresenting {
     private func present(
         title: String,
         message: String,
+        maximum: Int,
         initialValue: String,
         accessibilityLabel: String,
         in window: NSWindow,
@@ -95,17 +112,20 @@ final class NativeEditorNavigationPresenter: EditorNavigationPresenting {
     ) {
         let field = NSTextField(string: initialValue)
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
-        field.setAccessibilityLabel(accessibilityLabel)
+        field.setAccessibilityLabel(catalog.text(accessibilityLabel))
         field.selectText(nil)
 
         let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
+        alert.messageText = catalog.text(title)
+        alert.informativeText = catalog.text(message, arguments: [String(maximum)])
         alert.alertStyle = .informational
         alert.accessoryView = field
-        alert.addButton(withTitle: L10n.text("Go"))
-        alert.addButton(withTitle: L10n.text("Cancel"))
-        alert.beginSheetModal(for: window) { response in
+        alert.addButton(withTitle: catalog.text("Go"))
+        alert.addButton(withTitle: catalog.text("Cancel"))
+        let identifier = ObjectIdentifier(alert)
+        activeAlerts[identifier] = (alert, title, message, maximum, accessibilityLabel)
+        alert.beginSheetModal(for: window) { [weak self] response in
+            self?.activeAlerts.removeValue(forKey: identifier)
             guard response == .alertFirstButtonReturn else { return }
             MainActor.assumeIsolated { completion(field.stringValue) }
         }

@@ -79,6 +79,7 @@ public final class WindowCommandBarView: NSVisualEffectView {
     }
 
     public func apply(mainMenu: NSMenu) {
+        setAccessibilityLabel(L10n.text("Application commands"))
         dismissMenu()
         removeMenuButtons()
         startObservingMenuTracking()

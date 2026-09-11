@@ -171,6 +171,7 @@ private final class NativeTabPathActionHandler: TabPathActionHandling {
 @MainActor
 private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
     private let message = NSTextField(labelWithString: "")
+    private var displayedFailure: PersistenceFailure?
     private let retryButton = NSButton(title: L10n.text("Retry"), target: nil, action: nil)
     private var retryAction: (@MainActor () -> Void)?
     private var heightConstraint: NSLayoutConstraint!
@@ -204,10 +205,21 @@ private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
     required init?(coder: NSCoder) { nil }
 
     func present(failure: PersistenceFailure, retry: @escaping @MainActor () -> Void) {
+        displayedFailure = failure
         message.stringValue = L10n.text("Session %1$@ failed: %2$@", L10n.text(failure.operation == .load ? "Restore" : "Save"), PresentationErrorText.message(failure.cause))
         retryAction = retry
         heightConstraint.constant = 36
         isHidden = false
+    }
+
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        retryButton.title = catalog.text("Retry")
+        if let failure = displayedFailure {
+            message.stringValue = catalog.text("Session %1$@ failed: %2$@", arguments: [
+                catalog.text(failure.operation == .load ? "Restore" : "Save"),
+                PresentationErrorText.message(failure.cause, catalog: catalog)
+            ])
+        }
     }
 
     @objc private func retryPressed() {
@@ -257,6 +269,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var extensionUseCase: ExtensionWorkspaceUseCase?
     private var workspaceBrowserUseCase: WorkspaceBrowserUseCase?
     private var extensionState = ExtensionRegistryState(items: [])
+    private var displayedExtensionError: (any Error)?
+    private var symbolPause: (title: String, amount: String, help: String, limit: String)?
     private var hasTornDownWindow = false
     private let framePersistence: WindowFramePersistence?
     private var hasPreparedWindowFrame = false
@@ -1148,7 +1162,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 ? "\(comparison.right.title) — \(comparison.right.fullPath ?? "Untitled")"
                 : comparison.right.title,
             leftText: comparison.left.text,
-            rightText: comparison.right.text
+            rightText: comparison.right.text,
+            titleKey: "Diff — %1$@ ↔ %2$@",
+            titleArguments: [comparison.left.title, comparison.right.title]
         )
     }
 
@@ -1197,6 +1213,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func applyPreferences(_ settings: AppSettings) {
+        let languageChanged = appPreferences.appLanguage != settings.appLanguage
         appPreferences = settings
         fileUseCase?.setLiveReloadEnabled(settings.liveFileReloadEnabled)
         searchPanel.applyPreferences(settings)
@@ -1204,6 +1221,43 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         statusBar.isHidden = !settings.statusBarVisible
         statusBarHeightConstraint?.constant = settings.statusBarVisible ? 24 : 0
         for group in editorGroupLayout.snapshot.visibleGroups { tabStrip(for: group)?.applyPreferences(settings) }
+        if languageChanged { refreshLocalization(catalog: LocalizationCatalog(language: settings.appLanguage)) }
+    }
+
+    public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        workspaceSidebar.refreshLocalization(catalog: catalog)
+        searchPanel.refreshLocalization(catalog: catalog)
+        liveFileBanner.refreshLocalization(catalog: catalog)
+        persistenceBanner.refreshLocalization(catalog: catalog)
+        statusBar.refreshLocalization(catalog: catalog)
+        extensionsPanel.refreshLocalization(catalog: catalog)
+        symbolOutlinePanel.refreshLocalization(catalog: catalog)
+        commandPalettePanel.refreshLocalization(catalog: catalog)
+        (openDocumentComparePresenter as? NativeOpenDocumentComparePresenter)?.refreshLocalization(catalog: catalog)
+        (fileConflictPresenter as? NativeFilePanelAdapter)?.refreshLocalization(catalog: catalog)
+        (navigationPresenter as? NativeEditorNavigationPresenter)?.refreshLocalization(catalog: catalog)
+        for group in editorGroupLayout.snapshot.visibleGroups {
+            editorGroupWorkspace.pane(for: group)?.refreshLocalization(catalog: catalog)
+        }
+        for case let zone as EditorGroupDropZoneView in editorGroupWorkspace.dropOverlay.subviews {
+            zone.refreshLocalization(catalog: catalog)
+        }
+        renderFileFormatStatus()
+        renderLanguageState(languageState)
+        if let displayedExtensionError {
+            setStatus(extensionStatus, text: catalog.text("Extension error: %1$@", arguments: [PresentationErrorText.message(displayedExtensionError, catalog: catalog)]), warning: true)
+        } else {
+            renderExtensionState(extensionState)
+        }
+        refreshLiveFileBanner()
+        if let symbolPause {
+            setStatus(symbolStatus, text: catalog.text(symbolPause.title, arguments: [symbolPause.amount]), warning: true)
+            symbolStatus.toolTip = catalog.text(symbolPause.help, arguments: [symbolPause.limit])
+        } else {
+            let count = currentDocumentOutline?.symbols.count ?? 0
+            setStatus(symbolStatus, text: count == 0 ? catalog.text("Symbols") : catalog.text("Symbols %1$@", arguments: [String(count)]), warning: false)
+            symbolStatus.setAccessibilityValue(catalog.text("%1$@ current document symbols", arguments: [String(count)]))
+        }
     }
 
     private func refreshLiveFileBanner() {
@@ -1270,6 +1324,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                     text: L10n.text("Completion paused · %1$@ MiB", L10n.argument(actual / 1_024 / 1_024)),
                     warning: true
                 )
+                self.symbolPause = ("Completion paused · %1$@ MiB", String(actual / 1_024 / 1_024), "Completion limit: %1$@ bytes", String(maximum))
                 self.symbolStatus.toolTip = L10n.text("Completion limit: %1$@ bytes", L10n.argument(maximum))
             case .noPrefix, .noMatches:
                 NSSound.beep()
@@ -1288,6 +1343,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             guard let self, !Task.isCancelled, self.workspaceInteractionsAreActionable else { return }
             switch outcome {
             case .ready(let outline):
+                self.symbolPause = nil
                 self.currentDocumentOutline = outline
                 self.setStatus(
                     self.symbolStatus,
@@ -1302,6 +1358,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                     text: L10n.text("Symbols paused · %1$@ MiB", L10n.argument(actual / 1_024 / 1_024)),
                     warning: true
                 )
+                self.symbolPause = ("Symbols paused · %1$@ MiB", String(actual / 1_024 / 1_024), "Symbol outline limit: %1$@ bytes", String(maximum))
                 self.symbolStatus.toolTip = L10n.text("Symbol outline limit: %1$@ bytes", L10n.argument(maximum))
                 NSSound.beep()
             case .unavailable, .stale:
@@ -1528,7 +1585,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         if searchPanel.isHidden { showSearchPanel(replace: false) }
         let query = searchPanel.currentQuery()
         guard !query.pattern.isEmpty else {
-            searchPanel.presentStatus(L10n.text("Enter text, then choose Find in Folder again"))
+            searchPanel.presentStatus(key: "Enter text, then choose Find in Folder again")
             searchPanel.focusFind()
             return
         }
@@ -3330,6 +3387,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             if shouldCancelCompletion(for: change) { documentIntelligenceUseCase?.cancel() }
             symbolOutlinePanel.dismiss()
             currentDocumentOutline = nil
+            symbolPause = nil
             setStatus(symbolStatus, text: L10n.text("Symbols"), warning: false)
             symbolStatus.setAccessibilityValue(L10n.text("Current document symbols"))
         }
@@ -3878,24 +3936,24 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard workspaceInteractionsAreActionable,
               !query.pattern.isEmpty, let searchUseCase else { return }
         let operation = beginSearchOperation()
-        searchPanel.presentStatus(L10n.text("Searching…"))
+        searchPanel.presentStatus(key: "Searching…")
         searchTask = Task { [weak self] in
             do {
                 let match = try await searchUseCase.find(query)
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(match == nil ? L10n.text("No matches") : L10n.text("Match selected"))
+                self?.searchPanel.presentStatus(key: match == nil ? "No matches" : "Match selected")
             } catch SearchFailure.cancelled { }
             catch SearchFailure.noSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Select a non-empty range to search"))
+                self?.searchPanel.presentStatus(key: "Select a non-empty range to search")
             }
             catch SearchFailure.invalidSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Selection changed; select a range again"))
+                self?.searchPanel.presentStatus(key: "Selection changed; select a range again")
             }
             catch {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Search failed: %1$@", PresentationErrorText.message(error)))
+                self?.searchPanel.presentFailure(prefix: "Search failed: %1$@", error: error)
             }
         }
     }
@@ -3904,7 +3962,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard workspaceInteractionsAreActionable,
               !query.pattern.isEmpty, let searchUseCase else { return }
         let operation = beginSearchOperation()
-        searchPanel.presentStatus(L10n.text("Searching…"))
+        searchPanel.presentStatus(key: "Searching…")
         searchTask = Task { [weak self] in
             do {
                 let result = try await searchUseCase.findAll(query)
@@ -3913,15 +3971,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             } catch SearchFailure.cancelled { }
             catch SearchFailure.noSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Select a non-empty range to search"))
+                self?.searchPanel.presentStatus(key: "Select a non-empty range to search")
             }
             catch SearchFailure.invalidSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Selection changed; select a range again"))
+                self?.searchPanel.presentStatus(key: "Selection changed; select a range again")
             }
             catch {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Search failed: %1$@", PresentationErrorText.message(error)))
+                self?.searchPanel.presentFailure(prefix: "Search failed: %1$@", error: error)
             }
         }
     }
@@ -3932,13 +3990,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               let folderSearchUseCase,
               let filePanels else { return }
         let operation = beginSearchOperation()
-        searchPanel.presentStatus(L10n.text("Choose a folder…"))
+        searchPanel.presentStatus(key: "Choose a folder…")
         searchTask = Task { [weak self] in
             guard let self,
                   let root = await filePanels.chooseFolderURL(attachedTo: self.window),
                   self.searchOperationID == operation,
                   self.workspaceInteractionsAreActionable else { return }
-            self.searchPanel.presentStatus(L10n.text("Searching %1$@…", L10n.argument(root.lastPathComponent)))
+            self.searchPanel.presentStatus(key: "Searching %1$@…", arguments: [root.lastPathComponent])
             do {
                 let result = try await folderSearchUseCase.search(rootPath: root.path, query: query)
                 guard self.searchOperationID == operation else { return }
@@ -3946,7 +4004,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             } catch FolderSearchFailure.search(.cancelled) { }
             catch {
                 guard self.searchOperationID == operation else { return }
-                self.searchPanel.presentStatus(L10n.text("Folder search failed: %1$@", PresentationErrorText.message(error)))
+                self.searchPanel.presentFailure(prefix: "Folder search failed: %1$@", error: error)
             }
         }
     }
@@ -3959,18 +4017,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             do {
                 let next = try await searchUseCase.replaceCurrentThenFind(query)
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(next == nil ? L10n.text("Replaced; no next match") : L10n.text("Replaced"))
+                self?.searchPanel.presentStatus(key: next == nil ? "Replaced; no next match" : "Replaced")
             } catch SearchFailure.noSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Select a non-empty range to replace"))
+                self?.searchPanel.presentStatus(key: "Select a non-empty range to replace")
             }
             catch SearchFailure.invalidSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Selection changed; select a range again"))
+                self?.searchPanel.presentStatus(key: "Selection changed; select a range again")
             }
             catch {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Replace failed: %1$@", PresentationErrorText.message(error)))
+                self?.searchPanel.presentFailure(prefix: "Replace failed: %1$@", error: error)
             }
         }
     }
@@ -3983,18 +4041,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             do {
                 let count = try await searchUseCase.replaceAll(query)
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("search.replaced", count))
+                self?.searchPanel.presentStatus(key: "search.replaced", arguments: [count])
             } catch SearchFailure.noSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Select a non-empty range to replace"))
+                self?.searchPanel.presentStatus(key: "Select a non-empty range to replace")
             }
             catch SearchFailure.invalidSelection {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Selection changed; select a range again"))
+                self?.searchPanel.presentStatus(key: "Selection changed; select a range again")
             }
             catch {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Replace All failed: %1$@", PresentationErrorText.message(error)))
+                self?.searchPanel.presentFailure(prefix: "Replace All failed: %1$@", error: error)
             }
         }
     }
@@ -4009,7 +4067,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 self?.activeEditor.focus()
             } catch {
                 guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(L10n.text("Result is stale"))
+                self?.searchPanel.presentStatus(key: "Result is stale")
             }
         }
     }
@@ -4030,9 +4088,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                   self.workspaceInteractionsAreActionable else { return }
             switch outcome {
             case .activated:
-                self.searchPanel.presentStatus(L10n.text("Opened %1$@:%2$@", L10n.argument(document.relativePath), L10n.argument(match.line)))
+                self.searchPanel.presentStatus(key: "Opened %1$@:%2$@", arguments: [document.relativePath, String(match.line)])
             case .stale:
-                self.searchPanel.presentStatus(L10n.text("Folder result changed; search again"))
+                self.searchPanel.presentStatus(key: "Folder result changed; search again")
             case .failed(let failure):
                 guard failure != .cancelled else { return }
                 self.fileConflictPresenter?.presentFileFailure(
@@ -4299,6 +4357,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func renderExtensionState(_ state: ExtensionRegistryState) {
+        displayedExtensionError = nil
         extensionState = state; extensionsPanel.render(state)
         let enabled = state.items.filter(\.enabled).count
         if !state.discoveryFailures.isEmpty {
@@ -4318,6 +4377,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func renderExtensionError(_ error: any Error) {
+        displayedExtensionError = error
         setStatus(extensionStatus, text: L10n.text("Extension error: %1$@", PresentationErrorText.message(error)), warning: true)
     }
 

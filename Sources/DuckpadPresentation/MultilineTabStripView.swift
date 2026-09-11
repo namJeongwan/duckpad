@@ -218,34 +218,40 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         updateVisualState()
         updateActionVisibility()
 
+        refreshLocalization()
+    }
+
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        guard let tab = configuredTab, let index = configuredIndex, let row = configuredRow else { return }
+        func text(_ key: String, _ arguments: CVarArg...) -> String { catalog.text(key, arguments: arguments) }
         let stableID = tab.id.rawValue.uuidString.lowercased()
         let state = [
-            tab.isActive ? L10n.text("selected") : L10n.text("not selected"),
-            tab.isDirty ? L10n.text("modified") : L10n.text("unmodified"),
-            tab.isPinned ? L10n.text("pinned") : L10n.text("not pinned"),
-            L10n.text("index %1$@", L10n.argument(index + 1)),
-            L10n.text("row %1$@", L10n.argument(row + 1)),
+            tab.isActive ? text("selected") : text("not selected"),
+            tab.isDirty ? text("modified") : text("unmodified"),
+            tab.isPinned ? text("pinned") : text("not pinned"),
+            text("index %1$@", L10n.argument(index + 1)),
+            text("row %1$@", L10n.argument(row + 1)),
         ].joined(separator: ", ")
         view.setAccessibilityElement(true)
         view.setAccessibilityRole(.button)
         view.setAccessibilityIdentifier("duckpad.tab.\(stableID)")
-        view.setAccessibilityLabel(L10n.text("%1$@ tab", L10n.argument(tab.title)))
+        view.setAccessibilityLabel(text("%1$@ tab", L10n.argument(tab.title)))
         view.setAccessibilityValue(state)
-        view.setAccessibilityHelp(L10n.text("Activate %1$@ tab", L10n.argument(tab.title)))
+        view.setAccessibilityHelp(text("Activate %1$@ tab", L10n.argument(tab.title)))
         closeButton.setAccessibilityIdentifier("duckpad.tab.close.\(stableID)")
-        closeButton.setAccessibilityLabel(L10n.text("Close %1$@", L10n.argument(tab.title)))
-        closeButton.setAccessibilityValue(tab.isDirty ? L10n.text("modified tab") : L10n.text("unmodified tab"))
+        closeButton.setAccessibilityLabel(text("Close %1$@", L10n.argument(tab.title)))
+        closeButton.setAccessibilityValue(tab.isDirty ? text("modified tab") : text("unmodified tab"))
         pinButton.setAccessibilityIdentifier("duckpad.tab.pin.\(stableID)")
-        pinButton.setAccessibilityLabel(tab.isPinned ? L10n.text("Unpin %1$@", L10n.argument(tab.title)) : L10n.text("Pin %1$@", L10n.argument(tab.title)))
-        pinButton.setAccessibilityValue(tab.isPinned ? L10n.text("pinned") : L10n.text("unpinned"))
-        pinButton.toolTip = tab.isPinned ? L10n.text("Unpin Tab") : L10n.text("Pin Tab")
+        pinButton.setAccessibilityLabel(tab.isPinned ? text("Unpin %1$@", L10n.argument(tab.title)) : text("Pin %1$@", L10n.argument(tab.title)))
+        pinButton.setAccessibilityValue(tab.isPinned ? text("pinned") : text("unpinned"))
+        pinButton.toolTip = tab.isPinned ? text("Unpin Tab") : text("Pin Tab")
         view.setAccessibilityCustomActions([
-            NSAccessibilityCustomAction(name: L10n.text("Close %1$@", L10n.argument(tab.title))) { [weak self] in
+            NSAccessibilityCustomAction(name: text("Close %1$@", L10n.argument(tab.title))) { [weak self] in
                 guard let self, self.closeButton.isEnabled else { return false }
                 self.onClose?()
                 return true
             },
-            NSAccessibilityCustomAction(name: tab.isPinned ? L10n.text("Unpin %1$@", L10n.argument(tab.title)) : L10n.text("Pin %1$@", L10n.argument(tab.title))) { [weak self] in
+            NSAccessibilityCustomAction(name: tab.isPinned ? text("Unpin %1$@", L10n.argument(tab.title)) : text("Pin %1$@", L10n.argument(tab.title))) { [weak self] in
                 self?.pinButton.accessibilityPerformPress() ?? false
             },
         ])
@@ -944,6 +950,19 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         updateNavigator()
         for case let item as DuckpadTabItem in hostedCollectionView.visibleItems() {
             item.setInteractionsEnabled(isEnabled)
+        }
+    }
+
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        hostedCollectionView.setAccessibilityLabel(catalog.text("Open document tabs"))
+        hostedScrollView.setAccessibilityLabel(catalog.text(appPreferences.multilineTabsEnabled ? "Multiline tab rows" : "Scrollable document tabs"))
+        previousTabsButton.toolTip = catalog.text("Scroll tabs left")
+        previousTabsButton.setAccessibilityLabel(catalog.text("Scroll tabs left"))
+        nextTabsButton.toolTip = catalog.text("Scroll tabs right")
+        nextTabsButton.setAccessibilityLabel(catalog.text("Scroll tabs right"))
+        documentSwitcher.refreshLocalization(catalog: catalog)
+        for case let item as DuckpadTabItem in hostedCollectionView.visibleItems() {
+            item.refreshLocalization(catalog: catalog)
         }
     }
 
