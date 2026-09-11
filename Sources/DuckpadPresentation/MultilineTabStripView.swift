@@ -742,7 +742,10 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
             engine.backingScale = scale
             flowLayout.engine = engine
         }
-        let viewportWidth = max(1, hostedScrollView.contentSize.width)
+        // This borderless surface has no scrollers. AppKit can temporarily
+        // reserve legacy scroller space while a row shrinks; using contentSize
+        // would wrap that row again and keep the window relaying out forever.
+        let viewportWidth = max(1, hostedScrollView.bounds.width)
         if flowLayout.viewportWidth != viewportWidth { needsRevealActiveTab = true }
         flowLayout.viewportWidth = viewportWidth
         hostedCollectionView.layoutSubtreeIfNeeded()
@@ -1188,7 +1191,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     private func updateDocumentFrame() {
-        let viewportWidth = max(1, hostedScrollView.contentSize.width)
+        let viewportWidth = max(1, hostedScrollView.bounds.width)
         let width = max(viewportWidth, measuredContentWidth)
         let height = max(measuredContentHeight, hostedScrollView.contentSize.height)
         let documentSize = NSSize(width: width, height: height)

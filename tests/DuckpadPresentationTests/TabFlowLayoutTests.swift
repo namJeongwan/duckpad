@@ -2727,15 +2727,24 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     #expect(!strip.hostedScrollView.hasHorizontalScroller)
 }
 
-@Test @MainActor func repeatedWindowResizingSettlesWrappedTabLayout() {
-    let (window, root, strip) = hostStrip(width: 893, height: 320, tabs: makeTabs(count: 24, activeIndex: 0))
+@Test @MainActor func repeatedWindowResizingSettlesWrappedTabLayout() throws {
+    let (window, root, strip) = hostStrip(width: 893, height: 320, tabs: makeTabs(count: 12, activeIndex: 0))
     defer {
         strip.tearDownHostedViews()
         window.contentView = nil
         window.close()
     }
+    strip.hostedScrollView.scrollerStyle = .legacy
+    let engine = strip.flowLayout.engine
+    let itemWidths = strip.flowLayout.itemWidths
+    let boundary = try #require((400...1200).first { width in
+        engine.layout(itemWidths: itemWidths, containerWidth: CGFloat(width - 1)).rowCount
+            > engine.layout(itemWidths: itemWidths, containerWidth: CGFloat(width)).rowCount
+    })
     window.orderFront(nil)
-    for width in [420, 893, 640, 1200, 421, 892, 639, 1199] {
+    // Cross a wrapping boundary in both directions; a temporary legacy scroller
+    // must not narrow the layout and send the tab height back to the previous row count.
+    for width in [893, boundary - 1, boundary, boundary + 1, boundary - 1, boundary, 420, 1200] {
         window.setContentSize(NSSize(width: width, height: 500))
         root.layoutSubtreeIfNeeded()
         RunLoop.current.run(until: Date().addingTimeInterval(0.03))
@@ -2747,6 +2756,8 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
         #expect(strip.flowLayout.layoutGeneration == generation)
         #expect(strip.viewportHeight == height)
         #expect(strip.viewportHeight == strip.contentHeight)
+        #expect(strip.flowLayout.viewportWidth == strip.hostedScrollView.bounds.width)
+        #expect(strip.rowCount == engine.layout(itemWidths: itemWidths, containerWidth: CGFloat(width)).rowCount)
         #expect(!strip.hostedScrollView.hasHorizontalScroller)
         #expect(!strip.hostedScrollView.hasVerticalScroller)
     }
