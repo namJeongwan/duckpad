@@ -7,7 +7,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: BinaryEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+public final class ScintillaEditorAdapter: FormattingEditorPort, BinaryEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -1178,6 +1178,12 @@ public final class ScintillaEditorAdapter: BinaryEditorPort, SearchEditorPort, S
         return SearchUTF8Range(location: Int(clamping: lower), length: Int(clamping: upper - lower))
     }
 
+    public func isReadyForFormatting(_ buffer: EditorBufferDescriptor) -> Bool {
+        guard !isInvalidated, activeBuffer == buffer, let view = activeScintillaView,
+              view.revision == buffer.revision else { return false }
+        return !view.hasMarkedText()
+    }
+
     public func captureExtensionInput(
         tabID: TabID,
         expectedBuffer: EditorBufferDescriptor,
@@ -1397,7 +1403,8 @@ public final class ScintillaEditorAdapter: BinaryEditorPort, SearchEditorPort, S
                 location: bridgeEdit.range.location,
                 length: bridgeEdit.range.length
             ),
-            replacement: replacement
+            replacement: replacement,
+            isIntermediateUndoRedo: bridgeEdit.isIntermediateUndoRedo
         )
         let generation = lifecycleGeneration
         let outcome = withEditCallbackScope {
@@ -1426,23 +1433,26 @@ public final class ScintillaEditorAdapter: BinaryEditorPort, SearchEditorPort, S
     }
 
     private func appendRecovery(_ edit: EditorIncrementalEdit, resultingRevision: UInt64) {
-        guard !isInvalidated, var recovery = recoveryBuffers[edit.bufferID],
-              recovery.revision == edit.expectedRevision,
+        guard !isInvalidated,
+              recoveryBuffers[edit.bufferID]?.revision == edit.expectedRevision,
+              let byteCount = recoveryBuffers[edit.bufferID]?.byteCount,
               edit.range.location >= 0, edit.range.length >= 0,
-              edit.range.location <= recovery.byteCount,
-              edit.range.length <= recovery.byteCount - edit.range.location else {
+              edit.range.location <= byteCount,
+              edit.range.length <= byteCount - edit.range.location else {
             scheduleRecovery(bufferID: edit.bufferID)
             return
         }
         let replacement = Data(edit.replacement.utf8)
-        recovery.deltas.append(EditorRecoveryDelta(
+        // Mutate through Dictionary's modifying subscript. A local RecoveryBuffer
+        // copy would share its delta array and force a full copy on every append.
+        // Existing immutable captures still trigger copy-on-write when needed.
+        recoveryBuffers[edit.bufferID]!.deltas.append(EditorRecoveryDelta(
             expectedRevision: edit.expectedRevision,
             range: edit.range,
             replacementUTF8: replacement
         ))
-        recovery.revision = resultingRevision
-        recovery.byteCount = recovery.byteCount - edit.range.length + replacement.count
-        recoveryBuffers[edit.bufferID] = recovery
+        recoveryBuffers[edit.bufferID]!.revision = resultingRevision
+        recoveryBuffers[edit.bufferID]!.byteCount = byteCount - edit.range.length + replacement.count
         lastRecoveryJournalWorkByteCount = replacement.count + MemoryLayout<EditorRecoveryDelta>.stride
         recoveryJournalAppendCount += 1
     }

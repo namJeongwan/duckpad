@@ -134,6 +134,7 @@ NSString *DPScintillaResourcePath(NSString *name) {
 }
 
 @interface DPScintillaEdit ()
+@property(nonatomic, readwrite) BOOL isIntermediateUndoRedo;
 - (instancetype)initWithRange:(NSRange)range
                   insertedUTF8:(NSData *)inserted
                    deletedUTF8:(NSData *)deleted
@@ -214,6 +215,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     NSUInteger _languageConfigurationCount;
     NSUInteger _maximumStyleBytes;
     BOOL _foldingEnabled;
+    BOOL _deferReplacementStyling;
     BOOL _braceMatchingEnabled;
     DPScintillaPalette _palette;
     std::vector<std::pair<int, int>> _semanticStyleRoles;
@@ -563,7 +565,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_REPLACETARGET
                  wParam:(uptr_t)replacement.length
                  lParam:(sptr_t)replacementBytes];
-    if (_foldingEnabled) {
+    if (_foldingEnabled && !_deferReplacementStyling) {
         const NSInteger changedLine = [_scintilla message:SCI_LINEFROMPOSITION
                                                     wParam:(uptr_t)range.location];
         const NSInteger lineStart = [_scintilla message:SCI_POSITIONFROMLINE
@@ -572,6 +574,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
             ? [_scintilla message:SCI_POSITIONFROMLINE wParam:(uptr_t)(changedLine + 1)]
             : (NSInteger)self.documentByteLength;
         [_scintilla message:SCI_COLOURISE wParam:(uptr_t)lineStart lParam:nextLineStart];
+        _synchronouslyStyledByteCount += nextLineStart - lineStart;
     }
     _suppressEdit = NO;
     _revision = resultingRevision;
@@ -609,7 +612,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         }
         previousLocation = range.location;
     }
+    const BOOL wasDeferringStyling = _deferReplacementStyling;
+    _deferReplacementStyling = YES;
     [_scintilla message:SCI_BEGINUNDOACTION];
+    BOOL succeeded = YES;
     for (NSUInteger index = 0; index < ranges.count; index += 1) {
         const NSRange range = ranges[index].rangeValue;
         NSData *replacement = replacements[index];
@@ -618,12 +624,22 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                    expectedRevision:_revision
                   resultingRevision:_revision + 1
                                error:error]) {
-            [_scintilla message:SCI_ENDUNDOACTION];
-            return NO;
+            succeeded = NO;
+            break;
         }
     }
     [_scintilla message:SCI_ENDUNDOACTION];
-    return YES;
+    _deferReplacementStyling = wasDeferringStyling;
+    if (_foldingEnabled && !wasDeferringStyling && ranges.count > 0) {
+        // Descending edits keep the lowest original position stable. Refresh
+        // lexer/fold state once after the batch, not for every whitespace edit.
+        const NSUInteger start = MIN(ranges.lastObject.rangeValue.location, self.documentByteLength);
+        const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:start];
+        const NSInteger lineStart = [_scintilla message:SCI_POSITIONFROMLINE wParam:line];
+        [_scintilla message:SCI_COLOURISE wParam:lineStart lParam:-1];
+        _synchronouslyStyledByteCount += self.documentByteLength - lineStart;
+    }
+    return succeeded;
 }
 
 - (NSRange)searchUTF8:(NSData *)pattern
@@ -2420,6 +2436,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                                                       baseRevision:base
                                                  resultingRevision:_revision
                                                             origin:origin];
+    edit.isIntermediateUndoRedo = origin != DPScintillaEditOriginUser
+        && (flags & SC_MULTISTEPUNDOREDO) != 0
+        && (flags & SC_LASTSTEPINUNDOREDO) == 0;
     if (self.onEdit) self.onEdit(edit);
 }
 

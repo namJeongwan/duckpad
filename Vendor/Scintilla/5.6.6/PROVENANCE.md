@@ -118,3 +118,20 @@ It validates revision and UTF-8 ranges, applies palette-aware green decorations
 without changing selections or text, and clears decorations on native edits.
 The vendor import script leaves `bridge/` untouched; these are not generated
 files. No upstream Scintilla/Lexilla source is changed.
+
+Programmatic batch replacements in the Duckpad-owned bridge defer explicit lexer
+and fold styling until all descending edits have been applied, then refresh the
+affected suffix once. This prevents format-document and replace-all commands
+from repeatedly lexing long JSON lines for every small edit. Native edits,
+revision increments, selection adjustment, and the single Undo group remain
+unchanged. Existing synchronous styling instrumentation also counts replacement
+styling for a deterministic work-bound regression. The bridge is not generated;
+no upstream Scintilla/Lexilla source changes are involved.
+
+Native Undo/Redo edit payloads now expose whether more text edits follow in the
+same synchronous action, derived from Scintilla's MULTISTEPUNDOREDO and
+LASTSTEPINUNDOREDO notification flags. Duckpad advances every revision and
+records every recovery delta, while the workspace publishes UI updates and
+schedules persistence only for the final edit. This prevents thousands of
+transient AppKit updates and cancelled tasks from accumulating in one Undo
+event. This is a Duckpad-owned bridge/header change, not an upstream patch.

@@ -27,7 +27,7 @@ public struct DuckpadSettingsSmokeState: Equatable, Sendable {
 
 @MainActor
 public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
-    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation", "Searching"]
+    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation", "Searching", "Formatting"]
     public private(set) var selectedCategory = "General"
     private var catalog = L10n.catalog
     private var localizationBindings: [(LocalizationCatalog) -> Void] = []
@@ -44,6 +44,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     let appLanguage = NSPopUpButton(frame: .zero, pullsDown: false)
     private let languageNote = NSTextField(wrappingLabelWithString: "")
     private let launchLanguage = L10n.catalog.language
+    private let sqlDialect = NSPopUpButton(frame: .zero, pullsDown: false)
     private let appearance = NSPopUpButton(frame: .zero, pullsDown: false)
     private let wordWrap = NSButton(checkboxWithTitle: L10n.text("Wrap long lines in new tabs"), target: nil, action: nil)
     private let wrapMarkers = NSButton(checkboxWithTitle: L10n.text("Show wrap symbols in new tabs"), target: nil, action: nil)
@@ -237,6 +238,26 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             row.spacing = 12
             (pages[category] as? NSStackView)?.addArrangedSubview(row)
         }
+        checkbox("Format on Save", \.formatting.formatOnSave, "Formatting")
+        choices("Print width", \.formatting.printWidth, [("60", 60), ("80", 80), ("100", 100), ("120", 120), ("160", 160)], "Formatting")
+        choices("Indent size", \.formatting.tabWidth, (1...8).map { (String($0), $0) }, "Formatting")
+        checkbox("Indent with tabs", \.formatting.useTabs, "Formatting")
+        checkbox("Prefer single quotes", \.formatting.singleQuote, "Formatting")
+        checkbox("Print semicolons", \.formatting.semicolons, "Formatting")
+        for dialect in SQLFormattingDialect.allCases {
+            sqlDialect.addItem(withTitle: dialect.displayName)
+            sqlDialect.lastItem?.representedObject = dialect.rawValue
+        }
+        sqlDialect.target = self
+        sqlDialect.action = #selector(sqlDialectChanged(_:))
+        localize { [sqlDialect] in sqlDialect.setAccessibilityLabel($0.text("SQL dialect")) }
+        let sqlRow = NSStackView(views: [label("SQL dialect"), sqlDialect])
+        sqlRow.spacing = 12
+        (pages["Formatting"] as? NSStackView)?.addArrangedSubview(sqlRow)
+        let formattingNote = label("Format Document: ⇧⌥F. Prettier, XML and SQL formatting work offline. Unsupported languages save normally. If formatting fails, your current text is saved without formatting.", wrapping: true)
+        formattingNote.textColor = .secondaryLabelColor
+        (pages["Formatting"] as? NSStackView)?.addArrangedSubview(formattingNote)
+        formattingNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
         checkbox("Follow the current document’s directory", \.fileDialogFollowsDocument, "Default Directory")
         let directoryNote = label("Open and Save As start beside the active file. When turned off, or for an untitled tab, macOS remembers the last used location.", wrapping: true)
         (pages["Default Directory"] as? NSStackView)?.addArrangedSubview(directoryNote)
@@ -398,6 +419,14 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         selectCategory(key)
     }
 
+    @objc private func sqlDialectChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let dialect = SQLFormattingDialect(rawValue: raw) else { return }
+        var proposed = settings
+        proposed.formatting.sqlDialect = dialect
+        startUpdate(proposed)
+    }
+
     @objc private func languageChanged(_ sender: NSPopUpButton) {
         guard let raw = sender.selectedItem?.representedObject as? String,
               let language = AppLanguage(rawValue: raw) else { return }
@@ -531,6 +560,9 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
 
     private func render(_ settings: AppSettings) {
         self.settings = settings
+        if let item = sqlDialect.itemArray.first(where: { $0.representedObject as? String == settings.formatting.sqlDialect.rawValue }) {
+            sqlDialect.select(item)
+        }
         if let item = appLanguage.itemArray.first(where: { $0.representedObject as? String == settings.appLanguage.rawValue }) {
             appLanguage.select(item)
         }
@@ -563,6 +595,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         editorFontSize.isEnabled = enabled || preservesFontSizeDraft
         editorFontSizeStepper.isEnabled = enabled || preservesFontSizeDraft
         appLanguage.isEnabled = enabled
+        sqlDialect.isEnabled = enabled
         appearance.isEnabled = enabled
         wordWrap.isEnabled = enabled
         wrapMarkers.isEnabled = enabled && wordWrap.state == .on

@@ -73,6 +73,8 @@ public final class AppSettingsUseCase {
         normalized.recentFileLimit = min(max(settings.recentFileLimit, 0), 50)
         normalized.recentFilePathMode = min(max(settings.recentFilePathMode, 0), 2)
         normalized.findSelectionMaximumCharacters = min(max(settings.findSelectionMaximumCharacters, 0), 16383)
+        normalized.formatting.tabWidth = min(max(settings.formatting.tabWidth, 1), 16)
+        normalized.formatting.printWidth = min(max(settings.formatting.printWidth, 40), 320)
         do {
             try await store.save(normalized)
             state = .ready(normalized)

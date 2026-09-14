@@ -2,3 +2,8 @@
 # contains historical whitespace that must not be normalized to satisfy a
 # repository diagnostic; Duckpad-owned paths retain Git's strict defaults.
 /Vendor/Lexilla/5.5.3/** whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+
+# Preserve bundled JavaScript string literals and upstream license notices.
+# Do not normalize generated/vendor bytes to satisfy whitespace diagnostics.
+/Sources/DuckpadInfrastructure/Resources/Formatter/formatter*.js whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+/Sources/DuckpadInfrastructure/Resources/Formatter/licenses/** whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

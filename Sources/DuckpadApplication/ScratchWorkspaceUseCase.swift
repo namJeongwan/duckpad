@@ -762,8 +762,10 @@ public final class ScratchWorkspaceUseCase {
         do {
             let revision = try session.recordEdit(in: tabID, expectedRevision: edit.expectedRevision)
             persistenceState = .pending
-            schedulePersistence()
-            publish(.bufferEdited(index: index))
+            if !edit.isIntermediateUndoRedo {
+                schedulePersistence()
+                publish(.bufferEdited(index: index))
+            }
             return .accepted(newRevision: revision)
         } catch {
             let current = (try? session.buffer(for: tabID).revision) ?? edit.expectedRevision

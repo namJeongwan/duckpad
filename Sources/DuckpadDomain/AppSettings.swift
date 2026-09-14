@@ -47,6 +47,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var fillFindWithSelection: Bool
     public var findSelectionMaximumCharacters: Int
     public var monospacedFindFields: Bool
+    public var formatting: FormattingSettings
 
     public init(
         schemaVersion: Int = AppSettings.currentSchemaVersion,
@@ -82,7 +83,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         fileDialogFollowsDocument: Bool = false,
         fillFindWithSelection: Bool = true,
         findSelectionMaximumCharacters: Int = 1024,
-        monospacedFindFields: Bool = false
+        monospacedFindFields: Bool = false,
+        formatting: FormattingSettings = .init()
     ) {
         self.schemaVersion = schemaVersion
         self.appLanguage = appLanguage
@@ -118,6 +120,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.fillFindWithSelection = fillFindWithSelection
         self.findSelectionMaximumCharacters = findSelectionMaximumCharacters
         self.monospacedFindFields = monospacedFindFields
+        self.formatting = formatting
     }
 
     public init(from decoder: Decoder) throws {
@@ -156,5 +159,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         fillFindWithSelection = try values.decodeIfPresent(Bool.self, forKey: .fillFindWithSelection) ?? true
         findSelectionMaximumCharacters = try values.decodeIfPresent(Int.self, forKey: .findSelectionMaximumCharacters) ?? 1024
         monospacedFindFields = try values.decodeIfPresent(Bool.self, forKey: .monospacedFindFields) ?? false
+        formatting = try values.decodeIfPresent(FormattingSettings.self, forKey: .formatting) ?? .init()
     }
 }

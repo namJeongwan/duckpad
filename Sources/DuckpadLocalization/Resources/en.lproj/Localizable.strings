@@ -590,3 +590,22 @@
 "When inactive" = "When inactive";
 "Always" = "Always";
 "Window opacity" = "Window opacity";
+
+/* Built-in formatting */
+"Formatting" = "Formatting";
+"Format Document" = "Format Document";
+"Format on Save" = "Format on Save";
+"Print width" = "Print width";
+"Indent size" = "Indent size";
+"Indent with tabs" = "Indent with tabs";
+"Prefer single quotes" = "Prefer single quotes";
+"Print semicolons" = "Print semicolons";
+"SQL dialect" = "SQL dialect";
+"Format Document: ⇧⌥F. Prettier, XML and SQL formatting work offline. Unsupported languages save normally. If formatting fails, your current text is saved without formatting." = "Format Document: ⇧⌥F. Prettier, XML and SQL formatting work offline. Unsupported languages save normally. If formatting fails, your current text is saved without formatting.";
+"Could not format document" = "Could not format document";
+"No built-in formatter is available for this language." = "No built-in formatter is available for this language.";
+"Formatting supports documents up to 1 MiB and results up to 4 MiB." = "Formatting supports documents up to 1 MiB and results up to 4 MiB.";
+"Formatting is already in progress. Try again when it finishes." = "Formatting is already in progress. Try again when it finishes.";
+"Formatting took too long. Your document has been kept." = "Formatting took too long. Your document has been kept.";
+"The built-in formatter could not be started." = "The built-in formatter could not be started.";
+"Formatting failed: %1$@" = "Formatting failed: %1$@";

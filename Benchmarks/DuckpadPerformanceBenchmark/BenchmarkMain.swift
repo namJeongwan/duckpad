@@ -91,6 +91,11 @@ private enum DuckpadPerformanceBenchmark {
     @MainActor
     static func main() async {
         do {
+            if CommandLine.arguments.count == 3,
+               let language = ["--format-json": "json", "--format-yaml": "yaml", "--format-sql": "sql"][CommandLine.arguments[1]] {
+                try await FormattingBenchmark.run(path: CommandLine.arguments[2], language: language)
+                return
+            }
             let warmLaunch = try parseWarmLaunch(arguments: Array(CommandLine.arguments.dropFirst()))
             let budgets = try loadBudgets()
             _ = NSApplication.shared

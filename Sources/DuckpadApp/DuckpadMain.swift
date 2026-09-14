@@ -52,6 +52,10 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     func applicationDidFinishLaunching(_ notification: Notification) {
         installDevelopmentAppIcon()
         environment = ProcessInfo.processInfo.environment
+        if environment["DUCKPAD_FORMATTING_SMOKE"] == "1" {
+            Task { @MainActor in await BuiltInFormattingSmoke.run() }
+            return
+        }
         let settingsArchive = environment["DUCKPAD_SETTINGS_FILE"].map {
             URL(fileURLWithPath: $0, isDirectory: false)
         } ?? LocalAppSettingsStore.defaultArchiveURL()
@@ -809,6 +813,9 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             editor: editor,
             allowsUserExtensions: allowsDevelopmentExtensions
         )
+        let formattingUseCase = DocumentFormattingUseCase(workspace: workspace, editor: editor, formatter: BundledPrettierFormatter())
+        formattingUseCase.settings = settings.formatting
+        fileUseCase.formattingUseCase = formattingUseCase
         let panels = NativeFilePanelAdapter()
         let controller = DuckpadWindowController(
             workspace: workspace,
@@ -830,6 +837,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             languageUseCase: languageUseCase,
             documentIntelligenceUseCase: documentIntelligenceUseCase,
             extensionUseCase: extensionUseCase,
+            formattingUseCase: formattingUseCase,
             framePersistence: WindowFramePersistence(
                 defaults: UserDefaults(suiteName: "com.namjeongwan.duckpad.window-frames")!,
                 frameKey: recoveryRoot.standardizedFileURL.path,
