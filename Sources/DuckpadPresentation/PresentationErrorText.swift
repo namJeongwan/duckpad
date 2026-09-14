@@ -67,6 +67,7 @@ enum PresentationErrorText {
             }
         case let failure as TextFileStoreError:
             switch failure {
+            case .destinationExists: return catalog.text("A file already exists at that location. Choose another name or folder.")
             case .notFound, .invalidPath: return catalog.text("This file is no longer available.")
             case .permissionDenied: return catalog.text("Permission denied. Open the file or folder again to restore access.")
             case .conflict: return catalog.text("The file changed outside Duckpad.")

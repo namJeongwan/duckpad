@@ -706,6 +706,67 @@ public final class FileDocumentUseCase {
         return outcome
     }
 
+    public func changeLocation(_ operation: FileLocationOperation, expectedContext: FileWorkspaceContext) async -> FileSaveOutcome {
+        await acquireOperation()
+        defer { releaseOperation() }
+        guard !Task.isCancelled, workspace.activeFileContext() == expectedContext else { return .failed(.comparisonInvalidated) }
+        guard let old = expectedContext.binding else { return .requiresDestination(expectedContext.tabID) }
+        var destination: URL?
+        let grantOwner = UUID()
+        if case .move(let url) = operation {
+            do {
+                _ = try await store.renewSecurityScopedAccess(to: url, ownerID: grantOwner)
+                // Resolve the directory, not the leaf: resolving an existing leaf
+                // erases a case-only spelling change on the default macOS volume.
+                let parent = try await store.canonicalURL(for: url.deletingLastPathComponent())
+                destination = parent.appendingPathComponent(url.lastPathComponent)
+            } catch {
+                await store.releaseAllSecurityScopedAccess(ownerID: grantOwner)
+                return .failed(.store(error))
+            }
+            if destination?.path == old.canonicalPath {
+                await store.releaseAllSecurityScopedAccess(ownerID: grantOwner)
+                return .saved(expectedContext.tabID)
+            }
+        }
+        let effectiveOperation = destination.map(FileLocationOperation.move) ?? operation
+        var outcome = await workspace.changeFileLocation(expected: expectedContext, destinationPath: destination?.path) {
+            let receipt = try await self.store.changeLocation(of: old, operation: effectiveOperation)
+            if case .trash = operation, !old.isReadOnly { return nil }
+            let url = URL(fileURLWithPath: receipt.identity.canonicalPath)
+            let access = try? await self.store.renewSecurityScopedAccess(to: url, ownerID: self.securityScopeOwnerID)
+            let updated = FileBinding(canonicalPath: receipt.identity.canonicalPath, encoding: old.encoding,
+                byteOrderMark: old.byteOrderMark, lineEnding: old.lineEnding,
+                observedIdentity: receipt.identity, securityScopedBookmark: access?.bookmark ?? old.securityScopedBookmark,
+                binaryByteCount: old.binaryByteCount)
+            if access == nil, let restored = try? await self.store.restoreSecurityScopedAccess(for: updated, ownerID: self.securityScopeOwnerID),
+               restored.canonicalPath == updated.canonicalPath { return restored }
+            return updated
+        }
+        await store.releaseAllSecurityScopedAccess(ownerID: grantOwner)
+        if case .trash = operation, case .saved = outcome {
+            // The file has moved; the detached/relocated binding is already committed.
+            // Use normal close recovery so a persistence failure retains the buffer,
+            // and never discard an edit made after the confirmed revision.
+            switch await workspace.close(tabID: expectedContext.tabID, decision: .discard,
+                                         expectedRevision: expectedContext.buffer.revision) {
+            case .closed: break
+            case .persistenceFailed(let failure): outcome = .failed(.workspace(failure))
+            case .rejected(let error): outcome = .failed(.session(error))
+            case .cancelled: outcome = .cancelled(expectedContext.tabID)
+            case .requiresDecision, .saveUnavailable, .reviewStale:
+                outcome = .failed(.comparisonInvalidated)
+            }
+        }
+        if workspace.fileContext(tabID: expectedContext.tabID)?.binding != old {
+            pendingConflict = nil
+            dismissExternalChange(for: expectedContext.tabID)
+            await releaseSecurityScopedAccessForClosedDocuments()
+            updateLiveReloadDocuments()
+        }
+        return outcome
+    }
+
     public func resolveConflict(_ resolution: FileConflictResolution) async -> FileSaveOutcome {
         await acquireOperation()
         defer { releaseOperation() }

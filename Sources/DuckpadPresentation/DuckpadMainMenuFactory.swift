@@ -54,6 +54,12 @@ public enum DuckpadMainMenuFactory {
         add("Save a Copy As…", #selector(DuckpadWindowController.performSaveCopyAs(_:)), "s", target, modifiers: [.command, .option, .shift], to: fileMenu)
         add("Save All", #selector(DuckpadWindowController.performSaveAll(_:)), "s", target, modifiers: [.command, .option], to: fileMenu)
         fileMenu.addItem(.separator())
+        add("Rename…", #selector(DuckpadWindowController.performRenameFile(_:)), "", target, modifiers: [], to: fileMenu)
+        add("Move To…", #selector(DuckpadWindowController.performMoveFile(_:)), "", target, modifiers: [], to: fileMenu)
+        add("Move to Trash…", #selector(DuckpadWindowController.performTrashFile(_:)), "", target, modifiers: [], to: fileMenu)
+        fileMenu.addItem(.separator())
+        add("Print…", #selector(DuckpadWindowController.performPrintDocument(_:)), "p", target, to: fileMenu)
+        fileMenu.addItem(.separator())
         add("Close", #selector(DuckpadWindowController.performCloseActiveTab(_:)), "w", target, to: fileMenu)
         fileItem.submenu = fileMenu
 

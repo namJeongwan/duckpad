@@ -609,3 +609,27 @@
 "Formatting took too long. Your document has been kept." = "포맷 시간이 초과되었습니다. 문서 내용은 유지됩니다.";
 "The built-in formatter could not be started." = "내장 포맷터를 시작할 수 없습니다.";
 "Formatting failed: %1$@" = "포맷 실패: %1$@";
+
+"Rename…" = "이름 변경…";
+
+"Move To…" = "이동…";
+
+"Move to Trash…" = "휴지통으로 이동…";
+
+"Print…" = "인쇄…";
+
+"Rename" = "이름 변경";
+
+"Move" = "이동";
+
+"Move to Trash?" = "휴지통으로 이동할까요?";
+
+"Move to Trash" = "휴지통으로 이동";
+
+"The file will move to Trash and its tab will close. Unsaved changes will be discarded. You can restore the saved file using Finder." = "파일을 휴지통으로 이동하고 탭을 닫습니다. 저장하지 않은 변경 사항은 버려집니다. 저장된 파일은 Finder에서 복원할 수 있습니다.";
+
+"The file will move to Trash and its tab will close. You can restore the file using Finder." = "파일을 휴지통으로 이동하고 탭을 닫습니다. 파일은 Finder에서 복원할 수 있습니다.";
+
+"A file already exists at that location. Choose another name or folder." = "같은 위치에 파일이 이미 있습니다. 다른 이름이나 폴더를 선택해 주세요.";
+
+"Could not change file location" = "파일 위치를 변경하지 못했습니다";

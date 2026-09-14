@@ -12,6 +12,7 @@ public struct FileReadResult: Equatable, Sendable {
 }
 
 public enum TextFileStoreError: Error, Equatable, Sendable {
+    case destinationExists(String)
     case notFound(String)
     case permissionDenied(String)
     case invalidPath(String)
@@ -55,6 +56,7 @@ public struct SecurityScopedFileAccess: Equatable, Sendable {
 }
 
 public protocol TextFileStore: Sendable {
+    func changeLocation(of binding: FileBinding, operation: FileLocationOperation) async throws(TextFileStoreError) -> FileLocationReceipt
     /// Refresh access from a URL explicitly selected in a native file panel.
     func renewSecurityScopedAccess(to url: URL, ownerID: UUID) async throws(TextFileStoreError) -> SecurityScopedFileAccess
     func prepareSecurityScopedAccess(
@@ -83,6 +85,9 @@ public protocol TextFileStore: Sendable {
 }
 
 public extension TextFileStore {
+    func changeLocation(of binding: FileBinding, operation: FileLocationOperation) async throws(TextFileStoreError) -> FileLocationReceipt {
+        throw .io("File location operations are unavailable")
+    }
     func readForDisplay(from url: URL, assuming encoding: TextFileEncoding?) async throws(TextFileStoreError) -> FileReadResult {
         try await read(from: url)
     }
