@@ -590,3 +590,22 @@
 "When inactive" = "비활성일 때";
 "Always" = "항상";
 "Window opacity" = "창 불투명도";
+
+/* Built-in formatting */
+"Formatting" = "포맷팅";
+"Format Document" = "문서 포맷";
+"Format on Save" = "저장 시 자동 포맷";
+"Print width" = "줄 너비";
+"Indent size" = "들여쓰기 크기";
+"Indent with tabs" = "탭으로 들여쓰기";
+"Prefer single quotes" = "작은따옴표 우선 사용";
+"Print semicolons" = "세미콜론 사용";
+"SQL dialect" = "SQL 방언";
+"Format Document: ⇧⌥F. Prettier, XML and SQL formatting work offline. Unsupported languages save normally. If formatting fails, your current text is saved without formatting." = "문서 포맷: ⇧⌥F. Prettier·XML·SQL 포맷팅은 오프라인으로 동작합니다. 지원하지 않는 언어는 그대로 저장합니다. 포맷에 실패하면 현재 내용을 그대로 저장합니다.";
+"Could not format document" = "문서를 포맷할 수 없습니다";
+"No built-in formatter is available for this language." = "이 언어는 내장 포맷터가 지원하지 않습니다.";
+"Formatting supports documents up to 1 MiB and results up to 4 MiB." = "포맷팅은 문서 최대 1 MiB, 결과 최대 4 MiB까지 지원합니다.";
+"Formatting is already in progress. Try again when it finishes." = "포맷 중입니다. 완료 후 다시 시도해 주세요.";
+"Formatting took too long. Your document has been kept." = "포맷 시간이 초과되었습니다. 문서 내용은 유지됩니다.";
+"The built-in formatter could not be started." = "내장 포맷터를 시작할 수 없습니다.";
+"Formatting failed: %1$@" = "포맷 실패: %1$@";

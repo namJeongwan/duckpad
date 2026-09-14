@@ -56,6 +56,8 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, readonly) uint64_t baseRevision;
 @property(nonatomic, readonly) uint64_t resultingRevision;
 @property(nonatomic, readonly) DPScintillaEditOrigin origin;
+/// More text edits follow synchronously in the same native Undo/Redo action.
+@property(nonatomic, readonly) BOOL isIntermediateUndoRedo;
 @end
 
 /// Narrow AppKit facade. No Scintilla message, pointer, or C++ type is public.

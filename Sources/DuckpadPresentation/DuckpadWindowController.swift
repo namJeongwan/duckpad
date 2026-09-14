@@ -269,6 +269,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let folderSearchUseCase: FolderSearchUseCase?
     private var languageUseCase: LanguageWorkspaceUseCase?
     private let documentIntelligenceUseCase: DocumentIntelligenceUseCase?
+    private var formattingUseCase: DocumentFormattingUseCase?
     private var extensionUseCase: ExtensionWorkspaceUseCase?
     private var workspaceBrowserUseCase: WorkspaceBrowserUseCase?
     private var extensionState = ExtensionRegistryState(items: [])
@@ -367,6 +368,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         languageUseCase: LanguageWorkspaceUseCase? = nil,
         documentIntelligenceUseCase: DocumentIntelligenceUseCase? = nil,
         extensionUseCase: ExtensionWorkspaceUseCase? = nil,
+        formattingUseCase: DocumentFormattingUseCase? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
         framePersistence: WindowFramePersistence? = nil,
         automaticallyStarts: Bool = true
@@ -422,6 +424,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.languageUseCase = languageUseCase
         self.documentIntelligenceUseCase = documentIntelligenceUseCase
         self.extensionUseCase = extensionUseCase
+        self.formattingUseCase = formattingUseCase
         tabCloseCoordinator = TabCloseCoordinator(workspace: workspace)
         self.terminationCoordinator = terminationCoordinator
         self.approvedWindowClose = approvedWindowClose ?? { $0.performClose(nil) }
@@ -785,6 +788,26 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             guard let self, self.workspaceInteractionsAreActionable else { return }
             _ = await self.languageUseCase?.setOverride(.manual(LanguageID(rawValue: raw)))
         }
+    }
+
+    @objc public func performFormatDocument(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, formattingUseCase?.canFormat == true,
+              let context = workspace.activeFileContext() else { return }
+        beginFileCommandTask { [weak self] in
+            guard let self, !self.hasTornDownWindow else { return }
+            do { try await self.formattingUseCase?.format(expectedContext: context) }
+            catch is CancellationError { return }
+            catch { self.presentFormattingFailure((error as? FormattingFailure) ?? .unavailable) }
+        }
+    }
+
+    private func presentFormattingFailure(_ failure: FormattingFailure) {
+        guard !hasTornDownWindow, let window else { return }
+        let alert = NSAlert()
+        alert.messageText = L10n.text("Could not format document")
+        alert.informativeText = PresentationErrorText.message(failure)
+        alert.addButton(withTitle: L10n.text("OK"))
+        alert.beginSheetModal(for: window)
     }
 
     @objc public func performToggleLineComment(_ sender: Any?) {
@@ -1230,6 +1253,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         let languageChanged = appPreferences.appLanguage != settings.appLanguage
         appPreferences = settings
         fileUseCase?.setLiveReloadEnabled(settings.liveFileReloadEnabled)
+        formattingUseCase?.settings = settings.formatting
         searchPanel.applyPreferences(settings)
         commandBar.setBarVisible(settings.menuBarVisible)
         statusBar.isHidden = !settings.statusBarVisible
@@ -1793,6 +1817,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(performFormatDocument(_:)) {
+            return workspaceInteractionsAreActionable && formattingUseCase?.canFormat == true
+        }
         if let command = editorCommand(for: menuItem.action) {
             return actionableEditorCommands?.canPerform(command) ?? false
         }
@@ -2396,6 +2423,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             conversion: conversion,
             expectedContext: context
         )
+        // Format on Save may have advanced the editor revision before an I/O
+        // failure. A retry must refer to that retained, undoable document.
+        let retryContext = workspace.fileContext(tabID: context.tabID) ?? context
         if case .requiresDestination = outcome {
             await routeSaveFileAs(
                 conversion: conversion,
@@ -2403,11 +2433,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 acceptedBeforeTermination: acceptedBeforeTermination
             )
         } else {
-            let resolved = await resolve(fileOutcome: outcome, accessRecoveryContext: context, conversion: conversion) { [weak self] in
+            let resolved = await resolve(fileOutcome: outcome, accessRecoveryContext: retryContext, conversion: conversion) { [weak self] in
                 self?.beginFileCommandTask { [weak self] in
                     await self?.routeSaveFile(
                         conversion: conversion,
-                        expectedContext: context,
+                        expectedContext: retryContext,
                         acceptedBeforeTermination: true
                     )
                 }
@@ -2453,15 +2483,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               workspaceInteractionsAreActionable || acceptedBeforeTermination,
               !hasTornDownWindow,
               workspace.activeFileContext() == context else { return }
-        let outcome = await resolve(fileOutcome: await fileUseCase.saveAs(
-            url,
-            conversion: conversion,
-            expectedContext: context
-        ), accessRecoveryContext: context, conversion: conversion) { [weak self] in
+        let saved = await fileUseCase.saveAs(url, conversion: conversion, expectedContext: context)
+        let retryContext = workspace.fileContext(tabID: context.tabID) ?? context
+        let outcome = await resolve(fileOutcome: saved, accessRecoveryContext: retryContext, conversion: conversion) { [weak self] in
             self?.beginFileCommandTask { [weak self] in
                 await self?.routeSaveFileAs(
                     conversion: conversion,
-                    expectedContext: context,
+                    expectedContext: retryContext,
                     acceptedBeforeTermination: true
                 )
             }

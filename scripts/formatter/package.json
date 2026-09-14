@@ -1,0 +1,12 @@
+{
+  "name": "duckpad-bundled-formatter",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": {
+    "prettier": "3.9.6",
+    "@prettier/plugin-xml": "3.4.2",
+    "sql-formatter": "15.8.2"
+  },
+  "devDependencies": { "esbuild": "0.28.2" }
+}

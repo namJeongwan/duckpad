@@ -173,6 +173,7 @@ let package = Package(
             resources: [
                 .process("Resources/Languages.json"),
                 .copy("Resources/BundledExtensions"),
+                .copy("Resources/Formatter"),
             ]
         ),
         .target(

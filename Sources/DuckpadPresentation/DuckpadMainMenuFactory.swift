@@ -94,6 +94,7 @@ public enum DuckpadMainMenuFactory {
         add("Delete Line", #selector(DuckpadWindowController.performDeleteLine(_:)), "k", target, modifiers: [.command, .shift], to: editMenu)
         add("Join Lines", #selector(DuckpadWindowController.performJoinLines(_:)), "j", target, modifiers: [.control], to: editMenu)
         editMenu.addItem(.separator())
+        add("Format Document", #selector(DuckpadWindowController.performFormatDocument(_:)), "f", target, modifiers: [.option, .shift], to: editMenu)
         add("Indent Line(s)", #selector(DuckpadWindowController.performIndent(_:)), "", target, modifiers: [], to: editMenu)
         add("Unindent Line(s)", #selector(DuckpadWindowController.performUnindent(_:)), "", target, modifiers: [], to: editMenu)
         add(

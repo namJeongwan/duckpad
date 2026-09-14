@@ -113,6 +113,7 @@ public final class FileDocumentUseCase {
     private var pendingLivePaths = Set<String>()
     public private(set) var externalChanges: [TabID: LiveFileChange] = [:]
     public var onExternalChanges: (() -> Void)?
+    public var formattingUseCase: DocumentFormattingUseCase?
     public private(set) var loadingProgress: FileLoadingProgress? {
         didSet { if oldValue != loadingProgress { onLoadingProgress?() } }
     }
@@ -610,6 +611,7 @@ public final class FileDocumentUseCase {
         // Merely viewing a permissively decoded file must not rewrite its
         // original bytes when Save is pressed without an edit or conversion.
         if conversion == nil,
+           formattingUseCase?.settings.formatOnSave != true || formattingUseCase?.canFormat == false,
            workspace.snapshot().tabs.first(where: { $0.id == context.tabID })?.isDirty == false {
             return .saved(context.tabID)
         }
@@ -890,6 +892,24 @@ public final class FileDocumentUseCase {
         }
         if let duplicate = workspace.tabID(canonicalPath: url.path), duplicate != context.tabID {
             return .failed(.session(.duplicateFileBinding(url.path)))
+        }
+        var context = context
+        if let formattingUseCase, formattingUseCase.settings.formatOnSave {
+            do {
+                context = try await formattingUseCase.format(expectedContext: context, destination: url)
+            } catch FormattingFailure.unsupportedLanguage {
+                // Unsupported documents still save normally.
+            } catch FormattingFailure.staleDocument {
+                return .failed(.comparisonInvalidated)
+            } catch is CancellationError {
+                return .cancelled(context.tabID)
+            } catch {
+                // Formatting is best effort on save. Keep the current text and
+                // continue the normal save without presenting a formatting alert.
+            }
+            guard workspace.fileContext(tabID: context.tabID) == context, !Task.isCancelled else {
+                return .failed(.comparisonInvalidated)
+            }
         }
         guard let snapshot = editor.snapshot(for: context.buffer.bufferID) else {
             return .failed(.editorSnapshotUnavailable(context.buffer.bufferID))

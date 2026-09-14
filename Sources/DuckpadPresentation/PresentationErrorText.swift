@@ -42,6 +42,16 @@ enum PresentationErrorText {
             case .writeFailed: return catalog.text("Preferences could not be written to disk.")
             case .writeUncertain: return catalog.text("The preferences file is visible, but its durable storage could not be confirmed.")
             }
+        case let failure as FormattingFailure:
+            switch failure {
+            case .unsupportedLanguage: return catalog.text("No built-in formatter is available for this language.")
+            case .tooLarge: return catalog.text("Formatting supports documents up to 1 MiB and results up to 4 MiB.")
+            case .staleDocument: return catalog.text("The document or selection changed. Try again.")
+            case .busy: return catalog.text("Formatting is already in progress. Try again when it finishes.")
+            case .timedOut: return catalog.text("Formatting took too long. Your document has been kept.")
+            case .unavailable: return catalog.text("The built-in formatter could not be started.")
+            case .invalidSyntax(let detail): return catalog.text("Formatting failed: %1$@", arguments: [detail])
+            }
         case let failure as FileOperationFailure:
             switch failure {
             case .readOnly: return catalog.text("Binary files are read-only and cannot be saved.")
