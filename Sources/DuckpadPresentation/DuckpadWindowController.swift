@@ -1551,6 +1551,54 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    @objc public func performRenameFile(_ sender: Any? = nil) { beginFileLocationChange(renaming: true) }
+    @objc public func performMoveFile(_ sender: Any? = nil) { beginFileLocationChange(renaming: false) }
+    @objc public func performTrashFile(_ sender: Any? = nil) { beginFileLocationChange(renaming: nil) }
+
+    private func beginFileLocationChange(renaming: Bool?) {
+        guard workspaceInteractionsAreActionable, let context = workspace.activeFileContext(),
+              context.binding != nil, fileUseCase != nil, window?.attachedSheet == nil else { return }
+        beginFileCommandTask { [weak self] in
+            await self?.routeFileLocationChange(renaming: renaming, expectedContext: context)
+        }
+    }
+
+    public func routeFileLocationChange(renaming: Bool?, expectedContext context: FileWorkspaceContext) async {
+        guard !hasTornDownWindow, workspaceInteractionsAreActionable,
+              workspace.activeFileContext() == context, let binding = context.binding,
+              let fileUseCase, let filePanels else { return }
+        let source = URL(fileURLWithPath: binding.canonicalPath)
+        let operation: FileLocationOperation
+        if let renaming {
+            guard let destination = await filePanels.chooseFileLocation(for: source, renaming: renaming, attachedTo: window) else { return }
+            operation = .move(destination)
+        } else {
+            guard await filePanels.confirmTrash(of: source, hasUnsavedChanges: workspace.snapshot().tabs.first(where: { $0.id == context.tabID })?.isDirty == true, attachedTo: window) else { return }
+            operation = .trash
+        }
+        guard !Task.isCancelled, !hasTornDownWindow, !terminationReviewInProgress,
+              workspace.activeFileContext() == context else { return }
+        let outcome = await fileUseCase.changeLocation(operation, expectedContext: context)
+        if case .failed(let failure) = outcome {
+            if let window, !hasTornDownWindow {
+                let alert = NSAlert()
+                alert.messageText = L10n.text("Could not change file location")
+                alert.informativeText = PresentationErrorText.message(failure)
+                alert.addButton(withTitle: L10n.text("OK"))
+                alert.beginSheetModal(for: window, completionHandler: nil)
+            }
+        }
+        if case .move = operation { recordActiveDocumentURLIfSaved(outcome) }
+    }
+
+    @objc public func performPrintDocument(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, let window, window.attachedSheet == nil,
+              let context = workspace.activeFileContext(), context.binding?.isReadOnly != true,
+              let snapshot = activeEditor.snapshot(for: context.buffer.bufferID),
+              snapshot.revision == context.buffer.revision else { return }
+        DocumentPrintController.print(text: snapshot.text, title: context.title, window: window)
+    }
+
     @objc public func performSaveAll(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable, fileUseCase != nil else { return }
         beginFileCommandTask { [weak self] in
@@ -1882,6 +1930,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case #selector(performSaveFile(_:)), #selector(performSaveFileAs(_:)), #selector(performSaveCopyAs(_:)):
             return workspaceInteractionsAreActionable && fileUseCase != nil
                 && workspace.activeFileContext()?.binding?.isReadOnly != true
+        case #selector(performRenameFile(_:)), #selector(performMoveFile(_:)), #selector(performTrashFile(_:)):
+            return workspaceInteractionsAreActionable && fileUseCase != nil
+                && workspace.activeFileContext()?.binding != nil && window?.attachedSheet == nil
+        case #selector(performPrintDocument(_:)):
+            return workspaceInteractionsAreActionable && workspace.activeFileContext() != nil
+                && workspace.activeFileContext()?.binding?.isReadOnly != true && window?.attachedSheet == nil
         case #selector(performSaveAll(_:)):
             return workspaceInteractionsAreActionable && fileUseCase != nil
                 && workspace.snapshot().tabs.contains(where: \.isDirty)
@@ -3937,6 +3991,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 && editorGroupLayout.snapshot.orientation != nil
         case .compareWithOpenDocument:
             return workspaceInteractionsAreActionable && workspace.snapshot().tabs.count >= 2
+        case .renameFile, .moveFile, .trashFile:
+            return workspaceInteractionsAreActionable && provisionalEditorGroupLayout == nil
+                && fileUseCase != nil && filePanels != nil && window?.attachedSheet == nil
+                && workspace.fileContext(tabID: tabID)?.binding != nil
         case .close, .setPinned, .copyFullPath, .openContainingFolder:
             return workspaceInteractionsAreActionable
         }
@@ -3959,6 +4017,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             Task { @MainActor [weak self] in
                 guard let self, self.workspaceInteractionsAreActionable else { return }
                 _ = await self.workspace.setPinned(tabID, isPinned: pinned)
+            }
+        case .renameFile, .moveFile, .trashFile:
+            guard validateContextAction(action, tabID: tabID, group: group),
+                  let context = workspace.fileContext(tabID: tabID) else { return }
+            performActivate(tabID, in: group)
+            let activation = editorGroupActivationTask
+            let renaming: Bool? = action == .trashFile ? nil : action == .renameFile
+            beginFileCommandTask { [weak self] in
+                await activation?.value
+                guard !Task.isCancelled, let self, self.window?.attachedSheet == nil else { return }
+                await self.routeFileLocationChange(renaming: renaming, expectedContext: context)
             }
         case .copyFullPath:
             guard let path = workspace.snapshot().tabs.first(where: { $0.id == tabID })?.fullPath else { return }

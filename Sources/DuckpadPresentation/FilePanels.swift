@@ -11,6 +11,8 @@ public final class WeakWindowReference: @unchecked Sendable {
 
 @MainActor
 public protocol FilePanelPresenting: AnyObject {
+    func chooseFileLocation(for url: URL, renaming: Bool, attachedTo window: NSWindow?) async -> URL?
+    func confirmTrash(of url: URL, hasUnsavedChanges: Bool, attachedTo window: NSWindow?) async -> Bool
     func chooseOpenURL(attachedTo window: NSWindow?) async -> URL?
     func chooseSaveURL(suggestedName: String, attachedTo window: NSWindow?) async -> URL?
     func chooseSaveAccessURL(for url: URL, attachedTo window: NSWindow?) async -> URL?
@@ -20,6 +22,9 @@ public protocol FilePanelPresenting: AnyObject {
 }
 
 public extension FilePanelPresenting {
+    func chooseFileLocation(for url: URL, renaming: Bool, attachedTo window: NSWindow?) async -> URL? { nil }
+    func confirmTrash(of url: URL, hasUnsavedChanges: Bool, attachedTo window: NSWindow?) async -> Bool { false }
+
     func chooseSaveAccessURL(for url: URL, attachedTo window: NSWindow?) async -> URL? {
         await chooseSaveURL(suggestedName: url.lastPathComponent, attachedTo: window)
     }
@@ -73,6 +78,29 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
 
     public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
         (openDocumentComparePresenter as? NativeOpenDocumentComparePresenter)?.refreshLocalization(catalog: catalog)
+    }
+
+    public func chooseFileLocation(for url: URL, renaming: Bool, attachedTo window: NSWindow?) async -> URL? {
+        let panel = NSSavePanel()
+        panel.title = L10n.text(renaming ? "Rename…" : "Move To…")
+        panel.prompt = L10n.text(renaming ? "Rename" : "Move")
+        panel.directoryURL = url.deletingLastPathComponent()
+        panel.nameFieldStringValue = url.lastPathComponent
+        panel.canCreateDirectories = true
+        guard await run(panel, attachedTo: window) == .OK else { return nil }
+        return panel.url
+    }
+
+    public func confirmTrash(of url: URL, hasUnsavedChanges: Bool, attachedTo window: NSWindow?) async -> Bool {
+        let alert = NSAlert()
+        alert.messageText = L10n.text("Move to Trash?")
+        alert.informativeText = url.lastPathComponent + "\n" + L10n.text(hasUnsavedChanges
+            ? "The file will move to Trash and its tab will close. Unsaved changes will be discarded. You can restore the saved file using Finder."
+            : "The file will move to Trash and its tab will close. You can restore the file using Finder.")
+        alert.addButton(withTitle: L10n.text("Move to Trash"))
+        alert.addButton(withTitle: L10n.text("Cancel"))
+        if let window { return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn }
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     public func chooseOpenURL(attachedTo window: NSWindow?) async -> URL? {

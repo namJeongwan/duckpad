@@ -919,6 +919,45 @@ public final class ScratchWorkspaceUseCase {
         )
     }
 
+    /// Holds the structural transaction across filesystem work. A successful
+    /// rename/trash is already visible on disk, so publish it even if recovery
+    /// persistence fails; retry must save the new binding, never the old path.
+    public func changeFileLocation(
+        expected: FileWorkspaceContext,
+        destinationPath: String?,
+        operation: @MainActor () async throws -> FileBinding?
+    ) async -> FileSaveOutcome {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        guard !Task.isCancelled, startupState == .ready, activeFileContext() == expected,
+              expected.binding != nil else { return .failed(.comparisonInvalidated) }
+        if let destinationPath, let duplicate = tabID(canonicalPath: destinationPath), duplicate != expected.tabID {
+            return .failed(.session(.duplicateFileBinding(destinationPath)))
+        }
+        do {
+            let binding = try await operation()
+            var candidate = session
+            try candidate.changeFileLocation(tabID: expected.tabID, binding: binding,
+                title: binding.map { URL(fileURLWithPath: $0.canonicalPath).lastPathComponent } ?? expected.title)
+            session = candidate
+            persistenceState = .pending
+            let index = candidate.tabs.firstIndex { $0.id == expected.tabID }!
+            publish(.tabUpdated(index: index))
+            switch await save(candidate) {
+            case .saved:
+                persistenceState = .saved
+                publish(.persistence)
+                return .saved(expected.tabID)
+            case .failed(let failure):
+                persistenceState = .failed(failure)
+                publishFailure(failure, retry: .saveCurrent)
+                return .failed(.workspace(failure))
+            }
+        } catch let error as TextFileStoreError { return .failed(.store(error)) }
+        catch let error as SessionError { return .failed(.session(error)) }
+        catch { return .failed(.store(.io(String(describing: error)))) }
+    }
+
     @discardableResult
     public func addOpenedFile(binding: FileBinding, title: String) async -> WorkspaceActionOutcome {
         await acquireTransaction()

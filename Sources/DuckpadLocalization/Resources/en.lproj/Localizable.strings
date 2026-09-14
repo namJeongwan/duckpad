@@ -609,3 +609,27 @@
 "Formatting took too long. Your document has been kept." = "Formatting took too long. Your document has been kept.";
 "The built-in formatter could not be started." = "The built-in formatter could not be started.";
 "Formatting failed: %1$@" = "Formatting failed: %1$@";
+
+"Rename…" = "Rename…";
+
+"Move To…" = "Move To…";
+
+"Move to Trash…" = "Move to Trash…";
+
+"Print…" = "Print…";
+
+"Rename" = "Rename";
+
+"Move" = "Move";
+
+"Move to Trash?" = "Move to Trash?";
+
+"Move to Trash" = "Move to Trash";
+
+"The file will move to Trash and its tab will close. Unsaved changes will be discarded. You can restore the saved file using Finder." = "The file will move to Trash and its tab will close. Unsaved changes will be discarded. You can restore the saved file using Finder.";
+
+"The file will move to Trash and its tab will close. You can restore the file using Finder." = "The file will move to Trash and its tab will close. You can restore the file using Finder.";
+
+"A file already exists at that location. Choose another name or folder." = "A file already exists at that location. Choose another name or folder.";
+
+"Could not change file location" = "Could not change file location";

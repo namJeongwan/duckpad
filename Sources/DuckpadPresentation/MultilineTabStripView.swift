@@ -6,6 +6,9 @@ import DuckpadDomain
 public enum TabContextAction: Equatable, Sendable {
     case close(TabCloseScope)
     case setPinned(Bool)
+    case renameFile
+    case moveFile
+    case trashFile
     case copyFullPath
     case openContainingFolder
     case moveToEditorGroup(EditorGroupSplitOrientation)
@@ -388,6 +391,10 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         )
         if tab.fullPath != nil {
             menu.addItem(.separator())
+            add(L10n.text("Rename…"), action: #selector(renameFile), to: menu, contextAction: .renameFile)
+            add(L10n.text("Move To…"), action: #selector(moveFile), to: menu, contextAction: .moveFile)
+            add(L10n.text("Move to Trash…"), action: #selector(trashFile), to: menu, contextAction: .trashFile)
+            menu.addItem(.separator())
             add(L10n.text("Copy Full Path"), action: #selector(copyFullPath), to: menu)
             add(L10n.text("Open Containing Folder"), action: #selector(openContainingFolder), to: menu)
         }
@@ -423,6 +430,9 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         guard let tab = configuredTab else { return }
         onContextAction?(.setPinned(!tab.isPinned))
     }
+    @objc private func renameFile() { onContextAction?(.renameFile) }
+    @objc private func moveFile() { onContextAction?(.moveFile) }
+    @objc private func trashFile() { onContextAction?(.trashFile) }
     @objc private func copyFullPath() { onContextAction?(.copyFullPath) }
     @objc private func openContainingFolder() { onContextAction?(.openContainingFolder) }
     @objc private func moveToGroupRight() { onContextAction?(.moveToEditorGroup(.sideBySide)) }

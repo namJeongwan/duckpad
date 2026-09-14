@@ -100,6 +100,18 @@ public actor LocalTextFileStore: TextFileStore {
             .appendingPathComponent("document-bookmarks.json", isDirectory: false)
     }
 
+    /// A false start result does not prove the process lacks access: AppKit can
+    /// deliver an implicitly authorized file URL. Only macOS can turn that grant
+    /// into a security-scoped bookmark; resolving it gives us a scope to own and
+    /// balance. Never grant access based on a path/existence check alone.
+    private func acquireSecurityScopedURL(_ url: URL) -> URL? {
+        if startSecurityScopedAccess(url) { return url }
+        guard let bookmark = try? createSecurityScopedBookmark(url),
+              let resolved = try? resolveSecurityScopedBookmark(bookmark).0,
+              startSecurityScopedAccess(resolved) else { return nil }
+        return resolved
+    }
+
     public func prepareSecurityScopedAccess(
         to url: URL,
         ownerID: UUID
@@ -123,20 +135,22 @@ public actor LocalTextFileStore: TextFileStore {
             return SecurityScopedFileAccess(url: current.url, bookmark: current.bookmark)
         }
 
-        var accessedURL = requested
-        var started = startSecurityScopedAccess(requested)
-        if !started {
+        // Keep the URL supplied by AppKit; standardizing it is only for lookup.
+        // Finder drops may already grant process access without carrying an
+        // explicitly startable scope. Convert that grant to a retained bookmark.
+        var acquiredURL = acquireSecurityScopedURL(url)
+        if acquiredURL == nil {
             do {
                 let archive = try loadBookmarkArchive()
                 guard let stored = archive.entries.last(where: { $0.path == requested.path }) else {
                     throw TextFileStoreError.permissionDenied(requested.path)
                 }
-                accessedURL = try resolveSecurityScopedBookmark(stored.bookmark).0
-                started = startSecurityScopedAccess(accessedURL)
+                let resolved = try resolveSecurityScopedBookmark(stored.bookmark).0
+                if startSecurityScopedAccess(resolved) { acquiredURL = resolved }
             } catch let error as TextFileStoreError { throw error }
             catch { throw .permissionDenied(requested.path) }
         }
-        guard started else { throw .permissionDenied(requested.path) }
+        guard let accessedURL = acquiredURL else { throw .permissionDenied(requested.path) }
         do {
             let canonical = try Self.canonicalize(accessedURL)
             if var current = activeSecurityScopes[canonical.path] {
@@ -146,10 +160,10 @@ public actor LocalTextFileStore: TextFileStore {
                 return SecurityScopedFileAccess(url: current.url, bookmark: current.bookmark)
             }
             let bookmark = try FileManager.default.fileExists(atPath: canonical.path)
-                ? createSecurityScopedBookmark(canonical) : nil
+                ? createSecurityScopedBookmark(accessedURL) : nil
             if let bookmark { try persistBookmark(bookmark, aliases: [requested.path, canonical.path]) }
             activeSecurityScopes[canonical.path] = ActiveSecurityScope(
-                url: canonical,
+                url: accessedURL,
                 bookmark: bookmark,
                 owners: [ownerID]
             )
@@ -170,23 +184,23 @@ public actor LocalTextFileStore: TextFileStore {
         guard securityScopedAccessRequired else { return SecurityScopedFileAccess(url: url) }
         guard url.isFileURL else { throw .invalidPath(url.absoluteString) }
         // Use the newly selected Powerbox URL, never the expired cached grant.
-        guard startSecurityScopedAccess(url) else { throw .permissionDenied(url.path) }
+        guard let accessedURL = acquireSecurityScopedURL(url) else { throw .permissionDenied(url.path) }
         do {
-            let canonical = try Self.canonicalize(url)
+            let canonical = try Self.canonicalize(accessedURL)
             let bookmark = try FileManager.default.fileExists(atPath: canonical.path)
-                ? createSecurityScopedBookmark(canonical) : nil
+                ? createSecurityScopedBookmark(accessedURL) : nil
             if let bookmark { try persistBookmark(bookmark, aliases: [url.path, canonical.path]) }
             let previous = activeSecurityScopes[canonical.path]
             var owners = previous?.owners ?? []
             owners.insert(ownerID)
-            activeSecurityScopes[canonical.path] = ActiveSecurityScope(url: url, bookmark: bookmark, owners: owners)
+            activeSecurityScopes[canonical.path] = ActiveSecurityScope(url: accessedURL, bookmark: bookmark, owners: owners)
             if let previous { stopSecurityScopedAccess(previous.url) }
             return SecurityScopedFileAccess(url: canonical, bookmark: bookmark)
         } catch let error as TextFileStoreError {
-            stopSecurityScopedAccess(url)
+            stopSecurityScopedAccess(accessedURL)
             throw error
         } catch {
-            stopSecurityScopedAccess(url)
+            stopSecurityScopedAccess(accessedURL)
             throw .io(String(describing: error))
         }
     }
@@ -228,7 +242,7 @@ public actor LocalTextFileStore: TextFileStore {
                 activeSecurityScopes[canonical.path] = current
             } else {
                 activeSecurityScopes[canonical.path] = ActiveSecurityScope(
-                    url: canonical,
+                    url: resolved.0,
                     bookmark: refreshed,
                     owners: [ownerID]
                 )

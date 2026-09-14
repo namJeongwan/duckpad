@@ -28,6 +28,8 @@ public struct BufferMetadata: Codable, Equatable, Sendable {
         return revision
     }
 
+    public mutating func markDirty() { isDirty = true }
+
     public mutating func markClean() { isDirty = false }
 
     @discardableResult
@@ -506,6 +508,18 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         }
         if savedRevision == nil || savedRevision == buffer.revision { buffer.markClean() }
         buffers[buffer.id] = buffer
+    }
+
+    /// Changes file metadata without replacing editor bytes or resetting Undo.
+    public mutating func changeFileLocation(tabID: TabID, binding: FileBinding?, title: String) throws {
+        var document = try document(for: tabID)
+        if let binding, let duplicate = self.tabID(canonicalPath: binding.canonicalPath), duplicate != tabID {
+            throw SessionError.duplicateFileBinding(binding.canonicalPath)
+        }
+        document.title = title
+        documents[document.id] = document
+        fileBindings[document.id] = binding
+        if binding == nil { buffers[document.bufferID]?.markDirty() }
     }
 
     /// Refreshes sandbox authority without changing the document title,

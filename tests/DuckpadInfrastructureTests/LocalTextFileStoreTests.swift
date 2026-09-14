@@ -289,3 +289,49 @@ func directoryDurabilityFailuresRestoreOriginal(fault: AtomicWriteFault) async t
     #expect(try String(contentsOf: file, encoding: .utf8) == "preserved edits")
     await store.releaseAllSecurityScopedAccess(ownerID: owner)
 }
+
+@Test(arguments: [false, true])
+func implicitFileGrantBecomesOwnedBookmarkWithoutAnOpenPanel(renewing: Bool) async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("dropped.txt")
+    try Data("dropped 한글".utf8).write(to: file)
+    let scoped = try #require(URL(string: file.absoluteString + "?owned-scope"))
+    let counter = SecurityScopeCounter()
+    let store = LocalTextFileStore(bookmarkArchiveURL: directory.appendingPathComponent("bookmarks.json"),
+        testingSecurityScopedAccessRequired: true,
+        testingStartSecurityScopedAccess: { url in
+            _ = counter.start(url)
+            return url == scoped
+        },
+        testingStopSecurityScopedAccess: { url in
+            #expect(url == scoped)
+            counter.stop(url)
+        },
+        testingCreateSecurityScopedBookmark: { _ in Data("retained-grant".utf8) },
+        testingResolveSecurityScopedBookmark: { _ in (scoped, false) })
+    let owner = UUID()
+    let access = try await (renewing
+        ? store.renewSecurityScopedAccess(to: file, ownerID: owner)
+        : store.prepareSecurityScopedAccess(to: file, ownerID: owner))
+    #expect(access.url.path == file.path)
+    #expect(access.bookmark == Data("retained-grant".utf8))
+    #expect(try await store.read(from: access.url).data == Data("dropped 한글".utf8))
+    await store.releaseAllSecurityScopedAccess(ownerID: owner)
+    #expect(counter.values == (2, 1))
+}
+
+@Test func missingGrantDoesNotBecomeFileAccess() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("denied.txt")
+    let store = LocalTextFileStore(bookmarkArchiveURL: directory.appendingPathComponent("bookmarks.json"),
+        testingSecurityScopedAccessRequired: true,
+        testingStartSecurityScopedAccess: { _ in false }, testingStopSecurityScopedAccess: { _ in Issue.record("Unacquired scope stopped") },
+        testingCreateSecurityScopedBookmark: { _ in throw TextFileStoreError.permissionDenied(file.path) },
+        testingResolveSecurityScopedBookmark: { _ in throw TextFileStoreError.permissionDenied(file.path) })
+    await #expect(throws: TextFileStoreError.permissionDenied(file.path)) {
+        _ = try await store.prepareSecurityScopedAccess(to: file, ownerID: UUID())
+    }
+}
