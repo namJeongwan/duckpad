@@ -17,6 +17,229 @@ private typealias ScintillaMessageInvocation = @convention(c) (
 
 @Suite(.serialized)
 struct LanguageEditorAdapterTests {
+    @Test @MainActor
+    func markdownStylesHaveVisibleColorsAndResetWhenLanguageChanges() throws {
+        let (_, view) = hostedView()
+        try view.loadUTF8(Data("# Heading\n\n**bold** and `code`\n\n```rust\nfn main() {}\n```".utf8), revision: 0)
+        #expect(view.applyLexerNamed("markdown", keywords: [], tabWidth: 4, useTabs: false,
+                                    folding: false, braceMatching: false, maximumStyleBytes: 1_000_000))
+        _ = try sendTestingScintillaMessage(4003, lParam: -1, to: view) // SCI_COLOURISE
+        #expect(view.style(atUTF8Position: 2) == 6)
+        // SCI_STYLEGETFORE / SCI_STYLEGETBOLD: the legacy lexer has no named-style metadata.
+        #expect(try sendTestingScintillaMessage(2481, wParam: 6, to: view) != sendTestingScintillaMessage(2481, wParam: 0, to: view))
+        #expect(try sendTestingScintillaMessage(2483, wParam: 6, to: view) == 1)
+        #expect(view.applyLexerNamed("null", keywords: [], tabWidth: 4, useTabs: false,
+                                    folding: false, braceMatching: false, maximumStyleBytes: 1_000_000))
+        #expect(try sendTestingScintillaMessage(2483, wParam: 6, to: view) == 0)
+    }
+
+    @Test @MainActor
+    func selectionSurroundPreservesUnicodeDirectionAndOneUndo() throws {
+        for pair in ["()", "[]", "{}", "''", "\"\"", "``"] {
+            let (_, view) = hostedView()
+            let source = "앞\r\n한글🦆\r\n뒤"
+            try view.loadUTF8(Data(source.utf8), revision: 0)
+            #expect(view.applyLexerNamed("json", keywords: [], tabWidth: 2, useTabs: false,
+                                        folding: true, braceMatching: true, maximumStyleBytes: 1_000_000))
+            view.restoreCaretUTF8Position(5, anchorPosition: 15, firstVisibleLine: 0,
+                                         horizontalScrollOffset: 0, wordWrapEnabled: true)
+            view.resetInstrumentation()
+            view.insertCommittedText(String(pair.prefix(1)))
+
+            let expected = "앞\r\n" + pair.prefix(1) + "한글🦆" + pair.suffix(1) + "\r\n뒤"
+            #expect(view.incrementalPayloadByteCount == 2)
+            #expect(view.snapshotReadCount == 0)
+            #expect(view.contentUTF8 == Data(expected.utf8))
+            #expect(view.caretUTF8Position == 6)
+            #expect(view.anchorUTF8Position == 16)
+            view.undo()
+            #expect(view.contentUTF8 == Data(source.utf8))
+            #expect(!view.canUndo)
+            view.redo()
+            #expect(view.contentUTF8 == Data(expected.utf8))
+        }
+    }
+
+    @Test @MainActor
+    func selectionSurroundHandlesMultipleSelectionsAndEmptyCaret() throws {
+        let (_, view) = hostedView()
+        try view.loadUTF8(Data("one two end".utf8), revision: 0)
+        #expect(view.applyLexerNamed("python", keywords: [], tabWidth: 2, useTabs: false,
+                                    folding: true, braceMatching: true, maximumStyleBytes: 1_000_000))
+        view.setPrimarySelectionUTF8Range(NSRange(location: 4, length: 3))
+        #expect(view.addSelectionUTF8Range(NSRange(location: 0, length: 3)))
+        #expect(view.addSelectionUTF8Range(NSRange(location: 11, length: 0)))
+        view.insertCommittedText("[")
+        #expect(view.contentUTF8 == Data("[one] [two] end[]".utf8))
+        #expect(view.selectionCount == 3)
+        view.undo()
+        #expect(view.contentUTF8 == Data("one two end".utf8))
+        #expect(!view.canUndo)
+    }
+
+    @Test @MainActor
+    func selectionSurroundLargeRangeOnlyPublishesDelimiterBytes() throws {
+        let (_, view) = hostedView()
+        let source = String(repeating: "한글🦆\n", count: 100_000)
+        try view.loadUTF8(Data(source.utf8), revision: 0)
+        #expect(view.applyLexerNamed("json", keywords: [], tabWidth: 2, useTabs: false,
+                                    folding: false, braceMatching: true, maximumStyleBytes: 2_000_000))
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: source.utf8.count))
+        view.resetInstrumentation()
+        view.insertCommittedText("{")
+        #expect(view.incrementalPayloadByteCount == 2)
+        #expect(view.snapshotReadCount == 0)
+        #expect(view.documentByteLength == source.utf8.count + 2)
+        view.undo()
+        #expect(view.incrementalPayloadByteCount == 4)
+        #expect(view.contentUTF8 == Data(source.utf8))
+    }
+
+    @Test @MainActor
+    func selectionSurroundUsesTheRealAppKitInputPath() throws {
+        let (window, view) = hostedView()
+        defer { window.orderOut(nil) }
+        try view.loadUTF8(Data("한글🦆".utf8), revision: 0)
+        #expect(view.applyLexerNamed("json", keywords: [], tabWidth: 2, useTabs: false,
+                                    folding: true, braceMatching: true, maximumStyleBytes: 1_000_000))
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 10))
+        window.makeKeyAndOrderFront(nil)
+        view.focusEditor()
+        try sendKeyEvent(characters: "{", charactersIgnoringModifiers: "[",
+                         modifierFlags: [.shift], keyCode: 33, to: window)
+        #expect(view.contentUTF8 == Data("{한글🦆}".utf8))
+        #expect(view.anchorUTF8Position == 1)
+        #expect(view.caretUTF8Position == 11)
+        view.undo()
+        #expect(view.contentUTF8 == Data("한글🦆".utf8))
+    }
+
+    @Test @MainActor
+    func selectionSurroundLeavesIMEPasteReplacementAndPlainTextNative() throws {
+        let (window, view) = hostedView()
+        defer { window.orderOut(nil) }
+        let pasteboard = NSPasteboard.general
+        let oldItems = pasteboard.pasteboardItems?.map { item in
+            item.types.compactMap { type in item.data(forType: type).map { (type, $0) } }
+        } ?? []
+        defer {
+            pasteboard.clearContents()
+            pasteboard.writeObjects(oldItems.map { entries in
+                let item = NSPasteboardItem()
+                for (type, data) in entries { item.setData(data, forType: type) }
+                return item
+            })
+        }
+        for mode in ["plain", "paste", "multi", "replacement", "ime"] {
+            try view.loadUTF8(Data("한글".utf8), revision: 0)
+            #expect(view.applyLexerNamed(mode == "plain" ? "null" : "json", keywords: [],
+                                        tabWidth: 2, useTabs: false, folding: false,
+                                        braceMatching: mode != "plain", maximumStyleBytes: 1_000_000))
+            view.selectAll()
+            view.focusEditor()
+            let client = try #require(window.firstResponder as? NSTextInputClient)
+            switch mode {
+            case "paste":
+                pasteboard.clearContents()
+                #expect(pasteboard.setString("{", forType: .string))
+                view.paste()
+            case "multi": view.insertCommittedText("{{")
+            case "replacement":
+                client.insertText("{", replacementRange: NSRange(location: 0, length: 2))
+            case "ime":
+                view.setMarkedText("ㅎ", selectedRange: NSRange(location: 1, length: 0),
+                                   replacementRange: NSRange(location: NSNotFound, length: 0))
+                client.insertText("{", replacementRange: NSRange(location: NSNotFound, length: 0))
+            default: view.insertCommittedText("{")
+            }
+            #expect(view.contentUTF8 == Data((mode == "multi" ? "{{" : "{").utf8))
+        }
+    }
+
+    @Test @MainActor
+    func selectionSurroundFromSplitPanePublishesBoundedRecoveryEdits() throws {
+        let adapter = ScintillaEditorAdapter()
+        defer { adapter.invalidate() }
+        let id = BufferID()
+        adapter.install(.init(bufferID: id, revision: 0, text: "한글🦆"))
+        adapter.display(.init(bufferID: id, revision: 0))
+        adapter.split(orientation: .sideBySide)
+        #expect(adapter.applyLanguage(.init(languageID: .init(rawValue: "json"), lexerName: "json",
+                                            indentation: .init(width: 2), folding: true, braceMatching: true)))
+        let primary = try #require(adapter.activeScintillaView)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        secondary.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 10))
+        var edits: [EditorIncrementalEdit] = []
+        adapter.onEdit = {
+            edits.append($0)
+            return .accepted(newRevision: $0.expectedRevision + 1)
+        }
+        secondary.insertCommittedText("[")
+        #expect(primary.contentUTF8 == Data("[한글🦆]".utf8))
+        #expect(secondary.contentUTF8 == primary.contentUTF8)
+        #expect(secondary.anchorUTF8Position == 1)
+        #expect(secondary.caretUTF8Position == 11)
+        #expect(edits.map(\.replacement) == ["]", "["])
+        #expect(edits.allSatisfy { $0.range.length == 0 })
+        #expect(adapter.recoverySnapshot(for: id)?.utf8 == primary.contentUTF8)
+        secondary.undo()
+        #expect(adapter.recoverySnapshot(for: id)?.utf8 == Data("한글🦆".utf8))
+        #expect(primary.contentUTF8 == secondary.contentUTF8)
+        secondary.redo()
+        #expect(adapter.recoverySnapshot(for: id)?.utf8 == Data("[한글🦆]".utf8))
+    }
+
+    @Test @MainActor
+    func selectionSurroundStopsWhenRecoveryRejectsAnEdit() async throws {
+        for acceptedCount in 0...1 {
+            let adapter = ScintillaEditorAdapter()
+            defer { adapter.invalidate() }
+            let id = BufferID()
+            adapter.install(.init(bufferID: id, revision: 0, text: "text"))
+            adapter.display(.init(bufferID: id, revision: 0))
+            #expect(adapter.applyLanguage(.init(languageID: .init(rawValue: "json"), lexerName: "json",
+                                                indentation: .init(width: 2), folding: true, braceMatching: true)))
+            let view = try #require(adapter.activeScintillaView)
+            view.selectAll()
+            var edits = 0
+            adapter.onEdit = {
+                edits += 1
+                return edits <= acceptedCount ? .accepted(newRevision: $0.expectedRevision + 1)
+                    : .rejected(currentRevision: $0.expectedRevision)
+            }
+            view.insertCommittedText("{")
+            try await waitForRevision(view, UInt64(acceptedCount))
+            let expected = Data((acceptedCount == 0 ? "text" : "text}").utf8)
+            #expect(view.contentUTF8 == expected)
+            #expect(adapter.recoverySnapshot(for: id)?.utf8 == expected)
+            #expect(edits == acceptedCount + 1)
+            #expect(!view.canUndo)
+        }
+    }
+
+    @Test @MainActor
+    func selectionSurroundReservesRevisionSpaceForUndo() throws {
+        for remaining in 1...4 {
+            let (_, view) = hostedView()
+            let revision = UInt64.max - UInt64(remaining)
+            try view.loadUTF8(Data("text".utf8), revision: revision)
+            #expect(view.applyLexerNamed("json", keywords: [], tabWidth: 2, useTabs: false,
+                                        folding: false, braceMatching: true, maximumStyleBytes: 1_000_000))
+            view.selectAll()
+            view.insertCommittedText("{")
+            if remaining == 4 {
+                #expect(view.contentUTF8 == Data("{text}".utf8))
+                view.undo()
+                #expect(view.contentUTF8 == Data("text".utf8))
+                #expect(view.revision == UInt64.max)
+            } else {
+                #expect(view.contentUTF8 == Data("text".utf8))
+                #expect(view.revision == revision)
+                #expect(!view.canUndo)
+            }
+        }
+    }
+
     @Test @MainActor func findSelectionCaptureIsUnicodeBoundedWithoutFullDocumentRead() throws {
         let adapter = ScintillaEditorAdapter()
         defer { adapter.invalidate() }

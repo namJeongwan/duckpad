@@ -53,6 +53,17 @@ struct DocumentFormattingIntegrationTests {
         func dispose() { controller.close(); editor.invalidate(); try? FileManager.default.removeItem(at: root) }
     }
 
+    @Test func markdownSavePreservesIndentationWithoutCallingFormatter() async throws {
+        let f = try Fixture(); await f.start(); defer { f.dispose() }
+        let source = "\'\'\'rust\nfn main() {\n    let n = 1;\n}\n\'\'\'\n"
+        let context = try await f.open(source, name: "test.md")
+        f.formatting.settings.formatOnSave = true
+        #expect(await f.files.saveActive() == .saved(context.tabID))
+        #expect(f.engine.requests.isEmpty)
+        #expect(try String(contentsOfFile: context.binding!.canonicalPath, encoding: .utf8) == source)
+        #expect(f.editor.activeScintillaView?.contentUTF8 == Data(source.utf8))
+    }
+
     @Test func largeFormattedSaveUndoRedoPublishesOncePerAction() async throws {
         let f = try Fixture(); await f.start(); defer { f.dispose() }
         let prompt = String(repeating: "한글 🦆 > nested\n", count: 4_000)

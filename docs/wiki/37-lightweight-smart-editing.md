@@ -8,7 +8,11 @@ Duckpad now provides the high-frequency editing assistance expected from a
 language-aware scratchpad without introducing an IDE-scale parser, language
 server, background worker, or new dependency. When a brace-capable language is
 active, direct keyboard input of `{`, `[`, `(`, `'`, `"`, or backtick inserts
-the matching closer and leaves the caret between the pair.
+the matching closer and leaves the caret between the pair. With selected text,
+the same openers surround each stream selection and retain the inner selection
+and its direction. Mixed empty carets receive a pair; one Undo restores the text.
+Only the two delimiters per selection enter undo and recovery storage, even
+when the selection spans a large document.
 
 Return preserves the current line's leading whitespace. It adds one configured
 indent unit after `{`, `[`, or `(`, and after `:` in Python. When Return is
@@ -45,9 +49,19 @@ boundaries before Scintilla mutates the document. `SCN_CHARADDED` accepts only
 direct input for the caret adjustment. Command, Control, and Option modified key
 events are not treated as smart insertions. Return handled directly by Scintilla
 uses a synchronous input preflight, while keyboard paste remains outside that
-signal. Every smart transformation requires one empty stream selection with no
-virtual space. Selection surround remains deferred; `<` and `>` remain literal
-edits so comparison operators are never captured as pairs.
+signal. Pair insertion, closer skip-over, and smart indentation require one empty
+stream selection with no virtual space. Selection surround instead uses a
+pre-insertion delegate, before native typing deletes selected text. It accepts
+one or more disjoint stream selections without virtual space, retains the main
+selection, and preserves the existing publisher for split panes. Explicit text
+replacement, IME, paste, rectangle selections, and empty-caret-only input retain
+their existing behavior. `<` and `>` remain literal edits.
+
+Surrounding publishes individual one-byte insertions in descending position
+order inside one undo group. Rejected edits stop further insertions and use the
+existing recovery path; accepted deltas remain authoritative if a later delta
+is rejected. Revision capacity is checked before mutation for both the complete
+surround and its Undo.
 
 ## Verification contract
 

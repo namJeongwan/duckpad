@@ -66,3 +66,5 @@ Secrets.xcconfig
 *.pem
 *.p12
 *.mobileprovision
+
+/scripts/markdown-preview/node_modules/

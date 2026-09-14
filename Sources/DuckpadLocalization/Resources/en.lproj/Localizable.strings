@@ -633,3 +633,20 @@
 "A file already exists at that location. Choose another name or folder." = "A file already exists at that location. Choose another name or folder.";
 
 "Could not change file location" = "Could not change file location";
+
+"Markdown Preview" = "Markdown Preview";
+"Close Preview" = "Close Preview";
+"Rendering preview…" = "Rendering preview…";
+"Markdown preview could not be rendered." = "Markdown preview could not be rendered.";
+"Markdown preview is unavailable for binary files." = "Markdown preview is unavailable for binary files.";
+"Allow Local Images…" = "Allow Local Images…";
+"Choose the folder containing this document’s images." = "Choose the folder containing this document’s images.";
+"Markdown image drop" = "Markdown image drop";
+"Ask every time" = "Ask every time";
+"Insert into Markdown" = "Insert into Markdown";
+"How would you like to use these images?" = "How would you like to use these images?";
+"Don’t ask again; use this action" = "Don’t ask again; use this action";
+"The image drop preference could not be saved." = "The image drop preference could not be saved.";
+"Open in New Tab" = "Open in New Tab";
+
+"Choose an image folder to allow local images in the preview." = "Choose an image folder to allow local images in the preview.";

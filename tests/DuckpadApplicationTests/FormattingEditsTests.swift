@@ -58,6 +58,13 @@ struct FormattingEditsTests {
         #expect(FormattingLanguage.parser(languageID: "rust", filename: "main.rs", usesLanguageOverride: false) == nil)
     }
 
+    @Test func markdownIsExcludedFromFormatting() {
+        for ext in ["md", "markdown", "mdx", "MD"] {
+            #expect(FormattingLanguage.parser(languageID: "json", filename: "draft." + ext, usesLanguageOverride: false) == nil)
+        }
+        #expect(FormattingLanguage.parser(languageID: "markdown", filename: "new 1", usesLanguageOverride: true) == nil)
+    }
+
     @Test func legacySettingsKeepAutomaticFormattingOffAndNewSettingsRoundTrip() throws {
         let legacy = Data(#"{"schemaVersion":1,"appearanceMode":"system","defaultWordWrapEnabled":true,"defaultWrapMarkerVisible":false}"#.utf8)
         #expect(try JSONDecoder().decode(AppSettings.self, from: legacy).formatting.formatOnSave == false)

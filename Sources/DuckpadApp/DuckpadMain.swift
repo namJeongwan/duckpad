@@ -52,6 +52,10 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     func applicationDidFinishLaunching(_ notification: Notification) {
         installDevelopmentAppIcon()
         environment = ProcessInfo.processInfo.environment
+        if environment["DUCKPAD_MARKDOWN_SMOKE"] == "1" {
+            Task { @MainActor in await BuiltInMarkdownSmoke.run() }
+            return
+        }
         if environment["DUCKPAD_FORMATTING_SMOKE"] == "1" {
             Task { @MainActor in await BuiltInFormattingSmoke.run() }
             return
@@ -866,6 +870,15 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         windowEditors[identifier] = runtime.editor
         windowRecoveryRoots[identifier] = recoveryRoot.standardizedFileURL
         controller.onNewWindowRequested = { [weak self] in self?.createAdditionalWindow() }
+        controller.onMarkdownImageDropPreferenceChanged = { [weak self] action in
+            guard let self, self.terminationCoordinator.permitsApplicationCommands else { return false }
+            var settings = self.settingsUseCase.state.settings
+            settings.markdownImageDropAction = action
+            switch await self.settingsUseCase.update(settings) {
+            case .saved(let saved), .savedWithWarning(let saved, _): self.apply(saved); return true
+            case .failed: return false
+            }
+        }
         controller.onSettingsRequested = { [weak self] in self?.showSettings() }
         controller.onThemeRequested = { [weak self] mode in self?.changeTheme(mode) }
         controller.currentAppearanceMode = { [weak self] in self?.settingsUseCase.state.settings.appearanceMode ?? .system }

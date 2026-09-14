@@ -1,0 +1,24 @@
+{
+  "name": "duckpad-markdown-preview",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test preview.test.mjs"
+  },
+  "dependencies": {
+    "@vscode/markdown-it-katex": "1.1.2",
+    "dompurify": "3.4.15",
+    "highlight.js": "11.12.0",
+    "katex": "0.18.7",
+    "markdown-it": "15.0.2",
+    "mermaid": "12.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "overrides": {
+    "katex": "$katex",
+    "lodash-es": "4.18.1"
+  }
+}

@@ -23,8 +23,8 @@ final class MaterialFileIconTheme {
     private var images: [String: NSImage] = [:]
 
     private init() {
-        let bundle = Self.resourceBundle
-        guard let manifestURL = bundle.url(
+        let bundle = DuckpadPresentationResources.bundle
+        guard let manifestURL = bundle?.url(
             forResource: "material-icons",
             withExtension: "json",
             subdirectory: "MaterialIconTheme/dist"
@@ -99,16 +99,4 @@ final class MaterialFileIconTheme {
         }
     }
 
-    private static var resourceBundle: Bundle {
-        if let resources = Bundle.main.resourceURL,
-           let packaged = Bundle(
-               url: resources.appendingPathComponent(
-                   "Duckpad_DuckpadPresentation.bundle",
-                   isDirectory: true
-               )
-           ) {
-            return packaged
-        }
-        return Bundle.module
-    }
 }

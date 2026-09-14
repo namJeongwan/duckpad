@@ -22,6 +22,12 @@ test -f "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MaterialIcon
 test -f "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MaterialIconTheme/PROVENANCE.md"
 test -f "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MaterialIconTheme/dist/material-icons.json"
 test -f "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MaterialIconTheme/icons/file.svg"
+for ASSET in preview.js highlight.css katex.css THIRD_PARTY_NOTICES.txt fonts/KaTeX_Main-Regular.woff2; do
+    test -s "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MarkdownPreview/$ASSET"
+done
+for ASSET in pin.svg unpin.svg eye.svg LICENSES; do
+    test -s "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/ZedIcons/$ASSET"
+done
 
 for LOCALE in en ko ja zh-Hans pt-BR it fr de; do
     # SwiftPM normalizes resource directory names to lowercase.

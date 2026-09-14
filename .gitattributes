@@ -7,3 +7,8 @@
 # Do not normalize generated/vendor bytes to satisfy whitespace diagnostics.
 /Sources/DuckpadInfrastructure/Resources/Formatter/formatter*.js whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 /Sources/DuckpadInfrastructure/Resources/Formatter/licenses/** whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+
+# Preserve generated Markdown engine strings, upstream CSS, and license notices.
+/Sources/DuckpadPresentation/Resources/MarkdownPreview/*.js whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+/Sources/DuckpadPresentation/Resources/MarkdownPreview/*.css whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+/Sources/DuckpadPresentation/Resources/MarkdownPreview/THIRD_PARTY_NOTICES.txt whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

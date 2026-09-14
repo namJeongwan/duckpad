@@ -42,7 +42,12 @@ are not compiled. Duckpad carries six narrow integration and behavior patches:
    AppKit text interpretation. Command paths such as paste remain outside the
    direct-input signal. This preserves Scintilla's insertion and composition
    behavior while allowing the Duckpad-owned bridge to keep smart editing out
-   of paste, IME, selection, and multi-caret transactions.
+   of paste and IME transactions. An optional synchronous direct-selection
+   delegate can consume one opener before native typing deletes a selection;
+   composition commits and explicit replacement ranges bypass it. The bridge
+   surrounds stream selections by inserting only their two boundary bytes,
+   groups the insertions into one native undo action, and preserves selection
+   direction and multiple ranges. Empty-caret-only input remains unchanged.
 3. `cocoa/ScintillaCocoa.mm` resolves dynamic system colors within the content
    view's effective appearance using `performAsCurrentDrawingAppearance:`. This
    replaces the macOS 12-deprecated global current-appearance mutation while
@@ -135,3 +140,8 @@ records every recovery delta, while the workspace publishes UI updates and
 schedules persistence only for the final edit. This prevents thousands of
 transient AppKit updates and cancelled tasks from accumulating in one Undo
 event. This is a Duckpad-owned bridge/header change, not an upstream patch.
+
+- Markdown presentation: explicitly map legacy Lexilla Markdown style IDs to the
+  existing theme palette because its lexer exposes no named-style metadata.
+  Apply heading/strong/emphasis/link/code appearance and clear it with the normal
+  style reset when switching languages or themes.

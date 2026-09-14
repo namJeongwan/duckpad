@@ -24,6 +24,12 @@ final class StatusBarButton: NSButton {
         synchronizeHover()
     }
 
+    func resetPointerState() {
+        isHovered = false
+        isPressed = false
+        updateBackground()
+    }
+
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
         updateBackground()

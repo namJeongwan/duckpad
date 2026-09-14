@@ -589,7 +589,13 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	if ([delegate respondsToSelector: @selector(scintillaWillInsertTextFromSource:)])
 		[delegate scintillaWillInsertTextFromSource: wasComposing
 			? SCITextInputSourceIMECommit : SCITextInputSourceDirect];
-	mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
+	// Let the host surround a selection before native typing deletes its contents.
+	// Explicit replacement ranges and composition commits retain native semantics.
+	const BOOL handled = !wasComposing && replacementRange.location == NSNotFound
+		&& [delegate respondsToSelector: @selector(scintillaHandleDirectSelectionText:)]
+		&& [delegate scintillaHandleDirectSelectionText: newText];
+	if (!handled)
+		mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
 	if ([delegate respondsToSelector: @selector(scintillaDidInsertText)])
 		[delegate scintillaDidInsertText];
 }

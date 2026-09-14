@@ -4280,3 +4280,58 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
         strip.tearDownHostedViews()
     }
 }
+
+@Test @MainActor func markdownTabEyeAndCloseHaveIndependentHoverAndActions() throws {
+    let tabs = ["notes.MD", "source.swift"].enumerated().map { index, title in
+        TabSnapshot(id: TabID(), title: title, isActive: index == 1, isDirty: false, isPinned: false,
+                    buffer: EditorBufferDescriptor(bufferID: BufferID(), revision: 0))
+    }
+    let (window, _, strip) = hostStrip(width: 500, height: 200, tabs: tabs)
+    defer { strip.tearDownHostedViews(); window.contentView = nil; window.close() }
+    strip.onValidateContextAction = { _, _ in true }
+    var actions: [(TabID, TabContextAction)] = []
+    var closes: [TabID] = []
+    strip.onContextAction = { actions.append(($0, $1)) }
+    strip.onClose = { closes.append($0) }
+    for index in tabs.indices {
+        let item = try #require(strip.hostedCollectionView.item(at: IndexPath(item: index, section: 0)))
+        let event = try mouseMovementEvent(for: window)
+        item.view.mouseExited(with: event)
+        let eye = try #require(descendantButtons(of: item.view).first { $0.accessibilityIdentifier().hasPrefix("duckpad.tab.markdown-preview.") == true })
+        let close = try #require(descendantButtons(of: item.view).first { $0.accessibilityIdentifier().hasPrefix("duckpad.tab.close.") == true })
+        let titleFrame = try #require(descendantTextFields(of: item.view).first).frame
+        #expect(eye.isHidden)
+        #expect(eye.image === ZedTabIcons.markdownPreview)
+        #expect(eye.image?.isTemplate == true)
+        #expect(eye.image?.tiffRepresentation != nil)
+        item.view.mouseEntered(with: event)
+        #expect(eye.isHidden == (index != 0))
+        for button in (index == 0 ? [eye, close] : [close]) {
+            button.mouseExited(with: event)
+            let resting = button.layer?.backgroundColor
+            button.mouseEntered(with: event)
+            let hover = button.layer?.backgroundColor
+            #expect(hover != resting)
+            button.highlight(true)
+            #expect(button.layer?.backgroundColor != hover)
+            button.highlight(false)
+            button.mouseExited(with: event)
+            #expect(button.layer?.backgroundColor == resting)
+        }
+        #expect(descendantTextFields(of: item.view).first?.frame == titleFrame)
+        let menu = try #require(strip.contextMenu(for: tabs[index].id))
+        let previewIndex = menu.items.firstIndex { $0.action == NSSelectorFromString("previewMarkdown") }
+        #expect((previewIndex != nil) == (index == 0))
+        if let previewIndex {
+            eye.performClick(nil)
+            menu.performActionForItem(at: previewIndex)
+            #expect(actions.count == 2)
+            #expect(actions.allSatisfy { $0.0 == tabs[0].id && $0.1 == .previewMarkdown })
+            #expect(closes.isEmpty)
+        }
+        close.performClick(nil)
+        #expect(closes.last == tabs[index].id)
+        item.view.mouseExited(with: event)
+        #expect(eye.isHidden)
+    }
+}
