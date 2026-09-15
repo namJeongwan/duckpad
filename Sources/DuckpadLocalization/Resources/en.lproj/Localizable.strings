@@ -494,7 +494,7 @@
 "This extension is incompatible with this version of Duckpad." = "This extension is incompatible with this version of Duckpad.";
 "This file is no longer available." = "This file is no longer available.";
 "This folder is already in the workspace." = "This folder is already in the workspace.";
-"This removes the durable publisher tombstone for %1$@ (%2$@). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review." = "This removes the durable publisher tombstone for %1$@ (%2$@). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review.";
+"This removes the durable publisher tombstone for %1$@ (%2$@). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review." = "This resets publisher revocation for %1$@ (%2$@). The plugin remains disabled until you enable it.";
 "Toggle Block Comment" = "Toggle Block Comment";
 "Toggle Bookmark" = "Toggle Bookmark";
 "Toggle Line Comment" = "Toggle Line Comment";
@@ -650,3 +650,96 @@
 "Open in New Tab" = "Open in New Tab";
 
 "Choose an image folder to allow local images in the preview." = "Choose an image folder to allow local images in the preview.";
+"Clipboard History" = "Clipboard History";
+
+"Search clipboard history" = "Search clipboard history";
+
+"No clipboard history" = "No clipboard history";
+
+"Clear History…" = "Clear History…";
+
+"Clear History" = "Clear History";
+
+"Clear all clipboard history, including pinned items?" = "Clear all clipboard history, including pinned items?";
+
+"Plugin request failed: %1$@" = "Plugin request failed: %1$@";
+
+"Install Plugin…" = "Install Plugin…";
+
+"Choose a signed .duckpad-plugin package." = "Choose a signed .duckpad-plugin package.";
+
+"Publisher: %1$@\nFingerprint: %2$@\nVersion: %3$@\nPackage: %4$@\n\nData access and destination:\n%5$@\n\nAffected signed package identities:\n%6$@\n\nGrants last until revoked or identity changes. Publisher revoke is durable across restart until deliberate Reset. Requested clipboard access uses the system clipboard while the plugin is enabled. Plugin storage is private to this publisher and plugin. No direct filesystem, network, environment, or process access is exposed." = "Publisher: %1$@\nFingerprint: %2$@\nVersion: %3$@\nPackage: %4$@\n\nData access and destination:\n%5$@\n\nAffected signed package identities:\n%6$@\n\nGrants last until revoked or identity changes. Publisher revoke is durable across restart until deliberate Reset. Requested clipboard access uses the system clipboard while the plugin is enabled. Plugin storage is private to this publisher and plugin. No direct filesystem, network, environment, or process access is exposed.";
+
+"Pin" = "Pin";
+
+"Unpin" = "Unpin";
+
+"Keep history for" = "Keep history for";
+
+"1 Day" = "1 Day";
+
+"3 Days" = "3 Days";
+
+"1 Week" = "1 Week";
+
+"Paste Next" = "Paste Next";
+
+"Expired entries are deleted, including pinned items. History survives restarting Duckpad." = "Expired entries are deleted, including pinned items. History survives restarting Duckpad.";
+
+"Paste the selected item, then select the next item. Stops at the end of the list." = "Paste the selected item, then select the next item. Stops at the end of the list.";
+
+"Paste cancelled. Select an editor position and try again." = "Paste cancelled. Select an editor position and try again.";
+
+"End of history. Select an item to start again." = "End of history. Select an item to start again.";
+
+"Clipboard item preview" = "Clipboard item preview";
+
+"Preview" = "Preview";
+
+"Duckpad Text Tools" = "Duckpad Text Tools";
+
+"Native plugin: %1$@\nPublisher: %2$@\nFingerprint: %3$@\nVersion: %4$@\nPackage: %5$@\n\nThis plugin runs inside Duckpad and can access the same documents, clipboard, files, and network resources as Duckpad. Listed capabilities describe its intended use; they do not isolate native code. Enable only plugins from publishers you trust.\n\nRequested capabilities:\n%6$@" = "Native plugin: %1$@\nPublisher: %2$@\nFingerprint: %3$@\nVersion: %4$@\nPackage: %5$@\n\nThis plugin runs inside Duckpad and can access the same documents, clipboard, files, and network resources as Duckpad. Listed capabilities describe its intended use; they do not isolate native code. Enable only plugins from publishers you trust.\n\nRequested capabilities:\n%6$@";
+
+"Install Native Plugin" = "Install Native Plugin";
+
+"Install" = "Install";
+
+"Choose where to install this plugin. macOS will remember access to this package for future launches." = "Choose where to install this plugin. macOS will remember access to this package for future launches.";
+
+"The installed native plugin has changed. Reinstall its signed package before running it." = "The installed native plugin has changed. Reinstall its signed package before running it.";
+
+"This native plugin needs an installation location approved through macOS." = "This native plugin needs an installation location approved through macOS.";
+
+"%1$@ %2$@ · %3$@ · %4$@ applies next launch" = "%1$@ %2$@ · %3$@ · %4$@ applies next launch";
+
+"Check for Plugin Updates" = "Check for Plugin Updates";
+
+"Checking for Plugin Updates…" = "Checking for Plugin Updates…";
+
+"Update to %1$@" = "Update to %1$@";
+
+"Installing Plugin…" = "Installing Plugin…";
+
+"No Plugin Updates Available" = "No Plugin Updates Available";
+
+"Plugin Updates Available" = "Plugin Updates Available";
+
+"Could Not Check for Plugin Updates" = "Could Not Check for Plugin Updates";
+
+"Downloading and Verifying Plugin…" = "Downloading and Verifying Plugin…";
+
+"Plugin Update Requests Additional Access" = "Plugin Update Requests Additional Access";
+
+"%1$@ %2$@ requests these additional capabilities:\n%3$@" = "%1$@ %2$@ requests these additional capabilities:\n%3$@";
+
+"Plugin Update Will Apply Next Launch" = "Plugin Update Will Apply Next Launch";
+
+"Plugin Update Installed" = "Plugin Update Installed";
+
+"Plugin Update Cancelled" = "Plugin Update Cancelled";
+
+"Plugin Update Failed" = "Plugin Update Failed";
+
+"The native plugin is being installed. Please try again shortly." = "The native plugin is being installed. Please try again shortly.";
+
+"Update" = "Update";

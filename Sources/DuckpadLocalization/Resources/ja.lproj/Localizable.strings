@@ -494,7 +494,7 @@
 "This extension is incompatible with this version of Duckpad." = "この拡張機能は現在のDuckpadのバージョンと互換性がありません。";
 "This file is no longer available." = "このファイルは利用できなくなりました。";
 "This folder is already in the workspace." = "このフォルダはすでにワークスペースにあります。";
-"This removes the durable publisher tombstone for %1$@ (%2$@). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review." = "%1$@（%2$@）の発行者の永続的な取り消し記録を削除します。拡張機能は明示的に有効化し、識別情報に紐づく新しい権限審査を承認するまで無効のままで、アクセス権を持ちません。";
+"This removes the durable publisher tombstone for %1$@ (%2$@). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review." = "%1$@ (%2$@) の発行元の無効化をリセットします。プラグインは有効にするまで無効のままです。";
 "Toggle Block Comment" = "ブロックコメントを切り替え";
 "Toggle Bookmark" = "ブックマークを切り替え";
 "Toggle Line Comment" = "行コメントを切り替え";
@@ -583,3 +583,123 @@
 "When inactive" = "非アクティブ時";
 "Always" = "常時";
 "Window opacity" = "ウインドウの不透明度";
+
+/* Clipboard services and recent editor commands */
+"Binary" = "バイナリ";
+"Read-only" = "読み取り専用";
+"Binary files are read-only and cannot be saved." = "バイナリファイルは読み取り専用のため保存できません。";
+"Loading: %1$@%%" = "読み込み中：%1$@%%";
+"Formatting" = "整形";
+"Format Document" = "ドキュメントを整形";
+"Format on Save" = "保存時に整形";
+"Print width" = "折り返し幅";
+"Indent size" = "インデント幅";
+"Indent with tabs" = "タブでインデント";
+"Prefer single quotes" = "シングルクォートを優先";
+"Print semicolons" = "セミコロンを付加";
+"SQL dialect" = "SQL方言";
+"Format Document: ⇧⌥F. Prettier, XML and SQL formatting work offline. Unsupported languages save normally. If formatting fails, your current text is saved without formatting." = "ドキュメントを整形：⇧⌥F。Prettier、XML、SQLの整形はオフラインで動作します。未対応の言語は通常どおり保存されます。整形に失敗した場合、現在のテキストを整形せずに保存します。";
+"Could not format document" = "ドキュメントを整形できませんでした";
+"No built-in formatter is available for this language." = "この言語に対応する組み込みフォーマッターはありません。";
+"Formatting supports documents up to 1 MiB and results up to 4 MiB." = "整形できるドキュメントは最大1 MiB、出力結果は最大4 MiBです。";
+"Formatting is already in progress. Try again when it finishes." = "整形処理が実行中です。完了後にもう一度お試しください。";
+"Formatting took too long. Your document has been kept." = "整形処理がタイムアウトしました。ドキュメントは変更されていません。";
+"The built-in formatter could not be started." = "組み込みフォーマッターを起動できませんでした。";
+"Formatting failed: %1$@" = "整形に失敗しました：%1$@";
+"Rename…" = "名前を変更…";
+"Move To…" = "移動先を選択…";
+"Move to Trash…" = "ゴミ箱に入れる…";
+"Print…" = "プリント…";
+"Rename" = "名前を変更";
+"Move" = "移動";
+"Move to Trash?" = "ゴミ箱に入れますか？";
+"Move to Trash" = "ゴミ箱に入れる";
+"The file will move to Trash and its tab will close. Unsaved changes will be discarded. You can restore the saved file using Finder." = "ファイルをゴミ箱に移動し、タブを閉じます。未保存の変更は破棄されます。保存済みのファイルはFinderから復元できます。";
+"The file will move to Trash and its tab will close. You can restore the file using Finder." = "ファイルをゴミ箱に移動し、タブを閉じます。ファイルはFinderから復元できます。";
+"A file already exists at that location. Choose another name or folder." = "その場所には同じ名前のファイルが既にあります。別の名前またはフォルダを選択してください。";
+"Could not change file location" = "ファイルの場所を変更できませんでした";
+"Clipboard History" = "クリップボード履歴";
+"Search clipboard history" = "クリップボード履歴を検索";
+"No clipboard history" = "クリップボード履歴はありません";
+"Clear History…" = "履歴を消去…";
+"Clear History" = "履歴を消去";
+"Clear all clipboard history, including pinned items?" = "固定した項目も含め、クリップボード履歴をすべて消去しますか？";
+"Plugin request failed: %1$@" = "プラグインのリクエストに失敗しました：%1$@";
+"Install Plugin…" = "プラグインをインストール…";
+"Choose a signed .duckpad-plugin package." = "署名済みの .duckpad-plugin パッケージを選択してください。";
+"Publisher: %1$@\nFingerprint: %2$@\nVersion: %3$@\nPackage: %4$@\n\nData access and destination:\n%5$@\n\nAffected signed package identities:\n%6$@\n\nGrants last until revoked or identity changes. Publisher revoke is durable across restart until deliberate Reset. Requested clipboard access uses the system clipboard while the plugin is enabled. Plugin storage is private to this publisher and plugin. No direct filesystem, network, environment, or process access is exposed." = "発行者：%1$@\nフィンガープリント：%2$@\nバージョン：%3$@\nパッケージ：%4$@\n\nデータへのアクセスと保存先：\n%5$@\n\n対象となる署名済みパッケージの識別情報：\n%6$@\n\n権限は、取り消すかパッケージの識別情報が変わるまで有効です。発行者の権限取り消しは再起動後も維持され、明示的にリセットするまで解除されません。要求されたクリップボードアクセスは、プラグインが有効な間、システムのクリップボードを使用します。プラグインの保存領域は、この発行者とプラグイン専用です。ファイルシステム、ネットワーク、環境変数、プロセスへの直接アクセスは提供されません。";
+"Pin" = "固定";
+"Unpin" = "固定を解除";
+"Keep history for" = "履歴の保存期間";
+"1 Day" = "1日";
+"3 Days" = "3日";
+"1 Week" = "1週間";
+"Paste Next" = "順番に貼り付け";
+"Expired entries are deleted, including pinned items. History survives restarting Duckpad." = "保存期間を過ぎた項目は、固定した項目も含めて削除されます。Duckpadを再起動しても履歴は保持されます。";
+"Paste the selected item, then select the next item. Stops at the end of the list." = "選択した項目を貼り付けて、次の項目を選択します。リストの最後で停止します。";
+"Paste cancelled. Select an editor position and try again." = "貼り付けをキャンセルしました。エディタ内の挿入位置を選択して、もう一度お試しください。";
+"End of history. Select an item to start again." = "履歴の最後です。項目を選択すると再開できます。";
+"Clipboard item preview" = "クリップボード項目のプレビュー";
+"Preview" = "プレビュー";
+"Duckpad Text Tools" = "Duckpad テキストツール";
+
+"Native plugin: %1$@\nPublisher: %2$@\nFingerprint: %3$@\nVersion: %4$@\nPackage: %5$@\n\nThis plugin runs inside Duckpad and can access the same documents, clipboard, files, and network resources as Duckpad. Listed capabilities describe its intended use; they do not isolate native code. Enable only plugins from publishers you trust.\n\nRequested capabilities:\n%6$@" = "ネイティブプラグイン：%1$@\n発行者：%2$@\nフィンガープリント：%3$@\nバージョン：%4$@\nパッケージ：%5$@\n\nこのプラグインはDuckpad内で実行され、Duckpadと同じドキュメント、クリップボード、ファイル、ネットワークリソースにアクセスできます。表示される権限は利用目的の説明であり、ネイティブコードを隔離するものではありません。信頼できる発行者のプラグインのみ有効にしてください。\n\n要求された権限：\n%6$@";
+
+"Install Native Plugin" = "ネイティブプラグインをインストール";
+
+"Install" = "インストール";
+
+"Choose where to install this plugin. macOS will remember access to this package for future launches." = "プラグインのインストール先を選択してください。macOSはこのパッケージへのアクセスを次回以降も記憶します。";
+
+"The installed native plugin has changed. Reinstall its signed package before running it." = "インストール済みのネイティブプラグインが変更されています。実行前に署名済みパッケージを再インストールしてください。";
+
+"This native plugin needs an installation location approved through macOS." = "このネイティブプラグインにはmacOSで承認されたインストール先が必要です。";
+
+"%1$@ %2$@ · %3$@ · %4$@ applies next launch" = "%1$@ %2$@ · %3$@ · 次回起動時に %4$@ を適用";
+
+"Check for Plugin Updates" = "プラグインの更新を確認";
+
+"Checking for Plugin Updates…" = "プラグインの更新を確認中…";
+
+"Update to %1$@" = "%1$@ に更新";
+
+"Installing Plugin…" = "プラグインをインストール中…";
+
+"No Plugin Updates Available" = "利用可能なプラグインの更新はありません";
+
+"Plugin Updates Available" = "プラグインの更新があります";
+
+"Could Not Check for Plugin Updates" = "プラグインの更新を確認できませんでした";
+
+"Downloading and Verifying Plugin…" = "プラグインをダウンロードして検証中…";
+
+"Plugin Update Requests Additional Access" = "プラグインの更新には追加のアクセス権が必要です";
+
+"%1$@ %2$@ requests these additional capabilities:\n%3$@" = "%1$@ %2$@ は次の追加権限を要求しています：\n%3$@";
+
+"Plugin Update Will Apply Next Launch" = "次回起動時にプラグインの更新が適用されます";
+
+"Plugin Update Installed" = "プラグインの更新をインストールしました";
+
+"Plugin Update Cancelled" = "プラグインの更新をキャンセルしました";
+
+"Plugin Update Failed" = "プラグインの更新に失敗しました";
+
+"The native plugin is being installed. Please try again shortly." = "ネイティブプラグインをインストール中です。しばらくしてから再試行してください。";
+
+"Update" = "更新";
+"Markdown Preview" = "Markdown プレビュー";
+"Close Preview" = "プレビューを閉じる";
+"Rendering preview…" = "プレビューを生成中…";
+"Markdown preview could not be rendered." = "Markdown プレビューを生成できませんでした。";
+"Markdown preview is unavailable for binary files." = "バイナリファイルでは Markdown プレビューを利用できません。";
+"Allow Local Images…" = "ローカル画像を許可…";
+"Choose the folder containing this document’s images." = "この書類の画像が保存されているフォルダを選択してください。";
+"Markdown image drop" = "Markdown への画像ドロップ";
+"Ask every time" = "毎回確認する";
+"Insert into Markdown" = "Markdown に挿入";
+"How would you like to use these images?" = "これらの画像をどのように使用しますか？";
+"Don’t ask again; use this action" = "次回から確認せず、この操作を実行する";
+"The image drop preference could not be saved." = "画像ドロップの設定を保存できませんでした。";
+"Open in New Tab" = "新しいタブで開く";
+"Choose an image folder to allow local images in the preview." = "画像フォルダを選択して、プレビューでローカル画像の表示を許可してください。";

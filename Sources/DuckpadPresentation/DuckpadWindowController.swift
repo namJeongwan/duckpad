@@ -263,6 +263,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let fileFormatStatus = StatusBarButton(title: "UTF-8", target: nil, action: nil)
     private let extensionStatus = NSButton(title: L10n.text("Extensions loading…"), target: nil, action: nil)
     private let extensionsPanel = ExtensionsManagerPanel()
+    private var extensionUpdater: ExtensionUpdateController?
     let commandPalettePanel = CommandPalettePanel()
     let symbolOutlinePanel = SymbolOutlinePanel()
     private let workspaceSidebar = WorkspaceSidebarView(frame: .zero)
@@ -536,20 +537,33 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             NSApplication.shared.sendAction(action, to: target, from: item)
         }
         extensionUseCase?.onStateChange = { [weak self] state in self?.renderExtensionState(state) }
-        extensionsPanel.onSetEnabled = { [weak self] id, enabled in
+        extensionsPanel.onInstall = { [weak self] url in
             Task { @MainActor [weak self] in
-                guard let self, self.workspaceInteractionsAreActionable else { return }
-                do { try await self.extensionUseCase?.setEnabled(id, enabled: enabled) }
+                guard let self, let install = self.onInstallExtension else { return }
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    let id = try await install(url)
+                    await self.extensionUseCase?.refresh()
+                    try await self.extensionUseCase?.setEnabled(id, enabled: true)
+                    try await self.extensionServiceHost?.prepareNativeInstallation(for: id)
+                }
                 catch { self.renderExtensionError(error) }
             }
         }
-        extensionsPanel.onGrantRequested = { [weak self] item in
-            guard self?.workspaceInteractionsAreActionable == true else { return }
-            self?.reviewCapabilities(for: item, allow: true)
+        extensionsPanel.onSetEnabled = { [weak self] id, enabled in
+            Task { @MainActor [weak self] in
+                guard let self, self.workspaceInteractionsAreActionable else { return }
+                do {
+                    try await self.extensionUseCase?.setEnabled(id, enabled: enabled)
+                    if enabled { try await self.extensionServiceHost?.prepareNativeInstallation(for: id) }
+                }
+                catch { self.renderExtensionError(error) }
+            }
         }
         extensionsPanel.onRevoke = { [weak self] item in
             guard self?.workspaceInteractionsAreActionable == true else { return }
-            self?.reviewCapabilities(for: item, allow: false)
+            self?.reviewPublisherRevocation(for: item)
         }
         renderInitial(workspace.snapshot())
         if !((framePersistence?.restore(window)) ?? false) { window.center() }
@@ -591,6 +605,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         markdownPreviewTask = nil
         markdownPreviewPanel?.invalidate()
         markdownPreviewPanel = nil
+        extensionServiceHost?.close(in: workspaceContentSplit)
+        if let extensionUseCase { extensionServiceHost?.unregister(extensionUseCase) }
         cancelSearch()
         searchWindowController.dismiss()
         accessibilityDisplayObserver?.invalidate()
@@ -735,13 +751,32 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         let requested = item.manifest.capabilities.map { "\($0.id.rawValue) [\($0.scope.rawValue)]" }.joined(separator: "\n")
         let affected = (try? extensionUseCase?.revocationReviewToken(for: id).affectedPackageIdentities.joined(separator: "\n"))
             ?? "\(item.manifest.id.rawValue)@\(item.manifest.version)#\(item.packageDigest)"
-        return L10n.text("Publisher: %1$@\nFingerprint: %2$@\nVersion: %3$@\nPackage: %4$@\n\nData access and destination:\n%5$@\n\nAffected signed package identities:\n%6$@\n\nGrants last until revoked or identity changes. Publisher revoke is durable across restart until deliberate Reset. No network, filesystem, environment, clock, or process access is exposed.", L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint), L10n.argument(item.manifest.version), L10n.argument(item.packageDigest), L10n.argument(requested), L10n.argument(affected))
+        if item.manifest.runtime.kind == "native" {
+            return L10n.text("Native plugin: %1$@\nPublisher: %2$@\nFingerprint: %3$@\nVersion: %4$@\nPackage: %5$@\n\nThis plugin runs inside Duckpad and can access the same documents, clipboard, files, and network resources as Duckpad. Listed capabilities describe its intended use; they do not isolate native code. Enable only plugins from publishers you trust.\n\nRequested capabilities:\n%6$@", L10n.argument(item.manifest.name), L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint), L10n.argument(item.manifest.version), L10n.argument(item.packageDigest), L10n.argument(requested))
+        }
+        return L10n.text("Publisher: %1$@\nFingerprint: %2$@\nVersion: %3$@\nPackage: %4$@\n\nData access and destination:\n%5$@\n\nAffected signed package identities:\n%6$@\n\nGrants last until revoked or identity changes. Publisher revoke is durable across restart until deliberate Reset. Requested clipboard access uses the system clipboard while the plugin is enabled. Plugin storage is private to this publisher and plugin. No direct filesystem, network, environment, or process access is exposed.", L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint), L10n.argument(item.manifest.version), L10n.argument(item.packageDigest), L10n.argument(requested), L10n.argument(affected))
+    }
+
+    public var onInstallExtension: ((URL) async throws -> ExtensionID)?
+    public func configureExtensionUpdates(
+        check: @escaping @Sendable ([ExtensionRegistryItem]) async throws -> [ExtensionID: ExtensionUpdate],
+        prepare: @escaping @Sendable (ExtensionUpdate, String) async throws -> PreparedExtensionUpdate,
+        install: @escaping @Sendable (PreparedExtensionUpdate) async throws -> Void
+    ) {
+        guard let extensionUseCase else { return }
+        extensionUpdater = ExtensionUpdateController(useCase: extensionUseCase, panel: extensionsPanel, check: check, prepare: prepare, install: install,
+            onError: { [weak self] error in self?.renderExtensionError(error) })
+    }
+    private weak var extensionServiceHost: ExtensionListServiceHost?
+    public func configureExtensionServices(_ host: ExtensionListServiceHost) {
+        extensionServiceHost = host
+        if let extensionUseCase, !extensionState.items.isEmpty { host.synchronize(extensionUseCase) }
     }
 
     public var extensionCommands: [ExtensionCommandContribution] {
-        var commands: [ExtensionCommandContribution] = []
+        var commands: [ExtensionCommandContribution] = extensionUseCase?.serviceCommands().map(\.command) ?? []
         for item in extensionState.items where item.enabled && item.issue == nil {
-            for command in item.manifest.contributes.commands {
+            for command in item.manifest.contributes.commands where command.inputScope != .service {
                 let scope: ExtensionCapabilityScope = command.inputScope == .selection ? .selection : .activeDocument
                 let read = ExtensionCapabilityRequest(id: .documentsRead, scope: scope)
                 let write = ExtensionCapabilityRequest(id: .documentsWrite, scope: scope)
@@ -765,6 +800,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             guard item.enabled, item.issue == nil,
                   let command = item.manifest.contributes.commands.first(where: { $0.id == commandID })
             else { return nil }
+            if command.inputScope == .service {
+                guard self.extensionUseCase?.serviceCommands().contains(where: { $0.command.id == commandID }) == true else { return nil }
+                return item.manifest.contributes.keybindings.first(where: { $0.command == commandID })?.key
+            }
             let scope: ExtensionCapabilityScope = command.inputScope == .selection ? .selection : .activeDocument
             let read = ExtensionCapabilityRequest(id: .documentsRead, scope: scope)
             let write = ExtensionCapabilityRequest(id: .documentsWrite, scope: scope)
@@ -779,12 +818,34 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performShowExtensions(_ sender: Any?) {
         guard workspaceInteractionsAreActionable else { return }
         extensionsPanel.show(relativeTo: window)
+        Task { [weak self] in await self?.extensionUseCase?.refresh() }
     }
 
     @objc public func performExtensionCommand(_ sender: NSMenuItem) {
         guard !terminationReviewInProgress else { return }
         guard let raw = sender.representedObject as? String else { return }
         let id = ExtensionCommandID(rawValue: raw)
+        if extensionUseCase?.serviceCommands().contains(where: { $0.command.id == id }) == true {
+            extensionServiceHost?.show(id, in: workspaceContentSplit, onClose: { [weak self] in
+                guard let self, self.workspaceInteractionsAreActionable, self.window?.isKeyWindow == true else { return }
+                self.activeEditor.focus()
+            }, onError: { [weak self] error in self?.renderExtensionError(error) }) { [weak self] in
+                guard let self, self.workspaceInteractionsAreActionable, self.window?.isKeyWindow == true,
+                      let context = self.workspace.activeFileContext(),
+                      let validateTarget = (self.activeEditor as? any DeferredPasteEditorPort)?.capturePasteTargetValidation() else { return nil }
+                return { [weak self] text in
+                    guard let self, self.workspaceInteractionsAreActionable, self.window?.isKeyWindow == true,
+                          self.workspace.activeFileContext() == context, validateTarget() else { return false }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    self.activeEditor.focus()
+                    guard let editor = self.actionableEditorCommands, editor.canPerform(.paste) else { return false }
+                    editor.perform(.paste)
+                    return true
+                }
+            }
+            return
+        }
         Task { @MainActor [weak self] in
             guard let self, !self.terminationReviewInProgress else { return }
             do { _ = try await self.extensionUseCase?.invoke(id) }
@@ -1295,6 +1356,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         persistenceBanner.refreshLocalization(catalog: catalog)
         statusBar.refreshLocalization(catalog: catalog)
         extensionsPanel.refreshLocalization(catalog: catalog)
+        extensionServiceHost?.refreshLocalization(catalog: catalog)
         symbolOutlinePanel.refreshLocalization(catalog: catalog)
         commandPalettePanel.refreshLocalization(catalog: catalog)
         (openDocumentComparePresenter as? NativeOpenDocumentComparePresenter)?.refreshLocalization(catalog: catalog)
@@ -4811,8 +4873,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func renderExtensionState(_ state: ExtensionRegistryState) {
+        if let extensionUseCase { extensionServiceHost?.synchronize(extensionUseCase) }
         displayedExtensionError = nil
         extensionState = state; extensionsPanel.render(state)
+        extensionUpdater?.registryChanged(state)
         let enabled = state.items.filter(\.enabled).count
         if !state.discoveryFailures.isEmpty {
             setStatus(
@@ -4835,9 +4899,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         setStatus(extensionStatus, text: L10n.text("Extension error: %1$@", PresentationErrorText.message(error)), warning: true)
     }
 
-    private func reviewCapabilities(for item: ExtensionRegistryItem, allow: Bool) {
+    private func reviewPublisherRevocation(for item: ExtensionRegistryItem) {
         guard let window else { return }
-        if !allow, item.issue == .untrustedPublisher {
+        if item.issue == .untrustedPublisher {
             let alert = NSAlert(); alert.messageText = L10n.text("Reset publisher revocation?")
             alert.informativeText = L10n.text("This removes the durable publisher tombstone for %1$@ (%2$@). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review.", L10n.argument(item.manifest.publisher.id), L10n.argument(item.publisherFingerprint))
             alert.addButton(withTitle: L10n.text("Reset Revocation")); alert.addButton(withTitle: L10n.text("Cancel"))
@@ -4851,29 +4915,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return
         }
         let revocationToken: ExtensionRevocationReviewToken?
-        if !allow {
-            do { revocationToken = try extensionUseCase?.revocationReviewToken(for: item.manifest.id) }
-            catch { renderExtensionError(error); return }
-        } else { revocationToken = nil }
-        let token: ExtensionConsentReviewToken?
-        if allow {
-            do { token = try extensionUseCase?.consentReviewToken(for: item.manifest.id) }
-            catch { renderExtensionError(error); return }
-        } else { token = nil }
+        do { revocationToken = try extensionUseCase?.revocationReviewToken(for: item.manifest.id) }
+        catch { renderExtensionError(error); return }
         let alert = NSAlert()
-        alert.messageText = allow
-            ? L10n.text("Grant capabilities to %1$@?", L10n.argument(item.manifest.name))
-            : L10n.text("Revoke publisher %1$@ across %2$@ extension(s)?", L10n.argument(item.manifest.publisher.id), L10n.argument(revocationToken?.affectedPackageIdentities.count ?? 0))
-        alert.informativeText = extensionReviewDisclosure(for: item.manifest.id, revoking: !allow) ?? L10n.text("Extension identity unavailable; cancel and refresh.")
-        alert.addButton(withTitle: allow ? L10n.text("Grant Exact Capabilities") : L10n.text("Revoke Publisher"))
+        alert.messageText = L10n.text("Revoke publisher %1$@ across %2$@ extension(s)?", L10n.argument(item.manifest.publisher.id), L10n.argument(revocationToken?.affectedPackageIdentities.count ?? 0))
+        alert.informativeText = extensionReviewDisclosure(for: item.manifest.id, revoking: true) ?? L10n.text("Extension identity unavailable; cancel and refresh.")
+        alert.addButton(withTitle: L10n.text("Revoke Publisher"))
         alert.addButton(withTitle: L10n.text("Cancel"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             Task { @MainActor [weak self] in
                 do {
-                    if allow, let token {
-                        try await self?.extensionUseCase?.grantReviewed(token, choices: token.requests)
-                    } else if let revocationToken {
+                    if let revocationToken {
                         try await self?.extensionUseCase?.revokePublisher(revocationToken)
                     }
                 } catch { self?.renderExtensionError(error) }

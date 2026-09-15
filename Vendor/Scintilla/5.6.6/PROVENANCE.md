@@ -145,3 +145,4 @@ event. This is a Duckpad-owned bridge/header change, not an upstream patch.
   existing theme palette because its lexer exposes no named-style metadata.
   Apply heading/strong/emphasis/link/code appearance and clear it with the normal
   style reset when switching languages or themes.
+Clipboard dock: the Duckpad-owned bridge exposes a read-only serialized selection identity for deferred paste validation. It includes all carets, virtual spaces, and selection shape without reading document text. Upstream Scintilla sources and generated files are unchanged.

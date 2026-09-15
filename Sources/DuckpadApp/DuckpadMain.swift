@@ -26,7 +26,10 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private var fileStore: LocalTextFileStore!
     private var folderSearchStore: LocalFolderSearchFileStore!
     private var workspaceRootStore: LocalWorkspaceRootStore!
+    private var extensionServiceHost: ExtensionListServiceHost!
     private var extensionLoader: LocalExtensionPackageLoader!
+    private var extensionUpdateInstaller: ExtensionUpdateInstaller!
+    private let nativeExtensionActivationSession = NativeExtensionActivationSession()
     private var extensionPolicy: LocalExtensionPreferenceStore!
     private var extensionTransport: (any PluginHostTransport)!
     private var languageRegistry: LanguageRegistry!
@@ -54,6 +57,10 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         environment = ProcessInfo.processInfo.environment
         if environment["DUCKPAD_MARKDOWN_SMOKE"] == "1" {
             Task { @MainActor in await BuiltInMarkdownSmoke.run() }
+            return
+        }
+        if let mode = environment["DUCKPAD_NATIVE_INSTALL_SMOKE"] {
+            Task { await NativeInstallationSmoke.run(verifyOnly: mode == "verify") }
             return
         }
         if environment["DUCKPAD_FORMATTING_SMOKE"] == "1" {
@@ -110,7 +117,11 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         let policyRoot = environment["DUCKPAD_EXTENSION_POLICY_ROOT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? LocalExtensionPreferenceStore.defaultRoot()
         extensionLoader = LocalExtensionPackageLoader(root: extensionsRoot)
+        extensionUpdateInstaller = ExtensionUpdateInstaller(loader: extensionLoader)
         extensionPolicy = LocalExtensionPreferenceStore(root: policyRoot)
+        let serviceRoot = extensionsRoot.deletingLastPathComponent().appendingPathComponent("PluginData", isDirectory: true)
+        extensionServiceHost = ExtensionListServiceHost(storage: LocalExtensionServiceStorage(root: serviceRoot), nativeStorageRoot: serviceRoot,
+            nativePackageRoot: ManagedNativePackageStore.appRoot(), prepareNativePackage: { files in try await NativeInstallerClient().install(files: files) })
         if Bundle.main.bundleURL.pathExtension == "app" {
             extensionTransport = XPCPluginHostTransport()
         } else {
@@ -804,18 +815,17 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             configurationIssue: languageConfigurationIssue
         )
         let documentIntelligenceUseCase = DocumentIntelligenceUseCase(editor: editor)
-        #if DEBUG
-        let allowsDevelopmentExtensions = environment["DUCKPAD_ALLOW_DEVELOPMENT_EXTENSIONS"] == "1"
-        #else
-        let allowsDevelopmentExtensions = false
-        #endif
+        // Install/Enable authorizes declared plugin capabilities without a separate permission UI.
+        let allowsDevelopmentExtensions = true
         let extensionUseCase = ExtensionWorkspaceUseCase(
             loader: extensionLoader,
             grants: extensionPolicy,
             transport: extensionTransport,
             workspace: workspace,
             editor: editor,
-            allowsUserExtensions: allowsDevelopmentExtensions
+            allowsUserExtensions: allowsDevelopmentExtensions,
+            nativeActivationSession: nativeExtensionActivationSession,
+            automaticallyAuthorizesEnabledPackages: true
         )
         let formattingUseCase = DocumentFormattingUseCase(workspace: workspace, editor: editor, formatter: BundledPrettierFormatter())
         formattingUseCase.settings = settings.formatting
@@ -865,6 +875,13 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private func register(_ runtime: WindowRuntime, recoveryRoot: URL) {
         let controller = runtime.controller
         let identifier = ObjectIdentifier(controller)
+        controller.configureExtensionServices(extensionServiceHost)
+        let updater = extensionUpdateInstaller!
+        controller.configureExtensionUpdates(check: { try await updater.check($0) }, prepare: { try await updater.prepare($0, publisherFingerprint: $1) }, install: { try await updater.install($0) })
+        controller.onInstallExtension = { [weak self] url in
+            guard let self else { throw ExtensionFailure.cancelled }
+            return try await self.extensionUpdateInstaller.installPackage(at: url)
+        }
         controller.applyPreferences(settingsUseCase.state.settings)
         windowControllers[identifier] = controller
         windowEditors[identifier] = runtime.editor

@@ -21,6 +21,13 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
         publicKey: Data(base64Encoded: "4pf5NP1voP8k8NDDZEQ58lGM5D1xJlHh15QUO0jFSos=")!, source: .bundled
     )
 
+    /// Clipboard releases have their own persistent publisher key. The bundled
+    /// text-tools identity and digest allowlist remain unchanged.
+    public static let clipboardPublisherKey = TrustedPublisherKey(
+        publisherID: "com.duckpad", keyID: "clipboard-release-1",
+        publicKey: Data(base64Encoded: "WlOI4aUUE1yhCuLzGBpcklFSUDTxp+Smn07d2RQ2idE=")!, source: .userImported
+    )
+
     private let root: URL
     private let bundledPackages: [URL]
     private let trustedKeys: [String: TrustedPublisherKey]
@@ -28,7 +35,7 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
     private let limits: ExtensionHostLimits
     private let snapshotInterposition: (@Sendable (URL) -> Void)?
 
-    public init(root: URL, bundledPackages: [URL]? = nil, trustedKeys: [TrustedPublisherKey] = [bundledTextToolsKey], bundledDigestAllowlist: [ExtensionID: String] = [ExtensionID(rawValue: "com.duckpad.text-tools"): "ce54eed65c4707a705fb246a2bcf304be77366376147a5a17d4f1be3ad984390"], limits: ExtensionHostLimits = ExtensionHostLimits(), snapshotInterposition: (@Sendable (URL) -> Void)? = nil) {
+    public init(root: URL, bundledPackages: [URL]? = nil, trustedKeys: [TrustedPublisherKey] = [bundledTextToolsKey, clipboardPublisherKey], bundledDigestAllowlist: [ExtensionID: String] = [ExtensionID(rawValue: "com.duckpad.text-tools"): "ce54eed65c4707a705fb246a2bcf304be77366376147a5a17d4f1be3ad984390"], limits: ExtensionHostLimits = ExtensionHostLimits(), snapshotInterposition: (@Sendable (URL) -> Void)? = nil) {
         self.root = root.standardizedFileURL
         if let bundledPackages { self.bundledPackages = bundledPackages }
         else {
@@ -48,6 +55,25 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
     public nonisolated static func defaultRoot() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Duckpad/Extensions", isDirectory: true)
+    }
+
+    public func install(from source: URL) throws {
+        guard source.pathExtension == "duckpad-plugin" else { throw ExtensionFailure.invalidPackagePath }
+        let package = try load(source)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        guard try regularDirectory(root) else { throw ExtensionFailure.invalidPackagePath }
+        let staging = root.appendingPathComponent(".install-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: staging) }
+        let temporary = staging.appendingPathComponent("package.duckpad-plugin")
+        try FileManager.default.copyItem(at: source, to: temporary)
+        guard try load(temporary).packageDigest == package.packageDigest else { throw ExtensionFailure.signatureMismatch }
+        let destination = root.appendingPathComponent("\(package.manifest.id.rawValue)@\(package.manifest.version).duckpad-plugin")
+        // An existing version is immutable. New versions install alongside it.
+        guard renameatx_np(AT_FDCWD, temporary.path, AT_FDCWD, destination.path, UInt32(RENAME_EXCL)) == 0 else {
+            throw ExtensionFailure.hostUnavailable("plugin version is already installed or destination is unavailable")
+        }
     }
 
     public func discover() async -> ExtensionDiscoveryReport {
@@ -80,17 +106,49 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
         let packageRoot = packageURL.resolvingSymlinksInPath().standardizedFileURL
         guard packageRoot.path == packageURL.standardizedFileURL.path else { throw ExtensionFailure.invalidPackagePath }
         let files = try snapshotPackage(packageRoot)
-        guard let manifestData = files["plugin.json"], let module = files["module.wasm"],
+        return try verify(files: files, sourceURL: packageURL)
+    }
+
+    public func readPackage(at url: URL) throws -> (LoadedExtensionPackage, [String: Data]) {
+        let files = try snapshotPackage(url)
+        return (try verify(files: files), files)
+    }
+
+    public func verify(files: [String: Data]) throws -> LoadedExtensionPackage {
+        try verify(files: files, sourceURL: nil)
+    }
+
+    private func verify(files: [String: Data], sourceURL: URL?) throws -> LoadedExtensionPackage {
+        let nativeFiles = files["module.dylib"] != nil
+        guard files.count <= 64,
+              files.values.allSatisfy({ $0.count <= (nativeFiles ? 16 : 4) * 1_024 * 1_024 }),
+              files.values.reduce(0, { $0 + $1.count }) <= (nativeFiles ? 32 : 16) * 1_024 * 1_024,
+              files.keys.allSatisfy({ name in
+                  !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.contains("\\") && !name.contains("\0") && name.utf8.count <= 255 &&
+                  !["so", "bundle", "exe", "sh", "command", "js"].contains(URL(fileURLWithPath: name).pathExtension.lowercased())
+              }) else { throw ExtensionFailure.invalidPackagePath }
+        guard let manifestData = files["plugin.json"],
               let sums = files["SHA256SUMS"], let signatureData = files["SIGNATURE.ed25519"] else {
             throw ExtensionFailure.malformedManifest("missing signed package files")
         }
-        guard manifestData.count <= 64 * 1_024, module.count <= limits.maximumModuleBytes,
+        guard manifestData.count <= 64 * 1_024,
               sums.count <= 64 * 1_024, signatureData.count <= 256 else { throw ExtensionFailure.limitExceeded("package metadata") }
         try validateManifestKeys(manifestData)
         let manifest = try JSONDecoder().decode(ExtensionManifest.self, from: manifestData)
         try validate(manifest)
-        guard manifest.runtime.module == "module.wasm" else { throw ExtensionFailure.invalidPackagePath }
-        _ = try WasmModulePolicy.validate(module, limits: limits)
+        let native = manifest.runtime.kind == "native"
+        guard let module = files[manifest.runtime.module] else { throw ExtensionFailure.invalidPackagePath }
+        if native {
+            guard module.count <= 16 * 1_024 * 1_024 else { throw ExtensionFailure.limitExceeded("native module") }
+            // Mach-O signatures are also enforced by macOS at dlopen time.
+            guard module.count >= 4, [[0xcf,0xfa,0xed,0xfe], [0xca,0xfe,0xba,0xbe], [0xbe,0xba,0xfe,0xca]].contains(Array(module.prefix(4))) else {
+                throw ExtensionFailure.malformedManifest("native module is not Mach-O")
+            }
+        } else {
+            guard module.count <= limits.maximumModuleBytes else { throw ExtensionFailure.limitExceeded("WASM module") }
+            guard !files.keys.contains(where: { $0.hasSuffix(".dylib") }) else { throw ExtensionFailure.invalidPackagePath }
+            _ = try WasmModulePolicy.validate(module, limits: limits)
+        }
         guard String(data: sums, encoding: .utf8) != nil else { throw ExtensionFailure.signatureMismatch }
         try validateChecksums(sums, files: files)
         let signatureText = String(decoding: signatureData, as: UTF8.self)
@@ -106,16 +164,38 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
         let signatureDigest = SHA256.hash(data: signature).map { String(format: "%02x", $0) }.joined()
         let packageDigest = SHA256.hash(data: sums).map { String(format: "%02x", $0) }.joined()
         let capabilitySchemaDigest = capabilityDigest(manifest.capabilities)
-        let shippedURL = bundledPackages.contains { $0.standardizedFileURL.path == packageURL.standardizedFileURL.path }
+        let shippedURL = sourceURL.map { source in bundledPackages.contains { $0.standardizedFileURL.path == source.standardizedFileURL.path } } ?? false
         let source: LoadedExtensionPackage.TrustSource = shippedURL && bundledDigestAllowlist[manifest.id] == packageDigest
             ? .bundled : .userImported
         return LoadedExtensionPackage(manifest: manifest, module: module, packageDigest: packageDigest,
                                       publisherFingerprint: fingerprint, signatureDigest: signatureDigest,
-                                      capabilitySchemaDigest: capabilitySchemaDigest, trustSource: source)
+                                      capabilitySchemaDigest: capabilitySchemaDigest, trustSource: source, nativeFiles: native ? files : nil)
+    }
+
+    /// Publishes a verified snapshot, preserving every existing version.
+    public func install(files: [String: Data]) throws -> LoadedExtensionPackage {
+        let package = try verify(files: files)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        guard try regularDirectory(root) else { throw ExtensionFailure.invalidPackagePath }
+        let destination = root.appendingPathComponent("\(package.manifest.id.rawValue)@\(package.manifest.version).duckpad-plugin")
+        if FileManager.default.fileExists(atPath: destination.path) {
+            guard try load(destination).packageDigest == package.packageDigest else { throw ExtensionFailure.signatureMismatch }
+            return package
+        }
+        let staging = root.appendingPathComponent(".install-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: staging) }
+        for (name, data) in files { try data.write(to: staging.appendingPathComponent(name), options: .withoutOverwriting) }
+        guard renameatx_np(AT_FDCWD, staging.path, AT_FDCWD, destination.path, UInt32(RENAME_EXCL)) == 0 else { throw ExtensionFailure.hostUnavailable("could not publish plugin version") }
+        return package
     }
 
     private func validate(_ manifest: ExtensionManifest) throws {
-        guard manifest.schemaVersion == 1, manifest.runtime.kind == "wasm-core", manifest.runtime.abi == "duckpad-wasm-1",
+        let wasm = manifest.runtime.kind == "wasm-core" && manifest.runtime.abi == "duckpad-wasm-1" && manifest.runtime.module == "module.wasm"
+        let native = manifest.runtime.kind == "native" && manifest.runtime.abi == "duckpad-native-1" && manifest.runtime.module == "module.dylib"
+            && manifest.capabilities.contains(.init(id: .nativeCode, scope: .application))
+            && manifest.contributes.commands.allSatisfy { $0.inputScope == .service }
+        guard manifest.schemaVersion == 1, wasm || native,
               manifest.id.rawValue.utf8.count <= 128, manifest.name.utf8.count <= 128,
               manifest.publisher.id.utf8.count <= 128, manifest.publisher.keyID.utf8.count <= 128,
               manifest.id.rawValue.range(of: #"^[a-z0-9]+(?:[.-][a-z0-9-]+)+$"#, options: .regularExpression) != nil,
@@ -233,18 +313,21 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
         let names = try directoryNames(descriptor: directory)
         snapshotInterposition?(root)
         guard names.count <= 64 else { throw ExtensionFailure.limitExceeded("package file count") }
+        let nativePackage = names.contains("module.dylib")
+        let fileLimit = (nativePackage ? 16 : 4) * 1_024 * 1_024
+        let aggregateLimit = (nativePackage ? 32 : 16) * 1_024 * 1_024
         var result: [String: Data] = [:]
         var aggregateBytes = 0
         for name in names {
             guard !name.isEmpty, name != ".", name != "..", !name.contains("/") else { throw ExtensionFailure.invalidPackagePath }
             let suffix = URL(fileURLWithPath: name).pathExtension.lowercased()
-            guard !["dylib", "so", "bundle", "exe", "sh", "command", "js"].contains(suffix) else { throw ExtensionFailure.invalidPackagePath }
+            guard !["so", "bundle", "exe", "sh", "command", "js"].contains(suffix) else { throw ExtensionFailure.invalidPackagePath }
             let descriptor = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
             guard descriptor >= 0 else { throw ExtensionFailure.invalidPackagePath }
             defer { close(descriptor) }
             var info = stat()
             guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
-                  info.st_size >= 0, info.st_size <= 4 * 1_024 * 1_024 else { throw ExtensionFailure.invalidPackagePath }
+                  info.st_size >= 0, info.st_size <= fileLimit else { throw ExtensionFailure.invalidPackagePath }
             var bytes = [UInt8](repeating: 0, count: Int(info.st_size)); var offset = 0
             while offset < bytes.count {
                 let remaining = bytes.count - offset
@@ -255,7 +338,7 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
             var after = stat(); guard fstat(descriptor, &after) == 0,
                   after.st_dev == info.st_dev, after.st_ino == info.st_ino,
                   after.st_size == info.st_size else { throw ExtensionFailure.invalidPackagePath }
-            guard aggregateBytes <= 16 * 1_024 * 1_024 - bytes.count else { throw ExtensionFailure.limitExceeded("package aggregate bytes") }
+            guard aggregateBytes <= aggregateLimit - bytes.count else { throw ExtensionFailure.limitExceeded("package aggregate bytes") }
             aggregateBytes += bytes.count
             result[name] = Data(bytes)
         }

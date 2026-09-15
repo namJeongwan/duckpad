@@ -494,7 +494,7 @@
 "This extension is incompatible with this version of Duckpad." = "Cette extension est incompatible avec cette version de Duckpad.";
 "This file is no longer available." = "Ce fichier n’est plus disponible.";
 "This folder is already in the workspace." = "Ce dossier est déjà dans l’espace de travail.";
-"This removes the durable publisher tombstone for %1$@ (%2$@). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review." = "Cela supprime l’enregistrement persistant de révocation de l’éditeur %1$@ (%2$@). L’extension reste désactivée et sans accès tant que vous ne l’activez pas explicitement et n’approuvez pas un nouvel examen des autorisations lié à son identité.";
+"This removes the durable publisher tombstone for %1$@ (%2$@). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review." = "Cette action réinitialise la révocation de l’éditeur %1$@ (%2$@). Le plugin reste désactivé jusqu’à ce que vous l’activiez.";
 "Toggle Block Comment" = "Basculer le commentaire de bloc";
 "Toggle Bookmark" = "Basculer le signet";
 "Toggle Line Comment" = "Basculer le commentaire de ligne";
@@ -583,3 +583,123 @@
 "When inactive" = "Si inactive";
 "Always" = "Toujours";
 "Window opacity" = "Opacité de la fenêtre";
+
+/* Clipboard services and recent editor commands */
+"Binary" = "Binaire";
+"Read-only" = "Lecture seule";
+"Binary files are read-only and cannot be saved." = "Les fichiers binaires sont en lecture seule et ne peuvent pas être enregistrés.";
+"Loading: %1$@%%" = "Chargement : %1$@%%";
+"Formatting" = "Mise en forme";
+"Format Document" = "Mettre en forme le document";
+"Format on Save" = "Mettre en forme à l’enregistrement";
+"Print width" = "Largeur de ligne";
+"Indent size" = "Taille du retrait";
+"Indent with tabs" = "Indenter avec des tabulations";
+"Prefer single quotes" = "Préférer les apostrophes";
+"Print semicolons" = "Ajouter des points-virgules";
+"SQL dialect" = "Dialecte SQL";
+"Format Document: ⇧⌥F. Prettier, XML and SQL formatting work offline. Unsupported languages save normally. If formatting fails, your current text is saved without formatting." = "Mettre en forme le document : ⇧⌥F. La mise en forme Prettier, XML et SQL fonctionne hors ligne. Les langages non pris en charge sont enregistrés normalement. En cas d’échec, le texte actuel est enregistré sans mise en forme.";
+"Could not format document" = "Impossible de mettre en forme le document";
+"No built-in formatter is available for this language." = "Aucun outil de mise en forme intégré n’est disponible pour ce langage.";
+"Formatting supports documents up to 1 MiB and results up to 4 MiB." = "La mise en forme prend en charge les documents jusqu’à 1 MiB et les résultats jusqu’à 4 MiB.";
+"Formatting is already in progress. Try again when it finishes." = "Une mise en forme est déjà en cours. Réessayez lorsqu’elle sera terminée.";
+"Formatting took too long. Your document has been kept." = "La mise en forme a pris trop de temps. Votre document a été conservé.";
+"The built-in formatter could not be started." = "Impossible de démarrer l’outil de mise en forme intégré.";
+"Formatting failed: %1$@" = "Échec de la mise en forme : %1$@";
+"Rename…" = "Renommer…";
+"Move To…" = "Déplacer vers…";
+"Move to Trash…" = "Placer dans la corbeille…";
+"Print…" = "Imprimer…";
+"Rename" = "Renommer";
+"Move" = "Déplacer";
+"Move to Trash?" = "Placer dans la corbeille ?";
+"Move to Trash" = "Placer dans la corbeille";
+"The file will move to Trash and its tab will close. Unsaved changes will be discarded. You can restore the saved file using Finder." = "Le fichier sera placé dans la corbeille et son onglet sera fermé. Les modifications non enregistrées seront perdues. Vous pouvez restaurer le fichier enregistré avec le Finder.";
+"The file will move to Trash and its tab will close. You can restore the file using Finder." = "Le fichier sera placé dans la corbeille et son onglet sera fermé. Vous pouvez le restaurer avec le Finder.";
+"A file already exists at that location. Choose another name or folder." = "Un fichier existe déjà à cet emplacement. Choisissez un autre nom ou dossier.";
+"Could not change file location" = "Impossible de modifier l’emplacement du fichier";
+"Clipboard History" = "Historique du presse-papiers";
+"Search clipboard history" = "Rechercher dans l’historique";
+"No clipboard history" = "Aucun historique du presse-papiers";
+"Clear History…" = "Effacer l’historique…";
+"Clear History" = "Effacer l’historique";
+"Clear all clipboard history, including pinned items?" = "Effacer tout l’historique, y compris les éléments épinglés ?";
+"Plugin request failed: %1$@" = "Échec de la requête du plugin : %1$@";
+"Install Plugin…" = "Installer un plugin…";
+"Choose a signed .duckpad-plugin package." = "Choisissez un paquet .duckpad-plugin signé.";
+"Publisher: %1$@\nFingerprint: %2$@\nVersion: %3$@\nPackage: %4$@\n\nData access and destination:\n%5$@\n\nAffected signed package identities:\n%6$@\n\nGrants last until revoked or identity changes. Publisher revoke is durable across restart until deliberate Reset. Requested clipboard access uses the system clipboard while the plugin is enabled. Plugin storage is private to this publisher and plugin. No direct filesystem, network, environment, or process access is exposed." = "Éditeur : %1$@\nEmpreinte : %2$@\nVersion : %3$@\nPaquet : %4$@\n\nAccès aux données et destination :\n%5$@\n\nIdentités des paquets signés concernés :\n%6$@\n\nLes autorisations restent valides jusqu’à leur révocation ou un changement d’identité. La révocation de l’éditeur persiste après le redémarrage jusqu’à une réinitialisation explicite. L’accès demandé au presse-papiers utilise celui du système tant que le plugin est activé. Le stockage est privé pour cet éditeur et ce plugin. Aucun accès direct au système de fichiers, au réseau, à l’environnement ou aux processus n’est fourni.";
+"Pin" = "Épingler";
+"Unpin" = "Détacher";
+"Keep history for" = "Conserver l’historique pendant";
+"1 Day" = "1 jour";
+"3 Days" = "3 jours";
+"1 Week" = "1 semaine";
+"Paste Next" = "Coller en séquence";
+"Expired entries are deleted, including pinned items. History survives restarting Duckpad." = "Les éléments expirés sont supprimés, même s’ils sont épinglés. L’historique est conservé après le redémarrage de Duckpad.";
+"Paste the selected item, then select the next item. Stops at the end of the list." = "Colle l’élément sélectionné, puis sélectionne le suivant. S’arrête à la fin de la liste.";
+"Paste cancelled. Select an editor position and try again." = "Collage annulé. Sélectionnez une position dans l’éditeur et réessayez.";
+"End of history. Select an item to start again." = "Fin de l’historique. Sélectionnez un élément pour recommencer.";
+"Clipboard item preview" = "Aperçu de l’élément du presse-papiers";
+"Preview" = "Aperçu";
+"Duckpad Text Tools" = "Outils de texte Duckpad";
+
+"Native plugin: %1$@\nPublisher: %2$@\nFingerprint: %3$@\nVersion: %4$@\nPackage: %5$@\n\nThis plugin runs inside Duckpad and can access the same documents, clipboard, files, and network resources as Duckpad. Listed capabilities describe its intended use; they do not isolate native code. Enable only plugins from publishers you trust.\n\nRequested capabilities:\n%6$@" = "Plugin natif : %1$@\nÉditeur : %2$@\nEmpreinte : %3$@\nVersion : %4$@\nPaquet : %5$@\n\nCe plugin s’exécute dans Duckpad et peut accéder aux mêmes documents, presse-papiers, fichiers et ressources réseau. Les autorisations indiquées décrivent l’usage prévu ; elles n’isolent pas le code natif. Activez uniquement les plugins d’éditeurs de confiance.\n\nAutorisations demandées :\n%6$@";
+
+"Install Native Plugin" = "Installer le plugin natif";
+
+"Install" = "Installer";
+
+"Choose where to install this plugin. macOS will remember access to this package for future launches." = "Choisissez où installer ce plugin. macOS conservera l’accès à ce paquet pour les prochains lancements.";
+
+"The installed native plugin has changed. Reinstall its signed package before running it." = "Le plugin natif installé a été modifié. Réinstallez son paquet signé avant de l’exécuter.";
+
+"This native plugin needs an installation location approved through macOS." = "Ce plugin natif nécessite un emplacement d’installation approuvé par macOS.";
+
+"%1$@ %2$@ · %3$@ · %4$@ applies next launch" = "%1$@ %2$@ · %3$@ · %4$@ sera appliquée au prochain lancement";
+
+"Check for Plugin Updates" = "Rechercher les mises à jour des plugins";
+
+"Checking for Plugin Updates…" = "Recherche de mises à jour des plugins…";
+
+"Update to %1$@" = "Mettre à jour vers %1$@";
+
+"Installing Plugin…" = "Installation du plugin…";
+
+"No Plugin Updates Available" = "Aucune mise à jour de plugin disponible";
+
+"Plugin Updates Available" = "Mises à jour de plugins disponibles";
+
+"Could Not Check for Plugin Updates" = "Impossible de vérifier les mises à jour des plugins";
+
+"Downloading and Verifying Plugin…" = "Téléchargement et vérification du plugin…";
+
+"Plugin Update Requests Additional Access" = "La mise à jour du plugin demande des accès supplémentaires";
+
+"%1$@ %2$@ requests these additional capabilities:\n%3$@" = "%1$@ %2$@ demande ces accès supplémentaires :\n%3$@";
+
+"Plugin Update Will Apply Next Launch" = "La mise à jour du plugin sera appliquée au prochain lancement";
+
+"Plugin Update Installed" = "Mise à jour du plugin installée";
+
+"Plugin Update Cancelled" = "Mise à jour du plugin annulée";
+
+"Plugin Update Failed" = "Échec de la mise à jour du plugin";
+
+"The native plugin is being installed. Please try again shortly." = "Le plugin natif est en cours d’installation. Réessayez dans un instant.";
+
+"Update" = "Mettre à jour";
+"Markdown Preview" = "Aperçu Markdown";
+"Close Preview" = "Fermer l’aperçu";
+"Rendering preview…" = "Génération de l’aperçu…";
+"Markdown preview could not be rendered." = "Impossible de générer l’aperçu Markdown.";
+"Markdown preview is unavailable for binary files." = "L’aperçu Markdown n’est pas disponible pour les fichiers binaires.";
+"Allow Local Images…" = "Autoriser les images locales…";
+"Choose the folder containing this document’s images." = "Choisissez le dossier contenant les images de ce document.";
+"Markdown image drop" = "Dépôt d’images dans Markdown";
+"Ask every time" = "Toujours demander";
+"Insert into Markdown" = "Insérer dans Markdown";
+"How would you like to use these images?" = "Comment souhaitez-vous utiliser ces images ?";
+"Don’t ask again; use this action" = "Ne plus demander ; utiliser cette action";
+"The image drop preference could not be saved." = "Impossible d’enregistrer la préférence de dépôt d’images.";
+"Open in New Tab" = "Ouvrir dans un nouvel onglet";
+"Choose an image folder to allow local images in the preview." = "Choisissez un dossier d’images pour autoriser les images locales dans l’aperçu.";

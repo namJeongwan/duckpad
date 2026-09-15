@@ -7,7 +7,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: FormattingEditorPort, BinaryEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+public final class ScintillaEditorAdapter: DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -1171,6 +1171,16 @@ public final class ScintillaEditorAdapter: FormattingEditorPort, BinaryEditorPor
         return text
     }
 
+    public func capturePasteTargetValidation() -> (() -> Bool)? {
+        guard let view = activeScintillaView, !view.hasMarkedText() else { return nil }
+        let selection = view.pasteSelectionIdentity
+        let revision = view.revision
+        return { [weak self, weak view] in
+            guard let self, let view, self.activeScintillaView === view, !view.hasMarkedText() else { return false }
+            return view.revision == revision && view.pasteSelectionIdentity == selection
+        }
+    }
+
     public func activeSelectionUTF8Range() -> SearchUTF8Range? {
         guard let editorView = activeScintillaView else { return nil }
         let lower = min(editorView.anchorUTF8Position, editorView.caretUTF8Position)
@@ -1200,6 +1210,7 @@ public final class ScintillaEditorAdapter: FormattingEditorPort, BinaryEditorPor
               selection.length <= documentLength - selection.location else { throw .staleContext }
         let bytes: Data
         switch scope {
+        case .service: throw ExtensionFailure.unsupportedAPI
         case .selection:
             guard selection.length > 0 else { throw .invalidResult("command requires a selection") }
             guard selection.length <= maximumBytes else { throw .limitExceeded("command input") }

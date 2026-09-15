@@ -61,6 +61,7 @@ public enum PluginRuntimeExecutor {
             throw ExtensionFailure.invalidModule(message)
         }
         output.removeSubrange(Int(outputLength)..<output.count)
+        if request.context.inputScope == .service { return ExtensionHostResponse(serviceOutput: output) }
         guard String(data: output, encoding: .utf8) != nil else {
             throw ExtensionFailure.invalidResult("module emitted invalid UTF-8")
         }
@@ -71,6 +72,8 @@ public enum PluginRuntimeExecutor {
                 throw ExtensionFailure.invalidResult("Sort Selected Lines requires a selection")
             }
             range = request.context.selection
+        case .service:
+            throw ExtensionFailure.invalidResult("service cannot produce document edits")
         case .document:
             range = ExtensionUTF8Range(location: 0, length: request.context.utf8.count)
         }

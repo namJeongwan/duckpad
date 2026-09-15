@@ -835,6 +835,14 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SCROLLCARET];
     return YES;
 }
+- (NSData *)pasteSelectionIdentity {
+    const NSUInteger length = [_scintilla message:SCI_GETSELECTIONSERIALIZED];
+    std::string selection(length + 1, '\0');
+    [_scintilla message:SCI_GETSELECTIONSERIALIZED wParam:0
+                lParam:reinterpret_cast<sptr_t>(selection.data())];
+    return [NSData dataWithBytes:selection.data() length:length];
+}
+
 - (NSUInteger)selectionCount { return (NSUInteger)[_scintilla message:SCI_GETSELECTIONS]; }
 - (NSUInteger)caretUTF8Position { return (NSUInteger)[_scintilla message:SCI_GETCURRENTPOS]; }
 - (NSUInteger)anchorUTF8Position { return (NSUInteger)[_scintilla message:SCI_GETANCHOR]; }

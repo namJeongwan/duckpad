@@ -74,7 +74,15 @@ bool dp_wamr_invoke(
     uint32_t input_offset = 0;
     void *native_input = NULL;
 
-    module = wasm_runtime_load((uint8_t *)module_bytes, (uint32_t)module_length,
+    // WAMR rewrites parts of the binary during loading. Keep the caller's
+    // signed module immutable, including across repeated service requests.
+    uint8_t *load_bytes = malloc(module_length);
+    if (!load_bytes) {
+        copy_error(runtime_error, sizeof(runtime_error), "module allocation failed");
+        goto done;
+    }
+    memcpy(load_bytes, module_bytes, module_length);
+    module = wasm_runtime_load(load_bytes, (uint32_t)module_length,
                                runtime_error, sizeof(runtime_error));
     if (!module) goto done;
     instance = wasm_runtime_instantiate(module, limits.stack_bytes,
@@ -153,5 +161,6 @@ done:
     if (instance) wasm_runtime_deinstantiate(instance);
     if (module) wasm_runtime_unload(module);
     wasm_runtime_destroy();
+    free(load_bytes);
     return succeeded;
 }

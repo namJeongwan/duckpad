@@ -27,6 +27,7 @@ enum MenuLocalization {
                 && item.representedObject as? String != LanguageID.plainText.rawValue
             let isExtension = action == #selector(DuckpadWindowController.performExtensionCommand(_:))
                 && !(item.representedObject as? String ?? "").hasPrefix("com.duckpad.text-tools.")
+                && !(item.representedObject as? String ?? "").hasPrefix("com.duckpad.clipboard-history.")
             if !isFile && !isLanguage && !isExtension {
                 if let label = item.accessibilityLabel() { item.setAccessibilityLabel(catalog.text(label)) }
                 if let help = item.toolTip { item.toolTip = catalog.text(help) }

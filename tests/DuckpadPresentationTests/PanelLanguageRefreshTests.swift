@@ -62,9 +62,11 @@ struct PanelLanguageRefreshTests {
         #expect(table.selectedRow == 1)
         #expect(table.numberOfRows == 2)
         #expect(table.tableColumns[0].title == korean.text("Search Results"))
-        let header = try #require(panel.tableView(table, viewFor: nil, row: 0) as? NSTextField)
+        let headerCell = try #require(panel.tableView(table, viewFor: nil, row: 0) as? NSTableCellView)
+        let header = try #require(headerCell.textField)
         #expect(header.stringValue == korean.text("%1$@ — %2$@", arguments: ["File", korean.text("search.matches", arguments: [1])]))
-        let snippet = try #require(panel.tableView(table, viewFor: nil, row: 1) as? NSTextField)
+        let snippetCell = try #require(panel.tableView(table, viewFor: nil, row: 1) as? NSTableCellView)
+        let snippet = try #require(snippetCell.textField)
         #expect(snippet.stringValue == "  2:1  File")
         panel.presentStatus(key: "Searching %1$@…", arguments: ["File"])
         panel.refreshLocalization(catalog: english)
@@ -172,7 +174,7 @@ struct PanelLanguageRefreshTests {
         panel.refreshLocalization(catalog: korean)
         #expect(panel.window?.contentView === root)
         #expect(panel.window?.title == korean.text("Duckpad Extensions"))
-        #expect(buttons.contains { $0.title == korean.text("Grant Requested Capabilities") })
+        #expect(!buttons.contains { $0.accessibilityIdentifier() == "duckpad.extensions.grant" })
         #expect(buttons.contains { $0.title == korean.text("Enable") && !$0.isEnabled })
     }
 }
