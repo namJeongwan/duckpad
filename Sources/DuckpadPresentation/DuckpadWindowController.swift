@@ -263,6 +263,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let fileFormatStatus = StatusBarButton(title: "UTF-8", target: nil, action: nil)
     private let extensionStatus = NSButton(title: L10n.text("Extensions loading…"), target: nil, action: nil)
     private let extensionsPanel = ExtensionsManagerPanel()
+    private var extensionLocalInstallTask: Task<Void, Never>?
     private var extensionUpdater: ExtensionUpdateController?
     let commandPalettePanel = CommandPalettePanel()
     let symbolOutlinePanel = SymbolOutlinePanel()
@@ -538,13 +539,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         extensionUseCase?.onStateChange = { [weak self] state in self?.renderExtensionState(state) }
         extensionsPanel.onInstall = { [weak self] url in
-            Task { @MainActor [weak self] in
+            guard let self, self.extensionLocalInstallTask == nil else { return }
+            self.extensionLocalInstallTask = Task { @MainActor [weak self] in
                 guard let self, let install = self.onInstallExtension else { return }
+                defer { self.extensionLocalInstallTask = nil }
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
                 do {
                     let id = try await install(url)
+                    try Task.checkCancellation()
                     await self.extensionUseCase?.refresh()
+                    try Task.checkCancellation()
                     try await self.extensionUseCase?.setEnabled(id, enabled: true)
                     try await self.extensionServiceHost?.prepareNativeInstallation(for: id)
                 }
@@ -762,13 +767,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         check: @escaping @Sendable ([ExtensionRegistryItem]) async throws -> [ExtensionID: ExtensionUpdate],
         prepare: @escaping @Sendable (ExtensionUpdate, String) async throws -> PreparedExtensionUpdate,
         install: @escaping @Sendable (PreparedExtensionUpdate) async throws -> Void,
-        browse: @escaping @Sendable () async throws -> ExtensionCatalogSnapshot = { .init(plugins: []) }
+        browse: @escaping @Sendable () async throws -> ExtensionCatalogSnapshot = { .init(plugins: []) },
+        uninstall: @escaping @Sendable (ExtensionRegistryItem) async throws -> Void = { _ in throw ExtensionFailure.hostUnavailable("uninstall unavailable") }
     ) {
         guard let extensionUseCase else { return }
         extensionUpdater = ExtensionUpdateController(useCase: extensionUseCase, panel: extensionsPanel, check: check, prepare: prepare, install: install, browse: browse,
-            activate: { [weak self] id in try await self?.extensionServiceHost?.prepareNativeInstallation(for: id) },
+            activate: { [weak self] id in try await self?.extensionServiceHost?.prepareNativeInstallation(for: id) }, uninstall: uninstall,
             onError: { [weak self] error in self?.renderExtensionError(error) })
     }
+    public func stopExtensionForRemoval(_ id: ExtensionID) async throws {
+        if let task = extensionLocalInstallTask { task.cancel(); await task.value }
+        await extensionUpdater?.cancelInstallation(for: id)
+        try await extensionUseCase?.stopForRemoval(id)
+    }
+    public func refreshExtensions() async { await extensionUseCase?.refresh() }
+
     private weak var extensionServiceHost: ExtensionListServiceHost?
     public func configureExtensionServices(_ host: ExtensionListServiceHost) {
         extensionServiceHost = host

@@ -22,4 +22,10 @@ Each new plugin should normally have its own repository. The catalog registers i
 
 Selection/document transforms retain the WASM ABI. Native plugins can own their AppKit views and resources through SDK v1. Clipboard 0.2.1 demonstrates this path with Swift UI and a Rust history engine. The legacy WASM list service remains for 0.1.x compatibility.
 
-The native SDK currently exposes docking, locale changes, insertion tokens, and manifest-declared commands/shortcuts. It does not yet provide the full Notepad++ editor API, a JavaScript runtime, automated publisher onboarding, unattended updates or uninstall UI. The API is not yet a published stable release.
+The native SDK currently exposes docking, locale changes, insertion tokens, and manifest-declared commands/shortcuts. It does not yet provide the full Notepad++ editor API, a JavaScript runtime, automated publisher onboarding, unattended updates. The API is not yet a published stable release.
+
+## Uninstalling
+
+In Extensions Manager, select a user-installed plugin under Installed and choose **Uninstall…**. Confirmation stops its commands and panels in every window, cancels pending installation work, and removes all verified installed versions. Plugin history and settings remain available for reinstallation. Built-in plugins can be disabled but not uninstalled.
+
+Uninstall does not require restarting Duckpad. Native libraries remain mapped until the process exits; their instances are stopped immediately. Reinstalling the same signed native package can run immediately. Reinstalling a different native identity in the same process requires restarting before enabling it.

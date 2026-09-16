@@ -716,3 +716,11 @@
 "Plugin Installation Failed" = "插件安装失败";
 "Installed" = "已安装";
 "Some Plugins Could Not Be Loaded" = "部分插件无法加载";
+"Uninstall…" = "卸载…";
+"Uninstall" = "卸载";
+"Uninstall %1$@?" = "卸载 %1$@？";
+"The plugin will stop and all installed versions will be removed. Its history and settings will be kept for reinstallation." = "插件将停止运行，所有已安装版本都将被移除。历史记录和设置将保留以便重新安装。";
+"Built-in plugins can be disabled but not uninstalled." = "内置插件可以禁用，但不能卸载。";
+"Uninstalling Plugin…" = "正在卸载插件…";
+"Plugin Uninstalled" = "插件已卸载";
+"Plugin Uninstallation Failed" = "插件卸载失败";

@@ -28,6 +28,8 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
         publicKey: Data(base64Encoded: "WlOI4aUUE1yhCuLzGBpcklFSUDTxp+Smn07d2RQ2idE=")!, source: .userImported
     )
 
+    private var installGenerations: [ExtensionID: UInt64] = [:]
+    private var removing: Set<ExtensionID> = []
     private let root: URL
     private let bundledPackages: [URL]
     private let trustedKeys: [String: TrustedPublisherKey]
@@ -60,6 +62,7 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
     public func install(from source: URL) throws {
         guard source.pathExtension == "duckpad-plugin" else { throw ExtensionFailure.invalidPackagePath }
         let package = try load(source)
+        _ = try installationGeneration(for: package.manifest.id)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
         guard try regularDirectory(root) else { throw ExtensionFailure.invalidPackagePath }
@@ -74,6 +77,64 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
         guard renameatx_np(AT_FDCWD, temporary.path, AT_FDCWD, destination.path, UInt32(RENAME_EXCL)) == 0 else {
             throw ExtensionFailure.hostUnavailable("plugin version is already installed or destination is unavailable")
         }
+    }
+
+    public func installationGeneration(for id: ExtensionID) throws -> UInt64 {
+        guard !removing.contains(id) else { throw ExtensionFailure.staleContext }
+        return installGenerations[id, default: 0]
+    }
+    public func beginRemoval(_ id: ExtensionID) throws {
+        guard !removing.contains(id), installGenerations[id, default: 0] < UInt64.max else { throw ExtensionFailure.staleContext }
+        installGenerations[id, default: 0] += 1
+        removing.insert(id)
+    }
+    public func endRemoval(_ id: ExtensionID) { removing.remove(id) }
+
+    /// Runs without suspension so publication cannot interleave with removal.
+    /// Only verified packages inside the user installation root are removed.
+    public func uninstall(_ id: ExtensionID, publisherFingerprint: String) throws -> Set<String> {
+        guard removing.contains(id), id.rawValue.range(of: #"^[a-z0-9]+(?:[.-][a-z0-9-]+)+$"#, options: .regularExpression) != nil else { throw ExtensionFailure.invalidPackagePath }
+        for url in bundledPackages {
+            if try load(url).manifest.id == id { throw ExtensionFailure.invalidPackagePath }
+        }
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        guard try regularDirectory(root), root.resolvingSymlinksInPath().path == root.path else { throw ExtensionFailure.invalidPackagePath }
+        let urls = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "duckpad-plugin" }
+        var targets: [(URL, LoadedExtensionPackage)] = []
+        for url in urls {
+            let package: LoadedExtensionPackage
+            do { package = try load(url) }
+            catch {
+                // Do not touch unrelated broken packages. A broken canonical
+                // version of this plugin must not be reported as removed.
+                if url.lastPathComponent.hasPrefix(id.rawValue + "@") { throw error }
+                continue
+            }
+            guard package.manifest.id == id else { continue }
+            guard package.publisherFingerprint == publisherFingerprint else { throw ExtensionFailure.signatureMismatch }
+            targets.append((url, package))
+        }
+        let staging = root.appendingPathComponent(".uninstall-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        var moved: [(URL, URL)] = []
+        do {
+            for (source, package) in targets {
+                let destination = staging.appendingPathComponent(source.lastPathComponent)
+                try FileManager.default.moveItem(at: source, to: destination)
+                moved.append((source, destination))
+                // Reverify the moved snapshot before deleting it, in case a
+                // filesystem change raced the initial discovery.
+                let movedPackage = try load(destination)
+                guard movedPackage.packageDigest == package.packageDigest,
+                      movedPackage.publisherFingerprint == package.publisherFingerprint else { throw ExtensionFailure.signatureMismatch }
+            }
+        } catch {
+            for (source, destination) in moved.reversed() { try? FileManager.default.moveItem(at: destination, to: source) }
+            throw error
+        }
+        try FileManager.default.removeItem(at: staging)
+        return Set(targets.filter { $0.1.nativeFiles != nil }.map { $0.1.packageDigest })
     }
 
     public func discover() async -> ExtensionDiscoveryReport {
@@ -173,8 +234,10 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
     }
 
     /// Publishes a verified snapshot, preserving every existing version.
-    public func install(files: [String: Data]) throws -> LoadedExtensionPackage {
+    public func install(files: [String: Data], expectedGeneration: UInt64? = nil) throws -> LoadedExtensionPackage {
         let package = try verify(files: files)
+        let generation = try installationGeneration(for: package.manifest.id)
+        guard expectedGeneration == nil || expectedGeneration == generation else { throw ExtensionFailure.staleContext }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         guard try regularDirectory(root) else { throw ExtensionFailure.invalidPackagePath }
         let destination = root.appendingPathComponent("\(package.manifest.id.rawValue)@\(package.manifest.version).duckpad-plugin")

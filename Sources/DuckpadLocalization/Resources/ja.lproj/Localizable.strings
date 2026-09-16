@@ -716,3 +716,11 @@
 "Plugin Installation Failed" = "プラグインのインストールに失敗しました";
 "Installed" = "インストール済み";
 "Some Plugins Could Not Be Loaded" = "一部のプラグインを読み込めませんでした";
+"Uninstall…" = "アンインストール…";
+"Uninstall" = "アンインストール";
+"Uninstall %1$@?" = "%1$@ をアンインストールしますか？";
+"The plugin will stop and all installed versions will be removed. Its history and settings will be kept for reinstallation." = "プラグインを停止し、インストール済みのすべてのバージョンを削除します。履歴と設定は再インストール用に保持されます。";
+"Built-in plugins can be disabled but not uninstalled." = "内蔵プラグインは無効にできますが、アンインストールできません。";
+"Uninstalling Plugin…" = "プラグインをアンインストール中…";
+"Plugin Uninstalled" = "プラグインをアンインストールしました";
+"Plugin Uninstallation Failed" = "プラグインのアンインストールに失敗しました";

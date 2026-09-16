@@ -18,6 +18,11 @@ public final class NativeExtensionActivationSession {
         }
     }
 
+    private var removing: Set<ExtensionID> = []
+    func beginRemoval(_ id: ExtensionID) -> Bool { removing.insert(id).inserted }
+    func endRemoval(_ id: ExtensionID) { removing.remove(id) }
+    func isRemoving(_ id: ExtensionID) -> Bool { removing.contains(id) }
+
     private var selected: [ExtensionID: Identity] = [:]
 
     public init() {}
