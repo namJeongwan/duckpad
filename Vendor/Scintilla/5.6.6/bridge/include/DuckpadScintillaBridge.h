@@ -168,6 +168,10 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (BOOL)setSearchHighlights:(NSArray<NSValue *> *)ranges revision:(uint64_t)revision
     NS_SWIFT_NAME(setSearchHighlights(_:revision:));
 - (void)clearSearchHighlights;
+- (void)recordSavePointAtRevision:(uint64_t)revision;
+/// Bits: reverted-to-origin, saved, modified, reverted-to-modified.
+- (NSUInteger)changeHistoryStateAtLine:(NSUInteger)line;
+@property(nonatomic, readonly, copy) NSArray<NSNumber *> *searchOverviewPositions;
 - (BOOL)isSearchHighlightedAtUTF8Position:(NSUInteger)position NS_SWIFT_NAME(isSearchHighlighted(atUTF8Position:));
 - (void)setPrimarySelectionUTF8Range:(NSRange)range;
 - (void)restoreCaretUTF8Position:(NSUInteger)caret

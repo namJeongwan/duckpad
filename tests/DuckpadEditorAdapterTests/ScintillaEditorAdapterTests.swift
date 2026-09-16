@@ -345,6 +345,24 @@ struct ScintillaBridgeTests {
         #expect(text(view) == sample)
     }
 
+    @Test @MainActor
+    func normalPacedTypingStaysInOneUndoGroup() throws {
+        let view = makeHostedView()
+        try view.loadUTF8(Data(), revision: 0)
+        view.focusEditor()
+        let client = try #require(view.window?.firstResponder as? any NSTextInputClient)
+        for character in "abc한" {
+            client.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0))
+            Thread.sleep(forTimeInterval: 0.4)
+        }
+        view.undo()
+        #expect(text(view) == "")
+        #expect(!view.canUndo)
+        view.redo()
+        #expect(text(view) == "abc한")
+        #expect(!view.canRedo)
+    }
+
     @Test(arguments: [false, true]) @MainActor
     func typingPauseSplitsUndoUnlessExplicitlyGrouped(grouped: Bool) throws {
         let view = makeHostedView()
@@ -354,10 +372,10 @@ struct ScintillaBridgeTests {
         if grouped { view.beginGroupedUndo() }
         for character in "asdasd" {
             client.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0))
-            // A burst may last over 300 ms as long as each edit arrives sooner.
+            // A burst stays grouped while each edit arrives within the idle interval.
             Thread.sleep(forTimeInterval: 0.08)
         }
-        Thread.sleep(forTimeInterval: 0.35)
+        Thread.sleep(forTimeInterval: 1.15)
         // Reconfirming text is not an edit and must not restart the grouping clock.
         client.insertText("d", replacementRange: NSRange(location: 5, length: 1))
         for character in "한🙂e\u{301}" {
@@ -395,7 +413,7 @@ struct ScintillaBridgeTests {
         ))
         responder.keyDown(with: backspace)
         responder.keyDown(with: backspace)
-        Thread.sleep(forTimeInterval: 0.35)
+        Thread.sleep(forTimeInterval: 1.15)
         responder.keyDown(with: backspace)
         responder.keyDown(with: backspace)
         #expect(text(view) == "as")
@@ -457,9 +475,9 @@ struct ScintillaBridgeTests {
         try view.loadUTF8(Data(), revision: 0)
         view.setMarkedText("ㅎ", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
         #expect(view.hasMarkedText())
-        Thread.sleep(forTimeInterval: 0.35)
+        Thread.sleep(forTimeInterval: 1.15)
         view.setMarkedText("한", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
-        Thread.sleep(forTimeInterval: 0.35)
+        Thread.sleep(forTimeInterval: 1.15)
         if commitThroughInput {
             view.focusEditor()
             let client = try #require(view.window?.firstResponder as? any NSTextInputClient)

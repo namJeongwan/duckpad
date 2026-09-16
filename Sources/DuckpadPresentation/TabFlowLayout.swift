@@ -255,6 +255,16 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         onLayoutRegenerated?()
     }
 
+    public override func layoutAttributesForDropTarget(at pointInCollectionView: NSPoint) -> NSCollectionViewLayoutAttributes? {
+        let insertion = dropInsertion(at: pointInCollectionView)
+        let target = NSCollectionViewLayoutAttributes(forInterItemGapBefore: IndexPath(item: insertion.index, section: 0))
+        target.frame = insertion.marker
+        // The collection view owns native drag routing, while our accent layers
+        // draw the target. Suppress AppKit's second, independently placed bar.
+        target.isHidden = true
+        return target
+    }
+
     public override var collectionViewContentSize: NSSize { calculatedSize }
 
     public override func layoutAttributesForElements(in rect: NSRect) -> [NSCollectionViewLayoutAttributes] {
@@ -327,9 +337,9 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
 
     /// Match the pointer to a row and a title midpoint, including empty space
     /// after its final tab. The marker and committed insertion use one result.
-    func dropInsertion(at point: NSPoint) -> (index: Int, marker: NSRect) {
+    func dropInsertion(at point: NSPoint) -> (index: Int, marker: NSRect, target: NSRect) {
         guard !rows.isEmpty else {
-            return (0, NSRect(x: 0, y: 2, width: 3, height: 23))
+            return (0, NSRect(x: 0, y: 1, width: 2, height: 25), NSRect(x: 0, y: 0, width: 76, height: 27))
         }
         var lower = 0
         var upper = rows.count
@@ -341,7 +351,10 @@ public final class MultilineTabCollectionLayout: NSCollectionViewLayout {
         let index = row.itemRange.first { point.x < attributes[$0].frame.midX } ?? row.itemRange.upperBound
         let x = index == row.itemRange.upperBound
             ? attributes[index - 1].frame.maxX : attributes[index].frame.minX
-        return (index, NSRect(x: max(0, x - 1.5), y: row.minY + 2, width: 3, height: max(1, row.maxY - row.minY - 4)))
+        let targetIndex = row.itemRange.first { point.x < attributes[$0].frame.maxX } ?? (row.itemRange.upperBound - 1)
+        return (index, NSRect(x: max(0, min(x - 1, calculatedSize.width - 2)),
+                             y: row.minY + 1, width: 2, height: max(1, row.maxY - row.minY - 2)),
+                attributes[targetIndex].frame)
     }
 
     public override func shouldInvalidateLayout(forBoundsChange newBounds: NSRect) -> Bool {

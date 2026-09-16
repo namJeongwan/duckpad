@@ -7,7 +7,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -163,6 +163,11 @@ public final class ScintillaEditorAdapter: DeferredPasteEditorPort, FormattingEd
         primaryHost.setAccessibilityLabel(catalog.text("Primary editor pane"))
         internalSecondaryHost.setAccessibilityLabel(catalog.text("Secondary editor pane"))
         secondaryGroupHost.setAccessibilityLabel(catalog.text("Secondary editor group"))
+    }
+
+    public func recordSavePoint(for bufferID: BufferID, revision: UInt64) {
+        guard !isInvalidated, currentRevision(for: bufferID) == revision else { return }
+        bufferViews[bufferID]?.recordSavePoint(atRevision: revision)
     }
 
     public func display(_ buffer: EditorBufferDescriptor) {

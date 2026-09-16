@@ -63,8 +63,9 @@ are not compiled. Duckpad carries six narrow integration and behavior patches:
    undo history. Active IME composition follows the original commit path.
 
 6. `src/UndoHistory.h` and `src/UndoHistory.cxx` split otherwise coalescible
-   typing and deletion after at least 300 ms without an edit, using a monotonic
-   clock per document. Explicit undo groups and tentative IME composition are
+   typing and deletion after at least 1 second without an edit, using a monotonic
+   clock per document. The former 300 ms boundary split ordinary paced typing
+   into individual characters. Explicit undo groups and tentative IME composition are
    not split by elapsed time. Container actions do not restart the clock.
 
 The four packaged cursor PNGs are byte-identical copies from `cocoa/res`.
@@ -146,3 +147,26 @@ event. This is a Duckpad-owned bridge/header change, not an upstream patch.
   Apply heading/strong/emphasis/link/code appearance and clear it with the normal
   style reset when switching languages or themes.
 Clipboard dock: the Duckpad-owned bridge exposes a read-only serialized selection identity for deferred paste validation. It includes all carets, virtual spaces, and selection shape without reading document text. Upstream Scintilla sources and generated files are unchanged.
+
+Search overview markers add a Duckpad-owned overlay in `bridge/`.
+Validated search results are mapped to native display lines, shared across cloned
+panes, and cleared with the existing search indicators. The overlay coalesces
+marks by screen row; tick clicks reveal the matching line, while empty track
+passes through to the native scrollbar. The bridge and
+new helper are not generated; upstream Scintilla/Lexilla sources are unchanged.
+
+Change history enables Scintilla's native marker tracking in a dedicated 3-point
+margin with palette-aware modified/saved/reverted colours. Initial loads reset
+the baseline; successful matching-revision saves set the native save point
+without clearing undo. Binary viewers keep this feature disabled. No upstream
+sources or generated files are modified.
+
+Search overview ticks use source-over alpha blending with merged pixel coverage,
+so densely overlapping hits remain translucent above the native scrollbar thumb.
+
+Search overview mapping retains exact match byte offsets, including separate
+wrapped sublines within one document line. Native scroll-document height supplies
+the scale; clicking unfolds and centers the actual match. During idle wrapping,
+positions remain inside each line's current display span. Wrapped text panes with
+no persistent layout cache temporarily reuse a single-line cache for the mapping
+pass and restore the previous setting afterward.

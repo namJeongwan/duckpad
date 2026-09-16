@@ -1013,6 +1013,7 @@ public final class FileDocumentUseCase {
                 expectedBinding: context.binding
             ) {
             case .applied:
+                (editor as? any EditorSavePointPort)?.recordSavePoint(for: snapshot.bufferID, revision: snapshot.revision)
                 pendingConflict = nil
                 return .saved(context.tabID)
             case .persistenceFailed(let failure): return .failed(.workspace(failure))
@@ -1079,6 +1080,7 @@ public final class FileDocumentUseCase {
             if preservingUndo {
                 editor.reload(EditorTextSnapshot(bufferID: descriptor.bufferID,
                     revision: descriptor.revision, text: decoded.text))
+                (editor as? any EditorSavePointPort)?.recordSavePoint(for: descriptor.bufferID, revision: descriptor.revision)
             } else {
                 editor.install(EditorTextSnapshot(bufferID: descriptor.bufferID,
                     revision: descriptor.revision, text: decoded.text))

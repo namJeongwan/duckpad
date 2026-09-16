@@ -86,7 +86,11 @@ private actor FileStoreFake: TextFileStore {
 }
 
 @MainActor
-private final class FileEditorFake: EditorPort, EditorSelectionPort {
+private final class FileEditorFake: EditorSavePointPort, EditorSelectionPort {
+    var savePoints: [EditorBufferDescriptor] = []
+    func recordSavePoint(for bufferID: BufferID, revision: UInt64) {
+        savePoints.append(.init(bufferID: bufferID, revision: revision))
+    }
     var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
     private var active: EditorBufferDescriptor?
     private var values: [BufferID: EditorTextSnapshot] = [:]
@@ -372,6 +376,7 @@ private final class FileEditorFake: EditorPort, EditorSelectionPort {
     #expect(workspace.snapshot().tabs[0].title == url.lastPathComponent)
     #expect(workspace.snapshot().tabs[0].isDirty == false)
     #expect(await files.text(at: url) == "저장🙂\r\n")
+    #expect(editor.savePoints == [workspace.snapshot().activeBuffer!])
 }
 
 @Test @MainActor func externalModificationRequiresExplicitResolutionAndDoesNotOverwrite() async {

@@ -1,6 +1,7 @@
 #import "DuckpadScintillaBridge.h"
 
 #import "ScintillaView.h"
+#import "DPSearchOverviewView.h"
 
 #include <limits>
 #include <algorithm>
@@ -196,6 +197,12 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 @implementation DPScintillaEditorView {
     ScintillaView *_scintilla;
+    DPSearchOverviewView *_searchOverview;
+    NSIndexSet *_searchMarkerOffsets;
+    NSHashTable<DPScintillaEditorView *> *_searchMarkerPeers;
+    BOOL _searchOverviewNeedsRefresh;
+    NSInteger _searchOverviewDisplayLineCount;
+    CGFloat _searchOverviewDocumentHeight;
     uint64_t _revision;
     BOOL _suppressEdit;
     BOOL _requestedInputEnabled;
@@ -270,6 +277,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         _scintilla.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         _scintilla.delegate = self;
         [self addSubview:_scintilla];
+        _searchOverview = [[DPSearchOverviewView alloc] initWithFrame:NSZeroRect];
+        __weak DPScintillaEditorView *weakSelf = self;
+        _searchOverview.onSelectMarker = ^(NSUInteger index) { [weakSelf navigateToSearchMarker:index]; };
+        [self addSubview:_searchOverview];
+        _searchMarkerOffsets = [NSIndexSet indexSet];
+        _searchMarkerPeers = [NSHashTable weakObjectsHashTable];
+        [_searchMarkerPeers addObject:self];
         [_scintilla message:SCI_SETCODEPAGE wParam:SC_CP_UTF8];
         _publishesDocumentEdits = YES;
         [self updateModificationEventMask];
@@ -299,6 +313,15 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_SETMARGINTYPEN wParam:2 lParam:SC_MARGIN_SYMBOL];
         [_scintilla message:SCI_SETMARGINMASKN wParam:2 lParam:DPBookmarkMask];
         [_scintilla message:SCI_SETMARGINWIDTHN wParam:2 lParam:12];
+        [_scintilla message:SCI_SETMARGINTYPEN wParam:3 lParam:SC_MARGIN_SYMBOL];
+        [_scintilla message:SCI_SETMARGINMASKN wParam:3 lParam:0x01E00000];
+        [_scintilla message:SCI_SETMARGINWIDTHN wParam:3 lParam:3];
+        [_scintilla message:SCI_SETMARGINSENSITIVEN wParam:3 lParam:0];
+        for (int marker = SC_MARKNUM_HISTORY_REVERTED_TO_ORIGIN;
+             marker <= SC_MARKNUM_HISTORY_REVERTED_TO_MODIFIED; ++marker) {
+            [_scintilla message:SCI_MARKERDEFINE wParam:marker lParam:SC_MARK_BAR];
+        }
+        [_scintilla message:SCI_SETCHANGEHISTORY wParam:SC_CHANGE_HISTORY_ENABLED | SC_CHANGE_HISTORY_MARKERS];
         [_scintilla message:SCI_MARKERDEFINE wParam:DPBookmarkMarker lParam:SC_MARK_BOOKMARK];
         [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEROPEN lParam:SC_MARK_BOXMINUS];
         [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDER lParam:SC_MARK_BOXPLUS];
@@ -316,6 +339,107 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     return self;
 }
 
+- (void)layout {
+    [super layout];
+    NSScrollView *scroll = _scintilla.scrollView;
+    NSRect track = [self convertRect:scroll.contentView.bounds fromView:scroll.contentView];
+    NSScroller *scroller = scroll.verticalScroller;
+    _searchOverview.scroller = scroller;
+    if (!scroller.hidden && scroller.frame.size.width > 0) {
+        track = [self convertRect:scroller.bounds fromView:scroller];
+    }
+    const CGFloat width = MAX(12, scroller.frame.size.width);
+    _searchOverview.frame = NSMakeRect(MAX(0, NSMaxX(track) - width), NSMinY(track),
+                                       width, MAX(0, NSHeight(track)));
+    _searchOverviewNeedsRefresh = YES;
+}
+
+- (void)setFrameSize:(NSSize)size {
+    [super setFrameSize:size];
+    self.needsLayout = YES;
+    _searchOverviewNeedsRefresh = YES;
+}
+
+- (NSArray<NSNumber *> *)searchOverviewPositions { return _searchOverview.positions; }
+
+- (void)resetSearchOverviewDocument {
+    [_searchMarkerPeers removeObject:self];
+    _searchMarkerPeers = [NSHashTable weakObjectsHashTable];
+    [_searchMarkerPeers addObject:self];
+    _searchMarkerOffsets = [NSIndexSet indexSet];
+    _searchOverview.positions = @[];
+    _searchOverviewNeedsRefresh = NO;
+}
+
+- (void)navigateToSearchMarker:(NSUInteger)index {
+    if (_binaryDocument || index >= _searchMarkerOffsets.count) return;
+    __block NSUInteger selectedOffset = NSNotFound;
+    __block NSUInteger current = 0;
+    [_searchMarkerOffsets enumerateIndexesUsingBlock:^(NSUInteger offset, BOOL *stop) {
+        if (current++ == index) { selectedOffset = offset; *stop = YES; }
+    }];
+    if (selectedOffset == NSNotFound) return;
+    const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:selectedOffset];
+    [_scintilla message:SCI_ENSUREVISIBLEENFORCEPOLICY wParam:line];
+    [_scintilla message:SCI_GOTOPOS wParam:selectedOffset];
+    // SCI_VERTICALCENTRECARET centers the logical line's start, which can
+    // scroll a match in a long wrapped line back out of view.
+    const NSInteger lineHeight = MAX(1, [_scintilla message:SCI_TEXTHEIGHT wParam:0]);
+    const NSInteger caretRow = [_scintilla message:SCI_GETFIRSTVISIBLELINE]
+        + [_scintilla message:SCI_POINTYFROMPOSITION wParam:0 lParam:selectedOffset] / lineHeight;
+    const NSInteger centeredRow = MAX(0, caretRow - [_scintilla message:SCI_LINESONSCREEN] / 2);
+    [_scintilla message:SCI_SETFIRSTVISIBLELINE wParam:centeredRow];
+    _searchOverviewNeedsRefresh = YES;
+    [self refreshSearchOverview];
+    [self.window makeFirstResponder:[_scintilla content]];
+}
+
+- (void)refreshSearchOverview {
+    if (!_searchOverviewNeedsRefresh) return;
+    _searchOverviewNeedsRefresh = NO;
+    if (_searchMarkerOffsets.count == 0 || _binaryDocument) {
+        _searchOverview.positions = @[];
+        return;
+    }
+    // The one-past-end document line maps to the total display-line count,
+    // including folding/wrapping, without laying out the final document line.
+    const NSInteger displayLines = [_scintilla message:SCI_VISIBLEFROMDOCLINE
+                                               wParam:[_scintilla message:SCI_GETLINECOUNT]];
+    _searchOverviewDisplayLineCount = displayLines;
+    // Use the native scroll document extent, including scroll-past-end space
+    // and viewport padding, so ticks share the thumb's coordinate system.
+    const CGFloat lineHeight = MAX(1, [_scintilla message:SCI_TEXTHEIGHT wParam:0]);
+    _searchOverviewDocumentHeight = _scintilla.scrollView.documentView.frame.size.height;
+    const CGFloat documentHeight = MAX(lineHeight * displayLines, _searchOverviewDocumentHeight);
+    const NSInteger firstVisible = [_scintilla message:SCI_GETFIRSTVISIBLELINE];
+    const BOOL wrapping = [_scintilla message:SCI_GETWRAPMODE] != SC_WRAP_NONE;
+    const NSInteger cacheLevel = [_scintilla message:SCI_GETLAYOUTCACHE];
+    // Clones deliberately use no persistent layout cache. Temporarily keep
+    // one line so many matches in a huge wrapped line don't lay it out N times.
+    if (wrapping && cacheLevel == SC_CACHE_NONE) [_scintilla message:SCI_SETLAYOUTCACHE wParam:SC_CACHE_CARET];
+    NSMutableArray<NSNumber *> *positions = [NSMutableArray arrayWithCapacity:_searchMarkerOffsets.count];
+    __block NSInteger previousLine = -1, lineStart = 0, lineEnd = 0;
+    [_searchMarkerOffsets enumerateIndexesUsingBlock:^(NSUInteger offset, BOOL *stop) {
+        const NSInteger line = [self->_scintilla message:SCI_LINEFROMPOSITION wParam:offset];
+        if (line != previousLine) {
+            previousLine = line;
+            lineStart = [self->_scintilla message:SCI_VISIBLEFROMDOCLINE wParam:line];
+            lineEnd = [self->_scintilla message:SCI_VISIBLEFROMDOCLINE wParam:line + 1];
+        }
+        CGFloat displayLine = lineStart;
+        if (wrapping && lineEnd - lineStart > 1) {
+            const NSInteger y = [self->_scintilla message:SCI_POINTYFROMPOSITION wParam:0 lParam:offset];
+            // During idle rewrapping the new character layout may run ahead
+            // of native scroll heights. Stay within this line's current span
+            // until the next paint updates the map, keeping tick order stable.
+            displayLine = MAX(lineStart, MIN(lineEnd - 1, firstVisible + y / lineHeight));
+        }
+        [positions addObject:@(MIN(1.0, MAX(0, (displayLine + 0.5) * lineHeight / MAX(1, documentHeight))))];
+    }];
+    if (wrapping && cacheLevel == SC_CACHE_NONE) [_scintilla message:SCI_SETLAYOUTCACHE wParam:cacheLevel];
+    _searchOverview.positions = positions;
+}
+
 - (void)dealloc {
     [self cancelPendingSmartIndentation];
     DPScintillaEditorView *publisher = _documentPublisher;
@@ -328,6 +452,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)invalidate {
+    [_searchMarkerPeers removeObject:self];
+    [_searchOverview removeFromSuperview];
     [self cancelPendingSmartIndentation];
     DPScintillaEditorView *publisher = _documentPublisher;
     if (publisher != nil && publisher->_directInputInitiator == self) {
@@ -423,6 +549,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _pendingSmartCharacter = 0;
     if (_binaryDocument) {
         // StylesNone cannot be changed in place; text reload needs a regular document.
+        [self resetSearchOverviewDocument];
         [_scintilla message:SCI_SETDOCPOINTER wParam:0 lParam:0];
         [_scintilla message:SCI_SETLAYOUTCACHE wParam:SC_CACHE_NONE];
         [_scintilla message:SCI_SETCODEPAGE wParam:SC_CP_UTF8];
@@ -431,6 +558,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [self updateModificationEventMask];
     }
     [_scintilla setEditable:YES];
+    if (!preservingUndo) [_scintilla message:SCI_SETCHANGEHISTORY wParam:SC_CHANGE_HISTORY_DISABLED];
+    [_scintilla message:SCI_SETMARGINWIDTHN wParam:3 lParam:3];
     [_scintilla message:SCI_SETEOLMODE wParam:DPEOLModeForUTF8(content)];
     if (!preservingUndo || ![content isEqualToData:self.contentUTF8]) {
         if (preservingUndo) [_scintilla message:SCI_BEGINUNDOACTION];
@@ -442,7 +571,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         }
         if (preservingUndo) [_scintilla message:SCI_ENDUNDOACTION];
     }
-    if (!preservingUndo) [_scintilla message:SCI_EMPTYUNDOBUFFER];
+    if (!preservingUndo) {
+        [_scintilla message:SCI_EMPTYUNDOBUFFER];
+        [_scintilla message:SCI_SETSAVEPOINT];
+        [_scintilla message:SCI_SETCHANGEHISTORY wParam:SC_CHANGE_HISTORY_ENABLED | SC_CHANGE_HISTORY_MARKERS];
+    }
     [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
     _suppressEdit = NO;
     _revision = revision;
@@ -455,6 +588,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)loadBinaryDocument:(DPScintillaBinaryDocument *)document revision:(uint64_t)revision {
     [self cancelPendingSmartIndentation];
+    [self resetSearchOverviewDocument];
     _suppressEdit = YES;
     _binaryDocument = YES;
     _pendingSmartCaretPosition = -1;
@@ -469,6 +603,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETLAYOUTCACHE wParam:SC_CACHE_PAGE];
     [_scintilla message:SCI_SETUNDOSELECTIONHISTORY wParam:SC_UNDO_SELECTION_HISTORY_DISABLED];
     [document attachToScintillaView:_scintilla];
+    [_scintilla message:SCI_SETCHANGEHISTORY wParam:SC_CHANGE_HISTORY_DISABLED];
+    [_scintilla message:SCI_SETMARGINWIDTHN wParam:3 lParam:0];
     [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
     [_scintilla setEditable:NO];
     _revision = revision;
@@ -719,6 +855,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (BOOL)isWordWrapEnabled { return [_scintilla message:SCI_GETWRAPMODE] != SC_WRAP_NONE; }
 - (void)setWordWrapEnabled:(BOOL)value {
     [_scintilla message:SCI_SETWRAPMODE wParam:value && !_binaryDocument ? SC_WRAP_WORD : SC_WRAP_NONE];
+    _searchOverviewNeedsRefresh = YES;
 }
 - (BOOL)isWrapMarkerVisible {
     return [_scintilla message:SCI_GETWRAPVISUALFLAGS] != SC_WRAPVISUALFLAG_NONE;
@@ -760,6 +897,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                        lParam:reinterpret_cast<sptr_t>(digits.c_str())] + 8
         : 0;
     [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:width];
+    _searchOverviewNeedsRefresh = YES;
 }
 
 - (NSInteger)zoomLevel { return [_scintilla message:SCI_GETZOOM]; }
@@ -924,6 +1062,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)shareDocumentWithView:(DPScintillaEditorView *)source {
     if (source == nil || source == self) return;
+    [_searchMarkerPeers removeObject:self];
+    _searchMarkerPeers = source->_searchMarkerPeers;
+    [_searchMarkerPeers addObject:self];
+    _searchMarkerOffsets = source->_searchMarkerOffsets;
     _binaryDocument = source->_binaryDocument;
     [_scintilla message:SCI_SETLAYOUTCACHE wParam:_binaryDocument ? SC_CACHE_PAGE : SC_CACHE_NONE];
     [_scintilla message:SCI_SETUNDOSELECTIONHISTORY
@@ -931,6 +1073,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     if (_binaryDocument) [_scintilla message:SCI_SETWRAPMODE wParam:SC_WRAP_NONE];
     const sptr_t document = [source->_scintilla message:SCI_GETDOCPOINTER];
     [_scintilla message:SCI_SETDOCPOINTER wParam:0 lParam:document];
+    [_scintilla message:SCI_SETCHANGEHISTORY wParam:_binaryDocument ? SC_CHANGE_HISTORY_DISABLED
+        : SC_CHANGE_HISTORY_ENABLED | SC_CHANGE_HISTORY_MARKERS];
+    [_scintilla message:SCI_SETMARGINWIDTHN wParam:3 lParam:_binaryDocument ? 0 : 3];
     [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
     _statusContentGeneration += 1;
     // The primary view remains the sole document-modification observer. A
@@ -940,12 +1085,23 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _documentPublisher = source;
     [self updateModificationEventMask];
     [self synchronizeRevision:source.revision];
+    _searchOverviewNeedsRefresh = YES;
+    [self refreshSearchOverview];
 }
 
 - (void)synchronizeRevision:(uint64_t)revision {
     _revision = revision;
     [_scintilla setEditable:_requestedInputEnabled && !_binaryDocument && revision != UINT64_MAX];
 }
+- (void)recordSavePointAtRevision:(uint64_t)revision {
+    if (!_binaryDocument && _revision == revision) [_scintilla message:SCI_SETSAVEPOINT];
+}
+
+- (NSUInteger)changeHistoryStateAtLine:(NSUInteger)line {
+    if (_binaryDocument || line >= self.lineCount) return 0;
+    return ([_scintilla message:SCI_MARKERGET wParam:line] >> SC_MARKNUM_HISTORY_REVERTED_TO_ORIGIN) & 0xF;
+}
+
 - (BOOL)canUndo { return [[_scintilla content] canUndo]; }
 - (BOOL)canRedo { return [[_scintilla content] canRedo]; }
 - (BOOL)canCut {
@@ -980,16 +1136,29 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [self clearSearchHighlights];
     [_scintilla message:SCI_SETINDICATORCURRENT wParam:DPSearchIndicator];
     [_scintilla message:SCI_SETINDICATORVALUE wParam:1];
+    NSMutableIndexSet *offsets = [NSMutableIndexSet indexSet];
     for (NSValue *value in ranges) {
         const NSRange range = value.rangeValue;
+        [offsets addIndex:range.location];
         if (range.length > 0) {
             [_scintilla message:SCI_INDICATORFILLRANGE wParam:range.location lParam:range.length];
         }
+    }
+    for (DPScintillaEditorView *peer in _searchMarkerPeers) {
+        peer->_searchMarkerOffsets = [offsets copy];
+        peer->_searchOverviewNeedsRefresh = YES;
+        [peer refreshSearchOverview];
+        peer.needsLayout = YES;
     }
     return YES;
 }
 
 - (void)clearSearchHighlights {
+    for (DPScintillaEditorView *peer in _searchMarkerPeers) {
+        peer->_searchMarkerOffsets = [NSIndexSet indexSet];
+        peer->_searchOverview.positions = @[];
+        peer->_searchOverviewNeedsRefresh = NO;
+    }
     if (_binaryDocument) return;
     [_scintilla message:SCI_SETINDICATORCURRENT wParam:DPSearchIndicator];
     [_scintilla message:SCI_INDICATORCLEARRANGE wParam:0 lParam:self.documentByteLength];
@@ -1017,6 +1186,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETFIRSTVISIBLELINE wParam:(uptr_t)firstVisibleLine];
     [_scintilla message:SCI_SETXOFFSET wParam:(uptr_t)horizontalScrollOffset];
     [_scintilla message:SCI_SETWRAPMODE wParam:wordWrapEnabled && !_binaryDocument ? SC_WRAP_WORD : SC_WRAP_NONE];
+    _searchOverviewNeedsRefresh = YES;
 }
 
 - (BOOL)addSelectionUTF8Range:(NSRange)range {
@@ -1399,6 +1569,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                  wParam:effectiveFolding ? SC_AUTOMATICFOLD_CHANGE : SC_AUTOMATICFOLD_NONE];
     if (!effectiveFolding) {
         if (!_binaryDocument) [_scintilla message:SCI_FOLDALL wParam:SC_FOLDACTION_EXPAND];
+        _searchOverviewNeedsRefresh = YES;
         _foldRecoveryProgressPending = NO;
     }
     if (!_braceMatchingEnabled) [self updateBraceHighlight];
@@ -1452,6 +1623,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)applyPalette:(DPScintillaPalette)palette {
     _palette = palette;
+    _searchOverview.markerColor = palette == DPScintillaPaletteDark || palette == DPScintillaPaletteHighContrastDark
+        ? [NSColor colorWithSRGBRed:0.39 green:0.80 blue:0.53 alpha:0.40]
+        : [NSColor colorWithSRGBRed:0.18 green:0.56 blue:0.29 alpha:0.32];
+    _searchOverviewNeedsRefresh = YES;
     const BOOL dark = palette == DPScintillaPaletteDark || palette == DPScintillaPaletteHighContrastDark;
     const BOOL highContrast = palette == DPScintillaPaletteHighContrastLight || palette == DPScintillaPaletteHighContrastDark;
     const int foreground = dark ? 0xE8E8E8 : 0x202020;
@@ -1488,6 +1663,14 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETMARGINBACKN wParam:0 lParam:gutterBackground];
     [_scintilla message:SCI_SETMARGINBACKN wParam:1 lParam:gutterBackground];
     [_scintilla message:SCI_SETMARGINBACKN wParam:2 lParam:gutterBackground];
+    [_scintilla message:SCI_SETMARGINBACKN wParam:3 lParam:gutterBackground];
+    const int changeColors[] = { dark ? 0xE8B574 : 0xB57838, dark ? 0x87BC72 : 0x528A36,
+                                 dark ? 0x64B5F4 : 0x247ED5, dark ? 0x64B5F4 : 0x247ED5 };
+    for (int index = 0; index < 4; ++index) {
+        const int marker = SC_MARKNUM_HISTORY_REVERTED_TO_ORIGIN + index;
+        [_scintilla message:SCI_MARKERSETFORE wParam:marker lParam:changeColors[index]];
+        [_scintilla message:SCI_MARKERSETBACK wParam:marker lParam:changeColors[index]];
+    }
     [_scintilla message:SCI_SETFOLDMARGINCOLOUR wParam:1 lParam:gutterBackground];
     [_scintilla message:SCI_SETFOLDMARGINHICOLOUR wParam:1 lParam:gutterBackground];
     [_scintilla message:SCI_SETMARGINLEFT wParam:0 lParam:8];
@@ -1615,6 +1798,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_FOLDLINE
                  wParam:(uptr_t)header
                  lParam:expanded ? SC_FOLDACTION_EXPAND : SC_FOLDACTION_CONTRACT];
+    _searchOverviewNeedsRefresh = YES;
+    [self refreshSearchOverview];
     const BOOL isExpanded = [_scintilla message:SCI_GETFOLDEXPANDED wParam:(uptr_t)header] != 0;
     if (isExpanded == wasExpanded) return NO;
     if (publishChange && self.onFoldStateChange) self.onFoldStateChange();
@@ -1640,6 +1825,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     if (!_foldingEnabled) return NO;
     NSArray<NSNumber *> *before = [self contractedFoldHeaderLinesWithMaximumCount:NSUIntegerMax];
     [_scintilla message:SCI_FOLDALL wParam:SC_FOLDACTION_CONTRACT_EVERY_LEVEL];
+    _searchOverviewNeedsRefresh = YES;
+    [self refreshSearchOverview];
     NSArray<NSNumber *> *after = [self contractedFoldHeaderLinesWithMaximumCount:NSUIntegerMax];
     if ([before isEqualToArray:after]) return NO;
     if (self.onFoldStateChange) self.onFoldStateChange();
@@ -1649,6 +1836,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (BOOL)expandAllFolds {
     if (!self.hasContractedFolds) return NO;
     [_scintilla message:SCI_FOLDALL wParam:SC_FOLDACTION_EXPAND];
+    _searchOverviewNeedsRefresh = YES;
+    [self refreshSearchOverview];
     if (self.onFoldStateChange) self.onFoldStateChange();
     return YES;
 }
@@ -2472,7 +2661,21 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [self handleSmartCharacterAdded:notification];
         return;
     }
+    if (notification->nmhdr.code == SCN_PAINTED) {
+        // Idle wrapping can finish after layout/SC_UPDATE_CONTENT. Check the
+        // O(1) display count; scrolling alone must not remap every match.
+        if (_searchMarkerOffsets.count > 0 && !_binaryDocument) {
+            const NSInteger displayLines = [_scintilla message:SCI_VISIBLEFROMDOCLINE
+                                                       wParam:[_scintilla message:SCI_GETLINECOUNT]];
+            if (displayLines != _searchOverviewDisplayLineCount
+                || _scintilla.scrollView.documentView.frame.size.height != _searchOverviewDocumentHeight) {
+                _searchOverviewNeedsRefresh = YES;
+            }
+        }
+        [self refreshSearchOverview];
+    }
     if (notification->nmhdr.code == SCN_UPDATEUI) {
+        if (notification->updated & SC_UPDATE_CONTENT) _searchOverviewNeedsRefresh = YES;
         [self updateBraceHighlight];
         [self scheduleFoldRecoveryProgress];
         if (self.onStatusChange && (notification->updated & (SC_UPDATE_CONTENT | SC_UPDATE_SELECTION))) {
