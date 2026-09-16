@@ -393,11 +393,28 @@ func signedNativeClipboardInstallsDocksAndStopsWhenDisabled() async throws {
     let closeKey = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
         timestamp: 0, windowNumber: window.windowNumber, context: nil,
         characters: "w", charactersIgnoringModifiers: "w", isARepeat: false, keyCode: 13))
+    let controls = descendants(panel)
+    let search = try #require(controls.compactMap { $0 as? NSSearchField }.first)
+    let table = try #require(controls.compactMap { $0 as? NSTableView }.first)
+    let preview = try #require(controls.compactMap { $0 as? NSTextView }.first)
+    for target: NSView in [search, table, preview, panel] {
+        #expect(window.makeFirstResponder(target))
+        // The application menu can dispatch Close before the plugin view's
+        // performKeyEquivalent override. Exercise the real menu action too.
+        #expect(menu.performKeyEquivalent(with: closeKey))
+        #expect(panel.superview == nil)
+        #expect(workspace.snapshot().tabs.map(\.id) == tabIDs)
+        #expect(service.serviceCommands().count == 1) // Collection remains enabled.
+        controller.performExtensionCommand(item)
+        let reopenDeadline = ContinuousClock.now + .seconds(2)
+        while panel.superview == nil, ContinuousClock.now < reopenDeadline { await Task.yield() }
+        #expect(panel.superview is NSSplitView)
+    }
+    // The plugin-owned window shortcut continues to work independently.
     #expect(window.makeFirstResponder(panel))
     #expect(window.performKeyEquivalent(with: closeKey))
     #expect(panel.superview == nil)
     #expect(workspace.snapshot().tabs.map(\.id) == tabIDs)
-    #expect(service.serviceCommands().count == 1) // Closing does not disable collection.
     controller.performExtensionCommand(item)
     let reopenDeadline = ContinuousClock.now + .seconds(2)
     while panel.superview == nil, ContinuousClock.now < reopenDeadline { await Task.yield() }

@@ -123,6 +123,14 @@ public final class ExtensionListServiceHost {
         if panel.superview === split { panel.close() }
     }
 
+    /// Route the application's Close menu action before it reaches document tabs.
+    public func closeFocusedPanel(in split: NSSplitView) -> Bool {
+        if nativeHost.closeFocusedPanel(in: split) { return true }
+        guard PluginPanelFocus.ownsKeyboardFocus(panel, in: split) else { return false }
+        panel.close()
+        return true
+    }
+
     func pollClipboard() {
         reconcile()
         let readers = sessions.values.filter { $0.useCase != nil && $0.identity.capabilities.contains(.clipboardRead) }

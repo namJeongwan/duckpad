@@ -107,6 +107,11 @@ import DuckpadLocalization
         window?.makeFirstResponder(view)
     }
     func close(in split: NSSplitView) { if panel?.superview === split { close() } }
+    func closeFocusedPanel(in split: NSSplitView) -> Bool {
+        guard let panel, PluginPanelFocus.ownsKeyboardFocus(panel, in: split) else { return false }
+        close()
+        return true
+    }
     func close() {
         if let displayed { instances[displayed]?.detach() }
         if let panel {

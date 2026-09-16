@@ -1,6 +1,7 @@
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
+import DuckpadInfrastructure
 @testable import DuckpadPresentation
 import Foundation
 import Testing
@@ -74,6 +75,48 @@ private actor ListStorageFake: ExtensionServiceStorage {
         for _ in 0..<200 { if predicate() { return }; try? await Task.sleep(for: .milliseconds(10)) }
         Issue.record("List service did not reach expected state")
     }
+    @Test @MainActor func closeMenuDismissesFocusedPluginButKeepsEditorCloseBehavior() async throws {
+        _ = NSApplication.shared
+        let clipboard = NSPasteboard.withUniqueName()
+        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard)
+        let invoker = ListInvokerFake(); host.synchronize(invoker)
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+        controller.configureExtensionServices(host)
+        defer { host.unregister(invoker); controller.close(); clipboard.clearContents() }
+        controller.start(); await controller.waitForStartup()
+        let window = try #require(controller.window)
+        let split = try #require(window.contentView?.subviews.compactMap { $0 as? NSSplitView }.first)
+        let menu = DuckpadMainMenuFactory.make(target: controller)
+        let key = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: 0, windowNumber: window.windowNumber, context: nil,
+            characters: "w", charactersIgnoringModifiers: "w", isARepeat: false, keyCode: 13))
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let controls = descendants(host.panel)
+        let search = try #require(controls.compactMap { $0 as? NSSearchField }.first)
+        let table = try #require(controls.compactMap { $0 as? NSTableView }.first)
+        let preview = try #require(controls.compactMap { $0 as? NSTextView }.first)
+        let button = try #require(controls.compactMap { $0 as? NSButton }.first)
+        let before = workspace.snapshot().tabs
+        var restored = 0
+        for target: NSView in [search, table, preview, button] {
+            host.show(invoker.registration.command.id, in: split, onClose: { restored += 1 }) { nil }
+            #expect(window.makeFirstResponder(target))
+            #expect(menu.performKeyEquivalent(with: key))
+            #expect(host.panel.superview == nil)
+            #expect(workspace.snapshot().tabs == before)
+            #expect(invoker.enabled)
+        }
+        #expect(restored == 4)
+        controller.performNewScratch()
+        await wait { workspace.snapshot().tabs.count == before.count + 1 }
+        host.show(invoker.registration.command.id, in: split) { nil }
+        #expect(window.makeFirstResponder(controller.editor.textView))
+        #expect(menu.performKeyEquivalent(with: key))
+        await wait { workspace.snapshot().tabs.count == before.count }
+        #expect(host.panel.superview === split)
+    }
+
     @Test @MainActor func survivingWindowKeepsOneObserverAndNewerRevocationWins() async {
         _ = NSApplication.shared
         let clipboard = NSPasteboard.withUniqueName()
