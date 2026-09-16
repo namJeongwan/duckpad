@@ -1,0 +1,65 @@
+"""Check translated keys, placeholders, routes, metadata and local links."""
+from pathlib import Path
+from html.parser import HTMLParser
+from urllib.parse import urlsplit, unquote
+import json
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+ROOT = Path(__file__).resolve().parent
+OUTPUT = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT.parent / 'build/website-preview/duckpad'
+LANGUAGES = json.loads((ROOT / '_data/languages.json').read_text())
+PAGES = json.loads((ROOT / '_data/pages.json').read_text())
+REFERENCE = json.loads((ROOT / '_data/i18n/en.json').read_text())
+
+class Page(HTMLParser):
+    def __init__(self, text):
+        super().__init__()
+        self.elements = []
+        self.feed(text)
+    def handle_starttag(self, tag, attrs):
+        self.elements.append((tag, dict(attrs)))
+    def attrs(self, tag):
+        return [attrs for name, attrs in self.elements if name == tag]
+
+for language in LANGUAGES:
+    code = language['code']
+    data = json.loads((ROOT / '_data/i18n' / (code + '.json')).read_text())
+    assert data.keys() == REFERENCE.keys(), f'{code}: translation keys differ'
+    for key, value in data.items():
+        assert isinstance(value, str) and value.strip(), f'{code}: empty {key}'
+        assert sorted(re.findall(r':(?:version|macos)', value)) == sorted(re.findall(r':(?:version|macos)', REFERENCE[key])), f'{code}: placeholders in {key}'
+    for entry in PAGES:
+        route = language['prefix'] + entry['route']
+        text = (OUTPUT / route.lstrip('/') / 'index.html').read_text()
+        assert '{{' not in text and '{%' not in text and ':macos' not in text and ':version' not in text
+        page = Page(text)
+        assert page.attrs('html')[0]['lang'] == code
+        assert len(page.attrs('h1')) == 1
+        links = page.attrs('link')
+        canonical = next(a['href'] for a in links if a.get('rel') == 'canonical')
+        assert canonical == 'https://namjeongwan.github.io/duckpad' + route
+        alternates = {a['hreflang']: a['href'] for a in links if a.get('rel') == 'alternate'}
+        assert len(alternates) == len(LANGUAGES) + 1
+        for other in LANGUAGES:
+            assert alternates[other['code']] == 'https://namjeongwan.github.io/duckpad' + other['prefix'] + entry['route']
+        assert f'<title>{data[entry["key"] + "_title"].replace("&", "&amp;")}' in text
+        for tag, attrs in page.elements:
+            link = attrs.get('href') if tag == 'a' else attrs.get('src') if tag == 'img' else None
+            if not link or not link.startswith('/duckpad/'):
+                continue
+            relative = unquote(urlsplit(link).path[len('/duckpad/'):])
+            target = OUTPUT / relative
+            if link.endswith('/'):
+                target /= 'index.html'
+            assert target.is_file(), f'{route}: broken link {link}'
+        for attrs in page.attrs('img'):
+            assert 'alt' in attrs
+        assert not re.search(r'Your text editor|Make yourself at home|A little familiar|The essentials', text)
+
+sitemap = ET.parse(OUTPUT / 'sitemap.xml')
+urls = [entry.text for entry in sitemap.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc')]
+assert len(urls) == len(set(urls)) == 32
+assert set(urls) == {'https://namjeongwan.github.io/duckpad' + lang['prefix'] + p['route'] for lang in LANGUAGES for p in PAGES}
+print(f'PASS: {len(REFERENCE)} keys × 8 languages; 32 routes, metadata, alternate links, local links and sitemap')

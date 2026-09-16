@@ -1,0 +1,9 @@
+---
+layout: null
+---
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+{% for language in site.data.languages %}{% for item in site.data.pages %}
+  <url><loc>{{ language.prefix | append: item.route | absolute_url }}</loc></url>
+{% endfor %}{% endfor %}
+</urlset>
