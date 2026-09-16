@@ -24,7 +24,7 @@ struct LiveFileReloadIntegrationTests {
         let files = FileDocumentUseCase(workspace: workspace, editor: editor,
             store: LocalTextFileStore(bookmarkArchiveURL: root.appendingPathComponent("bookmarks.json")),
             changeMonitor: monitor)
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor,
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor,
             editorView: editor.view, fileUseCase: files)
         defer { controller.window?.close() }
         controller.applyPreferences(AppSettings(liveFileReloadEnabled: !reopenWithEncoding))

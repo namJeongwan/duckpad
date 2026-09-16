@@ -1,3 +1,4 @@
+import DuckpadInfrastructure
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -8,9 +9,30 @@ import WebKit
 
 @Suite(.serialized)
 struct MarkdownPreviewTests {
+    @Test @MainActor func largeDiagramsRemainRenderableAndAllowNextRender() async throws {
+        let panel = MarkdownPreviewPanel(frame: .zero, resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess())
+        defer { panel.invalidate() }
+        let web = try #require(panel.subviews.compactMap { $0 as? WKWebView }.first)
+        try await wait(web, expression: "typeof window.duckpadRender === 'function'")
+        let diagram = "graph TD; A-->B\n%% " + String(repeating: "x", count: 50_001)
+        let source = "```mermaid\n" + diagram + "\n```\n\n# After"
+        _ = try await web.callAsyncJavaScript("await window.duckpadRender(source, '', false); return true;",
+            arguments: ["source": source], in: nil, contentWorld: .page)
+        #expect(try await web.evaluateJavaScript("!!document.querySelector('.mermaid-diagram svg')") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('.mermaid-diagram').length") as? Int == 1)
+        #expect(try await web.evaluateJavaScript("document.querySelector('h1').textContent") as? String == "After")
+        let excessiveEdges = "%%{init: {'maxEdges': 10000}}%%\ngraph TD\n" + String(repeating: "A-->B\n", count: 501)
+        _ = try await web.callAsyncJavaScript("await window.duckpadRender(source, '', false); return true;",
+            arguments: ["source": "```mermaid\n" + excessiveEdges + "```"], in: nil, contentWorld: .page)
+        #expect(try await web.evaluateJavaScript("!!document.querySelector('.mermaid-diagram svg')") as? Bool == true)
+        _ = try await web.callAsyncJavaScript("await window.duckpadRender('```mermaid\\ngraph TD; C-->D\\n```', '', false); return true;",
+            arguments: [:], in: nil, contentWorld: .page)
+        #expect(try await web.evaluateJavaScript("!!document.querySelector('.mermaid-diagram svg')") as? Bool == true)
+    }
+
     @Test @MainActor func headerButtonsShowHoverAndPressAndClosePreview() throws {
         _ = NSApplication.shared
-        let panel = MarkdownPreviewPanel(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        let panel = MarkdownPreviewPanel(frame: NSRect(x: 0, y: 0, width: 600, height: 400), resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess())
         defer { panel.invalidate() }
         let header = try #require(panel.subviews.compactMap { $0 as? NSStackView }.first)
         panel.layoutSubtreeIfNeeded()
@@ -41,7 +63,7 @@ struct MarkdownPreviewTests {
 
     @Test @MainActor func rendersFullMarkdownOfflineAndSanitizesHTML() async throws {
         _ = NSApplication.shared
-        let panel = MarkdownPreviewPanel(frame: NSRect(x: 0, y: 0, width: 600, height: 500))
+        let panel = MarkdownPreviewPanel(frame: NSRect(x: 0, y: 0, width: 600, height: 500), resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess())
         defer { panel.invalidate() }
         let previewWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 850), styleMask: [.titled], backing: .buffered, defer: false)
         previewWindow.contentView = panel
@@ -100,7 +122,7 @@ struct MarkdownPreviewTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=")!
         try png.write(to: root.appendingPathComponent("duck image.png"))
-        let panel = MarkdownPreviewPanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+        let panel = MarkdownPreviewPanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400), resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess())
         defer { panel.invalidate() }
         let web = try #require(panel.subviews.compactMap { $0 as? WKWebView }.first)
         panel.update(source: "![duck](duck%20image.png)\n\n" + String(repeating: "text ", count: 500_000) + "\n\n# End", documentURL: root.appendingPathComponent("test.md"))
@@ -120,7 +142,7 @@ struct MarkdownPreviewTests {
         // A finite render stays pending for 10 seconds. Each runtime must disappear
         // before the next panel opens, without waiting for JavaScript completion.
         for _ in 0..<3 {
-            var panel: MarkdownPreviewPanel? = autoreleasepool { MarkdownPreviewPanel(frame: .zero) }
+            var panel: MarkdownPreviewPanel? = autoreleasepool { MarkdownPreviewPanel(frame: .zero, resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess()) }
             weak var releasedPanel = panel
             var web: WKWebView? = try #require(panel?.subviews.compactMap { $0 as? WKWebView }.first)
             weak var releasedWeb = web
@@ -149,7 +171,7 @@ struct MarkdownPreviewTests {
     }
 
     @Test @MainActor func latestPreviewRendersInWebKitAndCanBeInvalidated() async throws {
-        let panel = MarkdownPreviewPanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+        let panel = MarkdownPreviewPanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400), resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess())
         defer { panel.invalidate() }
         let web = try #require(panel.subviews.compactMap { $0 as? WKWebView }.first)
         #expect(web.configuration.defaultWebpagePreferences.allowsContentJavaScript)
@@ -172,7 +194,7 @@ struct MarkdownPreviewTests {
         try session.changeFileLocation(tabID: markdown, binding: nil, title: "notes.md")
         let plain = session.addUntitled()
         let workspace = ScratchWorkspaceUseCase(store: MarkdownSessionStore(session))
-        let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
         defer { controller.close() }
         controller.start()
         await controller.waitForStartup()
@@ -227,7 +249,7 @@ struct MarkdownPreviewTests {
 
     @Test @MainActor func standardCloseCommandDismissesPreviewBeforeClosingDocument() async throws {
         let workspace = ScratchWorkspaceUseCase(store: MarkdownSessionStore())
-        let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
         defer { controller.close() }
         controller.start()
         await controller.waitForStartup()
@@ -253,7 +275,7 @@ struct MarkdownPreviewTests {
         let markdown = session.addUntitled()
         try session.changeFileLocation(tabID: markdown, binding: nil, title: "notes.md")
         let workspace = ScratchWorkspaceUseCase(store: MarkdownSessionStore(session))
-        let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
         defer { controller.close() }
         controller.start()
         await controller.waitForStartup()

@@ -12,9 +12,9 @@ import DuckpadNativeABI
     var onClose: (() -> Void)?
     private var nextToken: UInt64 = 0
     private var paste: (UInt64, (String) -> Bool)?
-    init(_ registration: ExtensionServiceRegistration, root: URL, cacheRoot: URL, language: String) throws {
+    init(_ registration: ExtensionServiceRegistration, root: URL, installation: any VerifiedNativePluginInstallation, language: String) throws {
         self.registration = registration
-        image = try NativePluginImage.load(registration, cacheRoot: cacheRoot)
+        image = try NativePluginImage.load(registration, installation: installation)
         let command = SHA256.hash(data: Data(registration.command.id.rawValue.utf8)).map { String(format: "%02x", $0) }.joined()
         let storage = root.appendingPathComponent(registration.extensionID.rawValue).appendingPathComponent(registration.publisherFingerprint).appendingPathComponent(command)
         var api = DuckpadHostV1()

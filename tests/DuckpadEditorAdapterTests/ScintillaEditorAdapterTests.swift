@@ -1296,6 +1296,7 @@ struct ScintillaBridgeTests {
         let adapter = ScintillaEditorAdapter()
         let controller = DuckpadWindowController(
             workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
             editorAdapter: adapter,
             editorView: adapter.view,
             automaticallyStarts: false

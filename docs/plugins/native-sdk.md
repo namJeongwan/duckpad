@@ -54,6 +54,17 @@ The selected package must remain installed and pass verification; an update must
 
 The host's Hardened Runtime signing enables `com.apple.security.cs.disable-library-validation` to load code signed by third-party developers. The Duckpad package signature and Apple's Mach-O code signature are separate. Production native plugin distribution needs appropriate macOS signing/notarization; local test packages use ad-hoc code signing. See [Apple's entitlement documentation](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.cs.disable-library-validation).
 
+Before activation, Infrastructure compares the installed files with the
+authorized package snapshot off the AppKit main thread. It pins directory/file
+descriptors during verification and checks their identities, sizes, permissions,
+and modification/change timestamps again at the native loading boundary. The
+temporary descriptors are released after activation, while loaded code remains
+mapped for the process lifetime. Revoking or replacing a registration cancels
+its pending activation; a stale completion cannot activate code or remove a
+newer pending activation. These checks detect snapshot changes, but do not turn
+path-based `dlopen` into isolation from another process with the same user's
+filesystem authority.
+
 App Sandbox remains enabled for Duckpad and its existing WASM runtime service. Only `DuckpadNativeInstaller.xpc` runs outside Sandbox, as the logged-in user without administrator privileges. It accepts only a bounded signed-file payload, not destination paths or commands. It verifies the configured publisher signature, package inventory, native runtime, and host API range before writing under `~/Library/Containers/com.namjeongwan.duckpad/Data/Library/Application Support/Duckpad/NativePluginModules/<verified-digest>.duckpad-plugin`. The original signed registry package remains under Duckpad’s `Extensions` folder. Clipboard data remains separately under `PluginData`.
 
 The app and installer use `NSXPCConnection.setCodeSigningRequirement` with the shipped peer’s designated requirement; the installer additionally checks the connecting user. Ad-hoc builds bind to the code hash. Developer ID builds retain their signing requirement. See [Apple’s XPC requirement documentation](https://developer.apple.com/documentation/foundation/nsxpcconnection/setcodesigningrequirement(_:)). No quarantine attributes or system security settings are removed. The old `files.user-selected.executable` entitlement and installation Save panel are no longer used.

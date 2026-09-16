@@ -14,7 +14,7 @@ enum BuiltInMarkdownSmoke {
         do {
             let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
             let editor = ScintillaEditorAdapter()
-            let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor,
+            let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: LocalMarkdownImageAccess(), editorAdapter: editor,
                 editorView: editor.view)
             await controller.waitForStartup()
             controller.showAndFocus()

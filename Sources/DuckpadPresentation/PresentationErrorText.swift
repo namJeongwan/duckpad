@@ -8,6 +8,11 @@ import DuckpadLocalization
 enum PresentationErrorText {
     static func message(_ error: any Error, catalog: LocalizationCatalog = L10n.catalog) -> String {
         switch error {
+        case let failure as NativePluginValidationFailure:
+            switch failure {
+            case .installationRequired: return catalog.text("The native plugin is being installed. Please try again shortly.")
+            case .changedPackage: return catalog.text("The installed native plugin has changed. Reinstall its signed package before running it.")
+            }
         case let failure as SearchFailure:
             switch failure {
             case .emptyPattern: return catalog.text("Enter text to search.")

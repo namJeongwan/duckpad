@@ -8,7 +8,8 @@ final class MarkdownPreviewPanel: NSView, WKNavigationDelegate {
     private let title = NSTextField(labelWithString: "")
     private let closeButton = StatusBarButton()
     private let webView: WKWebView
-    private let loader = MarkdownPreviewResourceLoader()
+    private let loader: MarkdownPreviewResourceLoader
+    private let imageAccess: any MarkdownImageAccess
     private let folderButton = StatusBarButton()
     private var folderGrants: [URL] = []
     private var ready = false
@@ -26,7 +27,9 @@ final class MarkdownPreviewPanel: NSView, WKNavigationDelegate {
     private var rendering = false
     var onClose: (() -> Void)?
 
-    override init(frame: NSRect) {
+    init(frame: NSRect, resourceReader: any PreviewResourceReading, imageAccess: any MarkdownImageAccess) {
+        loader = MarkdownPreviewResourceLoader(reader: resourceReader)
+        self.imageAccess = imageAccess
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(loader, forURLScheme: "duckpad-preview")
@@ -85,29 +88,9 @@ final class MarkdownPreviewPanel: NSView, WKNavigationDelegate {
         closeButton.setAccessibilityLabel(catalog.text("Close Preview"))
     }
 
-    static func rememberImageAccess(_ urls: [URL]) {
-        var bookmarks = UserDefaults.standard.array(forKey: "markdownPreview.imageFolders") as? [Data] ?? []
-        for url in urls {
-            if let data = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
-                bookmarks.removeAll { existing in
-                    var stale = false
-                    let resolved = try? URL(resolvingBookmarkData: existing, options: [.withSecurityScope], bookmarkDataIsStale: &stale)
-                    return resolved?.standardizedFileURL.path == url.standardizedFileURL.path
-                }
-                bookmarks.append(data)
-            }
-        }
-        UserDefaults.standard.set(bookmarks, forKey: "markdownPreview.imageFolders")
-    }
-
     func reloadImageAccess() {
-        folderGrants.forEach { $0.stopAccessingSecurityScopedResource() }
-        folderGrants.removeAll()
-        for data in UserDefaults.standard.array(forKey: "markdownPreview.imageFolders") as? [Data] ?? [] {
-            var stale = false
-            if let url = try? URL(resolvingBookmarkData: data, options: [.withSecurityScope], bookmarkDataIsStale: &stale),
-               url.startAccessingSecurityScopedResource() { folderGrants.append(url) }
-        }
+        imageAccess.release(folderGrants)
+        folderGrants = imageAccess.acquire()
     }
 
     func update(source: String, documentURL: URL? = nil) {
@@ -179,9 +162,7 @@ final class MarkdownPreviewPanel: NSView, WKNavigationDelegate {
         picker.message = L10n.text("Choose the folder containing this document’s images.")
         picker.directoryURL = latest?.documentURL?.deletingLastPathComponent()
         guard picker.runModal() == .OK, let url = picker.url else { return }
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        Self.rememberImageAccess([url])
+        imageAccess.remember([url])
         reloadImageAccess()
         if let request = latest { enqueue(request.input, documentURL: request.documentURL, plain: request.plain) }
     }
@@ -194,7 +175,7 @@ final class MarkdownPreviewPanel: NSView, WKNavigationDelegate {
         webView.stopLoading()
         webView.navigationDelegate = nil
         loader.invalidate()
-        folderGrants.forEach { $0.stopAccessingSecurityScopedResource() }
+        imageAccess.release(folderGrants)
         folderGrants.removeAll()
         onClose = nil
     }

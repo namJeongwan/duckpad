@@ -26,8 +26,8 @@ public final class ExtensionListServiceHost {
     private var displayedCommand: ExtensionCommandID?
     private var restoreEditorFocus: (() -> Void)?
     private var preparePaste: (() -> ((String) -> Bool)?)?
-    public init(storage: any ExtensionServiceStorage, pasteboard: NSPasteboard = .general, nativeStorageRoot: URL? = nil, nativePackageRoot: URL? = nil, prepareNativePackage: (@Sendable ([String: Data]) async throws -> Void)? = nil) {
-        nativeHost = NativePluginServiceHost(storageRoot: nativeStorageRoot ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Duckpad/PluginData"), packageRoot: nativePackageRoot, preparePackage: prepareNativePackage)
+    public init(storage: any ExtensionServiceStorage, pasteboard: NSPasteboard = .general, nativeStorageRoot: URL? = nil, nativePackageRoot: URL? = nil, nativeVerifier: any NativePluginInstallationVerifying, prepareNativePackage: (@Sendable ([String: Data]) async throws -> Void)? = nil) {
+        nativeHost = NativePluginServiceHost(storageRoot: nativeStorageRoot ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Duckpad/PluginData"), packageRoot: nativePackageRoot, verifier: nativeVerifier, preparePackage: prepareNativePackage)
         self.storage = storage; self.pasteboard = pasteboard; self.changeCount = pasteboard.changeCount
         panel.onClose = { [weak self] in self?.dismissPresentation() }
         panel.onEvent = { [weak self] event, payload, query in self?.send(event, payload: payload, query: query) }
@@ -96,7 +96,7 @@ public final class ExtensionListServiceHost {
             Task { @MainActor [weak self, weak split] in
                 guard let self, let split else { return }
                 do {
-                    if let registration = self.allowed[command] { try await self.nativeHost.prepareInstallation(for: registration.extensionID) }
+                    try await self.nativeHost.prepareInstallation(command: command)
                     guard self.presentationGeneration == generation, split.window != nil else { return }
                     try self.nativeHost.show(command, in: split, onClose: onClose, preparePaste: preparePaste)
                 } catch { onError?(error) }

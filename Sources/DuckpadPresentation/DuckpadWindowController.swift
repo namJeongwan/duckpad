@@ -3,234 +3,11 @@ import AppKit
 import DuckpadApplication
 import DuckpadDomain
 
-private final class WorkspaceNotificationObservation: @unchecked Sendable {
-    private let center: NotificationCenter
-    private let token: NSObjectProtocol
-
-    init(center: NotificationCenter, token: NSObjectProtocol) {
-        self.center = center
-        self.token = token
-    }
-
-    func invalidate() {
-        center.removeObserver(token)
-    }
-
-    deinit {
-        invalidate()
-    }
-}
-
-public struct TabWorkspaceSmokeState: Equatable, Sendable {
-    public let tabCount: Int
-    public let rowCount: Int
-    public let selectedTabIsVisible: Bool
-}
-
-public struct SearchPanelSmokeState: Equatable, Sendable {
-    public let isVisible: Bool
-    public let height: Double
-}
-
-public struct LanguageStatusSmokeState: Equatable, Sendable {
-    public let text: String
-    public let isWarning: Bool
-}
-
-public struct FileFormatStatusSmokeState: Equatable, Sendable {
-    public let text: String
-    public let encoding: TextFileEncoding
-    public let byteOrderMark: ByteOrderMark
-    public let lineEnding: LineEnding
-    public let isEnabled: Bool
-}
-
-public struct ExtensionStatusSmokeState: Equatable, Sendable {
-    public let text: String
-    public let isWarning: Bool
-    public let commandCount: Int
-}
-
-public struct WorkspaceChromeSmokeState: Equatable, Sendable {
-    public let documentCount: Int
-    public let bannerHeight: Double
-    public let tabStripHeight: Double
-    public let statusBarHeight: Double
-    public let editorOverlapsStatusBar: Bool
-    public let interactionsEnabled: Bool
-    public let languageStatusEnabled: Bool
-    public let extensionStatusEnabled: Bool
-}
-
-public struct WorkspaceSidebarSmokeState: Equatable, Sendable {
-    public let isVisible: Bool
-    public let rootCount: Int
-    public let arrangedPaneCount: Int
-}
-
 private enum CloseRetryContext {
     /// Stable IDs capture the exact single/bulk command target set without
     /// retaining a stale tab snapshot or AppKit object.
     case tabs([TabID])
     case termination
-}
-
-@MainActor
-final class FileDropView: NSView {
-    var onFiles: (([URL]) -> Void)?
-    var onFilesAtLocation: (([URL], NSPoint) -> Void)?
-    var onFolders: (([URL]) -> Void)?
-    var onEffectiveAppearanceChange: (() -> Void)?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        registerForDraggedTypes([.fileURL])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { nil }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        onEffectiveAppearanceChange?()
-    }
-
-    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        guard sender.draggingSourceOperationMask.contains(.copy) else { return [] }
-        let content = partition(fileURLs(from: sender))
-        return ((onFiles != nil || onFilesAtLocation != nil) && !content.files.isEmpty)
-            || (onFolders != nil && !content.folders.isEmpty) ? .copy : []
-    }
-
-    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        draggingEntered(sender)
-    }
-
-    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        !draggingEntered(sender).isEmpty
-    }
-
-    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        guard prepareForDragOperation(sender) else { return false }
-        let urls = fileURLs(from: sender)
-        guard !urls.isEmpty else { return false }
-        let content = partition(urls)
-        var handled = false
-        if let onFilesAtLocation, !content.files.isEmpty {
-            onFilesAtLocation(content.files, sender.draggingLocation)
-            handled = true
-        } else if let onFiles, !content.files.isEmpty {
-            onFiles(content.files)
-            handled = true
-        }
-        if let onFolders, !content.folders.isEmpty {
-            onFolders(content.folders)
-            handled = true
-        }
-        return handled
-    }
-
-    private func partition(_ urls: [URL]) -> (files: [URL], folders: [URL]) {
-        var files: [URL] = []
-        var folders: [URL] = []
-        for url in urls {
-            var isDirectory: ObjCBool = false
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
-                folders.append(url)
-            } else {
-                files.append(url)
-            }
-        }
-        return (files, folders)
-    }
-
-    private func fileURLs(from sender: any NSDraggingInfo) -> [URL] {
-        (sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
-    }
-}
-
-@MainActor
-public protocol PersistenceErrorPresenting: AnyObject {
-    func present(failure: PersistenceFailure, retry: @escaping @MainActor () -> Void)
-}
-
-@MainActor
-public protocol TabPathActionHandling: AnyObject {
-    func copyFullPath(_ path: String)
-    func openContainingFolder(for path: String)
-}
-
-@MainActor
-private final class NativeTabPathActionHandler: TabPathActionHandling {
-    func copyFullPath(_ path: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(path, forType: .string)
-    }
-
-    func openContainingFolder(for path: String) {
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-    }
-}
-
-@MainActor
-private final class PersistenceErrorBanner: NSView, PersistenceErrorPresenting {
-    private let message = NSTextField(labelWithString: "")
-    private var displayedFailure: PersistenceFailure?
-    private let retryButton = NSButton(title: L10n.text("Retry"), target: nil, action: nil)
-    private var retryAction: (@MainActor () -> Void)?
-    private var heightConstraint: NSLayoutConstraint!
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.14).cgColor
-        isHidden = true
-        translatesAutoresizingMaskIntoConstraints = false
-        message.lineBreakMode = .byTruncatingTail
-        message.translatesAutoresizingMaskIntoConstraints = false
-        retryButton.target = self
-        retryButton.action = #selector(retryPressed)
-        retryButton.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(message)
-        addSubview(retryButton)
-        heightConstraint = heightAnchor.constraint(equalToConstant: 0)
-        NSLayoutConstraint.activate([
-            heightConstraint,
-            message.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            message.centerYAnchor.constraint(equalTo: centerYAnchor),
-            retryButton.leadingAnchor.constraint(greaterThanOrEqualTo: message.trailingAnchor, constant: 8),
-            retryButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            retryButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-        setAccessibilityIdentifier("duckpad.persistence.error")
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { nil }
-
-    func present(failure: PersistenceFailure, retry: @escaping @MainActor () -> Void) {
-        displayedFailure = failure
-        message.stringValue = L10n.text("Session %1$@ failed: %2$@", L10n.text(failure.operation == .load ? "Restore" : "Save"), PresentationErrorText.message(failure.cause))
-        retryAction = retry
-        heightConstraint.constant = 36
-        isHidden = false
-    }
-
-    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
-        retryButton.title = catalog.text("Retry")
-        if let failure = displayedFailure {
-            message.stringValue = catalog.text("Session %1$@ failed: %2$@", arguments: [
-                catalog.text(failure.operation == .load ? "Restore" : "Save"),
-                PresentationErrorText.message(failure.cause, catalog: catalog)
-            ])
-        }
-    }
-
-    @objc private func retryPressed() {
-        isHidden = true
-        heightConstraint.constant = 0
-        retryAction?()
-    }
 }
 
 @MainActor
@@ -293,11 +70,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     public var onClosed: (() -> Void)?
     public var onDocumentURLUsed: ((URL) -> Void)?
     private let editorHostView: NSView
-    private var markdownPreviewPanel: MarkdownPreviewPanel?
-    private var markdownPreviewTask: Task<Void, Never>?
-    private var markdownPreviewBuffer: EditorBufferDescriptor?
-    private var markdownPreviewDocumentPath: String?
-    private var markdownPreviewSourceTabID: TabID?
+    private let markdownPreview: MarkdownPreviewCoordinator
+    private var markdownPreviewPanel: MarkdownPreviewPanel? { markdownPreview.panel }
+    private let markdownImageAccess: any MarkdownImageAccess
     weak var markdownCommandsMenu: NSMenu?
     private var markdownImageDropTask: Task<Void, Never>?
     var markdownImageDropDecision: (@MainActor (NSWindow) async -> MarkdownImageDropDecision?)?
@@ -362,6 +137,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public init(
         workspace: ScratchWorkspaceUseCase,
+        previewResourceReader: any PreviewResourceReading,
+        markdownImageAccess: any MarkdownImageAccess,
         editorAdapter: (any EditorPort)? = nil,
         editorView: NSView? = nil,
         secondaryEditorView: NSView? = nil,
@@ -390,6 +167,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         automaticallyStarts: Bool = true
     ) {
         self.workspace = workspace
+        self.markdownImageAccess = markdownImageAccess
         self.framePersistence = framePersistence
         let fallback = editorAdapter == nil ? TextViewEditorAdapter() : nil
         precondition(
@@ -412,6 +190,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         fallbackEditor = fallback
         activeEditor = editorAdapter ?? fallback!
+        markdownPreview = MarkdownPreviewCoordinator(workspace: workspace, editor: activeEditor, resourceReader: previewResourceReader, imageAccess: markdownImageAccess)
         self.editorGroupRouter = editorGroupRouter
         editorHostView = editorView ?? fallback!.scrollView
         editorGroupWorkspace = EditorGroupWorkspaceView(
@@ -579,7 +358,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     deinit {
         markdownImageDropTask?.cancel()
-        markdownPreviewTask?.cancel()
         startTask?.cancel()
         searchTask?.cancel()
         languageDetectionTask?.cancel()
@@ -606,10 +384,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard !hasTornDownWindow else { return }
         hasTornDownWindow = true
         markdownImageDropTask?.cancel()
-        markdownPreviewTask?.cancel()
-        markdownPreviewTask = nil
-        markdownPreviewPanel?.invalidate()
-        markdownPreviewPanel = nil
+        markdownPreview.close()
         extensionServiceHost?.close(in: workspaceContentSplit)
         if let extensionUseCase { extensionServiceHost?.unregister(extensionUseCase) }
         cancelSearch()
@@ -1696,16 +1471,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     @objc public func performCloseMarkdownPreview(_ sender: Any? = nil) {
-        guard let panel = markdownPreviewPanel else { return }
-        markdownPreviewTask?.cancel()
-        markdownPreviewTask = nil
-        markdownPreviewBuffer = nil
-        markdownPreviewDocumentPath = nil
-        markdownPreviewSourceTabID = nil
-        panel.invalidate()
-        workspaceContentSplit.removeArrangedSubview(panel)
-        panel.removeFromSuperview()
-        markdownPreviewPanel = nil
+        guard markdownPreviewPanel != nil else { return }
+        markdownPreview.close()
         if let menu = markdownCommandsMenu { menuNeedsUpdate(menu) }
         activeEditor.focus()
     }
@@ -1716,55 +1483,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return
         }
         guard workspaceInteractionsAreActionable, workspace.activeFileContext()?.binding?.isReadOnly != true else { return }
-        let panel = MarkdownPreviewPanel(frame: .zero)
-        panel.onClose = { [weak self] in self?.performCloseMarkdownPreview() }
-        markdownPreviewPanel = panel
-        markdownPreviewSourceTabID = workspace.activeFileContext()?.tabID
+        markdownPreview.open(in: workspaceContentSplit) { [weak self] in self?.performCloseMarkdownPreview() }
         if let menu = markdownCommandsMenu { menuNeedsUpdate(menu) }
-        workspaceContentSplit.addArrangedSubview(panel)
-        workspaceContentSplit.setHoldingPriority(NSLayoutConstraint.Priority(300),
-                                                 forSubviewAt: workspaceContentSplit.arrangedSubviews.count - 1)
-        window?.contentView?.layoutSubtreeIfNeeded()
-        workspaceContentSplit.setPosition(workspaceContentSplit.bounds.width * 0.55,
-                                          ofDividerAt: workspaceContentSplit.arrangedSubviews.count - 2)
         scheduleMarkdownPreview()
     }
 
     private func scheduleMarkdownPreview() {
-        guard let panel = markdownPreviewPanel,
-              let context = workspace.activeFileContext() else { return }
-        if markdownPreviewSourceTabID != context.tabID {
-            guard workspace.snapshot().tabs.first(where: { $0.id == context.tabID })?.isMarkdownDocument == true else {
-                performCloseMarkdownPreview()
-                return
-            }
-            markdownPreviewSourceTabID = context.tabID
-        }
-        let buffer = context.buffer
-        let documentPath = workspace.activeFileContext()?.binding?.canonicalPath
-        guard markdownPreviewBuffer != buffer || markdownPreviewDocumentPath != documentPath else { return }
-        markdownPreviewDocumentPath = documentPath
-        if markdownPreviewBuffer?.bufferID != buffer.bufferID {
-            panel.showMessage(L10n.text("Rendering preview…"))
-        }
-        markdownPreviewBuffer = buffer
-        markdownPreviewTask?.cancel()
-        if context.binding?.isReadOnly == true {
-            panel.showMessage(L10n.text("Markdown preview is unavailable for binary files."))
-            return
-        }
-        markdownPreviewTask = Task { [weak self, weak panel] in
-            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
-            guard let self, let panel, !self.hasTornDownWindow,
-                  self.markdownPreviewPanel === panel,
-                  self.workspace.activeFileContext()?.buffer == buffer else { return }
-            guard let capture = self.activeEditor.recoveryCapture(for: buffer.bufferID),
-                  capture.revision == buffer.revision else { return }
-            let documentURL = self.workspace.activeFileContext()?.binding.map {
-                URL(fileURLWithPath: $0.canonicalPath)
-            }
-            panel.update(capture: capture, documentURL: documentURL)
-        }
+        if !markdownPreview.schedule() { performCloseMarkdownPreview() }
     }
 
     private func routeDroppedFiles(_ urls: [URL], at point: NSPoint) {
@@ -1819,7 +1544,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             let documentURL = context.binding.map { URL(fileURLWithPath: $0.canonicalPath) }
             let text = MarkdownImageDrop.markup(for: urls, documentURL: documentURL)
             guard case .accepted = editor.replaceActive(range: selection, with: Data(text.utf8), expectedRevision: context.buffer.revision) else { return }
-            MarkdownPreviewPanel.rememberImageAccess(urls)
+            markdownImageAccess.remember(urls)
             markdownPreviewPanel?.reloadImageAccess()
             editor.selectAndReveal(.init(location: selection.location + text.utf8.count, length: 0))
             editor.focus()

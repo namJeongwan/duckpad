@@ -27,7 +27,10 @@ Relative image paths resolve against the saved Markdown file. Absolute file
 image paths also work. In a sandboxed build, if the image directory has not
 already been authorized, use **Allow Local Images…** in the preview header to
 choose it. Folder grants are remembered with security-scoped bookmarks. The
-resource loader only serves image files and bundled preview assets. HTTP/HTTPS
+resource loader only serves image files and bundled preview assets. Local
+resources must be regular files. Large images and image symlinks remain supported
+when their targets are accessible regular files. Reads use 64 KiB chunks and
+stop on cancellation. HTTP/HTTPS
 images may load from the network; other preview engines never need a CDN.
 
 There is no arbitrary document-size cutoff. Preview waits 350 ms after a content
@@ -36,6 +39,12 @@ main thread. At most one render and one latest pending capture are retained.
 Native editor snapshot reads are avoided. Large documents still require memory
 and rendering time proportional to their content. Closing stops resource loads
 and invalidates pending updates. Binary documents are not Markdown content.
+
+`MarkdownPreviewCoordinator` owns preview scheduling and teardown. Filesystem
+reading and persistent image-folder grants are supplied by the application
+composition root through required ports; the panel does not persist bookmarks
+itself. Window and panel construction must supply the resource reader and image
+access provider, including smoke-test composition.
 
 Build bundled assets with `npm ci --ignore-scripts --prefix scripts/markdown-preview`
 and `npm run build --prefix scripts/markdown-preview`. The lockfile pins dependencies;

@@ -40,7 +40,7 @@ struct DocumentFormattingIntegrationTests {
             formatting = DocumentFormattingUseCase(workspace: workspace, editor: editor, formatter: engine)
             files = FileDocumentUseCase(workspace: workspace, editor: editor, store: LocalTextFileStore(bookmarkArchiveURL: root.appendingPathComponent("access.json")))
             files.formattingUseCase = formatting
-            controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor, editorView: editor.view,
+            controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: editor.view,
                 fileUseCase: files, formattingUseCase: formatting, automaticallyStarts: false)
         }
         func start() async { controller.start(); await controller.waitForStartup() }

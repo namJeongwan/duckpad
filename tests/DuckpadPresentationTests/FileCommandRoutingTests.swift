@@ -174,6 +174,7 @@ private final class SplitRecordingEditor: SplitEditorPort {
     let editor = SplitRecordingEditor()
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: NSView(frame: .zero),
         automaticallyStarts: false
@@ -207,6 +208,7 @@ private final class SplitRecordingEditor: SplitEditorPort {
     )
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         recoveryUseCase: recovery,
@@ -480,6 +482,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     panels.folderURL = root
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: fileUseCase,
@@ -492,15 +495,16 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     controller.start()
     await controller.waitForStartup()
     controller.performShowFind()
-    guard let content = controller.window?.contentView,
-          let field = descendant(of: NSSearchField.self, in: content, identifier: "duckpad.search.find"),
-          let table = descendant(of: NSTableView.self, in: content, identifier: "duckpad.search.results") else {
+    // Search controls live in their own panel, independently of editor layout.
+    guard let field = descendant(of: NSSearchField.self, in: controller.searchPanel, identifier: "duckpad.search.find"),
+          let table = descendant(of: NSTableView.self, in: controller.searchPanel, identifier: "duckpad.search.results") else {
         Issue.record("search controls unavailable")
         return
     }
-    field.stringValue = "duck"
-
     controller.performFindInFolder()
+    field.stringValue = "duck"
+    // The menu opens the folder tab; Return submits the user's query.
+    #expect(controller.searchPanel.control(field, textView: NSTextView(), doCommandBy: #selector(NSResponder.insertNewline(_:))))
     for _ in 0..<2_000 where table.numberOfRows < 2 { await Task.yield() }
     #expect(panels.folderRequests == 1)
     #expect(table.numberOfRows == 2)
@@ -528,6 +532,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     await files.seed("let second = 2", at: second)
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
@@ -559,6 +564,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     for (index, url) in urls.enumerated() { await files.seed("\(index)", at: url) }
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
@@ -599,6 +605,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     panels.saveURLs = [firstURL, secondURL]
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
@@ -643,6 +650,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     panels.saveURL = racedURL
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
@@ -699,6 +707,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     )
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
@@ -748,6 +757,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     var approvedClose = false
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
@@ -798,6 +808,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
         )
         let controller = DuckpadWindowController(
             workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
             editorAdapter: editor,
             editorView: editor.scrollView,
             fileUseCase: FileDocumentUseCase(workspace: workspace, editor: editor, store: files),
@@ -832,6 +843,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     panels.conflictResolutions = [.compare, .reload]
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: fileUseCase,
@@ -871,6 +883,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     panels.saveURL = saveAsURL
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: fileUseCase,
@@ -923,6 +936,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     panels.openURL = url
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: fileUseCase,
@@ -1001,6 +1015,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     panels.saveURL = url
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: fileUseCase,
@@ -1042,6 +1057,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     panels.blocksSavePanel = true
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: fileUseCase,
@@ -1093,6 +1109,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: fileUseCase,
@@ -1139,6 +1156,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     let coordinator = ApplicationTerminationCoordinator()
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         recoveryUseCase: recovery,
@@ -1170,6 +1188,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     )
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         recoveryUseCase: recovery,
@@ -1235,6 +1254,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     let coordinator = ApplicationTerminationCoordinator()
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         fileUseCase: files,
@@ -1282,6 +1302,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     let presenter = RecoveryErrorPresenterSpy()
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         errorPresenter: presenter,
@@ -1342,6 +1363,7 @@ struct FileLifecycleTests {
         let terminationCoordinator = terminationCoordinator ?? ApplicationTerminationCoordinator()
         let controller = DuckpadWindowController(
             workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
             editorAdapter: editor,
             editorView: editor.scrollView,
             errorPresenter: errorPresenter,
@@ -2249,7 +2271,7 @@ struct FileLifecycleTests {
         _ = NSApplication.shared
         let store = DelayedStartupSessionStore()
         let workspace = ScratchWorkspaceUseCase(store: store)
-        let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
         defer { controller.close() }
 
         controller.start()
@@ -2338,7 +2360,7 @@ struct FileLifecycleTests {
 
     @Test @MainActor func searchMenuRoutesAndPanelCollapsesWithoutBlankEditorStrip() {
         let controller = DuckpadWindowController(
-            workspace: ScratchWorkspaceUseCase(store: RoutingSessionStore()),
+            workspace: ScratchWorkspaceUseCase(store: RoutingSessionStore()), previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
             automaticallyStarts: false
         )
         controller.showWindow(nil)
@@ -2374,7 +2396,7 @@ struct FileLifecycleTests {
     let panels = PanelFake()
     panels.openURL = source
     panels.saveAccessURL = scenario == "cancel" ? nil : (["new", "missing"].contains(scenario) ? destination : source)
-    let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor,
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor,
         editorView: editor.scrollView, fileUseCase: useCase, filePanels: panels,
         fileConflictPresenter: panels, automaticallyStarts: false)
     defer { controller.close() }
@@ -2423,7 +2445,7 @@ struct FileLifecycleTests {
     panels.saveURL = copy
     panels.saveAccessURL = target
     panels.decisions = [.save]
-    let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor,
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor,
         editorView: editor.scrollView, fileUseCase: useCase, filePanels: panels,
         fileConflictPresenter: panels, dirtyDecisionPresenter: panels, automaticallyStarts: false)
     defer { controller.close() }
@@ -2462,7 +2484,7 @@ struct FileLifecycleTests {
     let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
     _ = await workspace.start()
     let panels = NativeFilePanelAdapter()
-    let controller = DuckpadWindowController(workspace: workspace, filePanels: panels, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), filePanels: panels, automaticallyStarts: false)
     defer { controller.close() }
     controller.applyPreferences(AppSettings(fileDialogFollowsDocument: true))
     #expect(panels.preferredFileDirectory?() == nil)

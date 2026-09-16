@@ -135,6 +135,7 @@ func equalTitleExtensionShortcutCollisionUsesCommandIDAsStableTieBreak() async t
     )
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: NSView(),
         extensionUseCase: service,
@@ -164,7 +165,7 @@ func asyncExtensionRefreshRebuildsAuthorizedMenuAndDisclosesConsentIdentity() as
     let editor = PresentationExtensionEditor(); let package = presentationPackage()
     let service = ExtensionWorkspaceUseCase(loader: PresentationExtensionLoader(package), grants: PresentationExtensionPolicy(),
         transport: PresentationExtensionTransport(), workspace: workspace, editor: editor)
-    let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor, editorView: NSView(), extensionUseCase: service, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: NSView(), extensionUseCase: service, automaticallyStarts: false)
     var menu = DuckpadMainMenuFactory.make(target: controller)
     controller.onExtensionCommandsChanged = { menu = DuckpadMainMenuFactory.make(target: controller) }
     #expect(controller.extensionCommands.isEmpty)
@@ -204,6 +205,7 @@ func extensionShortcutsFailClosedOnCoreCollisionOrMalformedDeclaration() async t
         )
         let controller = DuckpadWindowController(
             workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
             editorAdapter: editor,
             editorView: NSView(),
             extensionUseCase: service,
@@ -237,7 +239,7 @@ func applicationTerminationCancelsAndJoinsExtensionBeforeApproval() async throws
     )
     let coordinator = ApplicationTerminationCoordinator()
     let controller = DuckpadWindowController(
-        workspace: workspace, editorAdapter: editor, editorView: NSView(),
+        workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: NSView(),
         terminationCoordinator: coordinator, extensionUseCase: service,
         automaticallyStarts: false
     )
@@ -270,7 +272,7 @@ func deniedTerminationReopensInvocationAndEditorAdmission() async throws {
         transport: transport, workspace: workspace, editor: editor
     )
     let controller = DuckpadWindowController(
-        workspace: workspace, editorAdapter: editor, editorView: NSView(),
+        workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: NSView(),
         extensionUseCase: service, automaticallyStarts: false
     )
     controller.start()
@@ -299,7 +301,7 @@ func clipboardServiceAppearsInToolsWithOneShortcutAndTracksActivation() async th
     let editor = PresentationExtensionEditor()
     let service = ExtensionWorkspaceUseCase(loader: PresentationExtensionLoader(package),
         grants: PresentationExtensionPolicy(), transport: PresentationExtensionTransport(), workspace: workspace, editor: editor)
-    let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor, editorView: NSView(),
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: NSView(),
         extensionUseCase: service, automaticallyStarts: false)
     defer { controller.close() }
     var menu = DuckpadMainMenuFactory.make(target: controller)
@@ -355,9 +357,9 @@ func signedNativeClipboardInstallsDocksAndStopsWhenDisabled() async throws {
     let editor = PresentationExtensionEditor()
     let service = ExtensionWorkspaceUseCase(loader: loader, grants: PresentationExtensionPolicy(),
         transport: PresentationExtensionTransport(), workspace: workspace, editor: editor, allowsUserExtensions: true)
-    let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor, editorView: NSView(), extensionUseCase: service, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: NSView(), extensionUseCase: service, automaticallyStarts: false)
     let nativeStore = ManagedNativePackageStore(root: root.appendingPathComponent("NativePluginModules"))
-    let host = ExtensionListServiceHost(storage: LocalExtensionServiceStorage(root: root.appendingPathComponent("PluginData")), nativeStorageRoot: root.appendingPathComponent("PluginData"), prepareNativePackage: { _ = try await nativeStore.install(files: $0) })
+    let host = ExtensionListServiceHost(storage: LocalExtensionServiceStorage(root: root.appendingPathComponent("PluginData")), nativeStorageRoot: root.appendingPathComponent("PluginData"), nativeVerifier: LocalNativePluginInstallationVerifier(), prepareNativePackage: { _ = try await nativeStore.install(files: $0) })
     controller.configureExtensionServices(host)
     defer { controller.close() }
     controller.start(); await controller.waitForStartup()
@@ -369,7 +371,7 @@ func signedNativeClipboardInstallsDocksAndStopsWhenDisabled() async throws {
     #expect(controller.extensionCommands.count == 1)
     let nativeRegistration = try #require(service.serviceCommands().first)
     try await host.prepareNativeInstallation(for: package.manifest.id)
-    let reopened = try NativePluginInstallation.open(nativeRegistration, root: root.appendingPathComponent("NativePluginModules"))
+    let reopened = try await LocalNativePluginInstallationVerifier().open(nativeRegistration, root: root.appendingPathComponent("NativePluginModules"))
     #expect(reopened.directory.lastPathComponent == package.packageDigest + ".duckpad-plugin")
     #expect(try await nativeStore.install(files: #require(package.nativeFiles)) == package.packageDigest)
     host.synchronize(service)
@@ -427,8 +429,8 @@ func signedNativeClipboardInstallsDocksAndStopsWhenDisabled() async throws {
     let authorizedResource = reopened.directory.appendingPathComponent("locale-ja.strings")
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authorizedResource.path)
     try Data("tampered".utf8).write(to: authorizedResource)
-    #expect(throws: NativePluginInstallation.Failure.self) {
-        try NativePluginInstallation.open(nativeRegistration, root: root.appendingPathComponent("NativePluginModules"))
+    await #expect(throws: NativePluginValidationFailure.self) {
+        try await LocalNativePluginInstallationVerifier().open(nativeRegistration, root: root.appendingPathComponent("NativePluginModules"))
     }
     // Installed native resources remain intact; mutation is rejected on rediscovery.
     let installed = root.appendingPathComponent("Extensions/\(package.manifest.id.rawValue)@\(package.manifest.version).duckpad-plugin")

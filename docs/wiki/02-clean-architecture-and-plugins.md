@@ -8,6 +8,17 @@
 >
 > Compatibility target: reproduce at least 90% of the user-visible Notepad++ behavior while preferring the native macOS convention when literal Windows behavior conflicts with it
 
+> **Implementation status, 2026-09-16:** This is the original architecture proposal,
+> not a statement that every security gate below is implemented. Host API 1.3.0
+> added signed native plugins; the current [native SDK and trust model](../plugins/native-sdk.md)
+> supersedes the WASM-only restrictions below for that runtime. Native modules
+> load into Duckpad and share its App Sandbox authority. The native installer is
+> a separate, unsandboxed XPC service running as the logged-in user. WASM plugins
+> retain their separate sandbox and capability checks. Developer ID signing and
+> notarization require release-specific evidence; the local build defaults to
+> ad-hoc signing. The historical claims below about all plugins being WASM and
+> all official builds being notarized must not be used as current guarantees.
+
 ## 1. Decision summary
 
 Duckpad is a **Swift + AppKit macOS application**. AppKit owns windows, menus, commands, focus, drag and drop, accessibility, and the multiline tab bar. Scintilla Cocoa remains the editing engine and is reachable only through a narrow Objective-C++ adapter. Domain and application code never import AppKit, Objective-C++, Scintilla, Lexilla, SQLite, or a plugin runtime.
@@ -20,7 +31,7 @@ The first milestone fixes these decisions:
 4. Represent a tab as a placement of a document view. A tab is not the document and a Scintilla document handle is not a domain identifier.
 5. Implement wrapping document tabs with `NSCollectionView` and a custom `NSCollectionViewLayout`; do not use `NSTabViewController` or SwiftUI `TabView` as the document tab model.
 6. Use bundled Lexilla for fast syntax styling and LSP for semantic/editor intelligence. Tree-sitter is not a baseline dependency; it may later be exposed as an optional analysis service when a feature has a concrete parsing requirement.
-7. Execute third-party plugins only as WebAssembly modules inside the minimal-entitlement `DuckpadPluginRuntime.xpc` service and expose a versioned, capability-checked SDK. Version 1 never loads a plugin-provided executable, dylib, script runtime, or JIT code. Plugins receive commands, events, snapshots, revision-checked edits, and host-rendered declarative panels—not AppKit views, Scintilla handles, unrestricted host objects, WASI, or ambient operating-system access.
+7. Execute WASM plugins inside the minimal-entitlement `DuckpadPluginRuntime.xpc` service with capability checks and no WASI or JIT. Since host API 1.3.0, separately authorized signed native plugins can load a dylib into Duckpad and provide AppKit views. Their `runtime.native` grant authorizes code with the host process's authority; narrower declared capabilities do not sandbox that code. See the [native SDK](../plugins/native-sdk.md) for the current installation, consent, and lifecycle contract.
 8. Port **observable behavior**, not Win32 implementation. The compatibility matrix is the acceptance source of truth; macOS menus, shortcuts, text input, accessibility, security, and window behavior take priority over literal UI duplication.
 
 ## 2. Pinned local-source evidence

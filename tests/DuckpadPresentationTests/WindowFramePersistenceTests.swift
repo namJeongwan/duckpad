@@ -9,7 +9,7 @@ struct WindowFramePersistenceTests {
     @Test @MainActor func freshWorkspaceKeepsItsInitialContentSize() throws {
         _ = NSApplication.shared
         let controller = DuckpadWindowController(
-            workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()),
+            workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()), previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
             automaticallyStarts: false
         )
         defer { controller.close() }
@@ -23,7 +23,7 @@ struct WindowFramePersistenceTests {
     @Test @MainActor func refocusingAnOpenWorkspaceDoesNotRecenterIt() throws {
         _ = NSApplication.shared
         let controller = DuckpadWindowController(
-            workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()),
+            workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()), previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
             automaticallyStarts: false
         )
         defer { controller.close() }
@@ -116,7 +116,7 @@ struct WindowFramePersistenceTests {
 
     @MainActor private func makeController(defaults: UserDefaults, key: String) -> DuckpadWindowController {
         DuckpadWindowController(
-            workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()),
+            workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()), previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
             framePersistence: WindowFramePersistence(defaults: defaults, frameKey: key, fallbackKey: "last"),
             automaticallyStarts: false
         )

@@ -67,7 +67,7 @@ struct NativeFileDropTests {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let editor = ScintillaEditorAdapter()
         let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor,
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor,
             editorView: editor.view, fileUseCase: files, automaticallyStarts: false)
         defer { controller.close(); editor.invalidate() }
         controller.start(); await controller.waitForStartup()
@@ -96,7 +96,7 @@ struct NativeFileDropTests {
     @Test @MainActor func markdownImageDropRemembersChoiceAndUndoesAsOneEdit() async throws {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let editor = ScintillaEditorAdapter()
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor, editorView: editor.view, automaticallyStarts: false)
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: editor.view, automaticallyStarts: false)
         controller.start(); await controller.waitForStartup()
         defer { controller.close(); editor.invalidate() }
         let context = try #require(workspace.activeFileContext())
@@ -141,7 +141,7 @@ struct NativeFileDropTests {
     @Test @MainActor func cancelledAndStaleImageDropDoNotInsertOrRemember() async throws {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let editor = ScintillaEditorAdapter()
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor, editorView: editor.view, automaticallyStarts: false)
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: editor.view, automaticallyStarts: false)
         controller.start(); await controller.waitForStartup()
         defer { controller.close(); editor.invalidate() }
         let context = try #require(workspace.activeFileContext())
@@ -168,7 +168,7 @@ struct NativeFileDropTests {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let editor = ScintillaEditorAdapter()
         let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: LocalTextFileStore(bookmarkArchiveURL: root.appendingPathComponent("access.json")))
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor, editorView: editor.view, fileUseCase: files, automaticallyStarts: false)
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: editor.view, fileUseCase: files, automaticallyStarts: false)
         controller.start(); await controller.waitForStartup()
         defer { controller.close(); editor.invalidate() }
         let context = try #require(workspace.activeFileContext())
@@ -206,7 +206,7 @@ struct NativeFileDropTests {
 
     @Test @MainActor func previewForwardsImageDropsToWorkspaceWithLocation() throws {
         let root = FileDropView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
-        let panel = MarkdownPreviewPanel(frame: root.bounds)
+        let panel = MarkdownPreviewPanel(frame: root.bounds, resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess())
         root.addSubview(panel)
         let window = NSWindow(contentRect: root.bounds, styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

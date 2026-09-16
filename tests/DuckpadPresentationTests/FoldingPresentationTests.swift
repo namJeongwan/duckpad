@@ -182,6 +182,7 @@ struct FoldingPresentationTests {
         )
         let controller = DuckpadWindowController(
             workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
             editorAdapter: adapter,
             editorView: NSView(frame: .zero),
             recoveryUseCase: recoveryUseCase,

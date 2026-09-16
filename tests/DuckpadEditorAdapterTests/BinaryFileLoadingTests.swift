@@ -20,7 +20,7 @@ struct BinaryFileLoadingTests {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let editor = ScintillaEditorAdapter()
         let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: LocalTextFileStore())
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor,
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor,
             editorView: editor.view, fileUseCase: files, automaticallyStarts: false)
         defer { controller.close(); editor.invalidate() }
         _ = await workspace.start()
@@ -72,7 +72,7 @@ struct BinaryFileLoadingTests {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let editor = ScintillaEditorAdapter()
         let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: LocalTextFileStore())
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor,
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor,
             editorView: editor.view, fileUseCase: files, workspaceBrowserUseCase: browser,
             automaticallyStarts: false)
         defer { controller.close(); editor.invalidate() }

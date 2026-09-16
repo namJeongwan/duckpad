@@ -187,7 +187,7 @@ private func paletteMenu(
     _ = NSApplication.shared
     let target = CommandPaletteTestTarget()
     let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     controller.start()
     await controller.waitForStartup()
     controller.showAndFocus()
