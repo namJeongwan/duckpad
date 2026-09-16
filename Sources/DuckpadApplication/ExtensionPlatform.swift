@@ -77,8 +77,9 @@ public struct ExtensionHostResponse: Codable, Equatable, Sendable {
     public let protocolVersion: Int
     public let result: ExtensionCommandResult?
     public let failure: String?
-    public init(protocolVersion: Int = 1, result: ExtensionCommandResult? = nil, failure: String? = nil) {
-        self.protocolVersion = protocolVersion; self.result = result; self.failure = failure
+    public let serviceOutput: Data?
+    public init(protocolVersion: Int = 1, result: ExtensionCommandResult? = nil, failure: String? = nil, serviceOutput: Data? = nil) {
+        self.protocolVersion = protocolVersion; self.result = result; self.failure = failure; self.serviceOutput = serviceOutput
     }
 }
 
@@ -121,6 +122,16 @@ public struct ExtensionRegistryItem: Equatable, Sendable {
     public let enabled: Bool
     public let granted: Set<ExtensionCapabilityRequest>
     public let issue: ExtensionFailure?
+    public let pendingVersion: SemanticVersion?
+
+    init(manifest: ExtensionManifest, publisherFingerprint: String, packageDigest: String,
+         capabilitySchemaDigest: String, enabled: Bool, granted: Set<ExtensionCapabilityRequest>,
+         issue: ExtensionFailure?, pendingVersion: SemanticVersion? = nil) {
+        self.manifest = manifest; self.publisherFingerprint = publisherFingerprint
+        self.packageDigest = packageDigest; self.capabilitySchemaDigest = capabilitySchemaDigest
+        self.enabled = enabled; self.granted = granted; self.issue = issue
+        self.pendingVersion = pendingVersion
+    }
 }
 
 /// Immutable authority presented to a human. Consent is accepted only when
@@ -153,8 +164,9 @@ public struct ExtensionRegistryState: Equatable, Sendable {
 }
 
 @MainActor
-public final class ExtensionWorkspaceUseCase {
-    public static let apiVersion = SemanticVersion(major: 1, minor: 0, patch: 0)
+public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
+    public var servicePolicyGeneration: UInt64 { policyGeneration }
+    public nonisolated static let apiVersion = SemanticVersion(major: 1, minor: 3, patch: 0)
 
     private let loader: any ExtensionPackageLoaderPort
     private let grants: any ExtensionGrantStorePort
@@ -163,6 +175,8 @@ public final class ExtensionWorkspaceUseCase {
     private let editor: any ExtensionEditorPort
     private let limits: ExtensionHostLimits
     private let allowsUserExtensions: Bool
+    private let nativeActivationSession: NativeExtensionActivationSession
+    private var pendingVersions: [ExtensionID: SemanticVersion] = [:]
     private var packages: [ExtensionID: LoadedExtensionPackage] = [:]
     private var enabled: Set<ExtensionID> = []
     private var granted: Set<ExtensionGrant> = []
@@ -178,13 +192,16 @@ public final class ExtensionWorkspaceUseCase {
     /// durable. Once that happens, no refresh or retry may restore user
     /// authority in this process; only a new process may load the policy.
     private var policyAuthorityRequiresRestart = false
+    private let automaticallyAuthorizesEnabledPackages: Bool
     private var commandIndex: [ExtensionCommandID: ExtensionID] = [:]
 
     public var onStateChange: ((ExtensionRegistryState) -> Void)?
 
-    public init(loader: any ExtensionPackageLoaderPort, grants: any ExtensionGrantStorePort, transport: any PluginHostTransport, workspace: ScratchWorkspaceUseCase, editor: any ExtensionEditorPort, limits: ExtensionHostLimits = ExtensionHostLimits(), allowsUserExtensions: Bool = false) {
+    public init(loader: any ExtensionPackageLoaderPort, grants: any ExtensionGrantStorePort, transport: any PluginHostTransport, workspace: ScratchWorkspaceUseCase, editor: any ExtensionEditorPort, limits: ExtensionHostLimits = ExtensionHostLimits(), allowsUserExtensions: Bool = false, nativeActivationSession: NativeExtensionActivationSession = NativeExtensionActivationSession(), automaticallyAuthorizesEnabledPackages: Bool = false) {
         self.loader = loader; self.grants = grants; self.transport = transport
         self.workspace = workspace; self.editor = editor; self.limits = limits; self.allowsUserExtensions = allowsUserExtensions
+        self.nativeActivationSession = nativeActivationSession
+        self.automaticallyAuthorizesEnabledPackages = automaticallyAuthorizesEnabledPackages
     }
 
     public func refresh() async {
@@ -243,12 +260,30 @@ public final class ExtensionWorkspaceUseCase {
             }
         }
         for owner in malformedOwners { resolved.removeValue(forKey: owner) }
+        pendingVersions = [:]
+        for (id, latest) in resolved {
+            guard let active = nativeActivationSession.select(latest: latest, verifiedCandidates: permittedPackages) else {
+                resolved.removeValue(forKey: id)
+                discoveryFailures[id.rawValue] = .hostUnavailable("native package changed or removed; restart required")
+                continue
+            }
+            resolved[id] = active
+            if latest.manifest.version > active.manifest.version {
+                pendingVersions[id] = latest.manifest.version
+            }
+        }
+        // Validate the commands that will actually run. A staged native update
+        // can remove a command that the pinned, still-loaded version retains.
         var commandOwners: [ExtensionCommandID: [ExtensionID]] = [:]
         for package in resolved.values {
             for command in package.manifest.contributes.commands { commandOwners[command.id, default: []].append(package.manifest.id) }
         }
         for (command, owners) in commandOwners where Set(owners).count > 1 {
-            for owner in owners { resolved.removeValue(forKey: owner); discoveryFailures[owner.rawValue] = .malformedManifest("command collision: \(command.rawValue)") }
+            for owner in owners {
+                resolved.removeValue(forKey: owner)
+                pendingVersions.removeValue(forKey: owner)
+                discoveryFailures[owner.rawValue] = .malformedManifest("command collision: \(command.rawValue)")
+            }
         }
         commandIndex = [:]
         for package in resolved.values {
@@ -281,14 +316,65 @@ public final class ExtensionWorkspaceUseCase {
             }
         }
         enabled.formIntersection(resolved.keys)
-        granted = granted.filter { grant in
-            guard let package = resolved[grant.extensionID] else { return false }
-            return grantMatchesPackage(grant, package: package) && !revokedPublisherFingerprints.contains(package.publisherFingerprint)
+        // Keep identity-bound grants for staged versions. Only exact matches
+        // authorize the selected package; installing a version never transfers authority.
+        granted = granted.filter { !revokedPublisherFingerprints.contains($0.publisherFingerprint) }
+        if automaticallyAuthorizesEnabledPackages, !policyAuthorityRequiresRestart {
+            // Installation/Enable is the product's authorization action. Migrate
+            // previously enabled packages that were waiting for a separate Grant.
+            do { try await authorizeEnabledPackages() }
+            catch { discoveryFailures["preferences"] = .hostUnavailable("could not activate installed plugins") }
         }
         publish()
     }
 
+    private func authorizeEnabledPackages() async throws {
+        let missing = packages.values.filter { package in
+            enabled.contains(package.manifest.id) && !revokedPublisherFingerprints.contains(package.publisherFingerprint)
+                && !disabledPackageDigests.contains(package.packageDigest)
+                && package.manifest.capabilities.contains { request in
+                    !granted.contains { $0.capability == request.id && $0.scope == request.scope && grantMatchesPackage($0, package: package) }
+                }
+        }
+        guard !missing.isEmpty else { return }
+        try requirePolicyAuthority()
+        guard policyGeneration < .max else { throw ExtensionFailure.limitExceeded("policy generation") }
+        let next = policyGeneration + 1
+        var candidate = granted
+        for package in missing {
+            candidate = candidate.filter { $0.extensionID != package.manifest.id || $0.packageDigest != package.packageDigest }
+            for request in package.manifest.capabilities {
+                candidate.insert(boundGrant(package: package, capability: request.id, scope: request.scope, generation: next))
+            }
+        }
+        try await persist(ExtensionPolicySnapshot(generation: next, enabled: enabled, grants: candidate,
+            revokedPublisherFingerprints: revokedPublisherFingerprints, disabledPackageDigests: disabledPackageDigests))
+        granted = candidate; policyGeneration = next
+    }
+
     public func state() -> ExtensionRegistryState { makeState(status: nil) }
+
+    /// The Update button authorizes the verified new identity. Persist before
+    /// package publication so a failed install leaves the running version usable.
+    public func approveUpdate(from token: ExtensionConsentReviewToken, to package: LoadedExtensionPackage,
+                              choices: Set<ExtensionCapabilityRequest>) async throws(ExtensionFailure) {
+        try requirePolicyAuthority()
+        guard try consentReviewToken(for: token.extensionID) == token,
+              package.manifest.id == token.extensionID, package.manifest.version > token.version,
+              package.publisherFingerprint == token.publisherFingerprint, package.manifest.publisher.id == token.publisherID,
+              package.manifest.api.contains(Self.apiVersion), choices.isSubset(of: Set(package.manifest.capabilities)),
+              policyGeneration < .max else { throw .staleContext }
+        let next = policyGeneration + 1
+        var candidate = granted.filter { $0.extensionID != token.extensionID || $0.packageDigest != package.packageDigest }
+        for choice in choices { candidate.insert(boundGrant(package: package, capability: choice.id, scope: choice.scope, generation: next)) }
+        do {
+            try await persist(ExtensionPolicySnapshot(generation: next, enabled: enabled, grants: candidate,
+                revokedPublisherFingerprints: revokedPublisherFingerprints, disabledPackageDigests: disabledPackageDigests))
+        } catch let failure as ExtensionFailure { throw failure }
+        catch { throw .hostUnavailable("could not save plugin update approval") }
+        granted = candidate; policyGeneration = next
+        publish()
+    }
 
     public func setEnabled(_ id: ExtensionID, enabled shouldEnable: Bool) async throws(ExtensionFailure) {
         try requirePolicyAuthority()
@@ -301,6 +387,12 @@ public final class ExtensionWorkspaceUseCase {
         else { candidateEnabled.remove(id); candidateDisabledDigests.insert(package.packageDigest); candidateGrants = candidateGrants.filter { $0.extensionID != id } }
         guard policyGeneration < .max else { throw .limitExceeded("policy generation") }
         let candidateGeneration = policyGeneration + 1
+        if shouldEnable, automaticallyAuthorizesEnabledPackages {
+            candidateGrants = candidateGrants.filter { $0.extensionID != id || $0.packageDigest != package.packageDigest }
+            for request in package.manifest.capabilities {
+                candidateGrants.insert(boundGrant(package: package, capability: request.id, scope: request.scope, generation: candidateGeneration))
+            }
+        }
         do {
             try await persist(ExtensionPolicySnapshot(
                 generation: candidateGeneration, enabled: candidateEnabled, grants: candidateGrants,
@@ -404,7 +496,7 @@ public final class ExtensionWorkspaceUseCase {
         invocationGeneration += 1
         let generation = invocationGeneration
         guard limits.isValid else { throw .limitExceeded("invalid host limits") }
-        guard let (package, command) = command(commandID) else { throw .unknownCommand(commandID) }
+        guard let (package, command) = command(commandID), command.inputScope != .service else { throw .unknownCommand(commandID) }
         if policyAuthorityRequiresRestart, package.trustSource != .bundled { throw policyRestartFailure }
         guard enabled.contains(package.manifest.id) else { throw .disabled(package.manifest.id) }
         guard !revokedPublisherFingerprints.contains(package.publisherFingerprint) else { throw .untrustedPublisher }
@@ -475,6 +567,71 @@ public final class ExtensionWorkspaceUseCase {
         return result
     }
 
+    /// Service commands exchange values with the host, without capturing or editing a document.
+    public func invokeService(_ commandID: ExtensionCommandID, input: Data) async throws -> Data {
+        guard !invocationsSuspended, !Task.isCancelled else { throw ExtensionFailure.cancelled }
+        guard activeRequest == nil else { throw ExtensionFailure.busy }
+        guard let (package, command) = command(commandID), command.inputScope == .service else {
+            throw ExtensionFailure.unknownCommand(commandID)
+        }
+        guard serviceIsAuthorized(package) else { throw ExtensionFailure.disabled(package.manifest.id) }
+        guard package.nativeFiles == nil else { throw ExtensionFailure.unsupportedAPI }
+        guard limits.isValid, input.count <= limits.maximumInputBytes else { throw ExtensionFailure.limitExceeded("service input") }
+        guard invocationGeneration < .max else { throw ExtensionFailure.limitExceeded("invocation generation") }
+        invocationGeneration += 1
+        let generation = invocationGeneration
+        // These non-document identities cannot be used for edits: service responses have no edits.
+        let context = ExtensionInvocationContext(extensionID: package.manifest.id, commandID: command.id,
+            operation: command.operation, inputScope: .service, tabID: TabID(), bufferID: BufferID(), revision: 0,
+            selection: ExtensionUTF8Range(location: 0, length: 0), utf8: input)
+        let request = ExtensionHostRequest(module: package.module, context: context, limits: limits)
+        activeRequest = (request.requestID, package.manifest.id)
+        defer { finishInvocation(requestID: request.requestID) }
+        try await validateServiceAccess(commandID, expectedDigest: package.packageDigest)
+        let response = try await transport.invoke(request)
+        try await validateServiceAccess(commandID, expectedDigest: package.packageDigest)
+        guard !Task.isCancelled, generation == invocationGeneration,
+              packages[package.manifest.id] == package, serviceIsAuthorized(package) else { throw ExtensionFailure.cancelled }
+        guard response.protocolVersion == 1, response.failure == nil, response.result == nil,
+              let output = response.serviceOutput, output.count <= limits.maximumOutputBytes else {
+            throw ExtensionFailure.invalidResult(response.failure ?? "invalid service response")
+        }
+        return output
+    }
+
+    public func serviceCommands() -> [ExtensionServiceRegistration] {
+        packages.values.filter(serviceIsAuthorized).flatMap { package in
+            package.manifest.contributes.commands.filter { $0.inputScope == .service }.map {
+                ExtensionServiceRegistration(command: $0, extensionID: package.manifest.id,
+                    publisherFingerprint: package.publisherFingerprint, packageDigest: package.packageDigest,
+                    capabilities: Set(package.manifest.capabilities.map(\.id)), nativeFiles: package.nativeFiles)
+            }
+        }
+    }
+
+    private func serviceIsAuthorized(_ package: LoadedExtensionPackage) -> Bool {
+        guard !invocationsSuspended, !policyAuthorityRequiresRestart,
+              enabled.contains(package.manifest.id), !revokedPublisherFingerprints.contains(package.publisherFingerprint) else { return false }
+        let required: [ExtensionCapability] = [.pluginStorage, .uiList] + package.manifest.capabilities.map(\.id)
+        return required.allSatisfy { capability in
+            (try? require(capability, scope: .application, package: package)) != nil
+        }
+    }
+
+    public func validateServiceAccess(_ commandID: ExtensionCommandID, expectedDigest: String) async throws {
+        guard let (package, command) = command(commandID), command.inputScope == .service,
+              package.packageDigest == expectedDigest, serviceIsAuthorized(package) else { throw ExtensionFailure.cancelled }
+        if package.trustSource == .bundled { return }
+        let policy = try await grants.loadPolicy()
+        guard policy.enabled.contains(package.manifest.id), !policy.revokedPublisherFingerprints.contains(package.publisherFingerprint),
+              !policy.disabledPackageDigests.contains(package.packageDigest),
+              package.manifest.capabilities.allSatisfy({ request in
+                  policy.grants.contains { grant in
+                      grant.capability == request.id && grant.scope == request.scope && grantMatchesPackage(grant, package: package)
+                  }
+              }), serviceIsAuthorized(package) else { throw ExtensionFailure.cancelled }
+    }
+
     public func cancelInvocation() async {
         if invocationGeneration < .max { invocationGeneration += 1 }
         if let activeRequest { await transport.cancel(requestID: activeRequest.id) }
@@ -489,6 +646,7 @@ public final class ExtensionWorkspaceUseCase {
 
     public func resumeInvocations() {
         invocationsSuspended = false
+        publish()
     }
 
     /// Prevents any late host response from crossing a termination/recovery
@@ -532,6 +690,7 @@ public final class ExtensionWorkspaceUseCase {
             let range = SearchUTF8Range(location: edit.range.location, length: edit.range.length)
             let validRange: Bool
             switch context.inputScope {
+            case .service: throw ExtensionFailure.invalidResult("service cannot edit a document")
             case .selection:
                 validRange = range == SearchUTF8Range(location: capture.selection.location, length: capture.selection.length)
             case .document:
@@ -610,8 +769,9 @@ public final class ExtensionWorkspaceUseCase {
                 manifest: package.manifest, publisherFingerprint: package.publisherFingerprint,
                 packageDigest: package.packageDigest, capabilitySchemaDigest: package.capabilitySchemaDigest,
                 enabled: enabled.contains(package.manifest.id),
-                granted: Set(granted.filter { $0.extensionID == package.manifest.id }.map { ExtensionCapabilityRequest(id: $0.capability, scope: $0.scope) }),
-                issue: revokedPublisherFingerprints.contains(package.publisherFingerprint) ? .untrustedPublisher : nil
+                granted: Set(granted.filter { $0.extensionID == package.manifest.id && grantMatchesPackage($0, package: package) }.map { ExtensionCapabilityRequest(id: $0.capability, scope: $0.scope) }),
+                issue: revokedPublisherFingerprints.contains(package.publisherFingerprint) ? .untrustedPublisher : nil,
+                pendingVersion: pendingVersions[package.manifest.id]
             )
         }
         return ExtensionRegistryState(items: items, discoveryFailures: discoveryFailures, operationStatus: status)

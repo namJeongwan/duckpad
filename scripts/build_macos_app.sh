@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$REPOSITORY_ROOT/build/Duckpad.app"
 IDENTITY="-"
-SHORT_VERSION="0.5.0"
-BUILD_VERSION="22"
+SHORT_VERSION="0.6.0"
+BUILD_VERSION="38"
 NOTARY_PROFILE=""
 ARCHITECTURE="universal"
 
@@ -52,28 +52,35 @@ STAGING_ROOT="$(mktemp -d "$OUTPUT_PARENT/.duckpad-package.XXXXXX")"
 trap 'rm -rf "$STAGING_ROOT"' EXIT
 APP="$STAGING_ROOT/Duckpad.app"
 XPC="$APP/Contents/XPCServices/DuckpadPluginRuntime.xpc"
+INSTALLER="$APP/Contents/XPCServices/DuckpadNativeInstaller.xpc"
 
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$XPC/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$XPC/Contents/MacOS" "$INSTALLER/Contents/MacOS"
 if [[ "$ARCHITECTURE" == "universal" ]]; then
     for BUILD_ARCH in arm64 x86_64; do
         swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --product DuckpadApp
         swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --product DuckpadPluginRuntime
+        swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --product DuckpadNativeInstaller
     done
     ARM_BIN_PATH="$(swift build --package-path "$REPOSITORY_ROOT" -c release --arch arm64 --show-bin-path)"
     INTEL_BIN_PATH="$(swift build --package-path "$REPOSITORY_ROOT" -c release --arch x86_64 --show-bin-path)"
     lipo -create "$ARM_BIN_PATH/DuckpadApp" "$INTEL_BIN_PATH/DuckpadApp" -output "$APP/Contents/MacOS/Duckpad"
     lipo -create "$ARM_BIN_PATH/DuckpadPluginRuntime" "$INTEL_BIN_PATH/DuckpadPluginRuntime" -output "$XPC/Contents/MacOS/DuckpadPluginRuntime"
+    lipo -create "$ARM_BIN_PATH/DuckpadNativeInstaller" "$INTEL_BIN_PATH/DuckpadNativeInstaller" -output "$INSTALLER/Contents/MacOS/DuckpadNativeInstaller"
+    chmod 0755 "$INSTALLER/Contents/MacOS/DuckpadNativeInstaller"
     chmod 0755 "$APP/Contents/MacOS/Duckpad" "$XPC/Contents/MacOS/DuckpadPluginRuntime"
     BIN_PATH="$ARM_BIN_PATH"
 else
     swift build --package-path "$REPOSITORY_ROOT" -c release --product DuckpadApp
     swift build --package-path "$REPOSITORY_ROOT" -c release --product DuckpadPluginRuntime
+    swift build --package-path "$REPOSITORY_ROOT" -c release --product DuckpadNativeInstaller
     BIN_PATH="$(swift build --package-path "$REPOSITORY_ROOT" -c release --show-bin-path)"
     install -m 0755 "$BIN_PATH/DuckpadApp" "$APP/Contents/MacOS/Duckpad"
+    install -m 0755 "$BIN_PATH/DuckpadNativeInstaller" "$INSTALLER/Contents/MacOS/DuckpadNativeInstaller"
     install -m 0755 "$BIN_PATH/DuckpadPluginRuntime" "$XPC/Contents/MacOS/DuckpadPluginRuntime"
 fi
 install -m 0644 "$REPOSITORY_ROOT/Packaging/Info.plist" "$APP/Contents/Info.plist"
 install -m 0644 "$REPOSITORY_ROOT/Packaging/PluginRuntime-Info.plist" "$XPC/Contents/Info.plist"
+install -m 0644 "$REPOSITORY_ROOT/Packaging/NativeInstaller-Info.plist" "$INSTALLER/Contents/Info.plist"
 install -m 0644 "$REPOSITORY_ROOT/Sources/DuckpadApp/Resources/Duckpad.icns" "$APP/Contents/Resources/Duckpad.icns"
 
 # Binary distributions retain the notices required by the bundled engines.
@@ -94,11 +101,14 @@ done
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT_VERSION" "$XPC/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$XPC/Contents/Info.plist"
-plutil -lint "$APP/Contents/Info.plist" "$XPC/Contents/Info.plist" >/dev/null
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT_VERSION" "$INSTALLER/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$INSTALLER/Contents/Info.plist"
+plutil -lint "$APP/Contents/Info.plist" "$XPC/Contents/Info.plist" "$INSTALLER/Contents/Info.plist" >/dev/null
 
 SIGNING_FLAGS=(--force --sign "$IDENTITY" --options runtime)
 if [[ "$IDENTITY" != "-" ]]; then SIGNING_FLAGS+=(--timestamp); fi
 codesign "${SIGNING_FLAGS[@]}" --entitlements "$REPOSITORY_ROOT/Packaging/PluginRuntime.entitlements" "$XPC"
+codesign "${SIGNING_FLAGS[@]}" "$INSTALLER"
 codesign "${SIGNING_FLAGS[@]}" --entitlements "$REPOSITORY_ROOT/Packaging/Duckpad.entitlements" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 

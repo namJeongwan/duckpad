@@ -60,11 +60,17 @@ public enum ExtensionCapability: String, Codable, CaseIterable, Sendable {
     case documentsRead = "documents.read"
     case documentsWrite = "documents.write"
     case uiNotifications = "ui.notifications"
+    case clipboardRead = "clipboard.read"
+    case clipboardWrite = "clipboard.write"
+    case pluginStorage = "storage.plugin"
+    case uiList = "ui.list"
+    case nativeCode = "runtime.native"
 }
 
 public enum ExtensionCapabilityScope: String, Codable, CaseIterable, Sendable {
     case selection
     case activeDocument = "active"
+    case application
 }
 
 public struct ExtensionCapabilityRequest: Codable, Hashable, Sendable {
@@ -74,7 +80,7 @@ public struct ExtensionCapabilityRequest: Codable, Hashable, Sendable {
 }
 
 public struct ExtensionCommandContribution: Codable, Equatable, Sendable {
-    public enum InputScope: String, Codable, Sendable { case selection, document }
+    public enum InputScope: String, Codable, Sendable { case selection, document, service }
     public let id: ExtensionCommandID
     public let title: String
     public let operation: UInt32
@@ -182,10 +188,11 @@ public struct LoadedExtensionPackage: Equatable, Sendable {
     public let signatureDigest: String
     public let capabilitySchemaDigest: String
     public let trustSource: TrustSource
-    public init(manifest: ExtensionManifest, module: Data, packageDigest: String, publisherFingerprint: String, signatureDigest: String, capabilitySchemaDigest: String, trustSource: TrustSource) {
+    public let nativeFiles: [String: Data]?
+    public init(manifest: ExtensionManifest, module: Data, packageDigest: String, publisherFingerprint: String, signatureDigest: String, capabilitySchemaDigest: String, trustSource: TrustSource, nativeFiles: [String: Data]? = nil) {
         self.manifest = manifest; self.module = module
         self.packageDigest = packageDigest; self.publisherFingerprint = publisherFingerprint
-        self.signatureDigest = signatureDigest; self.capabilitySchemaDigest = capabilitySchemaDigest; self.trustSource = trustSource
+        self.signatureDigest = signatureDigest; self.capabilitySchemaDigest = capabilitySchemaDigest; self.trustSource = trustSource; self.nativeFiles = nativeFiles
     }
 }
 

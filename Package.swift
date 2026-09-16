@@ -15,12 +15,15 @@ let package = Package(
         .executable(name: "DuckpadApp", targets: ["DuckpadApp"]),
         .executable(name: "DuckpadPluginHost", targets: ["DuckpadPluginHost"]),
         .executable(name: "DuckpadPluginRuntime", targets: ["DuckpadPluginRuntime"]),
+        .executable(name: "DuckpadNativeInstaller", targets: ["DuckpadNativeInstaller"]),
         .executable(name: "DuckpadPerformanceBenchmark", targets: ["DuckpadPerformanceBenchmark"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "6.2.4"),
     ],
     targets: [
+        .target(name: "DuckpadArchiveBridge", publicHeadersPath: "include", linkerSettings: [.linkedLibrary("z")]),
+        .target(name: "DuckpadNativeABI", path: "SDK/DuckpadNative", exclude: ["Swift", "README.md"], sources: ["empty.c"], publicHeadersPath: "include"),
         .target(
             name: "DuckpadICUBridge",
             publicHeadersPath: "include",
@@ -169,7 +172,7 @@ let package = Package(
         .target(name: "DuckpadApplication", dependencies: ["DuckpadDomain"]),
         .target(
             name: "DuckpadInfrastructure",
-            dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadICUBridge", "DuckpadPluginSupport"],
+            dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadICUBridge", "DuckpadPluginSupport", "DuckpadArchiveBridge"],
             resources: [
                 .process("Resources/Languages.json"),
                 .copy("Resources/BundledExtensions"),
@@ -178,7 +181,7 @@ let package = Package(
         ),
         .target(
             name: "DuckpadPresentation",
-            dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadLocalization"],
+            dependencies: ["DuckpadNativeABI", "DuckpadApplication", "DuckpadDomain", "DuckpadLocalization"],
             resources: [.copy("Resources/MaterialIconTheme"), .copy("Resources/MarkdownPreview"), .copy("Resources/ZedIcons")]
         ),
         .target(
@@ -206,6 +209,10 @@ let package = Package(
                 .copy("Resources/Duckpad.icns"),
                 .copy("Resources/AppIcon-SOURCE.md"),
             ]
+        ),
+        .executableTarget(
+            name: "DuckpadNativeInstaller",
+            dependencies: ["DuckpadInfrastructure", "DuckpadPluginSupport"]
         ),
         .executableTarget(
             name: "DuckpadPluginHost",

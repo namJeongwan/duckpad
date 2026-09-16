@@ -114,6 +114,7 @@ private final class ExtensionEditorFake: ExtensionEditorPort {
               selected.length <= documentLength - selected.location else { throw .staleContext }
         let bytes: Data
         switch scope {
+        case .service: throw ExtensionFailure.unsupportedAPI
         case .selection:
             selectionCaptureCount += 1
             guard selected.length > 0 else { throw .invalidResult("command requires a selection") }
@@ -155,27 +156,195 @@ private func extensionPackage(
     digest: String = String(repeating: "a", count: 64),
     version: SemanticVersion = .init(major: 1, minor: 0, patch: 0),
     inputScope: ExtensionCommandContribution.InputScope = .selection,
-    keybindings: [ExtensionKeybindingContribution] = []
+    keybindings: [ExtensionKeybindingContribution] = [],
+    native: Bool = false,
+    id: ExtensionID = .init(rawValue: "com.example.tools"),
+    commandID: ExtensionCommandID = .init(rawValue: "com.example.tools.sort")
 ) -> LoadedExtensionPackage {
-    let id = ExtensionID(rawValue: "com.example.tools")
     let capabilityScope: ExtensionCapabilityScope = inputScope == .selection ? .selection : .activeDocument
-    let capabilities = [
+    let capabilities = inputScope == .service
+        ? ([ExtensionCapability.clipboardRead, .clipboardWrite, .pluginStorage, .uiList] + (native ? [.nativeCode] : [])).map { ExtensionCapabilityRequest(id: $0, scope: .application) }
+        : [
         ExtensionCapabilityRequest(id: .documentsRead, scope: capabilityScope),
         ExtensionCapabilityRequest(id: .documentsWrite, scope: capabilityScope),
     ]
     return LoadedExtensionPackage(
         manifest: ExtensionManifest(id: id, name: "Example Tools", version: version,
             api: .init(minimum: .init(major: 1, minor: 0, patch: 0), maximumExclusive: .init(major: 2, minor: 0, patch: 0)),
-            publisher: .init(id: "com.example", keyID: "one"), runtime: .init(kind: "wasm-core", module: "module.wasm", abi: "duckpad-wasm-1"),
+            publisher: .init(id: "com.example", keyID: "one"), runtime: .init(kind: native ? "native" : "wasm-core", module: native ? "module.dylib" : "module.wasm", abi: native ? "duckpad-native-1" : "duckpad-wasm-1"),
             capabilities: capabilities, contributes: .init(
                 commands: [
-                    .init(id: .init(rawValue: "com.example.tools.sort"), title: "Sort", operation: 7, inputScope: inputScope)
+                    .init(id: commandID, title: "Sort", operation: 7, inputScope: inputScope)
                 ],
                 keybindings: keybindings
             )),
         module: Data([0]), packageDigest: digest, publisherFingerprint: String(repeating: "b", count: 64),
-        signatureDigest: String(repeating: "c", count: 64), capabilitySchemaDigest: String(repeating: "d", count: 64), trustSource: trust
+        signatureDigest: String(repeating: "c", count: 64), capabilitySchemaDigest: String(repeating: "d", count: 64), trustSource: trust,
+        nativeFiles: native ? ["module.dylib": Data([0])] : nil
     )
+}
+
+@Test @MainActor
+func nativePinnedCommandsAreCheckedForCollisionsAfterStagingAnUpdate() async {
+    let sharedCommand = ExtensionCommandID(rawValue: "com.example.tools.extra.open")
+    let old = extensionPackage(trust: .bundled, inputScope: .service, native: true, commandID: sharedCommand)
+    let update = extensionPackage(trust: .bundled, digest: String(repeating: "e", count: 64),
+        version: .init(major: 1, minor: 1, patch: 0), inputScope: .service, native: true)
+    let other = extensionPackage(trust: .bundled, digest: String(repeating: "f", count: 64),
+        inputScope: .service, id: .init(rawValue: "com.example.tools.extra"), commandID: sharedCommand)
+    let (useCase, workspace, editor, loader, policy, transport) = await extensionFixture(package: old)
+    #expect(useCase.serviceCommands().map(\.command.id) == [sharedCommand])
+
+    // The latest manifests do not collide, but the native image remains on v1.
+    await loader.replace([old, update, other])
+    await useCase.refresh()
+    #expect(useCase.state().items.isEmpty)
+    #expect(useCase.serviceCommands().isEmpty)
+    #expect(useCase.state().discoveryFailures[old.manifest.id.rawValue] != nil)
+    #expect(useCase.state().discoveryFailures[other.manifest.id.rawValue] != nil)
+
+    // A fresh process can use v2 and the other plugin together.
+    let restarted = ExtensionWorkspaceUseCase(loader: loader, grants: policy, transport: transport,
+        workspace: workspace, editor: editor, allowsUserExtensions: true)
+    await restarted.refresh()
+    #expect(restarted.state().items.count == 2)
+    #expect(restarted.state().discoveryFailures.isEmpty)
+    #expect(Set(restarted.serviceCommands().map(\.command.id)).count == 2)
+}
+
+@Test @MainActor
+func nativeUpdateKeepsCurrentServiceUntilNextProcess() async throws {
+    let old = extensionPackage(inputScope: .service, native: true)
+    let update = extensionPackage(digest: String(repeating: "e", count: 64), version: .init(major: 1, minor: 1, patch: 0), inputScope: .service, native: true)
+    let (useCase, workspace, editor, loader, policy, transport) = await extensionFixture(package: old)
+    try await useCase.setEnabled(old.manifest.id, enabled: true)
+    let consent = try useCase.consentReviewToken(for: old.manifest.id)
+    try await useCase.grantReviewed(consent, choices: consent.requests)
+    let running = useCase.serviceCommands()
+    #expect(running.count == 1)
+
+    await loader.replace([update, old])
+    await useCase.refresh()
+    #expect(useCase.serviceCommands() == running)
+    #expect(useCase.state().items.first?.manifest.version == old.manifest.version)
+    #expect(useCase.state().items.first?.pendingVersion == update.manifest.version)
+    try await useCase.validateServiceAccess(running[0].command.id, expectedDigest: old.packageDigest)
+
+    // Disabling is immediate, but re-enabling cannot load a second native image.
+    try await useCase.setEnabled(old.manifest.id, enabled: false)
+    #expect(useCase.serviceCommands().isEmpty)
+    try await useCase.setEnabled(old.manifest.id, enabled: true)
+    let renewed = try useCase.consentReviewToken(for: old.manifest.id)
+    try await useCase.grantReviewed(renewed, choices: renewed.requests)
+    #expect(useCase.serviceCommands() == running)
+
+    let restarted = ExtensionWorkspaceUseCase(loader: loader, grants: policy, transport: transport,
+        workspace: workspace, editor: editor, allowsUserExtensions: true)
+    await restarted.refresh()
+    #expect(restarted.state().items.first?.manifest.version == update.manifest.version)
+    #expect(restarted.state().items.first?.pendingVersion == nil)
+    // A new signed identity does not silently inherit grants from the old code.
+    #expect(restarted.state().items.first?.granted.isEmpty == true)
+}
+
+@Test @MainActor
+func nativeActivationIsSharedAcrossWindowsAndAllowsFirstInstall() async {
+    let old = extensionPackage(inputScope: .service, native: true)
+    let update = extensionPackage(digest: String(repeating: "e", count: 64), version: .init(major: 2, minor: 0, patch: 0), inputScope: .service, native: true)
+    let (_, workspace, editor, loader, policy, transport) = await extensionFixture(package: old)
+    let session = NativeExtensionActivationSession()
+    let first = ExtensionWorkspaceUseCase(loader: loader, grants: policy, transport: transport,
+        workspace: workspace, editor: editor, allowsUserExtensions: true, nativeActivationSession: session)
+    await loader.replace([])
+    await first.refresh()
+    #expect(first.state().items.isEmpty)
+    await loader.replace([old])
+    await first.refresh()
+    #expect(first.state().items.first?.manifest.version == old.manifest.version)
+    #expect(first.state().items.first?.pendingVersion == nil)
+
+    await loader.replace([old, update])
+    let second = ExtensionWorkspaceUseCase(loader: loader, grants: policy, transport: transport,
+        workspace: workspace, editor: editor, allowsUserExtensions: true, nativeActivationSession: session)
+    await second.refresh()
+    #expect(second.state().items.first?.manifest.version == old.manifest.version)
+    #expect(second.state().items.first?.pendingVersion == update.manifest.version)
+}
+
+@Test @MainActor
+func nativeUpdateDoesNotHideMissingOrReplacedCurrentPackage() async {
+    let old = extensionPackage(inputScope: .service, native: true)
+    let changed = extensionPackage(digest: String(repeating: "f", count: 64), inputScope: .service, native: true)
+    let update = extensionPackage(digest: String(repeating: "e", count: 64), version: .init(major: 1, minor: 1, patch: 0), inputScope: .service, native: true)
+    for remaining in [[update], [changed, update], [changed]] {
+        let (useCase, _, _, loader, _, _) = await extensionFixture(package: old)
+        await loader.replace(remaining)
+        await useCase.refresh()
+        #expect(useCase.state().items.isEmpty)
+        #expect(useCase.state().discoveryFailures[old.manifest.id.rawValue] != nil)
+        #expect(useCase.serviceCommands().isEmpty)
+    }
+}
+
+@Test @MainActor
+func nativePendingUpdateTracksLatestAndClearsWhenRemoved() async {
+    let old = extensionPackage(inputScope: .service, native: true)
+    let update = extensionPackage(digest: String(repeating: "e", count: 64), version: .init(major: 1, minor: 1, patch: 0), inputScope: .service, native: true)
+    let newest = extensionPackage(digest: String(repeating: "f", count: 64), version: .init(major: 1, minor: 2, patch: 0), inputScope: .service, native: true)
+    let (useCase, _, _, loader, _, _) = await extensionFixture(package: old)
+    await loader.replace([old, update, newest])
+    await useCase.refresh()
+    #expect(useCase.state().items.first?.pendingVersion == newest.manifest.version)
+    await loader.replace([old])
+    await useCase.refresh()
+    #expect(useCase.state().items.first?.pendingVersion == nil)
+    #expect(useCase.state().items.first?.manifest.version == old.manifest.version)
+}
+
+@Test @MainActor
+func approvedNativeUpdatePreservesRunningGrantsAndActivatesAfterRestart() async throws {
+    let old = extensionPackage(inputScope: .service, native: true)
+    let update = extensionPackage(digest: String(repeating: "e", count: 64), version: .init(major: 1, minor: 1, patch: 0), inputScope: .service, native: true)
+    let (useCase, workspace, editor, loader, policy, transport) = await extensionFixture(package: old)
+    try await useCase.setEnabled(old.manifest.id, enabled: true)
+    var token = try useCase.consentReviewToken(for: old.manifest.id)
+    try await useCase.grantReviewed(token, choices: token.requests)
+    token = try useCase.consentReviewToken(for: old.manifest.id)
+    let running = useCase.serviceCommands()
+    try await useCase.approveUpdate(from: token, to: update, choices: Set(update.manifest.capabilities))
+    // An intervening refresh before file publication must not discard pending grants.
+    await useCase.refresh()
+    #expect(useCase.serviceCommands() == running)
+    #expect((try await policy.loadPolicy()).grants.contains { $0.packageDigest == update.packageDigest })
+    await loader.replace([old, update])
+    await useCase.refresh()
+    #expect(useCase.serviceCommands() == running)
+    let restarted = ExtensionWorkspaceUseCase(loader: loader, grants: policy, transport: transport,
+        workspace: workspace, editor: editor, allowsUserExtensions: true)
+    await restarted.refresh()
+    #expect(restarted.serviceCommands().first?.packageDigest == update.packageDigest)
+    #expect(restarted.serviceCommands().first?.extensionID == running.first?.extensionID)
+    #expect(restarted.serviceCommands().first?.publisherFingerprint == running.first?.publisherFingerprint)
+    #expect(restarted.serviceCommands().first?.command.id == running.first?.command.id)
+}
+
+@Test @MainActor
+func disablingCancelsPendingUpdateAuthorityAndStaleApprovalIsRejected() async throws {
+    let old = extensionPackage(inputScope: .service, native: true)
+    let update = extensionPackage(digest: String(repeating: "e", count: 64), version: .init(major: 1, minor: 1, patch: 0), inputScope: .service, native: true)
+    let (useCase, workspace, editor, loader, policy, transport) = await extensionFixture(package: old)
+    try await useCase.setEnabled(old.manifest.id, enabled: true)
+    let token = try useCase.consentReviewToken(for: old.manifest.id)
+    try await useCase.approveUpdate(from: token, to: update, choices: Set(update.manifest.capabilities))
+    await loader.replace([old, update])
+    try await useCase.setEnabled(old.manifest.id, enabled: false)
+    await #expect(throws: ExtensionFailure.self) { try await useCase.approveUpdate(from: token, to: update, choices: Set(update.manifest.capabilities)) }
+    let restarted = ExtensionWorkspaceUseCase(loader: loader, grants: policy, transport: transport,
+        workspace: workspace, editor: editor, allowsUserExtensions: true)
+    await restarted.refresh()
+    #expect(restarted.serviceCommands().isEmpty)
+    #expect(restarted.state().items.first?.enabled == false)
+    #expect(try await policy.loadPolicy().grants.isEmpty)
 }
 
 @Test @MainActor
@@ -528,4 +697,88 @@ func heldWorkspaceTransactionRejectsLateMutationAfterEveryAuthorityWithdrawal() 
         #expect(released != nil)
         if let released { workspace.cancelEditorBatch(released) }
     }
+}
+
+@Test @MainActor func serviceRequestsDoNotCaptureOrEditDocumentsAndRespectRevocation() async throws {
+    let package = extensionPackage(inputScope: .service)
+    let (useCase, workspace, editor, _, _, transport) = await extensionFixture(package: package)
+    let command = package.manifest.contributes.commands[0].id
+    #expect(useCase.serviceCommands().isEmpty)
+    try await useCase.setEnabled(package.manifest.id, enabled: true)
+    let token = try useCase.consentReviewToken(for: package.manifest.id)
+    try await useCase.grantReviewed(token, choices: token.requests)
+    #expect(useCase.serviceCommands().count == 1)
+    await transport.setResponse(ExtensionHostResponse(serviceOutput: Data([0, 255, 1])))
+    let before = workspace.snapshot().activeBuffer
+    let output = try await useCase.invokeService(command, input: Data([0, 255]))
+    #expect(output == Data([0, 255, 1]))
+    #expect(editor.documentCaptureCount == 0 && editor.selectionCaptureCount == 0 && editor.batchCount == 0)
+    #expect(workspace.snapshot().activeBuffer == before)
+    await transport.block()
+    let invocation = Task { try await useCase.invokeService(command, input: Data()) }
+    while await transport.requestCount() < 2 { await Task.yield() }
+    try await useCase.setEnabled(package.manifest.id, enabled: false)
+    await #expect(throws: (any Error).self) { _ = try await invocation.value }
+    #expect(useCase.serviceCommands().isEmpty)
+}
+
+@Test @MainActor func serviceRejectsDocumentEditResponses() async throws {
+    let package = extensionPackage(inputScope: .service)
+    let (useCase, _, editor, _, _, _) = await extensionFixture(package: package)
+    try await useCase.setEnabled(package.manifest.id, enabled: true)
+    let token = try useCase.consentReviewToken(for: package.manifest.id)
+    try await useCase.grantReviewed(token, choices: token.requests)
+    await #expect(throws: (any Error).self) {
+        _ = try await useCase.invokeService(package.manifest.contributes.commands[0].id, input: Data())
+    }
+    #expect(editor.batchCount == 0)
+}
+
+@Test @MainActor
+func installedPluginActivationNeedsNoSeparateGrantAndMigratesEnabledPackages() async throws {
+    let package = extensionPackage(inputScope: .service, native: true)
+    let (_, workspace, editor, loader, policy, transport) = await extensionFixture(package: package)
+    let useCase = ExtensionWorkspaceUseCase(loader: loader, grants: policy, transport: transport,
+        workspace: workspace, editor: editor, allowsUserExtensions: true, automaticallyAuthorizesEnabledPackages: true)
+    await useCase.refresh()
+    #expect(useCase.serviceCommands().isEmpty) // Discovery alone does not install/enable.
+    try await useCase.setEnabled(package.manifest.id, enabled: true)
+    #expect(useCase.serviceCommands().count == 1)
+    #expect(useCase.state().items.first?.granted == Set(package.manifest.capabilities))
+    try await useCase.setEnabled(package.manifest.id, enabled: false)
+    await useCase.refresh()
+    #expect(useCase.serviceCommands().isEmpty)
+    #expect(useCase.state().items.first?.enabled == false)
+    try await useCase.setEnabled(package.manifest.id, enabled: true)
+    #expect(useCase.serviceCommands().count == 1)
+
+    // Existing installations from the former Enable-then-Grant UI recover at launch.
+    let legacy = ExtensionPolicyFake(.init(enabled: [package.manifest.id]))
+    let migrated = ExtensionWorkspaceUseCase(loader: loader, grants: legacy, transport: transport,
+        workspace: workspace, editor: editor, allowsUserExtensions: true, automaticallyAuthorizesEnabledPackages: true)
+    await migrated.refresh()
+    #expect(migrated.serviceCommands().count == 1)
+    let saves = await legacy.saved.count
+    await migrated.refresh()
+    #expect(await legacy.saved.count == saves)
+    let revoke = try migrated.revocationReviewToken(for: package.manifest.id)
+    try await migrated.revokePublisher(revoke)
+    await migrated.refresh()
+    #expect(migrated.serviceCommands().isEmpty)
+    #expect(migrated.state().items.first?.issue == .untrustedPublisher)
+}
+
+@Test @MainActor
+func failedAutomaticActivationNeverPublishesPluginAccess() async throws {
+    let package = extensionPackage(inputScope: .service, native: true)
+    let (_, workspace, editor, loader, _, transport) = await extensionFixture(package: package)
+    let policy = ExtensionPolicyFake(.init(enabled: [package.manifest.id]))
+    await policy.setUncertain()
+    let useCase = ExtensionWorkspaceUseCase(loader: loader, grants: policy, transport: transport,
+        workspace: workspace, editor: editor, allowsUserExtensions: true, automaticallyAuthorizesEnabledPackages: true)
+    await useCase.refresh()
+    #expect(useCase.serviceCommands().isEmpty)
+    #expect(!useCase.state().discoveryFailures.isEmpty)
+    await useCase.refresh()
+    #expect(useCase.serviceCommands().isEmpty)
 }

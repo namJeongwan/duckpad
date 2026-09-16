@@ -489,10 +489,11 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         } else {
             label = rows[row].0
         }
-        let field = NSTextField(labelWithString: label)
-        field.lineBreakMode = .byTruncatingTail
-        field.setAccessibilityLabel(label)
-        return field
+        let identifier = NSUserInterfaceItemIdentifier("search-result")
+        let cell = (tableView.makeView(withIdentifier: identifier, owner: self) as? SingleLineTableCell) ?? SingleLineTableCell()
+        cell.identifier = identifier; cell.textField?.stringValue = label
+        cell.setAccessibilityLabel(label)
+        return cell
     }
 
     @objc private func primaryPressed() {

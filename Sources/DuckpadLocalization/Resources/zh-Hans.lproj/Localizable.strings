@@ -494,7 +494,7 @@
 "This extension is incompatible with this version of Duckpad." = "此扩展与当前 Duckpad 版本不兼容。";
 "This file is no longer available." = "此文件已不可用。";
 "This folder is already in the workspace." = "此文件夹已在工作区中。";
-"This removes the durable publisher tombstone for %1$@ (%2$@). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review." = "这将删除 %1$@（%2$@）的持久发布者撤销记录。扩展仍保持禁用且没有任何访问权限，直到你明确启用它并批准与身份绑定的新权限审查。";
+"This removes the durable publisher tombstone for %1$@ (%2$@). The extension remains disabled and receives no access until you explicitly enable it and approve a new identity-bound capability review." = "这将重置对发布者 %1$@ (%2$@) 的撤销。插件将保持停用，直到你启用它。";
 "Toggle Block Comment" = "切换块注释";
 "Toggle Bookmark" = "切换书签";
 "Toggle Line Comment" = "切换行注释";
@@ -583,3 +583,123 @@
 "When inactive" = "非活动时";
 "Always" = "始终";
 "Window opacity" = "窗口不透明度";
+
+/* Clipboard services and recent editor commands */
+"Binary" = "二进制";
+"Read-only" = "只读";
+"Binary files are read-only and cannot be saved." = "二进制文件为只读，无法保存。";
+"Loading: %1$@%%" = "正在加载：%1$@%%";
+"Formatting" = "格式化";
+"Format Document" = "格式化文档";
+"Format on Save" = "保存时格式化";
+"Print width" = "换行宽度";
+"Indent size" = "缩进大小";
+"Indent with tabs" = "使用制表符缩进";
+"Prefer single quotes" = "优先使用单引号";
+"Print semicolons" = "添加分号";
+"SQL dialect" = "SQL 方言";
+"Format Document: ⇧⌥F. Prettier, XML and SQL formatting work offline. Unsupported languages save normally. If formatting fails, your current text is saved without formatting." = "格式化文档：⇧⌥F。Prettier、XML 和 SQL 格式化可离线使用。不支持的语言会正常保存。如果格式化失败，将保存当前文本而不进行格式化。";
+"Could not format document" = "无法格式化文档";
+"No built-in formatter is available for this language." = "没有适用于此语言的内置格式化工具。";
+"Formatting supports documents up to 1 MiB and results up to 4 MiB." = "格式化支持最大 1 MiB 的文档和最大 4 MiB 的结果。";
+"Formatting is already in progress. Try again when it finishes." = "正在格式化。请在完成后重试。";
+"Formatting took too long. Your document has been kept." = "格式化超时。您的文档已保留。";
+"The built-in formatter could not be started." = "无法启动内置格式化工具。";
+"Formatting failed: %1$@" = "格式化失败：%1$@";
+"Rename…" = "重命名…";
+"Move To…" = "移动到…";
+"Move to Trash…" = "移到废纸篓…";
+"Print…" = "打印…";
+"Rename" = "重命名";
+"Move" = "移动";
+"Move to Trash?" = "移到废纸篓？";
+"Move to Trash" = "移到废纸篓";
+"The file will move to Trash and its tab will close. Unsaved changes will be discarded. You can restore the saved file using Finder." = "文件将移到废纸篓，其标签页将关闭。未保存的更改将被丢弃。您可以使用访达恢复已保存的文件。";
+"The file will move to Trash and its tab will close. You can restore the file using Finder." = "文件将移到废纸篓，其标签页将关闭。您可以使用访达恢复此文件。";
+"A file already exists at that location. Choose another name or folder." = "该位置已存在同名文件。请选择其他名称或文件夹。";
+"Could not change file location" = "无法更改文件位置";
+"Clipboard History" = "剪贴板历史记录";
+"Search clipboard history" = "搜索剪贴板历史记录";
+"No clipboard history" = "暂无剪贴板历史记录";
+"Clear History…" = "清空历史记录…";
+"Clear History" = "清空历史记录";
+"Clear all clipboard history, including pinned items?" = "要清空所有剪贴板历史记录，包括固定的条目吗？";
+"Plugin request failed: %1$@" = "插件请求失败：%1$@";
+"Install Plugin…" = "安装插件…";
+"Choose a signed .duckpad-plugin package." = "请选择已签名的 .duckpad-plugin 软件包。";
+"Publisher: %1$@\nFingerprint: %2$@\nVersion: %3$@\nPackage: %4$@\n\nData access and destination:\n%5$@\n\nAffected signed package identities:\n%6$@\n\nGrants last until revoked or identity changes. Publisher revoke is durable across restart until deliberate Reset. Requested clipboard access uses the system clipboard while the plugin is enabled. Plugin storage is private to this publisher and plugin. No direct filesystem, network, environment, or process access is exposed." = "发布者：%1$@\n指纹：%2$@\n版本：%3$@\n软件包：%4$@\n\n数据访问与目标位置：\n%5$@\n\n受影响的已签名软件包身份：\n%6$@\n\n授权会持续有效，直到被撤销或身份发生变化。撤销发布者权限的状态在重启后仍然保留，直到明确执行重置。请求的剪贴板访问会在插件启用期间使用系统剪贴板。插件存储仅供此发布者和插件使用。不提供对文件系统、网络、环境变量或进程的直接访问。";
+"Pin" = "固定";
+"Unpin" = "取消固定";
+"Keep history for" = "历史记录保留时间";
+"1 Day" = "1 天";
+"3 Days" = "3 天";
+"1 Week" = "1 周";
+"Paste Next" = "依次粘贴";
+"Expired entries are deleted, including pinned items. History survives restarting Duckpad." = "过期的条目会被删除，包括固定的条目。重启 Duckpad 后历史记录仍会保留。";
+"Paste the selected item, then select the next item. Stops at the end of the list." = "粘贴选中的条目，然后选中下一条。在列表末尾停止。";
+"Paste cancelled. Select an editor position and try again." = "粘贴已取消。请在编辑器中选择插入位置后重试。";
+"End of history. Select an item to start again." = "已到历史记录末尾。请选择一个条目以重新开始。";
+"Clipboard item preview" = "剪贴板条目预览";
+"Preview" = "预览";
+"Duckpad Text Tools" = "Duckpad 文本工具";
+
+"Native plugin: %1$@\nPublisher: %2$@\nFingerprint: %3$@\nVersion: %4$@\nPackage: %5$@\n\nThis plugin runs inside Duckpad and can access the same documents, clipboard, files, and network resources as Duckpad. Listed capabilities describe its intended use; they do not isolate native code. Enable only plugins from publishers you trust.\n\nRequested capabilities:\n%6$@" = "原生插件：%1$@\n发布者：%2$@\n指纹：%3$@\n版本：%4$@\n软件包：%5$@\n\n此插件在 Duckpad 内运行，可以访问与 Duckpad 相同的文档、剪贴板、文件和网络资源。列出的权限说明其预期用途，并不会隔离原生代码。请仅启用来自可信发布者的插件。\n\n请求的权限：\n%6$@";
+
+"Install Native Plugin" = "安装原生插件";
+
+"Install" = "安装";
+
+"Choose where to install this plugin. macOS will remember access to this package for future launches." = "请选择此插件的安装位置。macOS 会记住对此软件包的访问权限，以供下次启动时使用。";
+
+"The installed native plugin has changed. Reinstall its signed package before running it." = "已安装的原生插件已被更改。请在运行前重新安装其签名软件包。";
+
+"This native plugin needs an installation location approved through macOS." = "此原生插件需要通过 macOS 批准的安装位置。";
+
+"%1$@ %2$@ · %3$@ · %4$@ applies next launch" = "%1$@ %2$@ · %3$@ · 下次启动时应用 %4$@";
+
+"Check for Plugin Updates" = "检查插件更新";
+
+"Checking for Plugin Updates…" = "正在检查插件更新…";
+
+"Update to %1$@" = "更新至 %1$@";
+
+"Installing Plugin…" = "正在安装插件…";
+
+"No Plugin Updates Available" = "没有可用的插件更新";
+
+"Plugin Updates Available" = "有可用的插件更新";
+
+"Could Not Check for Plugin Updates" = "无法检查插件更新";
+
+"Downloading and Verifying Plugin…" = "正在下载并验证插件…";
+
+"Plugin Update Requests Additional Access" = "插件更新请求额外权限";
+
+"%1$@ %2$@ requests these additional capabilities:\n%3$@" = "%1$@ %2$@ 请求以下额外权限：\n%3$@";
+
+"Plugin Update Will Apply Next Launch" = "插件更新将在下次启动时应用";
+
+"Plugin Update Installed" = "插件更新已安装";
+
+"Plugin Update Cancelled" = "插件更新已取消";
+
+"Plugin Update Failed" = "插件更新失败";
+
+"The native plugin is being installed. Please try again shortly." = "正在安装原生插件。请稍后重试。";
+
+"Update" = "更新";
+"Markdown Preview" = "Markdown 预览";
+"Close Preview" = "关闭预览";
+"Rendering preview…" = "正在生成预览…";
+"Markdown preview could not be rendered." = "无法生成 Markdown 预览。";
+"Markdown preview is unavailable for binary files." = "二进制文件不支持 Markdown 预览。";
+"Allow Local Images…" = "允许本地图片…";
+"Choose the folder containing this document’s images." = "选择包含此文档图片的文件夹。";
+"Markdown image drop" = "将图片拖入 Markdown";
+"Ask every time" = "每次都询问";
+"Insert into Markdown" = "插入 Markdown";
+"How would you like to use these images?" = "您想如何使用这些图片？";
+"Don’t ask again; use this action" = "不再询问；使用此操作";
+"The image drop preference could not be saved." = "无法保存图片拖放偏好设置。";
+"Open in New Tab" = "在新标签页中打开";
+"Choose an image folder to allow local images in the preview." = "选择图片文件夹，以允许在预览中显示本地图片。";

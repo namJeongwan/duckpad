@@ -8,6 +8,30 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct LocalizationTests {
+    @Test func everyCatalogContainsEnglishKeysAndMatchingFormatArguments() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Sources/DuckpadLocalization/Resources")
+        func strings(_ language: AppLanguage) throws -> [String: String] {
+            let data = try Data(contentsOf: root.appendingPathComponent(language.rawValue + ".lproj/Localizable.strings"))
+            return try #require(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: String])
+        }
+        let english = try strings(.english)
+        let pattern = try NSRegularExpression(pattern: #"%(?:[0-9]+\$)?[@diuf]|%%"#)
+        func arguments(_ value: String) -> [String] {
+            pattern.matches(in: value, range: NSRange(value.startIndex..., in: value)).map {
+                (value as NSString).substring(with: $0.range)
+            }.sorted()
+        }
+        for language in AppLanguage.allCases where language != .system {
+            let translated = try strings(language)
+            #expect(Set(english.keys).subtracting(translated.keys).isEmpty, "Missing keys: \(language.rawValue)")
+            for (key, value) in english {
+                guard let localized = translated[key] else { continue }
+                #expect(arguments(value) == arguments(localized), "Format mismatch: \(language.rawValue) \(key)")
+            }
+        }
+    }
+
     @Test func settingsPreserveLanguageAndDecodeOlderArchives() throws {
         for language in AppLanguage.allCases {
             let settings = AppSettings(appLanguage: language)

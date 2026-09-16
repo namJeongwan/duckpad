@@ -446,7 +446,7 @@ public enum DuckpadMainMenuFactory {
                     accessibilityValue = L10n.text("Shortcut %1$@ unavailable because it is invalid", L10n.argument(declaration))
                 }
             }
-            item.setAccessibilityLabel(L10n.text("Extension command: %1$@", L10n.argument(command.title)))
+            item.setAccessibilityLabel(L10n.text("Extension command: %1$@", L10n.argument(L10n.text(command.title))))
             item.setAccessibilityValue(accessibilityValue)
         }
         extensionsItem.submenu = extensionsMenu
@@ -527,6 +527,16 @@ public enum DuckpadMainMenuFactory {
         for item in view.items.filter({ $0.action == #selector(DuckpadWindowController.performCompareWithOpenDocument(_:)) || $0.action == #selector(DuckpadWindowController.performShowCommandPalette(_:)) }) {
             move(item, from: view, to: tools)
         }
+        // Panel services belong beside the other tools. Move the existing item
+        // so the menu has one command target and one keyboard shortcut owner.
+        let serviceIDs = Set(target.extensionCommands.filter { $0.inputScope == .service }.map { $0.id.rawValue })
+        let plugins = menu("Plugins")
+        let serviceItems = plugins.items.filter { item in
+            guard let id = item.representedObject as? String else { return false }
+            return serviceIDs.contains(id)
+        }
+        if !serviceItems.isEmpty { tools.addItem(.separator()) }
+        for item in serviceItems { move(item, from: plugins, to: tools) }
         let help = NSMenu(title: "Help")
         for submenu in [preferences, tools, help] {
             let root = NSMenuItem()

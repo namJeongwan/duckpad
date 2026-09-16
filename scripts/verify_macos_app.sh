@@ -7,6 +7,9 @@ if [[ $# -ne 1 ]] || [[ "$1" != /* ]] || [[ "${1##*.}" != "app" ]]; then
 fi
 APP="$1"
 XPC="$APP/Contents/XPCServices/DuckpadPluginRuntime.xpc"
+INSTALLER="$APP/Contents/XPCServices/DuckpadNativeInstaller.xpc"
+test -x "$INSTALLER/Contents/MacOS/DuckpadNativeInstaller"
+[[ "$(plutil -extract CFBundleIdentifier raw "$INSTALLER/Contents/Info.plist")" == "com.namjeongwan.duckpad.native-installer" ]]
 
 test -x "$APP/Contents/MacOS/Duckpad"
 test -x "$XPC/Contents/MacOS/DuckpadPluginRuntime"
@@ -59,7 +62,10 @@ plutil -lint "$TEMP_ROOT/app.plist" "$TEMP_ROOT/xpc.plist" >/dev/null
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.files.user-selected.read-write' "$TEMP_ROOT/app.plist")" == "true" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.files.bookmarks.app-scope' "$TEMP_ROOT/app.plist")" == "true" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$TEMP_ROOT/xpc.plist")" == "true" ]]
-[[ "$(plutil -p "$TEMP_ROOT/app.plist" | grep -c 'com.apple.security' | tr -d ' ')" == "4" ]]
+for KEY in com.apple.security.print com.apple.security.cs.disable-library-validation; do
+    [[ "$(/usr/libexec/PlistBuddy -c "Print :$KEY" "$TEMP_ROOT/app.plist")" == "true" ]]
+done
+[[ "$(plutil -p "$TEMP_ROOT/app.plist" | grep -c 'com.apple.security' | tr -d ' ')" == "6" ]]
 [[ "$(plutil -p "$TEMP_ROOT/xpc.plist" | grep -c 'com.apple.security' | tr -d ' ')" == "1" ]]
 
 codesign -dv --verbose=4 "$APP" 2> "$TEMP_ROOT/app-signature.txt"
@@ -70,5 +76,14 @@ APP_TEAM="$(sed -n 's/^TeamIdentifier=//p' "$TEMP_ROOT/app-signature.txt")"
 XPC_TEAM="$(sed -n 's/^TeamIdentifier=//p' "$TEMP_ROOT/xpc-signature.txt")"
 [[ "$APP_TEAM" == "$XPC_TEAM" ]]
 
+codesign -d --entitlements :- "$INSTALLER" > "$TEMP_ROOT/installer-entitlements.txt" 2>/dev/null
+if grep -q "com.apple.security.app-sandbox" "$TEMP_ROOT/installer-entitlements.txt"; then
+    echo "Native installer must run outside App Sandbox" >&2; exit 1
+fi
+codesign -dv --verbose=4 "$INSTALLER" 2> "$TEMP_ROOT/installer-signature.txt"
+grep -Eq "flags=.*runtime" "$TEMP_ROOT/installer-signature.txt"
+INSTALLER_TEAM="$(sed -n 's/^TeamIdentifier=//p' "$TEMP_ROOT/installer-signature.txt")"
+[[ "$APP_TEAM" == "$INSTALLER_TEAM" ]]
+[[ "$(lipo -archs "$INSTALLER/Contents/MacOS/DuckpadNativeInstaller")" == "$APP_ARCHES" ]]
 codesign --verify --deep --strict --verbose=2 "$APP"
 echo "PASS: verified Duckpad app bundle, resources, XPC isolation, and signatures"

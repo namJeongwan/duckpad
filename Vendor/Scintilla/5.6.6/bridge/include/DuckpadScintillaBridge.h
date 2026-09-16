@@ -93,6 +93,7 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
                  scrollBeyondLastLine:(BOOL)scrollBeyondLastLine
                        wrapIndentMode:(NSInteger)wrapIndentMode;
 @property(nonatomic, readonly) NSUInteger selectionCount;
+@property(nonatomic, readonly, copy) NSData *pasteSelectionIdentity;
 @property(nonatomic, readonly) NSUInteger caretUTF8Position;
 @property(nonatomic, readonly) NSUInteger anchorUTF8Position;
 @property(nonatomic, readonly) NSUInteger firstVisibleLine;
