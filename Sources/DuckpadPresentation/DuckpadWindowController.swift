@@ -444,7 +444,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.terminationCoordinator = terminationCoordinator
         self.approvedWindowClose = approvedWindowClose ?? { $0.performClose(nil) }
         self.keepsClosedWindowForReopen = recoveryUseCase != nil && approvedWindowClose == nil
-        let window = NSWindow(
+        let window = EditorWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
