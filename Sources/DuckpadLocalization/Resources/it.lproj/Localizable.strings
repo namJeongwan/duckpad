@@ -703,3 +703,16 @@
 "The image drop preference could not be saved." = "Impossibile salvare la preferenza per il trascinamento delle immagini.";
 "Open in New Tab" = "Apri in una nuova scheda";
 "Choose an image folder to allow local images in the preview." = "Scegli una cartella di immagini per consentire le immagini locali nell’anteprima.";
+"Installed Plugins" = "Plugin installati";
+"Available Plugins" = "Plugin disponibili";
+"Search Plugins" = "Cerca plugin";
+"Refresh Catalog" = "Aggiorna catalogo";
+"No Compatible Plugins Available" = "Nessun plugin compatibile disponibile";
+"No Matching Plugins" = "Nessun plugin corrispondente";
+"Loading Plugin Catalog…" = "Caricamento del catalogo dei plugin…";
+"Could Not Load Plugin Catalog" = "Impossibile caricare il catalogo dei plugin";
+"Plugin Installed" = "Plugin installato";
+"Plugin Installation Cancelled" = "Installazione del plugin annullata";
+"Plugin Installation Failed" = "Installazione del plugin non riuscita";
+"Installed" = "Installato";
+"Some Plugins Could Not Be Loaded" = "Impossibile caricare alcuni plugin";

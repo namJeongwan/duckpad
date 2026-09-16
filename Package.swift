@@ -23,7 +23,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "DuckpadArchiveBridge", publicHeadersPath: "include", linkerSettings: [.linkedLibrary("z")]),
-        .target(name: "DuckpadNativeABI", path: "SDK/DuckpadNative", exclude: ["Swift", "README.md"], sources: ["empty.c"], publicHeadersPath: "include"),
+        .target(name: "DuckpadNativeABI", path: "SDK/DuckpadNative", exclude: ["Swift", "overview.md"], sources: ["empty.c"], publicHeadersPath: "include"),
         .target(
             name: "DuckpadICUBridge",
             publicHeadersPath: "include",

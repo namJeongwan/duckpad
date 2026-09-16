@@ -459,3 +459,45 @@ func pluginUpdateButtonChecksAutomaticallyAndStagesUntilRelaunch() async throws 
     #expect(status.stringValue == catalog.text("Plugin Update Will Apply Next Launch"))
     withExtendedLifetime(updater) {}
 }
+
+@Test @MainActor
+func catalogDiscoversAndInstallsWithoutAnExistingPluginOrPicker() async throws {
+    _ = NSApplication.shared
+    let package = presentationPackage(service: true)
+    let loader = PresentationExtensionLoader([])
+    let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+    let service = ExtensionWorkspaceUseCase(loader: loader, grants: PresentationExtensionPolicy(),
+        transport: PresentationExtensionTransport(), workspace: workspace, editor: PresentationExtensionEditor(), automaticallyAuthorizesEnabledPackages: true)
+    await service.refresh()
+    let manager = ExtensionsManagerPanel()
+    defer { manager.close() }
+    let release = ExtensionUpdate(extensionID: package.manifest.id, version: package.manifest.version,
+        downloadURL: URL(string: "https://github.com/example/sample/releases/download/v1.2.3/plugin.zip")!,
+        sha256: String(repeating: "0", count: 64), publisherID: package.manifest.publisher.id, keyID: package.manifest.publisher.keyID)
+    let plugin = ExtensionCatalogPlugin(name: "Sample", descriptions: ["en": "Test catalog plugin", "ja": "テストプラグイン"], release: release, publisherFingerprint: package.publisherFingerprint)
+    var activated = false
+    let updater = ExtensionUpdateController(useCase: service, panel: manager, check: { _ in [:] },
+        prepare: { update, fingerprint in
+            #expect(update == release); #expect(fingerprint == package.publisherFingerprint)
+            return .init(release: release, package: package, files: [:])
+        }, install: { _ in await loader.replace([package]) }, browse: { .init(plugins: [plugin]) },
+        activate: { id in #expect(id == package.manifest.id); activated = true },
+        onError: { Issue.record("Unexpected catalog install error: \($0)") })
+    service.onStateChange = { state in manager.render(state); updater.registryChanged(state) }
+    defer { service.onStateChange = nil }
+    func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+    let root = try #require(manager.window?.contentView)
+    let button = try #require(descendants(root).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "duckpad.extensions.catalog.install" })
+    manager.onBrowse?()
+    let deadline = ContinuousClock.now + .seconds(3)
+    while !button.isEnabled, ContinuousClock.now < deadline { await Task.yield() }
+    #expect(button.isEnabled)
+    button.performClick(nil)
+    while !activated, ContinuousClock.now < deadline { await Task.yield() }
+    #expect(activated)
+    #expect(service.state().items.first?.enabled == true)
+    #expect(service.serviceCommands().count == 1)
+    #expect(!button.isEnabled)
+    #expect(button.title == L10n.text("Installed"))
+    withExtendedLifetime(updater) {}
+}

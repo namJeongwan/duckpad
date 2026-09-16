@@ -761,10 +761,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     public func configureExtensionUpdates(
         check: @escaping @Sendable ([ExtensionRegistryItem]) async throws -> [ExtensionID: ExtensionUpdate],
         prepare: @escaping @Sendable (ExtensionUpdate, String) async throws -> PreparedExtensionUpdate,
-        install: @escaping @Sendable (PreparedExtensionUpdate) async throws -> Void
+        install: @escaping @Sendable (PreparedExtensionUpdate) async throws -> Void,
+        browse: @escaping @Sendable () async throws -> ExtensionCatalogSnapshot = { .init(plugins: []) }
     ) {
         guard let extensionUseCase else { return }
-        extensionUpdater = ExtensionUpdateController(useCase: extensionUseCase, panel: extensionsPanel, check: check, prepare: prepare, install: install,
+        extensionUpdater = ExtensionUpdateController(useCase: extensionUseCase, panel: extensionsPanel, check: check, prepare: prepare, install: install, browse: browse,
+            activate: { [weak self] id in try await self?.extensionServiceHost?.prepareNativeInstallation(for: id) },
             onError: { [weak self] error in self?.renderExtensionError(error) })
     }
     private weak var extensionServiceHost: ExtensionListServiceHost?

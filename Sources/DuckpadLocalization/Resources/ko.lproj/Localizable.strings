@@ -743,3 +743,16 @@
 "The native plugin is being installed. Please try again shortly." = "네이티브 플러그인을 설치 중입니다. 잠시 후 다시 시도해 주세요.";
 
 "Update" = "업데이트";
+"Installed Plugins" = "설치됨";
+"Available Plugins" = "설치 가능";
+"Search Plugins" = "플러그인 검색";
+"Refresh Catalog" = "카탈로그 새로고침";
+"No Compatible Plugins Available" = "호환되는 플러그인이 없습니다";
+"No Matching Plugins" = "검색 결과가 없습니다";
+"Loading Plugin Catalog…" = "플러그인 카탈로그 불러오는 중…";
+"Could Not Load Plugin Catalog" = "플러그인 카탈로그를 불러오지 못했습니다";
+"Plugin Installed" = "플러그인을 설치했습니다";
+"Plugin Installation Cancelled" = "플러그인 설치가 취소되었습니다";
+"Plugin Installation Failed" = "플러그인 설치에 실패했습니다";
+"Installed" = "설치됨";
+"Some Plugins Could Not Be Loaded" = "일부 플러그인을 불러오지 못했습니다";

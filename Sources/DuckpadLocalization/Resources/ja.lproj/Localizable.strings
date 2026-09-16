@@ -703,3 +703,16 @@
 "The image drop preference could not be saved." = "画像ドロップの設定を保存できませんでした。";
 "Open in New Tab" = "新しいタブで開く";
 "Choose an image folder to allow local images in the preview." = "画像フォルダを選択して、プレビューでローカル画像の表示を許可してください。";
+"Installed Plugins" = "インストール済み";
+"Available Plugins" = "インストール可能";
+"Search Plugins" = "プラグインを検索";
+"Refresh Catalog" = "カタログを更新";
+"No Compatible Plugins Available" = "互換性のあるプラグインはありません";
+"No Matching Plugins" = "一致するプラグインはありません";
+"Loading Plugin Catalog…" = "プラグインカタログを読み込み中…";
+"Could Not Load Plugin Catalog" = "プラグインカタログを読み込めませんでした";
+"Plugin Installed" = "プラグインをインストールしました";
+"Plugin Installation Cancelled" = "プラグインのインストールをキャンセルしました";
+"Plugin Installation Failed" = "プラグインのインストールに失敗しました";
+"Installed" = "インストール済み";
+"Some Plugins Could Not Be Loaded" = "一部のプラグインを読み込めませんでした";

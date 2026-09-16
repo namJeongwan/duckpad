@@ -5,6 +5,11 @@ import DuckpadDomain
 
 @MainActor
 final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
+    let catalogView = ExtensionCatalogView()
+    private let sections = NSSegmentedControl()
+    private var installedView: NSStackView!
+    private var hasShown = false
+    var onBrowse: (() -> Void)?
     private let table = NSTableView()
     private let installButton = NSButton(title: L10n.text("Install Plugin…"), target: nil, action: nil)
     private let updateButton = NSButton(title: L10n.text("Update"), target: nil, action: nil)
@@ -54,8 +59,18 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
         revokeButton.target = self; revokeButton.action = #selector(revoke)
         enableButton.setAccessibilityIdentifier("duckpad.extensions.enable")
         revokeButton.setAccessibilityIdentifier("duckpad.extensions.revoke")
-        let stack = NSStackView(views: [scroll, updateStatus, buttons]); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8; stack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        installedView = NSStackView(views: [scroll, updateStatus, buttons])
+        installedView.orientation = .vertical; installedView.alignment = .leading; installedView.spacing = 8
+        sections.segmentCount = 2; sections.trackingMode = .selectOne; sections.selectedSegment = 0
+        sections.setLabel(localized("Installed Plugins"), forSegment: 0)
+        sections.setLabel(localized("Available Plugins"), forSegment: 1)
+        sections.target = self; sections.action = #selector(changeSection)
+        sections.setAccessibilityIdentifier("duckpad.extensions.sections")
+        catalogView.isHidden = true
+        let stack = NSStackView(views: [sections, installedView, catalogView]); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8; stack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         stack.translatesAutoresizingMaskIntoConstraints = false; panel.contentView = stack
+        installedView.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
+        catalogView.widthAnchor.constraint(equalTo: installedView.widthAnchor).isActive = true
         buttons.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
         scroll.widthAnchor.constraint(equalTo: buttons.widthAnchor).isActive = true
         updateStatus.widthAnchor.constraint(equalTo: buttons.widthAnchor).isActive = true
@@ -66,6 +81,9 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
 
     func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
         self.catalog = catalog
+        sections.setLabel(localized("Installed Plugins"), forSegment: 0)
+        sections.setLabel(localized("Available Plugins"), forSegment: 1)
+        catalogView.refreshLocalization(catalog: catalog)
         window?.title = localized("Duckpad Extensions")
         table.tableColumns.first?.title = localized("Extension")
         installButton.title = localized("Install Plugin…")
@@ -95,7 +113,15 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
         updateButtons()
     }
 
+    @objc private func changeSection() {
+        installedView.isHidden = sections.selectedSegment != 0
+        catalogView.isHidden = sections.selectedSegment != 1
+        if sections.selectedSegment == 1 { onBrowse?() }
+    }
+
     func show(relativeTo window: NSWindow?) {
+        if !hasShown { hasShown = true; sections.selectedSegment = 1; changeSection() }
+        onBrowse?()
         showWindow(nil); self.window?.center(); self.window?.makeKeyAndOrderFront(nil)
         if let window, let panel = self.window { panel.setFrameOrigin(NSPoint(x: window.frame.midX - panel.frame.width / 2, y: window.frame.midY - panel.frame.height / 2)) }
     }
@@ -146,8 +172,8 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
         updateButton.title = installing ? localized("Installing Plugin…") : update.map { localized("Update to %1$@", L10n.argument($0.version)) } ?? localized("Update")
         checkButton.isEnabled = !checking && !installing
         installButton.isEnabled = !installing
-        enableButton.isEnabled = selected != nil; enableButton.title = selected?.enabled == true ? localized("Disable") : localized("Enable")
-        revokeButton.isEnabled = selected?.issue != nil || (selected?.enabled == true && !(selected?.granted.isEmpty ?? true))
+        enableButton.isEnabled = selected != nil && !installing; enableButton.title = selected?.enabled == true ? localized("Disable") : localized("Enable")
+        revokeButton.isEnabled = !installing && (selected?.issue != nil || (selected?.enabled == true && !(selected?.granted.isEmpty ?? true)))
         revokeButton.title = selected?.issue == .untrustedPublisher ? localized("Reset Publisher Revocation…") : localized("Revoke Publisher…")
         buttonBar?.refresh()
     }

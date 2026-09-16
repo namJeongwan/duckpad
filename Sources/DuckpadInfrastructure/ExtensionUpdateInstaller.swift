@@ -10,6 +10,9 @@ public actor ExtensionUpdateInstaller {
     public init(loader: LocalExtensionPackageLoader, nativeInstaller: @escaping @Sendable ([String: Data]) async throws -> Void = { try await NativeInstallerClient().install(files: $0) }) {
         self.loader = loader; self.nativeInstaller = nativeInstaller
     }
+    public func availablePlugins() async throws -> ExtensionCatalogSnapshot {
+        try await catalog.availablePlugins(hostAPI: ExtensionWorkspaceUseCase.apiVersion)
+    }
     public func check(_ items: [ExtensionRegistryItem]) async throws -> [ExtensionID: ExtensionUpdate] {
         var updates: [ExtensionID: ExtensionUpdate] = [:]
         guard items.contains(where: { $0.issue == nil }) else { return updates }
