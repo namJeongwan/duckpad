@@ -22,9 +22,9 @@ Enabled, authorized service commands appear in **Tools**, with their declared sh
 
 ## Installation and development
 
-Build the separate plugin with `cargo test` and `bash scripts/build.sh`. Its `scripts/sign.swift` reuses the persistent Clipboard publisher key outside the repository, with an optional explicit key path. Clipboard uses `clipboard-release-1`; the original bundled text-tools key is unchanged. The app and catalog contain only the corresponding public key. The signing command does not generate or rotate keys. Never commit a private key. The app verifies the signed inventory and module before installation, copies into private staging, revalidates the exact digest, and publishes a new version without replacing an existing version. Use **Plugins → Manage Extensions… → Install Plugin…**. Installation enables the plugin with its declared capabilities; no separate Grant action is required.
+Build the separate plugin with `cargo test` and `bash scripts/build.sh`. Its `scripts/sign.swift` reuses the persistent Clipboard publisher key outside the repository, with an optional explicit key path. Clipboard uses `clipboard-release-1`; the original bundled text-tools key is unchanged. The app and catalog contain only the corresponding public key. The signing command does not generate or rotate keys. Never commit a private key. The app verifies the signed inventory and module before installation, copies into private staging, revalidates the exact digest, and publishes a new version without replacing an existing version. Use **Plugins → Manage Extensions… → Available Plugins → Install** for a published compatible catalog release. Use **Installed Plugins → Install Plugin…** to select a local signed package. Installation enables the plugin with its declared capabilities; no separate Grant action is required.
 
-The first release uses local signed package installation and network updates. Catalog browsing/first-install UI, image history, global hotkeys, and pasting into other applications are not included in this change.
+The manager supports catalog discovery, network installation and updates, and local signed package installation. Image history, global hotkeys, and pasting into other applications are not included.
 
 ## Verification
 

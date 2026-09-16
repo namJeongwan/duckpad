@@ -703,3 +703,16 @@
 "The image drop preference could not be saved." = "Die Einstellung zum Ablegen von Bildern konnte nicht gespeichert werden.";
 "Open in New Tab" = "In neuem Tab öffnen";
 "Choose an image folder to allow local images in the preview." = "Wählen Sie einen Bilderordner, um lokale Bilder in der Vorschau zu erlauben.";
+"Installed Plugins" = "Installierte Plugins";
+"Available Plugins" = "Verfügbare Plugins";
+"Search Plugins" = "Plugins suchen";
+"Refresh Catalog" = "Katalog aktualisieren";
+"No Compatible Plugins Available" = "Keine kompatiblen Plugins verfügbar";
+"No Matching Plugins" = "Keine passenden Plugins";
+"Loading Plugin Catalog…" = "Plugin-Katalog wird geladen…";
+"Could Not Load Plugin Catalog" = "Plugin-Katalog konnte nicht geladen werden";
+"Plugin Installed" = "Plugin installiert";
+"Plugin Installation Cancelled" = "Plugin-Installation abgebrochen";
+"Plugin Installation Failed" = "Plugin-Installation fehlgeschlagen";
+"Installed" = "Installiert";
+"Some Plugins Could Not Be Loaded" = "Einige Plugins konnten nicht geladen werden";

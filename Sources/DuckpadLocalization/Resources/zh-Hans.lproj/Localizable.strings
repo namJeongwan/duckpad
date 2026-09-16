@@ -703,3 +703,16 @@
 "The image drop preference could not be saved." = "无法保存图片拖放偏好设置。";
 "Open in New Tab" = "在新标签页中打开";
 "Choose an image folder to allow local images in the preview." = "选择图片文件夹，以允许在预览中显示本地图片。";
+"Installed Plugins" = "已安装插件";
+"Available Plugins" = "可用插件";
+"Search Plugins" = "搜索插件";
+"Refresh Catalog" = "刷新目录";
+"No Compatible Plugins Available" = "没有兼容的插件";
+"No Matching Plugins" = "没有匹配的插件";
+"Loading Plugin Catalog…" = "正在加载插件目录…";
+"Could Not Load Plugin Catalog" = "无法加载插件目录";
+"Plugin Installed" = "插件已安装";
+"Plugin Installation Cancelled" = "已取消安装插件";
+"Plugin Installation Failed" = "插件安装失败";
+"Installed" = "已安装";
+"Some Plugins Could Not Be Loaded" = "部分插件无法加载";

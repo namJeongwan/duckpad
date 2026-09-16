@@ -16,6 +16,7 @@ public struct ExtensionUpdateCatalogClient: Sendable {
             let version: String; let api: API; let url: String; let sha256: String; let keyID: String
         }
         let schemaVersion: Int; let id: String; let repository: String
+        let name: String?; let description: [String: String]?
         let publisher: Publisher; let releases: [Release]
     }
     private let session: URLSession
@@ -26,7 +27,7 @@ public struct ExtensionUpdateCatalogClient: Sendable {
         configuration.httpShouldSetCookies = false
         session = URLSession(configuration: configuration)
     }
-    public func latestUpdate(id: ExtensionID, installedVersion: SemanticVersion, hostAPI: SemanticVersion, publisherID: String, publisherFingerprint: String) async throws -> ExtensionUpdate? {
+    public func latestUpdate(id: ExtensionID, installedVersion: SemanticVersion?, hostAPI: SemanticVersion, publisherID: String, publisherFingerprint: String) async throws -> ExtensionUpdate? {
         guard id.rawValue.range(of: #"^[a-z0-9]+(?:[.-][a-z0-9-]+)+$"#, options: .regularExpression) != nil else { throw Failure.invalidCatalog }
         let url = URL(string: "https://raw.githubusercontent.com/namJeongwan/duckpad-plugins/main/plugins/")!.appendingPathComponent(id.rawValue + ".json")
         let (data, status) = try await fetch(url)
@@ -37,6 +38,63 @@ public struct ExtensionUpdateCatalogClient: Sendable {
         let url = URL(string: "https://raw.githubusercontent.com/namJeongwan/duckpad-plugins/main/index.json")!
         let (data, status) = try await fetch(url)
         return try ExtensionCatalogIndex.decode(data, statusCode: status)
+    }
+
+    public func availablePlugins(hostAPI: SemanticVersion) async throws -> ExtensionCatalogSnapshot {
+        let ids = try await pluginIDs()
+        return try await Self.collect(ids: ids, hostAPI: hostAPI) { id in
+            let url = URL(string: "https://raw.githubusercontent.com/namJeongwan/duckpad-plugins/main/plugins/")!.appendingPathComponent(id.rawValue + ".json")
+            return try await fetch(url)
+        }
+    }
+
+    static func collect(ids: [ExtensionID], hostAPI: SemanticVersion,
+        fetchEntry: @escaping @Sendable (ExtensionID) async throws -> (Data, Int)) async throws -> ExtensionCatalogSnapshot {
+        var plugins: [ExtensionCatalogPlugin] = []
+        var hasFailures = false
+        // Keep request concurrency bounded even as the index grows.
+        for start in stride(from: 0, to: ids.count, by: 4) {
+            try Task.checkCancellation()
+            let batch = try await withThrowingTaskGroup(of: ExtensionCatalogSnapshot.self) { group in
+                for id in ids[start..<min(start + 4, ids.count)] {
+                    group.addTask {
+                        do {
+                            let (data, status) = try await fetchEntry(id)
+                            let plugin = try Self.decodePlugin(data, statusCode: status, id: id, hostAPI: hostAPI)
+                            return ExtensionCatalogSnapshot(plugins: plugin.map { [$0] } ?? [])
+                        } catch is CancellationError { throw CancellationError() }
+                        catch { return ExtensionCatalogSnapshot(plugins: [], hasFailures: true) }
+                    }
+                }
+                var batch: [ExtensionCatalogPlugin] = []
+                var failed = false
+                for try await item in group { batch.append(contentsOf: item.plugins); failed = failed || item.hasFailures }
+                return ExtensionCatalogSnapshot(plugins: batch, hasFailures: failed)
+            }
+            plugins.append(contentsOf: batch.plugins); hasFailures = hasFailures || batch.hasFailures
+        }
+        return ExtensionCatalogSnapshot(plugins: plugins.sorted { $0.release.extensionID.rawValue < $1.release.extensionID.rawValue }, hasFailures: hasFailures)
+    }
+
+    static func decodePlugin(_ data: Data, statusCode: Int, id: ExtensionID, hostAPI: SemanticVersion) throws -> ExtensionCatalogPlugin? {
+        guard statusCode == 200 else { throw Failure.unexpectedResponse }
+        guard data.count <= 1_048_576 else { throw Failure.invalidCatalog }
+        let entry = try JSONDecoder().decode(Entry.self, from: data)
+        guard let name = entry.name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              name.count <= 200, let descriptions = entry.description, descriptions.count <= 64,
+              descriptions.values.allSatisfy({ $0.count <= 4_000 }),
+              !entry.publisher.keys.isEmpty, entry.publisher.keys.count <= 64 else { throw Failure.invalidCatalog }
+        var result: ExtensionCatalogPlugin?
+        for key in entry.publisher.keys {
+            guard let bytes = Data(base64Encoded: key.publicKey), bytes.count == 32 else { throw Failure.invalidCatalog }
+            let fingerprint = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+            if let release = try decode(data, statusCode: statusCode, id: id, installedVersion: nil,
+                hostAPI: hostAPI, publisherID: entry.publisher.id, publisherFingerprint: fingerprint),
+                result == nil || result!.release.version < release.version {
+                result = ExtensionCatalogPlugin(name: name, descriptions: descriptions, release: release, publisherFingerprint: fingerprint)
+            }
+        }
+        return result
     }
 
     private func fetch(_ url: URL) async throws -> (Data, Int) {
@@ -60,7 +118,7 @@ public struct ExtensionUpdateCatalogClient: Sendable {
             return value != "." && value != ".." && !value.contains("/") && !value.contains("\\")
         }
     }
-    static func decode(_ data: Data, statusCode: Int, id: ExtensionID, installedVersion: SemanticVersion, hostAPI: SemanticVersion, publisherID: String, publisherFingerprint: String) throws -> ExtensionUpdate? {
+    static func decode(_ data: Data, statusCode: Int, id: ExtensionID, installedVersion: SemanticVersion?, hostAPI: SemanticVersion, publisherID: String, publisherFingerprint: String) throws -> ExtensionUpdate? {
         if statusCode == 404 { return nil }
         guard statusCode == 200 else { throw Failure.unexpectedResponse }
         guard data.count <= 1_048_576 else { throw Failure.invalidCatalog }
@@ -90,7 +148,7 @@ public struct ExtensionUpdateCatalogClient: Sendable {
                   release.url.hasPrefix(entry.repository + "/releases/download/v" + release.version + "/"),
                   url.pathExtension == "zip", !url.pathComponents.contains(".."),
                   safePath(url), !release.url.contains("\\") else { throw Failure.invalidCatalog }
-            if version > installedVersion, minimum <= hostAPI, hostAPI < maximum, matchingKeys.contains(release.keyID) {
+            if installedVersion.map({ version > $0 }) ?? true, minimum <= hostAPI, hostAPI < maximum, matchingKeys.contains(release.keyID) {
                 updates.append(ExtensionUpdate(extensionID: id, version: version, downloadURL: url, sha256: release.sha256, publisherID: publisherID, keyID: release.keyID))
             }
         }

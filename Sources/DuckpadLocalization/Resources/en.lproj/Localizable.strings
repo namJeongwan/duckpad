@@ -743,3 +743,16 @@
 "The native plugin is being installed. Please try again shortly." = "The native plugin is being installed. Please try again shortly.";
 
 "Update" = "Update";
+"Installed Plugins" = "Installed Plugins";
+"Available Plugins" = "Available Plugins";
+"Search Plugins" = "Search Plugins";
+"Refresh Catalog" = "Refresh Catalog";
+"No Compatible Plugins Available" = "No Compatible Plugins Available";
+"No Matching Plugins" = "No Matching Plugins";
+"Loading Plugin Catalog…" = "Loading Plugin Catalog…";
+"Could Not Load Plugin Catalog" = "Could Not Load Plugin Catalog";
+"Plugin Installed" = "Plugin Installed";
+"Plugin Installation Cancelled" = "Plugin Installation Cancelled";
+"Plugin Installation Failed" = "Plugin Installation Failed";
+"Installed" = "Installed";
+"Some Plugins Could Not Be Loaded" = "Some Plugins Could Not Be Loaded";

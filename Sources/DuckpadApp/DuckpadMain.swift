@@ -877,7 +877,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         let identifier = ObjectIdentifier(controller)
         controller.configureExtensionServices(extensionServiceHost)
         let updater = extensionUpdateInstaller!
-        controller.configureExtensionUpdates(check: { try await updater.check($0) }, prepare: { try await updater.prepare($0, publisherFingerprint: $1) }, install: { try await updater.install($0) })
+        controller.configureExtensionUpdates(check: { try await updater.check($0) }, prepare: { try await updater.prepare($0, publisherFingerprint: $1) }, install: { try await updater.install($0) }, browse: { try await updater.availablePlugins() })
         controller.onInstallExtension = { [weak self] url in
             guard let self else { throw ExtensionFailure.cancelled }
             return try await self.extensionUpdateInstaller.installPackage(at: url)

@@ -108,6 +108,6 @@ To include production-trust installation, also set `DUCKPAD_SIGNED_CLIPBOARD_PAC
 4. Submit a catalog entry/update in `duckpad-plugins` with the version, API range, immutable URL, checksum and public signing key ID.
 5. Run the catalog's `python3 -m unittest discover -s tests` and `python3 scripts/validate.py`.
 
-The current catalog is descriptive; a network installer is not implemented. A draft entry with an empty release list must never appear installable. The host, catalog and plugin releases are independent.
+Extensions Manager reads the index for the searchable Available Plugins list. Install downloads and verifies the selected compatible release before activating it. Installed plugins remain in a separate list for enable/disable and updates. A draft entry with an empty release list is not shown as installable. Failed catalog entries leave healthy plugins visible with a retryable partial-load notice. Publisher key onboarding remains subject to the trust policy described above. The host, catalog and plugin releases are independent.
 
 The catalog repository provides a root `index.json` with plugin ID/path references. When adding or removing a per-plugin catalog, regenerate it with `python3 scripts/generate_index.py` and run `--check` plus the catalog validator. Version and release metadata remain in `plugins/<plugin-id>.json`; draft entries have no installable releases.
