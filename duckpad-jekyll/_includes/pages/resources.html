@@ -1,0 +1,14 @@
+<section class="intro"><h1>{{ t.resources_label | escape }}</h1><p>{{ t.resources_summary | escape }}</p></section>
+<section class="section resource-list">
+  <div><h2><a href="https://github.com/namJeongwan/duckpad">{{ t.source_title | escape }}</a></h2><p>{{ t.source_text | escape }}</p></div>
+  <div><h2><a href="https://github.com/namJeongwan/duckpad/blob/main/docs/notepad-compatibility.md">{{ t.compatibility_title | escape }}</a></h2><p>{{ t.compatibility_text | escape }}</p></div>
+  <div><h2><a href="https://github.com/namJeongwan/duckpad/blob/main/docs/built-in-formatting.md">{{ t.formatting_title | escape }}</a></h2><p>{{ t.formatting_text | escape }}</p></div>
+  <div><h2><a href="https://github.com/namJeongwan/duckpad/blob/main/docs/plugins/developer-guide.md">{{ t.plugins_title | escape }}</a></h2><p>{{ t.plugins_text | escape }}</p></div>
+  <div><h2><a href="https://github.com/namJeongwan/duckpad/issues">{{ t.issue | escape }}</a></h2><p>{{ t.issues_text | escape }}</p></div>
+</section>
+<section class="section">
+  <h2>{{ t.build_title | escape }}</h2><p>{{ t.build_text | escape }}</p>
+  <div class="code-row"><code id="build-command">swift run DuckpadApp</code><button type="button" class="button secondary" data-copy data-success="{{ t.copied | escape }}" data-failure="{{ t.copy_failed | escape }}">{{ t.copy | escape }}</button></div>
+  <p class="copy-status" role="status" aria-live="polite"></p>
+  <a href="https://github.com/namJeongwan/duckpad#development">{{ t.development | escape }}</a>
+</section>

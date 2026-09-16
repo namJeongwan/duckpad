@@ -1,0 +1,50 @@
+[
+  {
+    "code": "en",
+    "name": "English",
+    "prefix": "",
+    "search_terms": "English 영어 英語 英语 Englisch anglais inglese inglês en"
+  },
+  {
+    "code": "ko",
+    "name": "한국어",
+    "prefix": "/ko",
+    "search_terms": "한국어 Korean 韓国語 韩语 Koreanisch coréen coreano ko"
+  },
+  {
+    "code": "ja",
+    "name": "日本語",
+    "prefix": "/ja",
+    "search_terms": "日本語 Japanese 일본어 日语 Japanisch japonais giapponese japonês ja"
+  },
+  {
+    "code": "zh-Hans",
+    "name": "简体中文",
+    "prefix": "/zh-Hans",
+    "search_terms": "简体中文 Chinese 중국어 중국어 간체 简体 中文 中国語 Chinesisch chinois cinese chinês zh zh-CN zh-Hans"
+  },
+  {
+    "code": "de",
+    "name": "Deutsch",
+    "prefix": "/de",
+    "search_terms": "Deutsch German 독일어 ドイツ語 德语 allemand tedesco alemão de"
+  },
+  {
+    "code": "fr",
+    "name": "Français",
+    "prefix": "/fr",
+    "search_terms": "Français French 프랑스어 フランス語 法语 Französisch francese francês fr"
+  },
+  {
+    "code": "it",
+    "name": "Italiano",
+    "prefix": "/it",
+    "search_terms": "Italiano Italian 이탈리아어 イタリア語 意大利语 Italienisch italien italiano it"
+  },
+  {
+    "code": "pt-BR",
+    "name": "Português (Brasil)",
+    "prefix": "/pt-BR",
+    "search_terms": "Português (Brasil) Portuguese 포르투갈어 브라질 ポルトガル語 葡萄牙语 Portugiesisch portugais portoghese pt pt-BR"
+  }
+]

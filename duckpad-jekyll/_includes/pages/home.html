@@ -1,0 +1,17 @@
+<section class="intro">
+  <h1>Duckpad</h1>
+  <p class="summary">{{ t.home_summary | escape }}</p>
+  <p>{{ t.home_detail | escape }}</p>
+  <div class="actions"><a class="button" href="{{ page.locale_prefix | append: '/download/' | relative_url }}">{{ t.download_mac | escape }}</a><a href="https://github.com/namJeongwan/duckpad">{{ t.github | escape }}</a></div>
+  <p class="note">{{ t.requirements | replace: ':macos', site.data.release.minimum_macos | escape }}</p>
+  <figure class="product-shot"><img src="{{ '/assets/duckpad-screenshot.png' | relative_url }}" width="906" height="772" alt="{{ t.screenshot_alt | escape }}"><figcaption>{{ t.screenshot_caption | escape }}</figcaption></figure>
+</section>
+<section class="section">
+  <h2>{{ t.features | escape }}</h2>
+  <ul class="feature-list">
+    <li><strong>{{ t.tabs_title | escape }}</strong> — {{ t.tabs_text | escape }}</li>
+    <li><strong>{{ t.search_title | escape }}</strong> — {{ t.search_text | escape }}</li>
+    <li><strong>{{ t.compare_title | escape }}</strong> — {{ t.compare_text | escape }}</li>
+  </ul>
+  <a href="{{ page.locale_prefix | append: '/resources/' | relative_url }}">{{ t.resources_label | escape }}</a>
+</section>

@@ -1,0 +1,15 @@
+<section class="intro">
+  <h1>{{ t.download_label | escape }}</h1>
+  <p>{{ t.download_intro | escape }}</p>
+  <p class="note">{{ t.requirements | replace: ':macos', site.data.release.minimum_macos | escape }}</p>
+</section>
+<section class="section downloads">
+  <h2>Duckpad {{ site.data.release.version }}</h2>
+  <div class="actions"><a class="button" href="{{ site.data.release.dmg }}">{{ t.dmg | escape }}</a><a class="button secondary" href="{{ site.data.release.zip }}">{{ t.zip | escape }}</a></div>
+  <p><a href="{{ site.data.release.checksums }}">{{ t.checksums_link | escape }}</a> · <a href="{{ site.data.release.url }}">{{ t.release_notes | escape }}</a> · <a href="https://github.com/namJeongwan/duckpad/releases">{{ t.all_releases | escape }}</a></p>
+  <aside class="notice"><h3>{{ t.install_note | escape }}</h3><p>{{ t.install_warning | escape }}</p></aside>
+</section>
+<section class="section">
+  <h2>{{ t.installation | escape }}</h2>
+  <ol class="steps"><li>{{ t.step_download | escape }}</li><li>{{ t.step_drag | escape }}</li><li>{{ t.step_open | escape }}</li></ol>
+</section>

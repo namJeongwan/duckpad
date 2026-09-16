@@ -1,0 +1,66 @@
+{%- assign t = site.data.i18n[page.lang] | default: site.data.i18n.en -%}
+{%- assign current_language = site.data.languages | where: 'code', page.lang | first -%}
+{%- assign title_key = page.key | append: '_title' -%}
+{%- assign description_key = page.key | append: '_description' -%}
+{%- assign description = t[description_key] | replace: ':macos', site.data.release.minimum_macos -%}
+<!doctype html>
+<html lang="{{ page.lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ t[title_key] | escape }}</title>
+  <meta name="description" content="{{ description | escape }}">
+  <link rel="canonical" href="{{ page.url | absolute_url }}">
+  {% for language in site.data.languages %}
+  <link rel="alternate" hreflang="{{ language.code }}" href="{{ language.prefix | append: page.route | absolute_url }}">
+  {% endfor %}
+  <link rel="alternate" hreflang="x-default" href="{{ page.route | absolute_url }}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Duckpad">
+  <meta property="og:title" content="{{ t[title_key] | escape }}">
+  <meta property="og:description" content="{{ description | escape }}">
+  <meta property="og:url" content="{{ page.url | absolute_url }}">
+  <meta property="og:image" content="{{ '/assets/duckpad-screenshot.png' | absolute_url }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" href="{{ '/assets/duckpad.png' | relative_url }}">
+  <style>{% include site.css %}</style>
+</head>
+<body>
+  <a class="skip" href="#content">{{ t.skip | escape }}</a>
+  <div class="site">
+    <header class="sidebar">
+      <a class="brand" href="{{ page.locale_prefix | append: '/' | relative_url }}" aria-label="{{ t.home_link | escape }}"><img src="{{ '/assets/duckpad.png' | relative_url }}" alt="" width="200" height="200"></a>
+      <a class="sidebar-version" href="{{ site.data.release.url }}">{{ t.version | replace: ':version', site.data.release.version | escape }}</a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="navigation" data-menu="{{ t.menu | escape }}" data-close="{{ t.close | escape }}" hidden>{{ t.menu | escape }}</button>
+      <nav class="site-nav" id="navigation" aria-label="{{ t.navigation | escape }}">
+        {% for item in site.data.pages %}
+        <a href="{{ page.locale_prefix | append: item.route | relative_url }}" {% if page.key == item.key %}aria-current="page"{% endif %}><svg class="nav-icon" viewBox="0 0 16 20" fill="none" aria-hidden="true"><path d="M3 2h10v16l-5-4-5 4V2Z" stroke="currentColor" stroke-width="1.4"/></svg><span>{{ t[item.label] | escape }}</span></a>
+        {% endfor %}
+      </nav>
+      <a class="sidebar-github" href="https://github.com/namJeongwan/duckpad">GitHub</a>
+    </header>
+    <div class="main-column">
+      <div class="site-tools">
+        <details class="language-picker">
+          <summary aria-label="{{ t.language | escape }}"><span lang="{{ page.lang }}">{{ current_language.name | escape }}</span></summary>
+          <div class="language-popover">
+            <label class="visually-hidden" for="language-search">{{ t.language_search | escape }}</label>
+            <input id="language-search" type="search" placeholder="{{ t.language_search | escape }}" autocomplete="off" spellcheck="false" hidden>
+            <ul id="language-options" aria-label="{{ t.language | escape }}">
+              {% for language in site.data.languages %}
+              <li><a id="language-option-{{ language.code }}" href="{{ language.prefix | append: page.route | relative_url }}" lang="{{ language.code }}" hreflang="{{ language.code }}" data-search="{{ language.search_terms | escape }}" {% if language.code == page.lang %}aria-current="true"{% endif %}>{{ language.name | escape }}</a></li>
+              {% endfor %}
+            </ul>
+            <p class="language-empty" role="status" hidden>{{ t.language_no_results | escape }}</p>
+          </div>
+        </details>
+      </div>
+      <main id="content" tabindex="-1">{% include {{ page.body }} %}</main>
+      <footer class="pagefoot"><a href="https://github.com/namJeongwan/duckpad">GitHub</a><a href="https://github.com/namJeongwan/duckpad/issues">{{ t.issue | escape }}</a></footer>
+    </div>
+  </div>
+  <script>{% include menu.js %}</script>
+  <script>{% include language.js %}</script>
+  {% if page.key == 'resources' %}<script>{% include copy.js %}</script>{% endif %}
+</body>
+</html>

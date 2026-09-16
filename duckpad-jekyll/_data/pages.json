@@ -1,0 +1,26 @@
+[
+  {
+    "key": "home",
+    "route": "/",
+    "label": "home_label",
+    "filename": "index.html"
+  },
+  {
+    "key": "download",
+    "route": "/download/",
+    "label": "download_label",
+    "filename": "download.html"
+  },
+  {
+    "key": "resources",
+    "route": "/resources/",
+    "label": "resources_label",
+    "filename": "resources.html"
+  },
+  {
+    "key": "author",
+    "route": "/author/",
+    "label": "author_label",
+    "filename": "author.html"
+  }
+]
