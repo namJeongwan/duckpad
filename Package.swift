@@ -179,7 +179,7 @@ let package = Package(
         .target(
             name: "DuckpadPresentation",
             dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadLocalization"],
-            resources: [.copy("Resources/MaterialIconTheme")]
+            resources: [.copy("Resources/MaterialIconTheme"), .copy("Resources/MarkdownPreview"), .copy("Resources/ZedIcons")]
         ),
         .target(
             name: "DuckpadEditorAdapter",

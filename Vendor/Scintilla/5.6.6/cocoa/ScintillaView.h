@@ -48,6 +48,7 @@ typedef NS_ENUM(NSInteger, SCITextInputSource) {
 - (void) notification: (SCNotification *) notification;
 @optional
 - (void) scintillaWillInsertTextFromSource: (SCITextInputSource) source;
+- (BOOL) scintillaHandleDirectSelectionText: (NSString *) text;
 - (void) scintillaDidInsertText;
 @end
 

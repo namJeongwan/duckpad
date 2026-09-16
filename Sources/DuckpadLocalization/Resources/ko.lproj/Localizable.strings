@@ -633,3 +633,20 @@
 "A file already exists at that location. Choose another name or folder." = "같은 위치에 파일이 이미 있습니다. 다른 이름이나 폴더를 선택해 주세요.";
 
 "Could not change file location" = "파일 위치를 변경하지 못했습니다";
+
+"Markdown Preview" = "Markdown 미리보기";
+"Close Preview" = "미리보기 닫기";
+"Rendering preview…" = "미리보기 준비 중…";
+"Markdown preview could not be rendered." = "Markdown 미리보기를 표시할 수 없습니다.";
+"Markdown preview is unavailable for binary files." = "바이너리 파일은 Markdown 미리보기를 사용할 수 없습니다.";
+"Allow Local Images…" = "로컬 이미지 접근 허용…";
+"Choose the folder containing this document’s images." = "이 문서의 이미지가 있는 폴더를 선택하세요.";
+"Markdown image drop" = "Markdown 이미지 드롭";
+"Ask every time" = "매번 묻기";
+"Insert into Markdown" = "Markdown에 삽입";
+"How would you like to use these images?" = "이미지를 어떻게 사용할까요?";
+"Don’t ask again; use this action" = "다음부터 묻지 않고 선택한 동작 사용";
+"The image drop preference could not be saved." = "이미지 드롭 설정을 저장하지 못했습니다.";
+"Open in New Tab" = "새 탭에서 열기";
+
+"Choose an image folder to allow local images in the preview." = "미리보기에 로컬 이미지를 표시할 수 있도록 이미지 폴더의 접근 권한을 허용합니다.";

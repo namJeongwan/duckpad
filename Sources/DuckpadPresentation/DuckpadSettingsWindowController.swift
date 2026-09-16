@@ -238,6 +238,8 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             row.spacing = 12
             (pages[category] as? NSStackView)?.addArrangedSubview(row)
         }
+        choices("Markdown image drop", \.markdownImageDropAction,
+                [("Ask every time", 0), ("Insert into Markdown", 1), ("Open in New Tab", 2)], "Editing")
         checkbox("Format on Save", \.formatting.formatOnSave, "Formatting")
         choices("Print width", \.formatting.printWidth, [("60", 60), ("80", 80), ("100", 100), ("120", 120), ("160", 160)], "Formatting")
         choices("Indent size", \.formatting.tabWidth, (1...8).map { (String($0), $0) }, "Formatting")

@@ -30,6 +30,12 @@ Earlier rows below retain historical evidence for already delivered work.
 
 ## Recently delivered
 
+Built-in [Markdown preview](wiki/40-markdown-preview.md) is available from
+View → Markdown Preview. It renders beside the editor and captures text only
+while open, after a 350 ms typing pause. It includes code colors, local images,
+math, and diagrams without an arbitrary document-size cutoff. Markdown saves
+preserve the original whitespace.
+
 | Item | Status | Evidence |
 | --- | --- | --- |
 | Lightweight smart editing design | Complete | Native Scintilla insertion notifications; no parser, LSP, or new dependency |
@@ -43,7 +49,9 @@ Earlier rows below retain historical evidence for already delivered work.
 | Independent code review | Approved | Final re-review: 0 Critical / 0 Important / 0 Minor |
 | Commit and remote branch push | Complete | `3c718ef` audited and pushed to `origin/feature/smart-editing` |
 
-Still deferred: selection surround and IDE-scale parsing. Smart pairs remain
+Selection surround now inserts only boundary delimiters, preserves stream
+selection direction and multiple ranges, and groups the edit into one Undo.
+IDE-scale parsing remains deferred. Smart pairs remain
 bounded to direct single-character input and adjacent-byte inspection, with
 explicit IME, selection, Undo, revision, and split-pane proof.
 

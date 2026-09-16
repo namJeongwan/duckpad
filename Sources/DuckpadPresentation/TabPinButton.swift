@@ -71,9 +71,7 @@ final class TabPinButton: NSButton {
     }
 
     private func updateAppearance() {
-        let name = isPinned ? (isPointerInside && isEnabled ? "pin.slash" : "pin.fill") : "pin"
-        image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
+        image = isPinned && isPointerInside && isEnabled ? ZedTabIcons.unpin : ZedTabIcons.pin
         contentTintColor = !isEnabled ? .disabledControlTextColor
             : (isPinned || isPointerInside ? .controlAccentColor : .secondaryLabelColor)
         needsDisplay = true

@@ -4,7 +4,7 @@
 
 Phase 7 adds a language-service foundation and production Lexilla syntax styling without reading or copying the ignored Notepad++ reference repository. It is not a Notepad++ parity claim. Implemented slices now include deterministic detection, per-document manual override, a broad bundled registry, real Lexilla lexers, light/dark/high-contrast-aware palettes, line numbers, fold margin and recovery, brace feedback, indentation settings/guides, loss-safe line and block comment commands, direct closing-delimiter dedent, and explicit configured indent/outdent.
 
-All lightweight delimiter pairs and exact adjacent closer skip-over are implemented for direct input in brace-capable languages. Selection surround, LSP, importable user-defined languages, and Notepad++ language-menu exact ordering remain deferred. Lightweight current-document completion and symbols are separate bounded features, not an IDE-scale language server.
+All lightweight delimiter pairs, selection surround, and exact adjacent closer skip-over are implemented for direct input in brace-capable languages. LSP, importable user-defined languages, and Notepad++ language-menu exact ordering remain deferred. Lightweight current-document completion and symbols are separate bounded features, not an IDE-scale language server.
 
 ## Official source and reproducibility
 

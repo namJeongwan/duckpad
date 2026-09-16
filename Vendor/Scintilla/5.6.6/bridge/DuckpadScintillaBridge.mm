@@ -11,6 +11,7 @@
 #include <vector>
 #include "ILexer.h"
 #include "Lexilla.h"
+#include "SciLexer.h"
 
 @interface DPScintillaBinaryDocument (DuckpadAttachment)
 - (void)attachToScintillaView:(ScintillaView *)view;
@@ -1028,7 +1029,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [self captureDirectInputPreflightState];
     DPScintillaEditorView *publisher = _documentPublisher;
     if (publisher != nil) publisher->_directInputInitiator = self;
-    [[_scintilla content] insertText:text];
+    if (![self scintillaHandleDirectSelectionText:text]) {
+        [[_scintilla content] insertText:text];
+    }
     if (publisher != nil && publisher->_directInputInitiator == self) {
         publisher->_directInputInitiator = nil;
     }
@@ -1062,6 +1065,89 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [self clearDirectInputPreflightState];
     _directInputInsertion = NO;
     _textInputSourceKnown = NO;
+}
+
+- (BOOL)scintillaHandleDirectSelectionText:(NSString *)text {
+    if (!_smartEditingEnabled || !_directInputInsertion || self.hasMarkedText
+        || [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding] != 1
+        || [_scintilla message:SCI_GETSELECTIONMODE] != SC_SEL_STREAM) return NO;
+    const char *pair = DPSmartPairForOpening(static_cast<unsigned char>(text.UTF8String[0]));
+    if (pair == nullptr) return NO;
+
+    struct SurroundSelection {
+        NSUInteger anchor;
+        NSUInteger caret;
+        NSUInteger index;
+        NSUInteger lower() const { return MIN(anchor, caret); }
+        NSUInteger upper() const { return MAX(anchor, caret); }
+    };
+    const NSUInteger count = (NSUInteger)[_scintilla message:SCI_GETSELECTIONS];
+    const NSUInteger mainSelection = (NSUInteger)[_scintilla message:SCI_GETMAINSELECTION];
+    const NSUInteger length = self.documentByteLength;
+    std::vector<SurroundSelection> selections;
+    BOOL hasSelection = NO;
+    for (NSUInteger index = 0; index < count; ++index) {
+        if ([_scintilla message:SCI_GETSELECTIONNCARETVIRTUALSPACE wParam:index] != 0
+            || [_scintilla message:SCI_GETSELECTIONNANCHORVIRTUALSPACE wParam:index] != 0) return NO;
+        const NSUInteger anchor = (NSUInteger)[_scintilla message:SCI_GETSELECTIONNANCHOR wParam:index];
+        const NSUInteger caret = (NSUInteger)[_scintilla message:SCI_GETSELECTIONNCARET wParam:index];
+        if (anchor > length || caret > length
+            || ![self isUTF8Boundary:anchor documentLength:length]
+            || ![self isUTF8Boundary:caret documentLength:length]) return NO;
+        selections.push_back({anchor, caret, index});
+        hasSelection |= anchor != caret;
+    }
+    if (!hasSelection) return NO; // Preserve existing single/multiple-caret typing.
+    std::sort(selections.begin(), selections.end(), [](const auto &a, const auto &b) {
+        return a.lower() < b.lower() || (a.lower() == b.lower() && a.upper() < b.upper());
+    });
+    for (NSUInteger index = 1; index < count; ++index) {
+        if (selections[index].lower() < selections[index - 1].upper()) return NO;
+    }
+    DPScintillaEditorView *publisher = _documentPublisher ?: self;
+    if (![self preflightUserMutation] || ![publisher preflightUserMutation]) return YES;
+    // Reserve the forward edits and their undo as a complete operation.
+    if (count > (UINT64_MAX - publisher.revision) / 4
+        || count > (static_cast<NSUInteger>(NSIntegerMax) - length) / 2) {
+        [publisher publishMutationError:DPScintillaErrorRevisionOverflow
+                            description:@"Insufficient revision or position space for selection surround"];
+        return YES;
+    }
+
+    // Insert only the delimiters: no selected-text copy or full-range replacement
+    // enters native undo history or the incremental recovery journal.
+    _directInputInsertion = NO;
+    [_scintilla message:SCI_BEGINUNDOACTION];
+    @try {
+        for (auto iterator = selections.rbegin(); iterator != selections.rend(); ++iterator) {
+            const NSUInteger positions[] = {iterator->upper(), iterator->lower()};
+            for (NSUInteger boundary = 0; boundary < 2; ++boundary) {
+                if (!self.isInputEnabled || !publisher.isInputEnabled) return YES;
+                [_scintilla message:SCI_SETTARGETSTART wParam:positions[boundary]];
+                [_scintilla message:SCI_SETTARGETEND wParam:positions[boundary]];
+                [_scintilla message:SCI_REPLACETARGET wParam:1
+                             lParam:reinterpret_cast<sptr_t>(pair + (boundary == 0 ? 1 : 0))];
+            }
+        }
+        if (!self.isInputEnabled || !publisher.isInputEnabled) return YES;
+        for (NSUInteger index = 0; index < count; ++index) {
+            selections[index].anchor += 2 * index + 1;
+            selections[index].caret += 2 * index + 1;
+        }
+        std::sort(selections.begin(), selections.end(), [](const auto &a, const auto &b) {
+            return a.index < b.index;
+        });
+        for (NSUInteger index = 0; index < count; ++index) {
+            [_scintilla message:index == 0 ? SCI_SETSELECTION : SCI_ADDSELECTION
+                         wParam:selections[index].caret lParam:selections[index].anchor];
+        }
+        [_scintilla message:SCI_SETMAINSELECTION wParam:mainSelection];
+        [_scintilla message:SCI_SCROLLCARET];
+    } @finally {
+        [_scintilla message:SCI_ENDUNDOACTION];
+        _directInputInsertion = YES;
+    }
+    return YES;
 }
 
 - (void)captureDirectInputPreflightState {
@@ -1272,8 +1358,26 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         else if (semantic.find("error") != std::string::npos || semantic.find("bad") != std::string::npos) role = 6;
         _semanticStyleRoles.emplace_back(style, role);
     }
+    // Legacy Markdown has style IDs but does not publish NamedStyles metadata.
+    if ([effectiveName isEqualToString:@"markdown"]) {
+        for (int style = SCE_MARKDOWN_DEFAULT; style <= SCE_MARKDOWN_CODEBK; ++style) {
+            int role = 0;
+            if (style >= SCE_MARKDOWN_HEADER1 && style <= SCE_MARKDOWN_HEADER6) role = 3;
+            else if (style == SCE_MARKDOWN_STRONG1 || style == SCE_MARKDOWN_STRONG2) role = 3;
+            else if (style == SCE_MARKDOWN_EM1 || style == SCE_MARKDOWN_EM2 || style == SCE_MARKDOWN_BLOCKQUOTE) role = 1;
+            else if (style >= SCE_MARKDOWN_CODE && style <= SCE_MARKDOWN_CODEBK) role = 4;
+            else if (style == SCE_MARKDOWN_LINK || style == SCE_MARKDOWN_ULIST_ITEM
+                     || style == SCE_MARKDOWN_OLIST_ITEM || style == SCE_MARKDOWN_HRULE) role = 5;
+            _semanticStyleRoles.emplace_back(style, role);
+        }
+    }
     [_scintilla message:SCI_SETILEXER wParam:0 lParam:reinterpret_cast<sptr_t>(lexer)];
     _lexerName = [effectiveName copy];
+    if ([_lexerName isEqualToString:@"markdown"]) {
+        [_scintilla message:SCI_SETPROPERTY
+                     wParam:reinterpret_cast<uptr_t>("lexer.markdown.header.eolfill")
+                     lParam:reinterpret_cast<sptr_t>("1")];
+    }
     _languageStylingFallback = overBudget && ![lexerName isEqualToString:@"null"];
     [_scintilla message:SCI_SETTABWIDTH wParam:MAX(1, MIN(tabWidth, 16))];
     [_scintilla message:SCI_SETUSETABS wParam:useTabs ? 1 : 0];
@@ -1408,6 +1512,21 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         }
         [_scintilla message:SCI_STYLESETFORE wParam:style lParam:colour];
         [_scintilla message:SCI_STYLESETBOLD wParam:style lParam:highContrast && role == 3];
+    }
+    if ([_lexerName isEqualToString:@"markdown"]) {
+        for (int style = SCE_MARKDOWN_HEADER1; style <= SCE_MARKDOWN_HEADER6; ++style) {
+            [_scintilla message:SCI_STYLESETBOLD wParam:style lParam:1];
+        }
+        for (int style : {SCE_MARKDOWN_STRONG1, SCE_MARKDOWN_STRONG2}) {
+            [_scintilla message:SCI_STYLESETBOLD wParam:style lParam:1];
+        }
+        for (int style : {SCE_MARKDOWN_EM1, SCE_MARKDOWN_EM2, SCE_MARKDOWN_BLOCKQUOTE}) {
+            [_scintilla message:SCI_STYLESETITALIC wParam:style lParam:1];
+        }
+        [_scintilla message:SCI_STYLESETUNDERLINE wParam:SCE_MARKDOWN_LINK lParam:1];
+        for (int style : {SCE_MARKDOWN_CODE, SCE_MARKDOWN_CODE2, SCE_MARKDOWN_CODEBK}) {
+            [_scintilla message:SCI_STYLESETBACK wParam:style lParam:caretLineBackground];
+        }
     }
     [_scintilla message:SCI_SETCARETFORE wParam:highContrast ? (dark ? 0xFFFFFF : 0x000000) : foreground];
     [_scintilla message:SCI_SETCARETLINEVISIBLE wParam:_highlightCurrentLine lParam:0];
