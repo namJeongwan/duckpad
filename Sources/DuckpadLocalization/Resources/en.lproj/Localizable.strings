@@ -756,3 +756,11 @@
 "Plugin Installation Failed" = "Plugin Installation Failed";
 "Installed" = "Installed";
 "Some Plugins Could Not Be Loaded" = "Some Plugins Could Not Be Loaded";
+"Uninstall…" = "Uninstall…";
+"Uninstall" = "Uninstall";
+"Uninstall %1$@?" = "Uninstall %1$@?";
+"The plugin will stop and all installed versions will be removed. Its history and settings will be kept for reinstallation." = "The plugin will stop and all installed versions will be removed. Its history and settings will be kept for reinstallation.";
+"Built-in plugins can be disabled but not uninstalled." = "Built-in plugins can be disabled but not uninstalled.";
+"Uninstalling Plugin…" = "Uninstalling Plugin…";
+"Plugin Uninstalled" = "Plugin Uninstalled";
+"Plugin Uninstallation Failed" = "Plugin Uninstallation Failed";

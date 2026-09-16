@@ -80,6 +80,7 @@ private func presentationPackage(
     secondShortcut: String? = nil,
     service: Bool = false,
     native: Bool = false,
+    trust: LoadedExtensionPackage.TrustSource = .bundled,
     version: SemanticVersion = .init(major: 1, minor: 2, patch: 3)
 ) -> LoadedExtensionPackage {
     let id = ExtensionID(rawValue: rawID)
@@ -108,7 +109,7 @@ private func presentationPackage(
                 keybindings: keybindings
             )),
         module: Data(), packageDigest: String(repeating: digestCharacter, count: 64), publisherFingerprint: String(repeating: "2", count: 64),
-        signatureDigest: String(repeating: "3", count: 64), capabilitySchemaDigest: String(repeating: "4", count: 64), trustSource: .bundled, nativeFiles: native ? ["module.dylib": Data()] : nil
+        signatureDigest: String(repeating: "3", count: 64), capabilitySchemaDigest: String(repeating: "4", count: 64), trustSource: trust, nativeFiles: native ? ["module.dylib": Data()] : nil
     )
 }
 
@@ -500,4 +501,69 @@ func catalogDiscoversAndInstallsWithoutAnExistingPluginOrPicker() async throws {
     #expect(!button.isEnabled)
     #expect(button.title == L10n.text("Installed"))
     withExtendedLifetime(updater) {}
+}
+
+@Test @MainActor
+func pluginUninstallWithdrawsCommandsAndRefreshesInstalledList() async throws {
+    _ = NSApplication.shared
+    let package = presentationPackage(service: true, native: true, trust: .userImported)
+    let loader = PresentationExtensionLoader(package)
+    let policy = PresentationExtensionPolicy()
+    let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+    let service = ExtensionWorkspaceUseCase(loader: loader, grants: policy,
+        transport: PresentationExtensionTransport(), workspace: workspace, editor: PresentationExtensionEditor(),
+        allowsUserExtensions: true, automaticallyAuthorizesEnabledPackages: true)
+    await service.refresh()
+    try await service.setEnabled(package.manifest.id, enabled: true)
+    #expect(service.serviceCommands().count == 1)
+    let manager = ExtensionsManagerPanel()
+    defer { manager.close() }
+    manager.render(service.state())
+    let updater = ExtensionUpdateController(useCase: service, panel: manager, check: { _ in [:] },
+        prepare: { _, _ in throw ExtensionFailure.staleContext }, install: { _ in },
+        uninstall: { item in
+            #expect(item.manifest.id == package.manifest.id)
+            let stopped = try await policy.loadPolicy()
+            #expect(!stopped.enabled.contains(package.manifest.id))
+            await loader.replace([])
+        }, onError: { Issue.record("Unexpected uninstall error: \($0)") })
+    service.onStateChange = { state in manager.render(state); updater.registryChanged(state) }
+    defer { service.onStateChange = nil }
+    func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+    let root = try #require(manager.window?.contentView)
+    let button = try #require(descendants(root).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "duckpad.extensions.uninstall" })
+    #expect(button.isEnabled)
+    // The callback is invoked by the confirmation dialog's Uninstall action.
+    manager.onUninstall?(try #require(service.state().items.first))
+    let deadline = ContinuousClock.now + .seconds(3)
+    while !service.state().items.isEmpty, ContinuousClock.now < deadline { await Task.yield() }
+    #expect(service.state().items.isEmpty)
+    #expect(service.serviceCommands().isEmpty)
+    #expect(!button.isEnabled)
+    // Reinstalling the same native image can activate without restarting.
+    await loader.replace([package])
+    await service.refresh()
+    while button.title == L10n.text("Uninstalling Plugin…"), ContinuousClock.now < deadline { await Task.yield() }
+    try await service.setEnabled(package.manifest.id, enabled: true)
+    #expect(service.serviceCommands().count == 1)
+    withExtendedLifetime(updater) {}
+}
+
+@Test @MainActor
+func builtInPluginCannotBeUninstalled() async throws {
+    _ = NSApplication.shared
+    let package = presentationPackage()
+    let service = ExtensionWorkspaceUseCase(loader: PresentationExtensionLoader(package), grants: PresentationExtensionPolicy(),
+        transport: PresentationExtensionTransport(), workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()), editor: PresentationExtensionEditor())
+    await service.refresh()
+    let item = try #require(service.state().items.first)
+    #expect(item.isBundled)
+    await #expect(throws: ExtensionFailure.self) { try await service.withdrawForRemoval(item) }
+    let manager = ExtensionsManagerPanel()
+    defer { manager.close() }
+    manager.render(service.state())
+    func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+    let root = try #require(manager.window?.contentView)
+    let button = try #require(descendants(root).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == "duckpad.extensions.uninstall" })
+    #expect(!button.isEnabled)
 }

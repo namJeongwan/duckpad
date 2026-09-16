@@ -23,6 +23,9 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
     var onCheckUpdates: (() -> Void)?
     var onUpdate: ((ExtensionRegistryItem, ExtensionUpdate) -> Void)?
     var onInstall: ((URL) -> Void)?
+    private let removeButton = NSButton(title: L10n.text("Uninstall…"), target: nil, action: nil)
+    private var removing = false
+    var onUninstall: ((ExtensionRegistryItem) -> Void)?
     private let enableButton = NSButton(title: L10n.text("Enable"), target: nil, action: nil)
     private let revokeButton = NSButton(title: L10n.text("Revoke"), target: nil, action: nil)
     private var items: [ExtensionRegistryItem] = []
@@ -46,7 +49,7 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
         table.addTableColumn(column); table.headerView = nil; table.delegate = self; table.dataSource = self
         table.setAccessibilityIdentifier("duckpad.extensions.list")
         let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
-        let buttons = WrappingButtonBar(buttons: [installButton, updateButton, checkButton, enableButton, revokeButton])
+        let buttons = WrappingButtonBar(buttons: [installButton, updateButton, checkButton, enableButton, removeButton, revokeButton])
         buttonBar = buttons
         updateButton.target = self; updateButton.action = #selector(updatePlugin)
         checkButton.target = self; checkButton.action = #selector(checkUpdates)
@@ -55,6 +58,8 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
         updateStatus.setAccessibilityIdentifier("duckpad.extensions.update-status")
         updateStatus.font = .systemFont(ofSize: 11); updateStatus.textColor = .secondaryLabelColor
         installButton.target = self; installButton.action = #selector(installPlugin)
+        removeButton.target = self; removeButton.action = #selector(uninstallPlugin)
+        removeButton.setAccessibilityIdentifier("duckpad.extensions.uninstall")
         enableButton.target = self; enableButton.action = #selector(toggleEnabled)
         revokeButton.target = self; revokeButton.action = #selector(revoke)
         enableButton.setAccessibilityIdentifier("duckpad.extensions.enable")
@@ -95,7 +100,8 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
         updateButtons()
     }
 
-    func renderUpdates(_ updates: [ExtensionID: ExtensionUpdate], checking: Bool, installing: Bool, statusKey: String) {
+    func renderUpdates(_ updates: [ExtensionID: ExtensionUpdate], checking: Bool, installing: Bool, statusKey: String, removing: Bool = false) {
+        self.removing = removing
         self.updates = updates; self.checking = checking; self.installing = installing; updateStatusKey = statusKey
         updateStatus.stringValue = statusKey.isEmpty ? "" : localized(statusKey)
         updateButtons()
@@ -156,6 +162,16 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
         if picker.runModal() == .OK, let url = picker.url { onInstall?(url) }
     }
 
+    @objc private func uninstallPlugin() {
+        guard let item = selected, !item.isBundled, !installing else { return }
+        let alert = NSAlert()
+        alert.messageText = localized("Uninstall %1$@?", L10n.argument(localized(item.manifest.name)))
+        alert.informativeText = localized("The plugin will stop and all installed versions will be removed. Its history and settings will be kept for reinstallation.")
+        alert.addButton(withTitle: localized("Uninstall")); alert.addButton(withTitle: localized("Cancel"))
+        alert.alertStyle = .warning
+        if alert.runModal() == .alertFirstButtonReturn { onUninstall?(item) }
+    }
+
     @objc private func toggleEnabled() {
         guard let item = selected else { return }
         onSetEnabled?(item.manifest.id, !item.enabled)
@@ -169,9 +185,12 @@ final class ExtensionsManagerPanel: NSWindowController, NSTableViewDataSource, N
     private func updateButtons() {
         let update = selected.flatMap { updates[$0.manifest.id] }
         updateButton.isEnabled = update != nil && !installing
-        updateButton.title = installing ? localized("Installing Plugin…") : update.map { localized("Update to %1$@", L10n.argument($0.version)) } ?? localized("Update")
+        updateButton.title = installing && !removing ? localized("Installing Plugin…") : update.map { localized("Update to %1$@", L10n.argument($0.version)) } ?? localized("Update")
         checkButton.isEnabled = !checking && !installing
         installButton.isEnabled = !installing
+        removeButton.title = localized(removing ? "Uninstalling Plugin…" : "Uninstall…")
+        removeButton.isEnabled = selected != nil && selected?.isBundled == false && !installing
+        removeButton.toolTip = selected?.isBundled == true ? localized("Built-in plugins can be disabled but not uninstalled.") : nil
         enableButton.isEnabled = selected != nil && !installing; enableButton.title = selected?.enabled == true ? localized("Disable") : localized("Enable")
         revokeButton.isEnabled = !installing && (selected?.issue != nil || (selected?.enabled == true && !(selected?.granted.isEmpty ?? true)))
         revokeButton.title = selected?.issue == .untrustedPublisher ? localized("Reset Publisher Revocation…") : localized("Revoke Publisher…")

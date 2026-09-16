@@ -14,6 +14,10 @@ import DuckpadLocalization
     private var catalogTask: Task<Void, Never>?
     private var catalogStatusKey = ""
     private var hasLoadedCatalog = false
+    typealias Uninstall = @Sendable (ExtensionRegistryItem) async throws -> Void
+    private let uninstall: Uninstall
+    private var activeInstallID: ExtensionID?
+    private var removing = false
     private let useCase: ExtensionWorkspaceUseCase
     private let panel: ExtensionsManagerPanel
     private let check: Check
@@ -29,9 +33,11 @@ import DuckpadLocalization
     private var checkGeneration = UUID()
 
     init(useCase: ExtensionWorkspaceUseCase, panel: ExtensionsManagerPanel, check: @escaping Check,
-         prepare: @escaping Prepare, install: @escaping Install, browse: @escaping Browse = { .init(plugins: []) }, activate: @escaping (ExtensionID) async throws -> Void = { _ in }, onError: @escaping (Error) -> Void) {
+         prepare: @escaping Prepare, install: @escaping Install, browse: @escaping Browse = { .init(plugins: []) }, activate: @escaping (ExtensionID) async throws -> Void = { _ in }, uninstall: @escaping Uninstall = { _ in throw ExtensionFailure.hostUnavailable("uninstall unavailable") }, onError: @escaping (Error) -> Void) {
+        self.uninstall = uninstall
         self.browse = browse; self.activate = activate
         self.useCase = useCase; self.panel = panel; self.check = check; self.prepare = prepare; self.install = install; self.onError = onError
+        panel.onUninstall = { [weak self] item in self?.remove(item) }
         panel.onBrowse = { [weak self] in self?.loadCatalog() }
         panel.catalogView.onReload = { [weak self] in self?.loadCatalog(force: true) }
         panel.catalogView.onInstall = { [weak self] in self?.installFromCatalog($0) }
@@ -53,7 +59,7 @@ import DuckpadLocalization
         if !state.items.isEmpty, Date().timeIntervalSince(lastCheck) >= 6 * 60 * 60 { checkNow() }
     }
     private func render() {
-        panel.renderUpdates(updates, checking: checkTask != nil, installing: installTask != nil, statusKey: statusKey)
+        panel.renderUpdates(updates, checking: checkTask != nil, installing: installTask != nil, statusKey: statusKey, removing: removing)
         panel.catalogView.render(catalogPlugins, installed: Set(useCase.state().items.map { $0.manifest.id }),
             loading: catalogTask != nil, busy: installTask != nil, statusKey: catalogStatusKey)
     }
@@ -77,6 +83,7 @@ import DuckpadLocalization
         guard installTask == nil, catalogTask == nil,
               !useCase.state().items.contains(where: { $0.manifest.id == plugin.release.extensionID }) else { return }
         checkTask?.cancel(); checkTask = nil; checkGeneration = UUID()
+        activeInstallID = plugin.release.extensionID
         catalogStatusKey = "Downloading and Verifying Plugin…"
         installTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -86,13 +93,44 @@ import DuckpadLocalization
                 guard !self.useCase.state().items.contains(where: { $0.manifest.id == plugin.release.extensionID }) else { throw ExtensionFailure.staleContext }
                 self.catalogStatusKey = "Installing Plugin…"; self.render()
                 try await self.install(prepared)
+                try Task.checkCancellation()
                 await self.useCase.refresh()
+                try Task.checkCancellation()
                 try await self.useCase.setEnabled(plugin.release.extensionID, enabled: true)
                 try await self.activate(plugin.release.extensionID)
                 self.catalogStatusKey = "Plugin Installed"
             } catch is CancellationError { self.catalogStatusKey = "Plugin Installation Cancelled" }
             catch { self.catalogStatusKey = "Plugin Installation Failed"; self.onError(error) }
-            self.installTask = nil; self.render()
+            self.installTask = nil; self.activeInstallID = nil; self.render()
+        }
+        render()
+    }
+
+    func cancelInstallation(for id: ExtensionID) async {
+        if activeInstallID == id, let task = installTask { task.cancel(); await task.value }
+        checkTask?.cancel(); checkTask = nil; checkGeneration = UUID()
+        updates.removeValue(forKey: id)
+        render()
+    }
+
+    func remove(_ item: ExtensionRegistryItem) {
+        guard installTask == nil, !item.isBundled else { return }
+        checkTask?.cancel(); checkTask = nil; checkGeneration = UUID()
+        removing = true; statusKey = "Uninstalling Plugin…"
+        installTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var ownsRemoval = false
+            do {
+                try await self.useCase.withdrawForRemoval(item)
+                ownsRemoval = true
+                try await self.uninstall(item)
+                self.updates.removeValue(forKey: item.manifest.id)
+                self.statusKey = "Plugin Uninstalled"
+                self.catalogStatusKey = ""
+            } catch { self.statusKey = "Plugin Uninstallation Failed"; self.onError(error) }
+            await self.useCase.refresh()
+            if ownsRemoval { self.useCase.finishRemoval(item.manifest.id) }
+            self.removing = false; self.installTask = nil; self.render()
         }
         render()
     }
@@ -122,6 +160,7 @@ import DuckpadLocalization
         guard installTask == nil else { return }
         checkTask?.cancel(); checkTask = nil
         checkGeneration = UUID()
+        activeInstallID = item.manifest.id
         statusKey = "Downloading and Verifying Plugin…"
         installTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -142,7 +181,7 @@ import DuckpadLocalization
                 self.statusKey = self.useCase.state().items.contains(where: { $0.manifest.id == item.manifest.id && $0.pendingVersion != nil }) ? "Plugin Update Will Apply Next Launch" : "Plugin Update Installed"
             } catch is CancellationError { self.statusKey = "Plugin Update Cancelled" }
             catch { self.statusKey = "Plugin Update Failed"; self.onError(error) }
-            self.installTask = nil; self.render()
+            self.installTask = nil; self.activeInstallID = nil; self.render()
         }
         render()
     }

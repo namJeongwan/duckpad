@@ -122,15 +122,16 @@ public struct ExtensionRegistryItem: Equatable, Sendable {
     public let enabled: Bool
     public let granted: Set<ExtensionCapabilityRequest>
     public let issue: ExtensionFailure?
+    public let isBundled: Bool
     public let pendingVersion: SemanticVersion?
 
     init(manifest: ExtensionManifest, publisherFingerprint: String, packageDigest: String,
          capabilitySchemaDigest: String, enabled: Bool, granted: Set<ExtensionCapabilityRequest>,
-         issue: ExtensionFailure?, pendingVersion: SemanticVersion? = nil) {
+         issue: ExtensionFailure?, pendingVersion: SemanticVersion? = nil, isBundled: Bool = false) {
         self.manifest = manifest; self.publisherFingerprint = publisherFingerprint
         self.packageDigest = packageDigest; self.capabilitySchemaDigest = capabilitySchemaDigest
         self.enabled = enabled; self.granted = granted; self.issue = issue
-        self.pendingVersion = pendingVersion
+        self.pendingVersion = pendingVersion; self.isBundled = isBundled
     }
 }
 
@@ -379,7 +380,8 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
     public func setEnabled(_ id: ExtensionID, enabled shouldEnable: Bool) async throws(ExtensionFailure) {
         try requirePolicyAuthority()
         guard let package = packages[id] else { throw .disabled(id) }
-        guard !revokedPublisherFingerprints.contains(package.publisherFingerprint) else { throw .untrustedPublisher }
+        guard !shouldEnable || !nativeActivationSession.isRemoving(id) else { throw .staleContext }
+        guard !shouldEnable || !revokedPublisherFingerprints.contains(package.publisherFingerprint) else { throw .untrustedPublisher }
         var candidateEnabled = enabled
         var candidateGrants = granted
         var candidateDisabledDigests = disabledPackageDigests
@@ -403,6 +405,22 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
         enabled = candidateEnabled; granted = candidateGrants; disabledPackageDigests = candidateDisabledDigests; policyGeneration = candidateGeneration
         if !shouldEnable { await cancelActiveRequest(ifOwnedBy: [id]) }
         publish()
+    }
+
+    public func withdrawForRemoval(_ item: ExtensionRegistryItem) async throws {
+        guard let package = packages[item.manifest.id], package.trustSource != .bundled,
+              package.packageDigest == item.packageDigest, package.publisherFingerprint == item.publisherFingerprint else { throw ExtensionFailure.staleContext }
+        guard nativeActivationSession.beginRemoval(item.manifest.id) else { throw ExtensionFailure.staleContext }
+        do { try await setEnabled(item.manifest.id, enabled: false) }
+        catch { nativeActivationSession.endRemoval(item.manifest.id); throw error }
+    }
+
+    public func finishRemoval(_ id: ExtensionID) { nativeActivationSession.endRemoval(id) }
+
+    public func stopForRemoval(_ id: ExtensionID) async throws {
+        await cancelActiveRequest(ifOwnedBy: [id])
+        await refresh()
+        if packages[id] != nil { try await setEnabled(id, enabled: false) }
     }
 
     public func consentReviewToken(for extensionID: ExtensionID) throws(ExtensionFailure) -> ExtensionConsentReviewToken {
@@ -771,7 +789,7 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
                 enabled: enabled.contains(package.manifest.id),
                 granted: Set(granted.filter { $0.extensionID == package.manifest.id && grantMatchesPackage($0, package: package) }.map { ExtensionCapabilityRequest(id: $0.capability, scope: $0.scope) }),
                 issue: revokedPublisherFingerprints.contains(package.publisherFingerprint) ? .untrustedPublisher : nil,
-                pendingVersion: pendingVersions[package.manifest.id]
+                pendingVersion: pendingVersions[package.manifest.id], isBundled: package.trustSource == .bundled
             )
         }
         return ExtensionRegistryState(items: items, discoveryFailures: discoveryFailures, operationStatus: status)

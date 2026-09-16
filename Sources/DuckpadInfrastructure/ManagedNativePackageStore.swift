@@ -18,6 +18,23 @@ public actor ManagedNativePackageStore {
             .appendingPathComponent("Duckpad/NativePluginModules", isDirectory: true)
     }
 
+    /// Unlink execution copies only after the host has stopped all instances.
+    /// Loaded Mach-O images remain mapped until process exit; never dlclose them.
+    public func remove(digests: Set<String>) throws {
+        guard !digests.isEmpty else { return }
+        guard digests.count <= 64, digests.allSatisfy({ $0.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil }) else { throw ExtensionFailure.invalidPackagePath }
+        guard FileManager.default.fileExists(atPath: root.path) else { return }
+        var info = stat()
+        guard root.resolvingSymlinksInPath().path == root.path, lstat(root.path, &info) == 0,
+              (info.st_mode & S_IFMT) == S_IFDIR, info.st_uid == geteuid() else { throw ExtensionFailure.invalidPackagePath }
+        for digest in digests {
+            let path = root.appendingPathComponent(digest + ".duckpad-plugin")
+            if lstat(path.path, &info) != 0 { if errno == ENOENT { continue }; throw ExtensionFailure.invalidPackagePath }
+            guard (info.st_mode & S_IFMT) == S_IFDIR, info.st_uid == geteuid() else { throw ExtensionFailure.invalidPackagePath }
+            try FileManager.default.removeItem(at: path)
+        }
+    }
+
     public func install(files: [String: Data]) async throws -> String {
         let package = try await verifier.verify(files: files)
         guard package.manifest.runtime.kind == "native", package.manifest.api.contains(ExtensionWorkspaceUseCase.apiVersion) else { throw ExtensionFailure.unsupportedAPI }

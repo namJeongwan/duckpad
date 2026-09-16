@@ -756,3 +756,11 @@
 "Plugin Installation Failed" = "플러그인 설치에 실패했습니다";
 "Installed" = "설치됨";
 "Some Plugins Could Not Be Loaded" = "일부 플러그인을 불러오지 못했습니다";
+"Uninstall…" = "제거…";
+"Uninstall" = "제거";
+"Uninstall %1$@?" = "%1$@ 플러그인을 제거할까요?";
+"The plugin will stop and all installed versions will be removed. Its history and settings will be kept for reinstallation." = "플러그인을 중지하고 설치된 모든 버전을 제거합니다. 기록과 설정은 재설치를 위해 유지됩니다.";
+"Built-in plugins can be disabled but not uninstalled." = "기본 제공 플러그인은 비활성화할 수 있지만 제거할 수 없습니다.";
+"Uninstalling Plugin…" = "플러그인 제거 중…";
+"Plugin Uninstalled" = "플러그인을 제거했습니다";
+"Plugin Uninstallation Failed" = "플러그인 제거에 실패했습니다";

@@ -716,3 +716,11 @@
 "Plugin Installation Failed" = "Échec de l’installation du plugin";
 "Installed" = "Installé";
 "Some Plugins Could Not Be Loaded" = "Certains plugins n’ont pas pu être chargés";
+"Uninstall…" = "Désinstaller…";
+"Uninstall" = "Désinstaller";
+"Uninstall %1$@?" = "Désinstaller %1$@ ?";
+"The plugin will stop and all installed versions will be removed. Its history and settings will be kept for reinstallation." = "Le plugin sera arrêté et toutes les versions installées seront supprimées. Son historique et ses réglages seront conservés pour une réinstallation.";
+"Built-in plugins can be disabled but not uninstalled." = "Les plugins intégrés peuvent être désactivés, mais pas désinstallés.";
+"Uninstalling Plugin…" = "Désinstallation du plugin…";
+"Plugin Uninstalled" = "Plugin désinstallé";
+"Plugin Uninstallation Failed" = "Échec de la désinstallation du plugin";
