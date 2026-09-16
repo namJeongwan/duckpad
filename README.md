@@ -10,6 +10,8 @@ It brings familiar text editing to the Mac with native menus, multiple document 
 
 ![Duckpad showing multiple document tabs and duck ASCII art](docs/assets/duckpad-screenshot.png)
 
+[Website](https://namjeongwan.github.io/duckpad/) · [한국어](https://namjeongwan.github.io/duckpad/ko/)
+
 ## Download
 
 [Download Duckpad](https://github.com/namJeongwan/duckpad/releases/latest)

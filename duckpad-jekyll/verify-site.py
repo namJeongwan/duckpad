@@ -44,6 +44,20 @@ for language in LANGUAGES:
         assert len(alternates) == len(LANGUAGES) + 1
         for other in LANGUAGES:
             assert alternates[other['code']] == 'https://namjeongwan.github.io/duckpad' + other['prefix'] + entry['route']
+        structured = re.findall(r'<script type="application/ld\+json">(.*?)</script>', text, re.S)
+        assert len(structured) == (1 if entry['key'] == 'home' else 0), f'{route}: structured data placement'
+        if structured:
+            app = json.loads(structured[0])
+            assert app['@context'] == 'https://schema.org' and app['@type'] == 'SoftwareApplication'
+            assert app['@id'] == 'https://namjeongwan.github.io/duckpad/#duckpad'
+            assert app['name'] == 'Duckpad' and app['inLanguage'] == code
+            assert app['url'] == canonical and app['description'] == data['home_description']
+            assert app['sameAs'] == 'https://github.com/namJeongwan/duckpad'
+            assert app['operatingSystem'].startswith('macOS ')
+            download_page = Page((OUTPUT / language['prefix'].lstrip('/') / 'download/index.html').read_text())
+            assert app['downloadUrl'] in [a.get('href') for a in download_page.attrs('a')]
+            assert app['softwareVersion'] in app['downloadUrl']
+            assert 'aggregateRating' not in app and 'review' not in app
         assert f'<title>{data[entry["key"] + "_title"].replace("&", "&amp;")}' in text
         for tag, attrs in page.elements:
             link = attrs.get('href') if tag == 'a' else attrs.get('src') if tag == 'img' else None
@@ -58,8 +72,11 @@ for language in LANGUAGES:
             assert 'alt' in attrs
         assert not re.search(r'Your text editor|Make yourself at home|A little familiar|The essentials', text)
 
+verification = 'googled90414a55ce3575a.html'
+assert (OUTPUT / verification).read_bytes() == (ROOT / verification).read_bytes(), 'Google verification file changed during build'
+
 sitemap = ET.parse(OUTPUT / 'sitemap.xml')
 urls = [entry.text for entry in sitemap.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc')]
 assert len(urls) == len(set(urls)) == 32
 assert set(urls) == {'https://namjeongwan.github.io/duckpad' + lang['prefix'] + p['route'] for lang in LANGUAGES for p in PAGES}
-print(f'PASS: {len(REFERENCE)} keys × 8 languages; 32 routes, metadata, alternate links, local links and sitemap')
+print(f'PASS: {len(REFERENCE)} keys × 8 languages; 32 routes, metadata, alternate links, local links, structured data, verification file and sitemap')

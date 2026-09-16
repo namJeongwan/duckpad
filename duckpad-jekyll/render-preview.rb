@@ -12,6 +12,10 @@ def read_yaml(path)
 end
 
 module PreviewUrls
+  def jsonify(value)
+    JSON.generate(value)
+  end
+
   def relative_url(path)
     site = @context['site']
     if @context.registers[:standalone]
@@ -62,6 +66,7 @@ end
 layout = Liquid::Template.parse(File.read(File.join(ROOT, '_layouts/default.html')), error_mode: :strict)
 output = File.join(PREVIEW_ROOT, site['baseurl'].sub(%r{\A/}, ''))
 FileUtils.mkdir_p(output)
+FileUtils.cp(File.join(ROOT, 'googled90414a55ce3575a.html'), output)
 FileUtils.cp_r(File.join(ROOT, 'assets'), output)
 standalone_assets = File.expand_path('../duckpad-site-assets', ROOT)
 FileUtils.mkdir_p(standalone_assets)

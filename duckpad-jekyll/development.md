@@ -91,3 +91,29 @@ domain, update `_config.yml` and the verification URL expectations together.
 
 Download data was checked against the GitHub v0.6.3 release. The website does not
 change app behavior, app version, signing, release files or the plugin API.
+
+## Google Search Console
+
+Register the URL-prefix property `https://namjeongwan.github.io/duckpad/`.
+The HTML-file verification method uses `googled90414a55ce3575a.html` at that
+property's root. It is copied without a layout or content changes. Keep it
+published after verification so Google can continue checking ownership.
+
+After this change is merged and deployed:
+
+1. Confirm `https://namjeongwan.github.io/duckpad/googled90414a55ce3575a.html`
+   returns the downloaded file, then click **Verify** in Search Console.
+2. Submit `https://namjeongwan.github.io/duckpad/sitemap.xml` in **Sitemaps**.
+3. Use **URL inspection** to request indexing of the English and Korean homepages.
+
+Each homepage includes localized `SoftwareApplication` JSON-LD with a shared
+application ID, the macOS requirement, release/download details, and the project
+repository. Existing titles, descriptions, canonical URLs, language alternates,
+and visible page content are retained. No rating or review is invented; this
+markup alone does not satisfy Google's software-app rich-result requirements.
+Ownership verification and sitemap submission do not guarantee indexing,
+ranking, or correction of AI-generated answers.
+
+References: [ownership verification](https://support.google.com/webmasters/answer/9008080),
+[requesting a crawl](https://developers.google.com/search/docs/crawling-indexing/ask-google-to-recrawl),
+and [software-app structured data](https://developers.google.com/search/docs/appearance/structured-data/software-app).
