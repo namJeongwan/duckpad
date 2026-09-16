@@ -1154,6 +1154,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     @objc public func performCloseActiveTab(_ sender: Any? = nil) {
+        if extensionServiceHost?.closeFocusedPanel(in: workspaceContentSplit) == true { return }
         if isMarkdownPreviewVisible {
             performCloseMarkdownPreview()
             return
