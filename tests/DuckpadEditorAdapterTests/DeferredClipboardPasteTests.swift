@@ -11,7 +11,7 @@ import Testing
         _ = NSApplication.shared
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let adapter = ScintillaEditorAdapter()
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: adapter, editorView: adapter.view,
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: adapter, editorView: adapter.view,
             secondaryEditorView: adapter.secondaryGroupView, additionalEditorViews: adapter.additionalEditorGroupViews,
             editorGroupRouter: adapter, automaticallyStarts: false)
         defer { controller.close(); adapter.invalidate() }

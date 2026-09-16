@@ -1,4 +1,5 @@
 import Foundation
+import DuckpadApplication
 import UniformTypeIdentifiers
 import WebKit
 
@@ -7,6 +8,9 @@ import WebKit
 @MainActor
 final class MarkdownPreviewResourceLoader: NSObject, WKURLSchemeHandler {
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    private let reader: any PreviewResourceReading
+
+    init(reader: any PreviewResourceReading) { self.reader = reader }
 
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
         let id = ObjectIdentifier(urlSchemeTask)
@@ -15,16 +19,17 @@ final class MarkdownPreviewResourceLoader: NSObject, WKURLSchemeHandler {
         }
         let mime = UTType(filenameExtension: file.pathExtension)?.preferredMIMEType
             ?? (file.pathExtension == "js" ? "text/javascript" : "application/octet-stream")
-        tasks[id] = Task { [weak self] in
+        tasks[id] = Task { [weak self, reader] in
+            var stream: (any PreviewResourceStream)?
             do {
-                let handle = try await Task.detached(priority: .utility) { try FileHandle(forReadingFrom: file) }.value
-                defer { try? handle.close() }
+                let resource = try await reader.open(file)
+                stream = resource
                 try Task.checkCancellation()
                 urlSchemeTask.didReceive(URLResponse(url: request, mimeType: mime, expectedContentLength: -1, textEncodingName: nil))
                 while true {
-                    let chunk = try await Task.detached(priority: .utility) { try handle.read(upToCount: 64 * 1024) }.value
+                    let chunk = try await resource.read()
                     try Task.checkCancellation()
-                    guard let chunk, !chunk.isEmpty else { break }
+                    guard !chunk.isEmpty else { break }
                     urlSchemeTask.didReceive(chunk)
                 }
                 urlSchemeTask.didFinish()
@@ -33,6 +38,7 @@ final class MarkdownPreviewResourceLoader: NSObject, WKURLSchemeHandler {
             } catch {
                 if !Task.isCancelled { urlSchemeTask.didFailWithError(error) }
             }
+            await stream?.close()
             self?.tasks[id] = nil
         }
     }

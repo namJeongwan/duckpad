@@ -91,7 +91,7 @@ struct LocalizationTests {
 
     @Test(arguments: AppLanguage.allCases.filter { $0 != .system })
     func translatedMenusKeepRoutingAndBilingualSearch(language: AppLanguage) throws {
-        let controller = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()), automaticallyStarts: false)
+        let controller = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()), previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
         defer { controller.close() }
         let recent = URL(fileURLWithPath: "/tmp/File")
         let menu = DuckpadMainMenuFactory.make(target: controller, recentDocumentURLs: [recent])

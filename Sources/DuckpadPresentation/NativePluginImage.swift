@@ -17,21 +17,19 @@ import DuckpadNativeABI
     let deactivate: Action
     let destroy: Action
     let language: Language
-    private let installation: NativePluginInstallation
     private let handle: UnsafeMutableRawPointer
 
-    static func load(_ registration: ExtensionServiceRegistration, cacheRoot: URL) throws -> NativePluginImage {
+    static func load(_ registration: ExtensionServiceRegistration, installation: any VerifiedNativePluginInstallation) throws -> NativePluginImage {
+        try installation.validateForLoading()
         if let image = loaded[registration.packageDigest] {
-            _ = try NativePluginInstallation.open(registration, root: cacheRoot)
-            try image.installation.validate(registration)
+            guard image.directory.path == installation.directory.path else { throw NativePluginValidationFailure.changedPackage }
             return image
         }
-        let image = try NativePluginImage(registration, cacheRoot: cacheRoot)
+        let image = try NativePluginImage(installation: installation)
         loaded[registration.packageDigest] = image
         return image
     }
-    private init(_ registration: ExtensionServiceRegistration, cacheRoot: URL) throws {
-        installation = try NativePluginInstallation.open(registration, root: cacheRoot)
+    private init(installation: any VerifiedNativePluginInstallation) throws {
         directory = installation.directory
         guard let handle = dlopen(directory.appendingPathComponent("module.dylib").path, RTLD_NOW | RTLD_LOCAL) else {
             throw NSError(domain: "DuckpadNativePlugin", code: 1, userInfo: [NSLocalizedDescriptionKey: String(cString: dlerror())])

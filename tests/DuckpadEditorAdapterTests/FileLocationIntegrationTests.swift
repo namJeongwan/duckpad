@@ -74,7 +74,7 @@ struct FileLocationIntegrationTests {
             let fileStore: any TextFileStore = simulatedTrash
                 ? LocationTestFileStore(base: base, trashURL: root.appendingPathComponent("trashed.txt")) : base
             files = FileDocumentUseCase(workspace: workspace, editor: editor, store: fileStore)
-            controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor, editorView: editor.view,
+            controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: editor.view,
                 secondaryEditorView: editor.secondaryGroupView, additionalEditorViews: editor.additionalEditorGroupViews,
                 editorGroupRouter: editor, fileUseCase: files, filePanels: panels, automaticallyStarts: false)
         }

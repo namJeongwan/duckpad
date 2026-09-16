@@ -7,6 +7,8 @@ import DuckpadLocalization
 @MainActor final class NativePluginServiceHost {
     private let storageRoot: URL
     private let cacheRoot: URL
+    private let verifier: any NativePluginInstallationVerifying
+    private var activationIDs: [ExtensionCommandID: UUID] = [:]
     private let preparePackage: (@Sendable ([String: Data]) async throws -> Void)?
     private var installations: [ExtensionCommandID: Task<Void, Error>] = [:]
     private var instances: [ExtensionCommandID: NativePluginInstance] = [:]
@@ -19,8 +21,9 @@ import DuckpadLocalization
     private var editorMinimum: NSLayoutConstraint?
     private var restoreFocus: (() -> Void)?
     private var language = L10n.catalog.language.rawValue
-    init(storageRoot: URL, packageRoot: URL? = nil, preparePackage: (@Sendable ([String: Data]) async throws -> Void)? = nil) {
+    init(storageRoot: URL, packageRoot: URL? = nil, verifier: any NativePluginInstallationVerifying, preparePackage: (@Sendable ([String: Data]) async throws -> Void)? = nil) {
         self.storageRoot = storageRoot
+        self.verifier = verifier
         cacheRoot = packageRoot ?? storageRoot.deletingLastPathComponent().appendingPathComponent("NativePluginModules")
         self.preparePackage = preparePackage
     }
@@ -28,59 +31,68 @@ import DuckpadLocalization
         let allowed = Dictionary(uniqueKeysWithValues: registrations.map { ($0.command.id, $0) })
         let previous = self.registrations
         self.registrations = allowed
-        for (id, task) in installations where allowed[id] == nil || allowed[id] != previous[id] { task.cancel(); installations.removeValue(forKey: id) }
+        for (id, task) in installations where allowed[id] == nil || allowed[id] != previous[id] { task.cancel(); installations.removeValue(forKey: id); activationIDs.removeValue(forKey: id) }
         for (id, entry) in instances where allowed[id] != entry.registration {
             if displayed == id { close() }
             entry.stop(); instances.removeValue(forKey: id)
         }
-        failures = failures.filter { allowed[$0.key] != nil }
+        failures = failures.filter { allowed[$0.key] != nil && allowed[$0.key] == previous[$0.key] }
         for registration in registrations where instances[registration.command.id] == nil {
-            if installations[registration.command.id] != nil { continue }
-            do {
-                instances[registration.command.id] = try NativePluginInstance(registration, root: storageRoot, cacheRoot: cacheRoot, language: language)
-                failures.removeValue(forKey: registration.command.id)
-            } catch {
-                failures[registration.command.id] = error
-                if let failure = error as? NativePluginInstallation.Failure, case .authorizationRequired = failure,
-                   preparePackage != nil, installations[registration.command.id] == nil {
-                    beginInstallation(registration)
-                }
+            if installations[registration.command.id] == nil {
+                beginInstallation(registration)
             }
         }
     }
     private func beginInstallation(_ registration: ExtensionServiceRegistration) {
-        guard let files = registration.nativeFiles, let preparePackage else { return }
         let id = registration.command.id
+        let token = UUID()
+        activationIDs[id] = token
+        let verifier = verifier
+        let cacheRoot = cacheRoot
+        let preparePackage = preparePackage
         installations[id] = Task { @MainActor [weak self] in
             do {
-                try await preparePackage(files)
+                let installation: any VerifiedNativePluginInstallation
+                do {
+                    installation = try await verifier.open(registration, root: cacheRoot)
+                } catch NativePluginValidationFailure.installationRequired {
+                    guard let files = registration.nativeFiles, let preparePackage else { throw NativePluginValidationFailure.installationRequired }
+                    try Task.checkCancellation()
+                    try await preparePackage(files)
+                    try Task.checkCancellation()
+                    installation = try await verifier.open(registration, root: cacheRoot)
+                }
                 try Task.checkCancellation()
-                guard let self, self.registrations[id] == registration else { throw CancellationError() }
+                guard let self, self.activationIDs[id] == token, self.registrations[id] == registration else { throw CancellationError() }
                 if self.instances[id] == nil {
-                    self.instances[id] = try NativePluginInstance(registration, root: self.storageRoot, cacheRoot: self.cacheRoot, language: self.language)
+                    self.instances[id] = try NativePluginInstance(registration, root: self.storageRoot, installation: installation, language: self.language)
                 }
                 self.failures.removeValue(forKey: id)
                 self.installations.removeValue(forKey: id)
+                self.activationIDs.removeValue(forKey: id)
             } catch {
-                if !Task.isCancelled, let self, self.registrations[id] == registration { self.failures[id] = error; self.installations.removeValue(forKey: id) }
+                if let self, self.activationIDs[id] == token {
+                    if !Task.isCancelled { self.failures[id] = error }
+                    self.installations.removeValue(forKey: id)
+                    self.activationIDs.removeValue(forKey: id)
+                }
                 throw error
             }
         }
     }
     func prepareInstallation(for extensionID: ExtensionID) async throws {
-        guard let registration = registrations.values.first(where: { $0.extensionID == extensionID }),
-              instances[registration.command.id] == nil else { return }
-        if installations[registration.command.id] == nil { beginInstallation(registration) }
-        if let task = installations[registration.command.id] { try await task.value }
-        else if let error = failures[registration.command.id] { throw error }
+        let commands = registrations.values.filter { $0.extensionID == extensionID }.map { $0.command.id }.sorted()
+        for command in commands { try await prepareInstallation(command: command) }
     }
-    func contains(_ id: ExtensionCommandID) -> Bool { instances[id] != nil || failures[id] != nil }
+    func prepareInstallation(command id: ExtensionCommandID) async throws {
+        guard instances[id] == nil else { return }
+        guard let registration = registrations[id] else { throw CancellationError() }
+        if installations[id] == nil { beginInstallation(registration) }
+        if let task = installations[id] { try await task.value }
+    }
+    func contains(_ id: ExtensionCommandID) -> Bool { registrations[id] != nil }
     func show(_ id: ExtensionCommandID, in split: NSSplitView, onClose: @escaping () -> Void, preparePaste: @escaping () -> ((String) -> Bool)?) throws {
-        if instances[id] == nil, let registration = registrations[id] {
-            if let error = failures[id] { throw error }
-            instances[id] = try NativePluginInstance(registration, root: storageRoot, cacheRoot: cacheRoot, language: language)
-            failures.removeValue(forKey: id)
-        }
+        if let failure = failures[id] { throw failure }
         guard let entry = instances[id] else { throw CocoaError(.executableNotLoadable) }
         close()
         let view = try entry.makeView()

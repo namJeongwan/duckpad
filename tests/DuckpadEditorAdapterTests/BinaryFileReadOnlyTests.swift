@@ -113,6 +113,7 @@ struct BinaryFileReadOnlyTests {
         #expect(restoredEditor.activeScintillaView?.caretUTF8Position == UInt(contents.count - 2))
 
         let controller = DuckpadWindowController(workspace: restoredWorkspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
             editorAdapter: restoredEditor, editorView: restoredEditor.view,
             fileUseCase: FileDocumentUseCase(workspace: restoredWorkspace, editor: restoredEditor,
                 store: LocalTextFileStore()), automaticallyStarts: false)

@@ -1,3 +1,4 @@
+import DuckpadInfrastructure
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -1101,6 +1102,7 @@ private func makeEditorGroupController(
         : FileDocumentUseCase(workspace: workspace, editor: router, store: EditorGroupFileStore())
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: router,
         editorView: NSView(),
         secondaryEditorView: NSView(),

@@ -95,7 +95,7 @@ import Testing
 
     @Test func projectMenusUseAnApplicationLifetimeTarget() throws {
         let target = DuckpadAppInfoController(appInfo: .init(version: "0.2.0", build: "5"), loadRelease: { nil })
-        let document = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()), automaticallyStarts: false)
+        let document = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()), previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
         let menu = DuckpadMainMenuFactory.make(target: document, projectTarget: target)
         defer { document.close() }
         let app = try #require(menu.items.first?.submenu)

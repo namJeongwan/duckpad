@@ -159,6 +159,7 @@ private final class BlockingWorkspacePanel: FilePanelPresenting {
     let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         filePanels: panel,
         workspaceBrowserUseCase: browser,
         automaticallyStarts: false
@@ -190,6 +191,7 @@ private final class BlockingWorkspacePanel: FilePanelPresenting {
     let coordinator = ApplicationTerminationCoordinator()
     var controller: DuckpadWindowController? = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         filePanels: panel,
         terminationCoordinator: coordinator,
         workspaceBrowserUseCase: browser,

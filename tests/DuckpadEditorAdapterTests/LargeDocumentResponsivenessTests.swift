@@ -25,7 +25,7 @@ struct LargeDocumentResponsivenessTests {
         let files = FileDocumentUseCase(workspace: workspace, editor: editor,
             store: LocalTextFileStore(bookmarkArchiveURL: root.appendingPathComponent("bookmarks.json")))
         let controller = DuckpadWindowController(
-            workspace: workspace, editorAdapter: editor, editorView: editor.view,
+            workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: editor.view,
             fileUseCase: files, automaticallyStarts: false
         )
         defer { controller.close(); editor.invalidate() }
@@ -141,7 +141,7 @@ struct LargeDocumentResponsivenessTests {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let editor = ScintillaEditorAdapter()
         let controller = DuckpadWindowController(
-            workspace: workspace, editorAdapter: editor, editorView: editor.view,
+            workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: editor.view,
             secondaryEditorView: editor.secondaryGroupView,
             additionalEditorViews: editor.additionalEditorGroupViews,
             editorGroupRouter: editor, automaticallyStarts: false

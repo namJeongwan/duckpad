@@ -40,7 +40,7 @@ enum FormattingBenchmark {
         let formatting = DocumentFormattingUseCase(workspace: workspace, editor: editor, formatter: engine)
         let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: LocalTextFileStore(bookmarkArchiveURL: root.appendingPathComponent("access.json")))
         files.formattingUseCase = formatting
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor, editorView: editor.view,
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: LocalMarkdownImageAccess(), editorAdapter: editor, editorView: editor.view,
             fileUseCase: files, formattingUseCase: formatting)
         defer { controller.close(); editor.invalidate() }
         await controller.waitForStartup()

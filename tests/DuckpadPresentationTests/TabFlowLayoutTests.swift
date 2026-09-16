@@ -265,7 +265,7 @@ private func makeAndCloseController(
 ) -> (WeakBox<DuckpadWindowController>, WeakBox<NSWindow>) {
     var result: (WeakBox<DuckpadWindowController>, WeakBox<NSWindow>)!
     autoreleasepool {
-        let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
         result = (WeakBox(controller), WeakBox(controller.window))
         controller.close()
     }
@@ -1099,6 +1099,7 @@ struct AppKitHostedTests {
     )
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: NSView(frame: .zero),
         languageUseCase: service,
@@ -1165,6 +1166,7 @@ struct AppKitHostedTests {
     )
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: NSView(frame: .zero),
         languageUseCase: service,
@@ -1201,7 +1203,7 @@ struct AppKitHostedTests {
     _ = NSApplication.shared
     let applicationTarget = ApplicationMenuTargetSpy()
     let controller = DuckpadWindowController(
-        workspace: ScratchWorkspaceUseCase(store: PresentationStore()),
+        workspace: ScratchWorkspaceUseCase(store: PresentationStore()), previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         automaticallyStarts: false
     )
     let menu = DuckpadMainMenuFactory.make(
@@ -1234,6 +1236,7 @@ struct AppKitHostedTests {
     let presenter = ErrorPresenterSpy()
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         errorPresenter: presenter,
         automaticallyStarts: false
     )
@@ -1291,6 +1294,7 @@ func blockCommentMenuIsAccessibleUniqueAndPaletteDiscoverable() async throws {
     )
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: NSView(),
         languageUseCase: service,
@@ -1338,6 +1342,7 @@ func blockCommentValidationRequiresReadyWorkspaceAndEditorCapability() async thr
     )
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: NSView(),
         languageUseCase: service,
@@ -1375,6 +1380,7 @@ func blockCommentCommandFocusesEditorOnlyAfterAcceptedMutation() async throws {
     )
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: NSView(),
         languageUseCase: service,
@@ -1404,7 +1410,7 @@ func blockCommentCommandFocusesEditorOnlyAfterAcceptedMutation() async throws {
 func everyCoreShortcutIdentityIsUnique() {
     _ = NSApplication.shared
     let controller = DuckpadWindowController(
-        workspace: ScratchWorkspaceUseCase(store: PresentationStore()),
+        workspace: ScratchWorkspaceUseCase(store: PresentationStore()), previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         automaticallyStarts: false
     )
     defer { controller.close() }
@@ -1433,6 +1439,7 @@ func languageMenusUseBoundedAlphabetHierarchyWithoutLosingDefinitions() throws {
     )
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: NSView(),
         languageUseCase: service,
@@ -1494,6 +1501,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     )
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: NSView(frame: .zero),
         languageUseCase: service,
@@ -1513,7 +1521,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 @Test @MainActor func encodingStatusMenuSeparatesReopeningFromSaving() {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     let menu = DuckpadMainMenuFactory.makeFileFormatStatusMenu(target: controller)
     #expect(menu.items.map(\.title) == ["Open or Reopen Using Encoding", "Convert and Save Encoding"])
@@ -1524,7 +1532,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 @Test @MainActor func mainMenuPublishesNativeTabSelectorsAndExactShortcuts() async {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     controller.start()
     await controller.waitForStartup()
@@ -1856,7 +1864,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 @Test @MainActor func openRecentMenuUsesApplicationLifetimeTargetAndDisambiguatesNames() {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     let target = ApplicationMenuTargetSpy()
     let first = URL(fileURLWithPath: "/tmp/one/shared.txt")
@@ -1890,6 +1898,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let intelligence = DocumentIntelligenceUseCase(editor: editor, maximumDocumentBytes: 4_096)
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: NSView(frame: .zero),
         documentIntelligenceUseCase: intelligence,
@@ -1949,7 +1958,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     _ = restored.addUntitled()
     let store = PresentationStore(session: restored)
     let workspace = ScratchWorkspaceUseCase(store: store)
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     controller.start()
     await controller.waitForStartup()
@@ -1980,7 +1989,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let admittedClose = restored.addUntitled()
     _ = restored.addUntitled()
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore(session: restored))
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     controller.start()
     await controller.waitForStartup()
@@ -2001,6 +2010,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore(session: restored))
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         dirtyDecisionPresenter: FixedDirtyDecisionPresenter(.cancel),
         automaticallyStarts: false
     )
@@ -2025,7 +2035,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 
 @Test @MainActor func mainMenuBulkCloseRoutesStableScopeThroughSharedCoordinator() async {
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     controller.start()
     await controller.waitForStartup()
@@ -2051,6 +2061,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let presenter = NavigationPresenterSpy()
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         navigationPresenter: presenter,
         automaticallyStarts: false
     )
@@ -2075,7 +2086,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 
 @Test @MainActor func newScratchShortcutActionAddsAndActivatesUntitledTab() async {
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     controller.start()
     await controller.waitForStartup()
@@ -3836,7 +3847,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     for _ in 0..<50 { session.addUntitled() }
     let store = PresentationStore(session: session)
     let workspace = ScratchWorkspaceUseCase(store: store)
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     controller.start()
     await controller.waitForStartup()
@@ -3866,6 +3877,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let presenter = ErrorPresenterSpy()
     var loadController: DuckpadWindowController? = DuckpadWindowController(
         workspace: loadWorkspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         errorPresenter: presenter,
         automaticallyStarts: false
     )
@@ -3882,6 +3894,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let operationPresenter = ErrorPresenterSpy()
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         errorPresenter: operationPresenter,
         automaticallyStarts: false
     )
@@ -3925,6 +3938,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let presenter = ErrorPresenterSpy()
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         errorPresenter: presenter,
         automaticallyStarts: false
     )
@@ -3950,7 +3964,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     restored.addUntitled()
     let store = DelayedPresentationStore(session: restored)
     let workspace = ScratchWorkspaceUseCase(store: store)
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     controller.start()
     await store.waitUntilEntered()
     #expect(workspace.snapshot().startup == .restoring)
@@ -3981,7 +3995,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 @Test @MainActor func compactChromeCollapsesEmptyBannerAndKeepsStatusOutsideEditor() async {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     controller.start()
     await controller.waitForStartup()
@@ -4001,7 +4015,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 @Test @MainActor func windowHostsOneCommandBarAboveTheEntireEditorGroupWorkspace() throws {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: PresentationStore())
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     let menu = DuckpadMainMenuFactory.make(target: controller)
     let fileMenu = try #require(menu.items.first { $0.submenu?.title == "File" }?.submenu)
@@ -4026,7 +4040,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     for _ in 0..<500 { session.addUntitled() }
     let store = PresentationStore(session: session)
     let workspace = ScratchWorkspaceUseCase(store: store)
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     controller.start()
     await controller.waitForStartup()
     let before = controller.tabStrip.updateMetrics
@@ -4058,7 +4072,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 @Test @MainActor func terminationJoinsAcceptedUndoCloseBeforeApproval() async {
     let store = PresentationStore()
     let workspace = ScratchWorkspaceUseCase(store: store)
-    let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     controller.start()
     await controller.waitForStartup()
@@ -4152,7 +4166,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 }
 
 @Test @MainActor func recentFilePreferencesLimitAndFormatWithoutLosingTargets() {
-    let controller = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: PresentationStore()), automaticallyStarts: false)
+    let controller = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: PresentationStore()), previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     let urls = (0..<15).map { URL(fileURLWithPath: "/tmp/folder\($0)/same.txt") }
     let settings = AppSettings(recentFileLimit: 5, recentFilePathMode: 1)
@@ -4169,7 +4183,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
 }
 
 @Test @MainActor func findPreferencesSeedSelectionAndPreserveQueryWhenDisabledOrOversized() async throws {
-    let controller = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: PresentationStore()))
+    let controller = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: PresentationStore()), previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess())
     defer { controller.close() }
     await controller.waitForStartup()
     let editor = controller.editor.textView

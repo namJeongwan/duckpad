@@ -11,7 +11,7 @@ public actor LocalExtensionServiceStorage: ExtensionServiceStorage {
     public init(root: URL) { self.root = root }
     public func load(_ identity: ExtensionServiceRegistration) throws -> Data {
         let directory = try directory(identity)
-        let fd = open(directory.appendingPathComponent("state.bin").path, O_RDONLY | O_NOFOLLOW)
+        let fd = open(directory.appendingPathComponent("state.bin").path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         if fd < 0 {
             if errno == ENOENT { return Data() }
             throw ExtensionFailure.hostUnavailable("plugin state could not be opened")

@@ -121,7 +121,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         extensionPolicy = LocalExtensionPreferenceStore(root: policyRoot)
         let serviceRoot = extensionsRoot.deletingLastPathComponent().appendingPathComponent("PluginData", isDirectory: true)
         extensionServiceHost = ExtensionListServiceHost(storage: LocalExtensionServiceStorage(root: serviceRoot), nativeStorageRoot: serviceRoot,
-            nativePackageRoot: ManagedNativePackageStore.appRoot(), prepareNativePackage: { files in try await NativeInstallerClient().install(files: files) })
+            nativePackageRoot: ManagedNativePackageStore.appRoot(), nativeVerifier: LocalNativePluginInstallationVerifier(), prepareNativePackage: { files in try await NativeInstallerClient().install(files: files) })
         if Bundle.main.bundleURL.pathExtension == "app" {
             extensionTransport = XPCPluginHostTransport()
         } else {
@@ -833,6 +833,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         let panels = NativeFilePanelAdapter()
         let controller = DuckpadWindowController(
             workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(),
+            markdownImageAccess: LocalMarkdownImageAccess(),
             editorAdapter: editor,
             editorView: editor.view,
             secondaryEditorView: editor.secondaryGroupView,

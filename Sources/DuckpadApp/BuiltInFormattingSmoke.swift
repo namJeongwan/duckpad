@@ -21,7 +21,7 @@ enum BuiltInFormattingSmoke {
             let files = FileDocumentUseCase(workspace: workspace, editor: editor,
                 store: LocalTextFileStore(bookmarkArchiveURL: root.appendingPathComponent("access.json")))
             files.formattingUseCase = formatting
-            let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor, editorView: editor.view,
+            let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: LocalMarkdownImageAccess(), editorAdapter: editor, editorView: editor.view,
                 fileUseCase: files, formattingUseCase: formatting)
             await controller.waitForStartup()
             controller.showAndFocus()

@@ -78,10 +78,10 @@ private actor ListStorageFake: ExtensionServiceStorage {
     @Test @MainActor func closeMenuDismissesFocusedPluginButKeepsEditorCloseBehavior() async throws {
         _ = NSApplication.shared
         let clipboard = NSPasteboard.withUniqueName()
-        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard)
+        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard, nativeVerifier: LocalNativePluginInstallationVerifier())
         let invoker = ListInvokerFake(); host.synchronize(invoker)
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
-        let controller = DuckpadWindowController(workspace: workspace, automaticallyStarts: false)
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
         controller.configureExtensionServices(host)
         defer { host.unregister(invoker); controller.close(); clipboard.clearContents() }
         controller.start(); await controller.waitForStartup()
@@ -121,7 +121,7 @@ private actor ListStorageFake: ExtensionServiceStorage {
         _ = NSApplication.shared
         let clipboard = NSPasteboard.withUniqueName()
         defer { clipboard.clearContents() }
-        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard)
+        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard, nativeVerifier: LocalNativePluginInstallationVerifier())
         let first = ListInvokerFake(), second = ListInvokerFake()
         host.synchronize(first); host.synchronize(second); host.unregister(second)
         clipboard.clearContents(); clipboard.setString("after second window closed", forType: .string)
@@ -141,7 +141,7 @@ private actor ListStorageFake: ExtensionServiceStorage {
     @Test @MainActor func delayedSelectionCannotPasteIntoReopenedPanelOrAfterClose() async {
         _ = NSApplication.shared
         let clipboard = NSPasteboard.withUniqueName()
-        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard)
+        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard, nativeVerifier: LocalNativePluginInstallationVerifier())
         let invoker = ListInvokerFake(); host.synchronize(invoker)
         defer { host.panel.close(); host.unregister(invoker); clipboard.clearContents() }
         let (window, split) = dock()
@@ -166,7 +166,7 @@ private actor ListStorageFake: ExtensionServiceStorage {
     @Test @MainActor func sidebarStaysDockedAfterRepeatedPasteAndMovesBetweenWindows() async {
         _ = NSApplication.shared
         let clipboard = NSPasteboard.withUniqueName()
-        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard)
+        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard, nativeVerifier: LocalNativePluginInstallationVerifier())
         let invoker = ListInvokerFake(); host.synchronize(invoker)
         let (first, left) = dock(), (second, right) = dock()
         defer { host.panel.close(); host.unregister(invoker); first.close(); second.close(); clipboard.clearContents() }
@@ -218,7 +218,7 @@ private actor ListStorageFake: ExtensionServiceStorage {
     @Test @MainActor func sequentialPasteAdvancesStopsAndIgnoresItsOwnClipboardWrite() async throws {
         _ = NSApplication.shared
         let clipboard = NSPasteboard.withUniqueName()
-        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard)
+        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard, nativeVerifier: LocalNativePluginInstallationVerifier())
         let invoker = ListInvokerFake(); invoker.items = [("one", "first"), ("two", "second"), ("three", "third")]
         host.synchronize(invoker)
         let (window, split) = dock()
@@ -269,7 +269,7 @@ private actor ListStorageFake: ExtensionServiceStorage {
         _ = NSApplication.shared
         let clipboard = NSPasteboard.withUniqueName()
         clipboard.setString("untouched clipboard", forType: .string)
-        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard)
+        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard, nativeVerifier: LocalNativePluginInstallationVerifier())
         let invoker = ListInvokerFake()
         let fullText = "fn main() {\n    println!(\"안녕하세요\");\n}\n" + String(repeating: "long text ", count: 100)
         invoker.items = [("one", fullText), ("two", "second item\n    indentation")]

@@ -1,3 +1,4 @@
+import DuckpadInfrastructure
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -103,6 +104,7 @@ private func makeCompareController() async -> (DuckpadWindowController, ScratchW
     let presenter = ComparePresenterSpy()
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
         editorView: editor.scrollView,
         openDocumentComparePresenter: presenter,
@@ -124,6 +126,7 @@ private func makeCompareController() async -> (DuckpadWindowController, ScratchW
     let presenter = ComparePresenterSpy()
     let controller = DuckpadWindowController(
         workspace: workspace,
+            previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         openDocumentComparePresenter: presenter,
         automaticallyStarts: false
     )

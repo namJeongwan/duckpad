@@ -1,3 +1,4 @@
+import DuckpadInfrastructure
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -13,7 +14,7 @@ struct MarkdownPreviewIntegrationTests {
         _ = NSApplication.shared
         let workspace = ScratchWorkspaceUseCase(store: PreviewIntegrationStore())
         let adapter = ScintillaEditorAdapter()
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: adapter,
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: adapter,
                                                   editorView: adapter.view, automaticallyStarts: false)
         defer { controller.close(); adapter.invalidate() }
         controller.start()

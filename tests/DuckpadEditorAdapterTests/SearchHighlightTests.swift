@@ -13,7 +13,7 @@ struct SearchHighlightTests {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let adapter = ScintillaEditorAdapter()
         let search = SearchWorkspaceUseCase(workspace: workspace, editor: adapter, regexEngine: ICURegexEngine())
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: adapter,
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: adapter,
                                                 editorView: adapter.view, searchUseCase: search,
                                                 automaticallyStarts: false)
         controller.start()

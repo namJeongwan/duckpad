@@ -11,7 +11,7 @@ struct ChromeLanguageRefreshTests {
     @Test func languagePreferencesRefreshExistingChromeWithoutReplacingTheEditor() async throws {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let editor = TextViewEditorAdapter()
-        let controller = DuckpadWindowController(workspace: workspace, editorAdapter: editor,
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor,
             editorView: editor.scrollView, automaticallyStarts: false)
         defer { controller.close() }
         _ = await workspace.start()
