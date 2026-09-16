@@ -368,6 +368,16 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         bottomSeparator.frame = NSRect(x: 0, y: 0, width: view.bounds.width, height: thickness)
     }
 
+    override var draggingImageComponents: [NSDraggingImageComponent] {
+        guard let tab = configuredTab else { return super.draggingImageComponents }
+        let image = TabDragPreview.image(title: tab.title, icon: fileIconImage.image,
+                                         isDirty: tab.isDirty, appearance: view.effectiveAppearance)
+        let component = NSDraggingImageComponent(key: .icon)
+        component.contents = image
+        component.frame = NSRect(origin: .zero, size: image.size)
+        return [component]
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
         if let tabID = configuredTab?.id { onHoverChanged?(tabID, false) }
@@ -477,16 +487,73 @@ private final class DuckpadTabItem: NSCollectionViewItem {
 
 @MainActor
 final class TabDocumentCollectionView: NSCollectionView {
+    override func beginDraggingSession(with items: [NSDraggingItem], event: NSEvent,
+                                       source: any NSDraggingSource) -> NSDraggingSession {
+        // Set the initial image before AppKit creates the drag window. Changing
+        // its frame in willBegin animates it from the original (often wide) tab.
+        TabDragPreview.prepare(items, at: convert(event.locationInWindow, from: nil))
+        showDragSource()
+        return super.beginDraggingSession(with: items, event: event, source: source)
+    }
+
+    private var dragSourceImage: CGImage?
+    private var dragSourceFrame: NSRect = .zero
+    private let dragSource = CALayer()
+
+    // Capture before AppKit hides its source item. A separate layer preserves
+    // the original title, icon and dirty state without changing native drag
+    // visibility or creating a second accessible/interactive tab.
+    func prepareDragSource(_ source: NSView) {
+        clearDragSource()
+        source.layoutSubtreeIfNeeded()
+        guard let bitmap = source.bitmapImageRepForCachingDisplay(in: source.bounds) else { return }
+        source.cacheDisplay(in: source.bounds, to: bitmap)
+        dragSourceImage = bitmap.cgImage
+        dragSourceFrame = convert(source.bounds, from: source)
+    }
+
+    func showDragSource() {
+        guard let dragSourceImage else { return }
+        wantsLayer = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        dragSource.name = "duckpad.tab.drag-source"
+        dragSource.zPosition = 98
+        dragSource.frame = dragSourceFrame
+        dragSource.contents = dragSourceImage
+        dragSource.contentsScale = window?.backingScaleFactor ?? 2
+        dragSource.borderWidth = 1
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            dragSource.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.45).cgColor
+        }
+        layer?.addSublayer(dragSource)
+        CATransaction.commit()
+    }
+
+    func clearDragSource() {
+        dragSource.removeFromSuperlayer()
+        dragSource.contents = nil
+        dragSourceImage = nil
+    }
+
     private var requiredDocumentSize = NSSize(width: 1, height: 1)
     private let insertionMarker = CALayer()
+    private let dropTarget = CALayer()
 
-    func showInsertionMarker(_ rect: NSRect?) {
-        guard let rect else { insertionMarker.isHidden = true; return }
+    func showInsertionMarker(_ rect: NSRect?, target: NSRect? = nil) {
+        guard let rect else {
+            insertionMarker.isHidden = true
+            dropTarget.isHidden = true
+            return
+        }
         wantsLayer = true
         if insertionMarker.superlayer == nil {
             insertionMarker.name = "duckpad.tab.drop-insertion"
             insertionMarker.zPosition = 100
-            insertionMarker.cornerRadius = 1.5
+            insertionMarker.cornerRadius = 1
+            dropTarget.name = "duckpad.tab.drop-target"
+            dropTarget.zPosition = 99
+            layer?.addSublayer(dropTarget)
             layer?.addSublayer(insertionMarker)
         }
         CATransaction.begin()
@@ -494,8 +561,11 @@ final class TabDocumentCollectionView: NSCollectionView {
         insertionMarker.frame = rect
         effectiveAppearance.performAsCurrentDrawingAppearance {
             insertionMarker.backgroundColor = NSColor.controlAccentColor.cgColor
+            dropTarget.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.16).cgColor
         }
         insertionMarker.isHidden = false
+        dropTarget.frame = target ?? .zero
+        dropTarget.isHidden = target == nil
         CATransaction.commit()
     }
 
@@ -676,6 +746,11 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         hostedCollectionView.allowsMultipleSelection = false
         hostedCollectionView.allowsEmptySelection = false
         hostedCollectionView.backgroundColors = [.clear]
+        // Keep native drop routing but replace AppKit's gap artwork: the accent
+        // layers already show the exact insertion edge and hovered target.
+        hostedCollectionView.register(NSView.self,
+                                      forSupplementaryViewOfKind: NSCollectionView.elementKindInterItemGapIndicator,
+                                      withIdentifier: NSUserInterfaceItemIdentifier("DuckpadTabDropGap"))
         hostedCollectionView.registerForDraggedTypes([Self.tabPasteboardType])
         hostedCollectionView.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
         hostedCollectionView.setAccessibilityIdentifier("duckpad.tab.collection")
@@ -1021,6 +1096,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
     }
 
     func tearDownHostedViews() {
+        hostedCollectionView.clearDragSource()
         hostedCollectionView.showInsertionMarker(nil)
         hoveredTabID = nil
         hoveredTabIndex = nil
@@ -1128,9 +1204,22 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
 
     public func collectionView(
         _ collectionView: NSCollectionView,
+        viewForSupplementaryElementOfKind kind: NSCollectionView.SupplementaryElementKind,
+        at indexPath: IndexPath
+    ) -> NSView {
+        collectionView.makeSupplementaryView(ofKind: kind,
+                                            withIdentifier: NSUserInterfaceItemIdentifier("DuckpadTabDropGap"),
+                                            for: indexPath)
+    }
+
+    public func collectionView(
+        _ collectionView: NSCollectionView,
         pasteboardWriterForItemAt indexPath: IndexPath
     ) -> (any NSPasteboardWriting)? {
         guard interactionsEnabled, appPreferences.tabDragEnabled, tabs.indices.contains(indexPath.item) else { return nil }
+        if let source = collectionView.item(at: indexPath)?.view {
+            hostedCollectionView.prepareDragSource(source)
+        }
         let item = NSPasteboardItem()
         let payload = EditorGroupDragPayload(
             tabID: tabs[indexPath.item].id,
@@ -1138,6 +1227,16 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         )
         item.setData(payload.encodedData(), forType: Self.tabPasteboardType)
         return item
+    }
+
+    public func collectionView(
+        _ collectionView: NSCollectionView,
+        draggingSession session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        dragOperation operation: NSDragOperation
+    ) {
+        hostedCollectionView.showInsertionMarker(nil)
+        hostedCollectionView.clearDragSource()
     }
 
     public func collectionView(
@@ -1157,14 +1256,19 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         proposedDropIndexPath.pointee = NSIndexPath(forItem: index, inSection: 0)
         if payload.sourceGroup == editorGroupID {
             let allowed = tabs.contains(where: { $0.id == payload.tabID })
-            hostedCollectionView.showInsertionMarker(allowed ? insertion.marker : nil)
+            let sourceIndex = tabs.firstIndex { $0.id == payload.tabID }
+            let unchanged = sourceIndex.map {
+                TabDropDestination.finalIndex(sourceIndex: $0, insertionIndex: index, itemCount: tabs.count) == $0
+            } ?? false
+            hostedCollectionView.showInsertionMarker(allowed && !unchanged ? insertion.marker : nil,
+                                                      target: allowed && !unchanged ? insertion.target : nil)
             return allowed ? .move : []
         }
         let operation = EditorGroupDragPayload.dropOperation(
             optionPressed: NSEvent.modifierFlags.contains(.option)
         )
         let allowed = onValidateGroupDrop?(payload, index, operation) == true
-        hostedCollectionView.showInsertionMarker(allowed ? insertion.marker : nil)
+        hostedCollectionView.showInsertionMarker(allowed ? insertion.marker : nil, target: allowed ? insertion.target : nil)
         return allowed ? (operation == .copy ? .copy : .move) : []
     }
 

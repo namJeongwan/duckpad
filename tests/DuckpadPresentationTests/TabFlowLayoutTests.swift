@@ -4335,3 +4335,100 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
         #expect(eye.isHidden)
     }
 }
+
+@Test @MainActor func tabDropFeedbackFollowsHoveredRowAndClearsTogether() throws {
+    let tabs = makeTabs(count: 6, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 400, height: 240, tabs: tabs)
+    defer { strip.tearDownHostedViews(); window.contentView = nil; window.close() }
+    let layout = strip.flowLayout
+    for index in tabs.indices {
+        let frame = try #require(layout.layoutAttributesForItem(at: IndexPath(item: index, section: 0))).frame
+        for x in [frame.minX + 2, frame.maxX - 2] {
+            let insertion = layout.dropInsertion(at: NSPoint(x: x, y: frame.midY))
+            #expect(insertion.target == frame)
+            #expect(insertion.marker.midY == frame.midY)
+            let nativeTarget = try #require(layout.layoutAttributesForDropTarget(at: NSPoint(x: x, y: frame.midY)))
+            #expect(nativeTarget.isHidden)
+            #expect(nativeTarget.indexPath?.item == insertion.index)
+            #expect(nativeTarget.frame == insertion.marker)
+            strip.hostedCollectionView.showInsertionMarker(insertion.marker, target: insertion.target)
+            let layers = strip.hostedCollectionView.layer?.sublayers ?? []
+            let target = try #require(layers.first { $0.name == "duckpad.tab.drop-target" })
+            let marker = try #require(layers.first { $0.name == "duckpad.tab.drop-insertion" })
+            #expect(!target.isHidden && !marker.isHidden)
+            #expect(target.frame == frame)
+            #expect(marker.frame.width == 2)
+            strip.hostedCollectionView.showInsertionMarker(nil)
+            #expect(target.isHidden && marker.isHidden)
+        }
+    }
+}
+
+@Test @MainActor func tabDragPreviewExcludesActionsAndRowJustification() throws {
+    let tabs = makeTabs(count: 6, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 700, height: 240, tabs: tabs)
+    defer { strip.tearDownHostedViews(); window.contentView = nil; window.close() }
+    let item = try #require(strip.hostedCollectionView.item(at: IndexPath(item: 0, section: 0)))
+    let components = item.draggingImageComponents
+    #expect(components.count == 1)
+    let image = try #require(components.first?.contents as? NSImage)
+    #expect(image.size.height == 29)
+    #expect(image.tiffRepresentation != nil)
+    #expect(image.size.width < item.view.bounds.width)
+    let long = TabDragPreview.image(title: String(repeating: "long-file-name", count: 40), icon: nil,
+                                     isDirty: true, appearance: NSAppearance(named: .darkAqua)!)
+    #expect(long.size.width == 360)
+}
+
+@Test @MainActor func compactTabDragPreviewStaysAtPointerFromWideTabEdge() {
+    let pointer = NSPoint(x: 980, y: 45)
+    let frame = TabDragPreview.frame(imageSize: NSSize(width: 90, height: 29), at: pointer)
+    #expect(frame.contains(pointer))
+    #expect(pointer.x - frame.minX == 24)
+    #expect(frame.midY == pointer.y)
+    #expect(frame.width == 90)
+}
+
+@Test @MainActor func tabDragFrameIsPreparedBeforeTheNativeSessionStarts() throws {
+    let item = NSDraggingItem(pasteboardWriter: NSPasteboardItem())
+    let image = TabDragPreview.image(title: "notes.md", icon: nil, isDirty: false,
+                                     appearance: NSAppearance(named: .aqua)!)
+    item.setDraggingFrame(NSRect(x: 1400, y: 0, width: 900, height: 27), contents: image)
+    let pointer = NSPoint(x: 75, y: 40)
+    TabDragPreview.prepare([item], at: pointer)
+    #expect(item.draggingFrame.contains(pointer))
+    #expect(item.draggingFrame.size == image.size)
+    #expect(try #require(item.imageComponents?.first).frame.origin == .zero)
+}
+
+@Test @MainActor func draggedTabRemainsVisibleUntilDragEnds() throws {
+    let tabs = makeTabs(count: 12, activeIndex: 0)
+    let (window, _, strip) = hostStrip(width: 500, height: 320, tabs: tabs)
+    defer {
+        strip.tearDownHostedViews()
+        window.contentView = nil
+        window.close()
+    }
+    let collection = strip.hostedCollectionView
+    let path = IndexPath(item: 0, section: 0)
+    let source = try #require(collection.item(at: path)?.view)
+    let originalFrame = collection.convert(source.bounds, from: source)
+    #expect(strip.collectionView(collection, pasteboardWriterForItemAt: path) != nil)
+    collection.showDragSource()
+    let retained = try #require(collection.layer?.sublayers?.first { $0.name == "duckpad.tab.drag-source" })
+    #expect(retained.frame == originalFrame)
+    #expect(retained.contents != nil)
+    #expect(retained.opacity == 1)
+    #expect(retained.borderWidth == 1)
+    // Simulate native source hiding and leaving the strip for a split target.
+    source.isHidden = true
+    collection.showInsertionMarker(nil)
+    #expect(retained.superlayer === collection.layer)
+    #expect(retained.contents != nil)
+    collection.clearDragSource()
+    #expect(retained.superlayer == nil)
+    #expect(retained.contents == nil)
+    source.isHidden = false
+    collection.showDragSource()
+    #expect(retained.superlayer == nil)
+}

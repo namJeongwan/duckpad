@@ -48,6 +48,7 @@ let package = Package(
             sources: [
                 "bridge/DuckpadScintillaBridge.mm",
                 "bridge/DPScintillaBinaryDocument.mm",
+                "bridge/DPSearchOverviewView.mm",
                 "cocoa/InfoBar.mm",
                 "cocoa/PlatCocoa.mm",
                 "cocoa/ScintillaCocoa.mm",

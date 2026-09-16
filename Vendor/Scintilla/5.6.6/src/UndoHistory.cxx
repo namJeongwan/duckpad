@@ -285,7 +285,7 @@ const char *UndoHistory::AppendAction(ActionType at, Sci::Position position, con
 				coalesce = false;
 			} else if (at == ActionType::container || actions.types[targetAct].at == ActionType::container) {
 				;	// A coalescible containerAction
-			} else if (!TentativeActive() && now - lastEditTime >= std::chrono::milliseconds(300)) {
+			} else if (!TentativeActive() && now - lastEditTime >= std::chrono::milliseconds(1000)) {
 				// Duckpad: split idle typing/deletion without splitting explicit groups or IME composition.
 				coalesce = false;
 			} else if ((at != actions.types[targetAct].at)) { // } && (!actions.AtStart(targetAct))) {
