@@ -3,6 +3,7 @@ description: "Duckpad is a lightweight text and code editor for macOS, inspired 
 url: "https://namjeongwan.github.io"
 baseurl: "/duckpad"
 lang: en
+google_site_verification: "scHa8p9uG9QT56IrMbCLuIoSUaDheDRTeyvqw-y_ULU"
 markdown: kramdown
 exclude:
   - README.md

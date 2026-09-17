@@ -1,0 +1,18 @@
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": {{ '/' | absolute_url | append: '#duckpad' | jsonify }},
+  "name": "Duckpad",
+  "description": {{ t.home_description | jsonify }},
+  "url": {{ page.url | absolute_url | jsonify }},
+  "sameAs": "https://github.com/namJeongwan/duckpad",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS {{ site.data.release.minimum_macos }}+",
+  "softwareVersion": {{ site.data.release.version | jsonify }},
+  "downloadUrl": {{ site.data.release.dmg | jsonify }},
+  "image": {{ '/assets/duckpad.png' | absolute_url | jsonify }},
+  "screenshot": {{ '/assets/duckpad-screenshot.png' | absolute_url | jsonify }},
+  "inLanguage": {{ page.lang | jsonify }}
+}
+</script>

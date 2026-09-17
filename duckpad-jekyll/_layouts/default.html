@@ -7,6 +7,7 @@
 <html lang="{{ page.lang }}">
 <head>
   <meta charset="utf-8">
+  <meta name="google-site-verification" content="{{ site.google_site_verification | escape }}">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ t[title_key] | escape }}</title>
   <meta name="description" content="{{ description | escape }}">
@@ -22,6 +23,7 @@
   <meta property="og:url" content="{{ page.url | absolute_url }}">
   <meta property="og:image" content="{{ '/assets/duckpad-screenshot.png' | absolute_url }}">
   <meta name="twitter:card" content="summary_large_image">
+  {% if page.key == 'home' %}{% include application.jsonld %}{% endif %}
   <link rel="icon" type="image/png" href="{{ '/assets/duckpad.png' | relative_url }}">
   <style>{% include site.css %}</style>
 </head>
