@@ -35,6 +35,9 @@ for language in LANGUAGES:
         text = (OUTPUT / route.lstrip('/') / 'index.html').read_text()
         assert '{{' not in text and '{%' not in text and ':macos' not in text and ':version' not in text
         page = Page(text)
+        head = Page(text.split('</head>', 1)[0])
+        verification_tags = [a.get('content') for a in head.attrs('meta') if a.get('name') == 'google-site-verification']
+        assert verification_tags == ['scHa8p9uG9QT56IrMbCLuIoSUaDheDRTeyvqw-y_ULU'], f'{route}: missing or incorrect verification meta tag in head'
         assert page.attrs('html')[0]['lang'] == code
         assert len(page.attrs('h1')) == 1
         links = page.attrs('link')

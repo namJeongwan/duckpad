@@ -95,14 +95,18 @@ change app behavior, app version, signing, release files or the plugin API.
 ## Google Search Console
 
 Register the URL-prefix property `https://namjeongwan.github.io/duckpad/`.
-The HTML-file verification method uses `googled90414a55ce3575a.html` at that
-property's root. It is copied without a layout or content changes. Keep it
+Use the **HTML tag** verification method. The token in `_config.yml` is rendered
+inside the shared `<head>` on every language/page combination. Keep the tag
 published after verification so Google can continue checking ownership.
+
+The original HTML-file method also remains available at
+`/duckpad/googled90414a55ce3575a.html`; the file is copied without changes.
 
 After this change is merged and deployed:
 
-1. Confirm `https://namjeongwan.github.io/duckpad/googled90414a55ce3575a.html`
-   returns the downloaded file, then click **Verify** in Search Console.
+1. Confirm the verification meta tag is present in the homepage source at
+   `https://namjeongwan.github.io/duckpad/`, then click **Verify** under **HTML tag**
+   in Search Console.
 2. Submit `https://namjeongwan.github.io/duckpad/sitemap.xml` in **Sitemaps**.
 3. Use **URL inspection** to request indexing of the English and Korean homepages.
 
