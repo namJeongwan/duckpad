@@ -64,3 +64,33 @@ import Testing
     #expect(TextFileCodec.decodeForDisplay(bytes).encoding == .utf16LittleEndian)
     #expect(throws: TextFileCodecError.invalidUTF8) { try TextFileCodec.decode(Data([0x80])) }
 }
+
+@Test func checkpointSavePreservesUnicodeBOMAndAllLineEndingCombinations() throws {
+    let atoms = ["", "한🦆e\u{301}", "\r", "\n", "\r\n"]
+    for first in atoms {
+        for second in atoms {
+            for third in atoms {
+                let text = first + second + third
+                let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+                    .replacingOccurrences(of: "\r", with: "\n")
+                for ending in [LineEnding.none, .mixed, .lf, .cr, .crlf] {
+                    let expected: String
+                    switch ending {
+                    case .none, .mixed: expected = text
+                    case .lf: expected = normalized
+                    case .cr: expected = normalized.replacingOccurrences(of: "\n", with: "\r")
+                    case .crlf: expected = normalized.replacingOccurrences(of: "\n", with: "\r\n")
+                    }
+                    #expect(TextFileCodec.convert(text, to: ending) == expected)
+                    for encoding in [TextFileEncoding.utf8, .utf16LittleEndian, .utf16BigEndian] {
+                        for bom in [ByteOrderMark.absent, .present] {
+                            let actual = TextFileCodec.encodeUTF8(Data(text.utf8), encoding: encoding,
+                                byteOrderMark: bom, lineEnding: ending)
+                            #expect(actual == TextFileCodec.encode(expected, encoding: encoding, byteOrderMark: bom))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

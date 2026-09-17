@@ -107,3 +107,13 @@ private final class AppSettingsStoreFake: AppSettingsStore {
     let encoded = try JSONEncoder().encode(AppSettings(editorFontSize: 18))
     #expect(try JSONDecoder().decode(AppSettings.self, from: encoded).editorFontSize == 18)
 }
+
+@Test @MainActor func editorSpacingBoundsApplyToSavedAndDecodedSettings() async throws {
+    let useCase = AppSettingsUseCase(store: AppSettingsStoreFake())
+    let invalid = AppSettings(editorLeftPadding: -1, editorRightPadding: .max, editorLineSpacing: .max)
+    let expected = AppSettings(editorLeftPadding: 0, editorRightPadding: 32, editorLineSpacing: 20)
+    #expect(await useCase.update(invalid) == .saved(expected))
+    #expect(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(invalid)) == expected)
+    _ = await useCase.update(AppSettings(editorLeftPadding: .max, editorRightPadding: -1, editorLineSpacing: -1))
+    #expect(useCase.state.settings == AppSettings(editorLeftPadding: 32, editorRightPadding: 0, editorLineSpacing: 0))
+}

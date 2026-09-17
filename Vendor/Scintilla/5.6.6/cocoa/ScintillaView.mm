@@ -503,6 +503,22 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 //--------------------------------------------------------------------------------------------------
 
+// Input methods may commit marked text and then dispatch insertNewline: for the
+// same Return key. keyDown: has already deferred that key to interpretKeyEvents:,
+// so handle the Cocoa command explicitly rather than losing the line break.
+- (void) insertNewline: (id) sender {
+#pragma unused(sender)
+	[self unmarkText];
+	id delegate = mOwner.delegate;
+	if ([delegate respondsToSelector: @selector(scintillaWillInsertTextFromSource:)])
+		[delegate scintillaWillInsertTextFromSource: SCITextInputSourceDirectNewline];
+	[mOwner message: SCI_BEGINUNDOACTION];
+	[mOwner message: SCI_NEWLINE];
+	[mOwner message: SCI_ENDUNDOACTION];
+	if ([delegate respondsToSelector: @selector(scintillaDidInsertText)])
+		[delegate scintillaDidInsertText];
+}
+
 - (void) doCommandBySelector: (SEL) selector {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"

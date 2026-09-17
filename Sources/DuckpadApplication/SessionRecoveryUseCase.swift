@@ -14,6 +14,7 @@ public final class SessionRecoveryUseCase {
     private var changeSerial: UInt64 = 0
     private var pendingToken: UUID?
     private var pendingTask: Task<Void, Never>?
+    private var durableState: (serial: UInt64, session: ScratchSession, views: [BufferID: EditorViewState])?
     private var isRestoring = false
     private var recoveryOperationBusy = false
     private var recoveryOperationWaiters: [CheckedContinuation<Void, Never>] = []
@@ -103,7 +104,7 @@ public final class SessionRecoveryUseCase {
     @discardableResult
     public func flush() async -> RecoveryOutcome {
         pendingToken = nil
-        return await commit(session: workspace.recoverySession())
+        return await commit()
     }
 
     /// Final lifecycle barrier. Input is disabled before waiting for an older
@@ -116,18 +117,33 @@ public final class SessionRecoveryUseCase {
         defer { editor.setInputEnabled(workspace.snapshot().startup == .ready) }
         while true {
             let serial = changeSerial
-            let outcome = await commit(session: workspace.recoverySession())
+            let outcome = await commit()
             guard case .saved = outcome else { return outcome }
             if serial == changeSerial { return outcome }
         }
     }
 
-    private func commit(session: ScratchSession) async -> RecoveryOutcome {
+    private func commit(session candidate: ScratchSession? = nil) async -> RecoveryOutcome {
         await acquireRecoveryOperation()
         defer { releaseRecoveryOperation() }
+        // Ordinary flushes must take metadata after admission: an older write
+        // can have suspended while newer edits were accepted. Close transactions
+        // instead supply their explicit candidate session.
+        let session = candidate ?? workspace.recoverySession()
         let capturedSerial = changeSerial
         let archive: RecoveryArchive
-        do { archive = try await capture(session: session) }
+        do {
+            let captures = try capture(session: session)
+            let views = captures.mapValues(\.viewState)
+            if let durableState, durableState.serial == capturedSerial,
+               durableState.session == session, durableState.views == views {
+                return .saved(generation)
+            }
+            let buffers = try await Task.detached(priority: .utility) {
+                try captures.mapValues { try $0.materializedSnapshot() }
+            }.value
+            archive = RecoveryArchive(session: session, buffers: buffers)
+        }
         catch let error as SessionStoreError {
             onFailure?(error)
             return .failed(error)
@@ -147,8 +163,10 @@ public final class SessionRecoveryUseCase {
             switch result {
             case .committed:
                 generation = next
+                durableState = (capturedSerial, session, archive.buffers.mapValues(\.viewState))
             case .superseded(let durable):
                 generation = max(generation, durable)
+                durableState = nil
             }
             for snapshot in archive.buffers.values {
                 editor.acknowledgeRecoverySnapshot(snapshot)
@@ -174,6 +192,7 @@ public final class SessionRecoveryUseCase {
         do {
             try await store.reset()
             generation = PersistenceGeneration(rawValue: 0)
+            durableState = nil
             return .saved(generation)
         } catch let error {
             onFailure?(error)
@@ -204,7 +223,7 @@ public final class SessionRecoveryUseCase {
         }
     }
 
-    private func capture(session: ScratchSession) async throws -> RecoveryArchive {
+    private func capture(session: ScratchSession) throws -> [BufferID: EditorRecoveryCapture] {
         var captures: [BufferID: EditorRecoveryCapture] = [:]
         for metadata in session.buffers.values {
             if let capture = editor.recoveryCapture(for: metadata.id) {
@@ -223,14 +242,7 @@ public final class SessionRecoveryUseCase {
                 throw SessionStoreError.corrupt("missing editor recovery buffer \(metadata.id.rawValue)")
             }
         }
-        let buffers = try await Task.detached(priority: .utility) {
-            var materialized: [BufferID: EditorRecoverySnapshot] = [:]
-            for (id, capture) in captures {
-                materialized[id] = try capture.materializedSnapshot()
-            }
-            return materialized
-        }.value
-        return RecoveryArchive(session: session, buffers: buffers)
+        return captures
     }
 
     private func acquireRecoveryOperation() async {

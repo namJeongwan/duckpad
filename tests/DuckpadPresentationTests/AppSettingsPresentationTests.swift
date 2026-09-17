@@ -477,3 +477,111 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
     #expect(field.stringValue == "24.5")
     #expect(controller.editorFontSizeStepper.doubleValue == 24.5)
 }
+
+@Test @MainActor func editorSpacingControlsSaveAndRollBackOnFailure() async throws {
+    _ = NSApplication.shared
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var saved = AppSettings(editorFontSize: 18, editorLeftPadding: 3, editorRightPadding: 8, editorLineSpacing: 4)
+    var fail = false
+    var task: Task<Void, Never>?
+    controller.onUpdateTaskStarted = { task = $0 }
+    controller.configure(settings: saved) { value in
+        if fail { return .failed(.writeFailed("fixture")) }
+        saved = value
+        return .saved(value)
+    }
+    controller.selectCategory("Margins/Border/Edge")
+    let root = try #require(controller.window?.contentView)
+    for (identifier, value) in [("editor-left-padding", 6), ("editor-right-padding", 12), ("editor-line-spacing", 7)] {
+        let field = try #require(findView(in: root, identifier: "duckpad.settings." + identifier) as? NSTextField)
+        field.stringValue = String(value)
+        #expect(NSApp.sendAction(try #require(field.action), to: field.target, from: field))
+        await task?.value
+    }
+    #expect(saved.editorLeftPadding == 6 && saved.editorRightPadding == 12 && saved.editorLineSpacing == 7)
+    #expect(saved.editorFontSize == 18)
+    fail = true
+    let left = try #require(findView(in: root, identifier: "duckpad.settings.editor-left-padding") as? NSTextField)
+    left.stringValue = "0"
+    #expect(NSApp.sendAction(try #require(left.action), to: left.target, from: left))
+    await task?.value
+    #expect(left.stringValue == "6")
+    #expect(saved.editorLeftPadding == 6)
+}
+
+@Test @MainActor func spacingNumberInputPreservesTypingAndStepperAcrossSlowSaves() async throws {
+    _ = NSApplication.shared
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    let gate = SettingsSaveGate()
+    var saved: [AppSettings] = []
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { value in
+        await gate.wait()
+        saved.append(value)
+        return .saved(value)
+    }
+    controller.onUpdateTaskStarted = { task = $0 }
+    controller.selectCategory("Margins/Border/Edge")
+    let root = try #require(controller.window?.contentView)
+    let field = try #require(findView(in: root, identifier: "duckpad.settings.editor-left-padding") as? NSTextField)
+    let stepper = try #require(findView(in: root, identifier: "duckpad.settings.editor-left-padding-stepper") as? NSStepper)
+    #expect(controller.window?.makeFirstResponder(field) == true)
+    let editor = try #require(field.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    editor.insertText("1", replacementRange: editor.selectedRange())
+    editor.insertText("2", replacementRange: editor.selectedRange())
+    #expect(field.isEnabled && stepper.isEnabled && controller.isUpdating)
+    #expect(editor.string == "12")
+    await gate.open()
+    await task?.value
+    #expect(saved.map(\.editorLeftPadding) == [1, 12])
+    #expect(editor.string == "12" && stepper.integerValue == 12)
+    #expect(editor.selectedRange() == NSRange(location: 2, length: 0))
+    for invalid in ["a", ".", "-", "12px", "한", " "] {
+        editor.insertText(invalid, replacementRange: editor.selectedRange())
+        #expect(editor.string == "12")
+    }
+    stepper.integerValue = 13
+    #expect(NSApp.sendAction(try #require(stepper.action), to: stepper.target, from: stepper))
+    await task?.value
+    #expect(saved.last?.editorLeftPadding == 13 && field.stringValue == "13")
+    editor.selectAll(nil)
+    editor.insertText("33", replacementRange: editor.selectedRange())
+    #expect(NSApp.sendAction(try #require(field.action), to: field.target, from: field))
+    #expect(field.stringValue == "13")
+    #expect(saved.last?.editorLeftPadding == 13)
+}
+
+@Test @MainActor func spacingNumberInputsKeepQueuedChangesAfterSaveFailure() async throws {
+    _ = NSApplication.shared
+    let gate = SettingsSaveGate()
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var attempts = 0
+    var saved: AppSettings?
+    var task: Task<Void, Never>?
+    controller.configure(settings: .defaults) { value in
+        attempts += 1
+        if attempts == 1 { await gate.wait(); return .failed(.writeFailed("fixture")) }
+        saved = value
+        return .saved(value)
+    }
+    controller.onUpdateTaskStarted = { task = $0 }
+    let root = try #require(controller.window?.contentView)
+    let left = try #require(findView(in: root, identifier: "duckpad.settings.editor-left-padding-stepper") as? NSStepper)
+    let line = try #require(findView(in: root, identifier: "duckpad.settings.editor-line-spacing-stepper") as? NSStepper)
+    let leftAction = try #require(left.action)
+    left.integerValue = 6
+    #expect(NSApp.sendAction(leftAction, to: left.target, from: left))
+    left.integerValue = 7
+    #expect(NSApp.sendAction(leftAction, to: left.target, from: left))
+    line.integerValue = 8
+    #expect(NSApp.sendAction(try #require(line.action), to: line.target, from: line))
+    await gate.open()
+    await task?.value
+    #expect(saved?.editorLeftPadding == 7 && saved?.editorLineSpacing == 8)
+    #expect(left.integerValue == 7 && line.integerValue == 8)
+    #expect(saved?.editorRightPadding == 8)
+}

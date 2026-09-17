@@ -11,7 +11,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
-        var baseUTF8: Data
+        var checkpoint: EditorRecoveryCheckpoint
         var deltas: [EditorRecoveryDelta]
         var byteCount: Int
     }
@@ -386,7 +386,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         snapshots[bufferID] = EditorTextSnapshot(bufferID: bufferID, revision: buffer.revision, text: "")
         // Read-only file contents are reloaded from disk; recovery stores only view state.
         recoveryBuffers[bufferID] = RecoveryBuffer(baseRevision: buffer.revision,
-            revision: buffer.revision, baseUTF8: Data(), deltas: [], byteCount: 0)
+            revision: buffer.revision, checkpoint: EditorRecoveryCheckpoint(text: ""), deltas: [], byteCount: 0)
         acceptedEdits[bufferID] = []
         let primary = preparePrimaryView(for: buffer)
         isRecovering = true
@@ -430,11 +430,12 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             storeViewState(bufferID: snapshot.bufferID)
         }
         snapshots[snapshot.bufferID] = snapshot
-        let bytes = Data(snapshot.text.utf8)
+        let checkpoint = EditorRecoveryCheckpoint(text: snapshot.text)
+        let bytes = checkpoint.utf8
         recoveryBuffers[snapshot.bufferID] = RecoveryBuffer(
             baseRevision: snapshot.revision,
             revision: snapshot.revision,
-            baseUTF8: bytes,
+            checkpoint: checkpoint,
             deltas: [],
             byteCount: bytes.count
         )
@@ -483,7 +484,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             bufferID: bufferID,
             baseRevision: recovery.baseRevision,
             revision: recovery.revision,
-            baseUTF8: recovery.baseUTF8,
+            checkpoint: recovery.checkpoint,
             deltas: recovery.deltas,
             viewState: pendingBinaryViewStates[bufferID] ?? viewStates[bufferID] ?? defaultViewState
         )
@@ -503,7 +504,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         }
         guard revision == snapshot.revision else { return }
         recovery.baseRevision = snapshot.revision
-        recovery.baseUTF8 = snapshot.utf8
+        recovery.checkpoint = snapshot.checkpoint
         recovery.deltas.removeFirst(consumed)
         recoveryBuffers[snapshot.bufferID] = recovery
     }
@@ -769,6 +770,9 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     private func applyDisplayPreferences(to view: DPScintillaEditorView) {
         let settings = displayPreferences
         view.configureEditorFont(settings.editorFontName, size: settings.editorFontSize)
+        view.configureTextLayout(withLeftPadding: settings.editorLeftPadding,
+                                 rightPadding: settings.editorRightPadding,
+                                 lineSpacing: settings.editorLineSpacing)
         view.configureGuides(withIndentation: settings.indentationGuidesVisible,
                              virtualSpace: settings.virtualSpaceEnabled,
                              edgeVisible: settings.edgeLineVisible, edgeColumn: settings.edgeColumn)
@@ -1478,11 +1482,12 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         guard !isInvalidated, let editorView = bufferViews[bufferID],
               let text = String(data: editorView.contentUTF8, encoding: .utf8) else { return }
         snapshots[bufferID] = EditorTextSnapshot(bufferID: bufferID, revision: revision, text: text)
-        let bytes = Data(text.utf8)
+        let checkpoint = EditorRecoveryCheckpoint(text: text)
+        let bytes = checkpoint.utf8
         recoveryBuffers[bufferID] = RecoveryBuffer(
             baseRevision: revision,
             revision: revision,
-            baseUTF8: bytes,
+            checkpoint: checkpoint,
             deltas: [],
             byteCount: bytes.count
         )
@@ -1491,20 +1496,21 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
 
     @discardableResult
     private func recoverBuffer(_ bufferID: BufferID) -> Bool {
-        guard !isInvalidated, let checkpoint = snapshots[bufferID],
+        guard !isInvalidated, let original = snapshots[bufferID],
               let snapshot = recoveredSnapshot(
-                from: checkpoint,
+                from: original,
                 edits: acceptedEdits[bufferID, default: []]
               ), let editorView = bufferViews[bufferID] else { return false }
         load(snapshot, into: editorView)
         synchronizeRevision(snapshot.revision, for: bufferID, excluding: editorView)
         updateDisplayedRevision(snapshot.revision, for: bufferID)
         snapshots[bufferID] = snapshot
-        let bytes = Data(snapshot.text.utf8)
+        let checkpoint = EditorRecoveryCheckpoint(text: snapshot.text)
+        let bytes = checkpoint.utf8
         recoveryBuffers[bufferID] = RecoveryBuffer(
             baseRevision: snapshot.revision,
             revision: snapshot.revision,
-            baseUTF8: bytes,
+            checkpoint: checkpoint,
             deltas: [],
             byteCount: bytes.count
         )
@@ -1578,11 +1584,12 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             ?? EditorTextSnapshot(bufferID: buffer.bufferID, revision: buffer.revision, text: "")
         snapshots[buffer.bufferID] = snapshots[buffer.bufferID] ?? snapshot
         if recoveryBuffers[buffer.bufferID] == nil {
-            let bytes = Data(snapshot.text.utf8)
+            let checkpoint = EditorRecoveryCheckpoint(text: snapshot.text)
+            let bytes = checkpoint.utf8
             recoveryBuffers[buffer.bufferID] = RecoveryBuffer(
                 baseRevision: snapshot.revision,
                 revision: snapshot.revision,
-                baseUTF8: bytes,
+                checkpoint: checkpoint,
                 deltas: [],
                 byteCount: bytes.count
             )
@@ -2277,7 +2284,10 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             }
             return offset
         }
-        let maximumLine = lineCount(in: utf8)
+        let needsLineCount = !state.bookmarkedLines.isEmpty
+            || !state.foldState.contractedHeaderLines.isEmpty
+            || !(state.secondaryViewState?.foldState.contractedHeaderLines.isEmpty ?? true)
+        let maximumLine = needsLineCount ? lineCount(in: utf8) : 0
         let secondary = state.secondaryViewState.map {
             SecondaryEditorViewState(
                 anchorUTF8: boundary($0.anchorUTF8),
@@ -2314,18 +2324,20 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     private func lineCount(in utf8: Data) -> Int {
-        var count = 1
-        var index = 0
-        while index < utf8.count {
-            if utf8[index] == 0x0D {
-                count += 1
-                if index + 1 < utf8.count, utf8[index + 1] == 0x0A { index += 1 }
-            } else if utf8[index] == 0x0A {
-                count += 1
+        utf8.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+            var count = 1
+            var index = 0
+            while index < bytes.count {
+                if bytes[index] == 0x0D {
+                    count += 1
+                    if index + 1 < bytes.count, bytes[index + 1] == 0x0A { index += 1 }
+                } else if bytes[index] == 0x0A {
+                    count += 1
+                }
+                index += 1
             }
-            index += 1
+            return count
         }
-        return count
     }
 
     /// Replays only accepted bounded deltas if a later edit must be rejected.

@@ -724,3 +724,8 @@
 "Uninstalling Plugin…" = "正在卸载插件…";
 "Plugin Uninstalled" = "插件已卸载";
 "Plugin Uninstallation Failed" = "插件卸载失败";
+
+"Text left padding (pt)" = "正文左侧留白 (pt)";
+"Text right padding (pt)" = "正文右侧留白 (pt)";
+"Extra line spacing (pt)" = "额外行距 (pt)";
+"Enter a whole number from %1$d to %2$d." = "请输入 %1$d 到 %2$d 之间的整数。";

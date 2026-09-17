@@ -490,3 +490,31 @@ func incompleteGenerationNeverReplacesPrevious(_ fault: RecoveryStoreFault) asyn
     _ = try await store.commit(archive, generation: PersistenceGeneration(rawValue: 1))
     #expect(try await store.loadLatest()?.archive.buffers.values.first?.utf8.count == text.utf8.count)
 }
+
+@Test func recoveryCommitObservesAnotherWriterAfterItsOwnPublication() async throws {
+    let root = recoveryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let first = LocalRecoveryStore(root: root)
+    let other = LocalRecoveryStore(root: root)
+    let archive = try recoveryArchive(text: "first")
+    let newer = try recoveryArchive(text: "other writer")
+    _ = try await first.commit(archive, generation: .init(rawValue: 1))
+    _ = try await other.commit(newer, generation: .init(rawValue: 3))
+    #expect(try await first.commit(archive, generation: .init(rawValue: 2))
+        == .superseded(durableGeneration: .init(rawValue: 3)))
+    #expect(try await first.loadLatest()?.archive == newer)
+}
+
+@Test func recoveryBookmarkBoundsCountCRLFPairsAndMixedEndings() async throws {
+    let root = recoveryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = LocalRecoveryStore(root: root)
+    let text = "한\r\n🦆\r끝\n"
+    let archive = try recoveryArchive(text: text, viewState: .init(bookmarkedLines: [0, 1, 2, 3]))
+    _ = try await store.commit(archive, generation: .init(rawValue: 1))
+    #expect(try await store.loadLatest()?.archive == archive)
+    let invalid = try recoveryArchive(text: text, viewState: .init(bookmarkedLines: [4]))
+    await #expect(throws: SessionStoreError.self) {
+        try await store.commit(invalid, generation: .init(rawValue: 2))
+    }
+}

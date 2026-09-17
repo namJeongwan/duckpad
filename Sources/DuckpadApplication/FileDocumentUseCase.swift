@@ -667,7 +667,7 @@ public final class FileDocumentUseCase {
         let outcome: FileSaveOutcome
         if workspace.tabID(canonicalPath: canonical.path) != nil {
             outcome = .failed(.session(.duplicateFileBinding(canonical.path)))
-        } else if let snapshot = editor.snapshot(for: context.buffer.bufferID) {
+        } else if let snapshot = editor.recoveryCapture(for: context.buffer.bufferID) {
             if snapshot.revision != context.buffer.revision {
                 outcome = .failed(.editorRevisionMismatch(
                     bufferID: context.buffer.bufferID,
@@ -676,24 +676,23 @@ public final class FileDocumentUseCase {
                 ))
             } else {
                 let format = outputFormat(context: context, conversion: conversion)
-                let text = TextFileCodec.convert(snapshot.text, to: format.lineEnding)
-                let data = TextFileCodec.encode(
-                    text,
-                    encoding: format.encoding,
-                    byteOrderMark: format.byteOrderMark
-                )
                 do {
+                    let prepared = try await prepareSave(snapshot, format: format)
                     let destinationIdentity = try await store.currentIdentity(for: canonical)
                     _ = try await store.writeAtomically(
-                        data,
+                        prepared.data,
                         to: canonical,
                         expectedIdentity: destinationIdentity,
                         overwrite: false
                     )
                     _ = try await store.prepareSecurityScopedAccess(to: canonical, ownerID: transientOwnerID)
                     outcome = .saved(context.tabID)
-                } catch let error {
+                } catch let error as FileOperationFailure {
+                    outcome = .failed(error)
+                } catch let error as TextFileStoreError {
                     outcome = .failed(.store(error))
+                } catch {
+                    outcome = .failed(.store(.io(String(describing: error))))
                 }
             }
         } else {
@@ -972,7 +971,7 @@ public final class FileDocumentUseCase {
                 return .failed(.comparisonInvalidated)
             }
         }
-        guard let snapshot = editor.snapshot(for: context.buffer.bufferID) else {
+        guard let snapshot = editor.recoveryCapture(for: context.buffer.bufferID) else {
             return .failed(.editorSnapshotUnavailable(context.buffer.bufferID))
         }
         guard snapshot.revision == context.buffer.revision else {
@@ -985,21 +984,21 @@ public final class FileDocumentUseCase {
         let format = outputFormat(context: context, conversion: conversion)
         let encoding = format.encoding
         let bom = format.byteOrderMark
-        let lineEnding = format.lineEnding
         // Bound EOL is a durable format choice, not a one-shot transformation.
         // Normal saves therefore normalize to the binding selected by a prior conversion.
-        let text = TextFileCodec.convert(snapshot.text, to: lineEnding)
-        let data = TextFileCodec.encode(text, encoding: encoding, byteOrderMark: bom)
+        let prepared: (data: Data, lineEnding: LineEnding)
+        do { prepared = try await prepareSave(snapshot, format: format) }
+        catch { return .failed(error) }
         let expected = !overwrite && context.binding?.canonicalPath == url.path ? context.binding?.observedIdentity : nil
         do {
-            let receipt = try await store.writeAtomically(data, to: url, expectedIdentity: expected, overwrite: overwrite)
+            let receipt = try await store.writeAtomically(prepared.data, to: url, expectedIdentity: expected, overwrite: overwrite)
             let retainedAccess = try await store.prepareSecurityScopedAccess(to: url, ownerID: securityScopeOwnerID)
             let identity = receipt.identity
             let binding = FileBinding(
                 canonicalPath: identity.canonicalPath,
                 encoding: encoding,
                 byteOrderMark: bom,
-                lineEnding: lineEnding == .none ? inferLineEnding(text) : lineEnding,
+                lineEnding: prepared.lineEnding,
                 observedIdentity: identity,
                 securityScopedBookmark: retainedAccess.bookmark ?? securityScopedBookmark
                     ?? (context.binding?.canonicalPath == url.path ? context.binding?.securityScopedBookmark : nil)
@@ -1120,8 +1119,22 @@ public final class FileDocumentUseCase {
         }
     }
 
-    private func inferLineEnding(_ text: String) -> LineEnding {
-        (try? TextFileCodec.decode(Data(text.utf8)).lineEnding) ?? .none
+    private func prepareSave(
+        _ capture: EditorRecoveryCapture,
+        format: TextFileConversion
+    ) async throws(FileOperationFailure) -> (data: Data, lineEnding: LineEnding) {
+        do {
+            return try await Task.detached(priority: .userInitiated) {
+                let snapshot = try capture.materializedSnapshot()
+                let ending = format.lineEnding == .none
+                    ? TextFileCodec.detectLineEnding(inUTF8: snapshot.utf8) : format.lineEnding
+                let data = TextFileCodec.encodeUTF8(snapshot.utf8, encoding: format.encoding,
+                    byteOrderMark: format.byteOrderMark, lineEnding: format.lineEnding)
+                return (data, ending)
+            }.value
+        } catch {
+            throw .editorSnapshotUnavailable(capture.bufferID)
+        }
     }
 
     private func outputFormat(

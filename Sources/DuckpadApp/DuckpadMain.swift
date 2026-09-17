@@ -224,6 +224,12 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 print("Duckpad save-access smoke created a file with renewed access")
                 fflush(stdout); Darwin._exit(86)
             }
+        } else if let path = environment["DUCKPAD_LARGE_FILE_SAVE_SMOKE"], securityScopeSmokeNamespace != nil {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                await LargeFileSaveSmoke.run(path: path, workspace: workspace, editor: editor,
+                                            files: fileUseCase, recovery: recoveryUseCase)
+            }
         } else if let expectedPath = environment["DUCKPAD_SECURITY_SCOPE_SMOKE_WRITE"] {
             Task { @MainActor in
                 await controller.waitForStartup()

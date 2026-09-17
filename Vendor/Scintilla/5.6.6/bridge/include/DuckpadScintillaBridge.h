@@ -84,6 +84,12 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic) NSInteger zoomLevel;
 @property(nonatomic, readonly, copy) NSString *editorFontName;
 @property(nonatomic, readonly) double editorFontSize;
+@property(nonatomic, readonly) NSInteger editorLeftPadding;
+@property(nonatomic, readonly) NSInteger editorRightPadding;
+@property(nonatomic, readonly) NSInteger editorLineSpacing;
+- (void)configureTextLayoutWithLeftPadding:(NSInteger)leftPadding
+                            rightPadding:(NSInteger)rightPadding
+                             lineSpacing:(NSInteger)lineSpacing;
 - (void)configureEditorFont:(NSString *)name size:(double)size;
 - (void)configureDisplayWithLineNumbers:(BOOL)lineNumbers
                        bookmarkMargin:(BOOL)bookmarkMargin

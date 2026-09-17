@@ -37,6 +37,7 @@ public actor LocalTextFileStore: TextFileStore {
 
     public static let maximumPersistedBookmarks = 100
     public static let maximumBookmarkArchiveBytes = 4 * 1_024 * 1_024
+    private let contentHasher = TextFileContentHasher()
     private let fault: AtomicWriteFault
     private let bookmarkArchiveURL: URL
     private let securityScopedAccessRequired: Bool
@@ -374,21 +375,26 @@ public actor LocalTextFileStore: TextFileStore {
     }
 
     public func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult {
-        do { return try await Task.detached(priority: .utility) { try Self.readBlocking(url) }.value }
+        do { return try await Task.detached(priority: .utility) { [contentHasher] in
+            try Self.readBlocking(url, hasher: contentHasher)
+        }.value }
         catch let error as TextFileStoreError { throw error }
         catch { throw .io(String(describing: error)) }
     }
 
     public func readForDisplay(from url: URL, assuming encoding: TextFileEncoding?) async throws(TextFileStoreError) -> FileReadResult {
         do {
-            return try await Task.detached(priority: .utility) {
+            return try await Task.detached(priority: .utility) { [contentHasher] in
                 let canonical = try Self.canonicalize(url)
                 var before = stat()
                 guard Darwin.lstat(canonical.path, &before) == 0 else { throw Self.mapErrno(path: canonical.path) }
                 guard before.st_size >= 0 else { throw TextFileStoreError.invalidPath(canonical.path) }
                 let data = try Data(contentsOf: canonical, options: [.mappedIfSafe])
                 guard BinaryFileContent.isBinary(data, assuming: encoding) else {
-                    return FileReadResult(data: data, identity: try Self.identity(for: canonical, data: data))
+                    // Hash caches must own their bytes: a mapped external file can
+                    // change underneath us even when its mtime is restored.
+                    let owned = data.withUnsafeBytes { Data($0) }
+                    return FileReadResult(data: owned, identity: try Self.identity(for: canonical, data: owned, hasher: contentHasher))
                 }
                 let identity = BinaryFileIdentity.make(path: canonical.path, data: data, info: before)
                 var after = stat()
@@ -410,24 +416,30 @@ public actor LocalTextFileStore: TextFileStore {
         overwrite: Bool
     ) async throws(TextFileStoreError) -> FileWriteReceipt {
         let fault = self.fault
+        let hasher = contentHasher
         let coordinatesSandboxWrite = securityScopedAccessRequired
         do {
-            return try await Task.detached(priority: .utility) {
+            return try await Task.detached(priority: .userInitiated) {
+                // Own the write payload even if a caller supplied externally
+                // mapped Data. The receipt/cache describe these immutable bytes.
+                let bytes = data.withUnsafeBytes { Data($0) }
                 if coordinatesSandboxWrite {
                     return try Self.coordinatedWriteBlocking(
-                        data,
+                        bytes,
                         to: url,
                         expectedIdentity: expectedIdentity,
                         overwrite: overwrite,
-                        fault: fault
+                        fault: fault,
+                        hasher: hasher
                     )
                 }
                 return try Self.writeBlocking(
-                    data,
+                    bytes,
                     to: url,
                     expectedIdentity: expectedIdentity,
                     overwrite: overwrite,
-                    fault: fault
+                    fault: fault,
+                    hasher: hasher
                 )
             }.value
         } catch let error as TextFileStoreError { throw error }
@@ -439,7 +451,8 @@ public actor LocalTextFileStore: TextFileStore {
         to url: URL,
         expectedIdentity: FileIdentity?,
         overwrite: Bool,
-        fault: AtomicWriteFault
+        fault: AtomicWriteFault,
+        hasher: TextFileContentHasher
     ) throws -> FileWriteReceipt {
         let coordinator = NSFileCoordinator(filePresenter: nil)
         var coordinationError: NSError?
@@ -455,7 +468,8 @@ public actor LocalTextFileStore: TextFileStore {
                     to: coordinatedURL,
                     expectedIdentity: expectedIdentity,
                     overwrite: overwrite,
-                    fault: fault
+                    fault: fault,
+                    hasher: hasher
                 ))
             } catch let error as TextFileStoreError {
                 result = .failure(error)
@@ -476,11 +490,12 @@ public actor LocalTextFileStore: TextFileStore {
         to url: URL,
         expectedIdentity: FileIdentity?,
         overwrite: Bool,
-        fault: AtomicWriteFault
+        fault: AtomicWriteFault,
+        hasher: TextFileContentHasher
     ) throws -> FileWriteReceipt {
         let canonical = try canonicalize(url)
         let current: FileIdentity?
-        do { current = try readBlocking(canonical).identity }
+        do { current = try readBlocking(canonical, hasher: hasher).identity }
         catch TextFileStoreError.notFound { current = nil }
         if let expectedIdentity {
             guard let current, sameObservedFile(current, expectedIdentity) else {
@@ -492,22 +507,71 @@ public actor LocalTextFileStore: TextFileStore {
         if case .replaceDestinationBeforeCommit(let external) = fault {
             do { try external.write(to: canonical, options: [.atomic]) }
             catch { throw map(error: error, path: canonical.path) }
-            throw TextFileStoreError.conflict(current: try? readBlocking(canonical).identity)
+            throw TextFileStoreError.conflict(current: try? readBlocking(canonical, hasher: hasher).identity)
         }
-        do { try data.write(to: canonical, options: [.atomic]) }
-        catch { throw map(error: error, path: canonical.path) }
+        if try !replaceUsingClone(data, at: canonical) {
+            do { try data.write(to: canonical, options: [.atomic]) }
+            catch { throw map(error: error, path: canonical.path) }
+        }
         let descriptor = Darwin.open(canonical.path, O_RDONLY | O_CLOEXEC)
         guard descriptor >= 0 else { throw mapErrno(path: canonical.path) }
         defer { Darwin.close(descriptor) }
         guard Darwin.fsync(descriptor) == 0, Darwin.fcntl(descriptor, F_FULLFSYNC) == 0 else {
             throw TextFileStoreError.durabilityFailure(
                 state: .replacementVisibleDurabilityUncertain,
-                current: try? readBlocking(canonical).identity,
+                current: try? readBlocking(canonical, hasher: hasher).identity,
                 recoveryPath: nil,
                 detail: String(describing: mapErrno(path: canonical.path))
             )
         }
-        return FileWriteReceipt(identity: try readBlocking(canonical).identity)
+        // The durable atomic candidate contains our owned payload. Reading the
+        // path again would both duplicate I/O and potentially describe a later
+        // external writer's bytes as this save's contents.
+        return FileWriteReceipt(identity: try identity(for: canonical, data: data, hasher: hasher))
+    }
+
+    /// Foundation supplies a replacement directory authorized for safe-save
+    /// under a file-scoped Powerbox grant. Unsupported volumes use Data's writer.
+    private static func replaceUsingClone(_ data: Data, at target: URL) throws -> Bool {
+        guard data.count >= ClonedTextFile.minimumByteCount else { return false }
+        // replaceItemAt reapplies source metadata before publication and cannot
+        // replace a read-only source on some volumes. Data's atomic writer can;
+        // keep that established path instead of retrying an uncertain replace.
+        var sourceInfo = stat()
+        guard Darwin.lstat(target.path, &sourceInfo) == 0,
+              sourceInfo.st_mode & S_IWUSR != 0 else { return false }
+        let manager = FileManager.default
+        let directory: URL
+        do {
+            directory = try manager.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                        appropriateFor: target, create: true)
+        } catch { return false }
+        var removeDirectory = true
+        defer { if removeDirectory { try? manager.removeItem(at: directory) } }
+        let candidate = directory.appendingPathComponent("document")
+        guard let descriptor = try ClonedTextFile.prepare(source: target, destination: candidate, data: data) else {
+            return false
+        }
+        let syncSucceeded = Darwin.fsync(descriptor) == 0 && Darwin.fcntl(descriptor, F_FULLFSYNC) == 0
+        let syncError = errno
+        let closeSucceeded = Darwin.close(descriptor) == 0
+        guard syncSucceeded, closeSucceeded else {
+            throw TextFileStoreError.atomicWriteFailed("candidate sync failed: \(syncError)")
+        }
+        do {
+            _ = try manager.replaceItemAt(target, withItemAt: candidate)
+        } catch {
+            // Foundation can leave recoverable items after a failed replacement.
+            // Retain them and report uncertainty rather than retrying a write.
+            removeDirectory = false
+            throw TextFileStoreError.durabilityFailure(
+                state: .filesystemStateUncertain,
+                current: try? readBlocking(target).identity,
+                recoveryPath: directory.path,
+                detail: String(describing: error)
+            )
+        }
+        return true
     }
 
     private static func canonicalize(_ url: URL) throws -> URL {
@@ -521,12 +585,12 @@ public actor LocalTextFileStore: TextFileStore {
         return parent.appendingPathComponent(standardized.lastPathComponent).standardizedFileURL
     }
 
-    private static func readBlocking(_ url: URL) throws -> FileReadResult {
+    private static func readBlocking(_ url: URL, hasher: TextFileContentHasher? = nil) throws -> FileReadResult {
         let canonical = try canonicalize(url)
         let data: Data
-        do { data = try Data(contentsOf: canonical, options: [.mappedIfSafe]) }
+        do { data = try Data(contentsOf: canonical) }
         catch { throw map(error: error, path: canonical.path) }
-        return FileReadResult(data: data, identity: try identity(for: canonical, data: data))
+        return FileReadResult(data: data, identity: try identity(for: canonical, data: data, hasher: hasher))
     }
 
     private static func writeBlocking(
@@ -534,7 +598,8 @@ public actor LocalTextFileStore: TextFileStore {
         to url: URL,
         expectedIdentity: FileIdentity?,
         overwrite: Bool,
-        fault: AtomicWriteFault
+        fault: AtomicWriteFault,
+        hasher: TextFileContentHasher
     ) throws -> FileWriteReceipt {
         let canonical = try canonicalize(url)
         let path = canonical.path
@@ -543,7 +608,8 @@ public actor LocalTextFileStore: TextFileStore {
         let temporary = canonical.deletingLastPathComponent()
             .appendingPathComponent(".\(canonical.lastPathComponent).duckpad-\(UUID().uuidString).tmp")
         let temporaryPath = temporary.path
-        var descriptor = Darwin.open(temporaryPath, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
+        let clonedDescriptor = try ClonedTextFile.prepare(source: canonical, destination: temporary, data: data)
+        var descriptor = clonedDescriptor ?? Darwin.open(temporaryPath, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else { throw mapErrno(path: temporaryPath) }
         var shouldUnlink = true
         defer {
@@ -551,13 +617,16 @@ public actor LocalTextFileStore: TextFileStore {
             if shouldUnlink { _ = Darwin.unlink(temporaryPath) }
         }
         do {
-            try data.withUnsafeBytes { raw in
-                guard let base = raw.baseAddress else { return }
-                var written = 0
-                while written < raw.count {
-                    let count = Darwin.write(descriptor, base.advanced(by: written), raw.count - written)
-                    guard count >= 0 else { throw mapErrno(path: temporaryPath) }
-                    written += count
+            if clonedDescriptor == nil {
+                try data.withUnsafeBytes { raw in
+                    guard let base = raw.baseAddress else { return }
+                    var written = 0
+                    while written < raw.count {
+                        let count = Darwin.write(descriptor, base.advanced(by: written), raw.count - written)
+                        if count < 0, errno == EINTR { continue }
+                        guard count > 0 else { throw mapErrno(path: temporaryPath) }
+                        written += count
+                    }
                 }
             }
             guard Darwin.fsync(descriptor) == 0 else { throw mapErrno(path: temporaryPath) }
@@ -585,7 +654,7 @@ public actor LocalTextFileStore: TextFileStore {
                     throw mapErrno(path: path)
                 }
                 shouldUnlink = false
-                let displaced = try readBlocking(temporary).identity
+                let displaced = try readBlocking(temporary, hasher: hasher).identity
                 guard sameObservedFile(displaced, expectedIdentity) else {
                     try restoreAfterConflict(
                         temporaryPath: temporaryPath,
@@ -613,7 +682,7 @@ public actor LocalTextFileStore: TextFileStore {
                 } else if errno == ENOENT {
                     guard renameExclusive(temporaryPath, path) else {
                         throw errno == EEXIST
-                            ? TextFileStoreError.conflict(current: try? readBlocking(canonical).identity)
+                            ? TextFileStoreError.conflict(current: try? readBlocking(canonical, hasher: hasher).identity)
                             : mapErrno(path: path)
                     }
                     try finishExclusiveCommit(target: canonical, directory: directory, fault: &remainingFault)
@@ -622,7 +691,7 @@ public actor LocalTextFileStore: TextFileStore {
                 }
             } else {
                 guard renameExclusive(temporaryPath, path) else {
-                    if errno == EEXIST { throw TextFileStoreError.conflict(current: try? readBlocking(canonical).identity) }
+                    if errno == EEXIST { throw TextFileStoreError.conflict(current: try? readBlocking(canonical, hasher: hasher).identity) }
                     throw mapErrno(path: path)
                 }
                 try finishExclusiveCommit(target: canonical, directory: directory, fault: &remainingFault)
@@ -633,7 +702,10 @@ public actor LocalTextFileStore: TextFileStore {
         } catch {
             throw TextFileStoreError.atomicWriteFailed(String(describing: error))
         }
-        return FileWriteReceipt(identity: try readBlocking(canonical).identity)
+        // The durable atomic candidate contains our owned payload. Reading the
+        // path again would both duplicate I/O and potentially describe a later
+        // external writer's bytes as this save's contents.
+        return FileWriteReceipt(identity: try identity(for: canonical, data: data, hasher: hasher))
     }
 
     private static func renameSwap(_ first: String, _ second: String) -> Bool {
@@ -821,10 +893,10 @@ public actor LocalTextFileStore: TextFileStore {
         return false
     }
 
-    private static func identity(for url: URL, data: Data) throws -> FileIdentity {
+    private static func identity(for url: URL, data: Data, hasher: TextFileContentHasher? = nil) throws -> FileIdentity {
         var info = stat()
         guard Darwin.lstat(url.path, &info) == 0 else { throw mapErrno(path: url.path) }
-        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let digest = hasher?.digest(data) ?? SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let nanos = Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec)
         return FileIdentity(
             canonicalPath: url.path,

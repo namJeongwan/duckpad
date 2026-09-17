@@ -87,6 +87,7 @@ private actor FileStoreFake: TextFileStore {
 
 @MainActor
 private final class FileEditorFake: EditorSavePointPort, EditorSelectionPort {
+    var snapshotCount = 0
     var savePoints: [EditorBufferDescriptor] = []
     func recordSavePoint(for bufferID: BufferID, revision: UInt64) {
         savePoints.append(.init(bufferID: bufferID, revision: revision))
@@ -104,7 +105,15 @@ private final class FileEditorFake: EditorSavePointPort, EditorSelectionPort {
         values[snapshot.bufferID] = snapshot
         if active?.bufferID == snapshot.bufferID { active = EditorBufferDescriptor(bufferID: snapshot.bufferID, revision: snapshot.revision) }
     }
-    func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? { values[bufferID] }
+    func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? {
+        snapshotCount += 1
+        return values[bufferID]
+    }
+    func recoveryCapture(for bufferID: BufferID) -> EditorRecoveryCapture? {
+        guard let value = values[bufferID] else { return nil }
+        return EditorRecoveryCapture(bufferID: bufferID, baseRevision: value.revision,
+            revision: value.revision, baseUTF8: Data(value.text.utf8))
+    }
     func retire(bufferID: BufferID) { values.removeValue(forKey: bufferID) }
     func setInputEnabled(_ isEnabled: Bool) {}
     func focus() {}
@@ -1149,4 +1158,26 @@ private actor FileSessionStoreFake: SessionStore {
     monitor.onChange?([url.path])
     await files.waitForLiveReload()
     #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "external")
+}
+
+@Test @MainActor func saveUsesImmutableCaptureInsteadOfFullEditorSnapshot() async {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    editor.display(workspace.snapshot().activeBuffer!)
+    _ = binding
+    editor.replaceWith("저장🙂\r\n")
+    let files = FileStoreFake()
+    let useCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: files)
+    let url = URL(fileURLWithPath: "/tmp/duckpad-save-as.txt")
+    editor.snapshotCount = 0
+    #expect(await useCase.saveAs(url) == .saved(workspace.snapshot().tabs[0].id))
+    #expect(workspace.activeFileContext()?.binding?.canonicalPath == url.path)
+    #expect(workspace.snapshot().tabs[0].title == url.lastPathComponent)
+    #expect(workspace.snapshot().tabs[0].isDirty == false)
+    #expect(await files.text(at: url) == "저장🙂\r\n")
+    #expect(editor.snapshotCount == 0)
+    #expect(editor.savePoints == [workspace.snapshot().activeBuffer!])
 }

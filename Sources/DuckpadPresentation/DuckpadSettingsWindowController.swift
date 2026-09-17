@@ -36,6 +36,11 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     private var categoryButtons: [NSButton] = []
     private var booleanControls: [(NSButton, WritableKeyPath<AppSettings, Bool>)] = []
     private var numberControls: [(NSPopUpButton, WritableKeyPath<AppSettings, Int>)] = []
+    private typealias SpacingControl = (field: NSTextField, stepper: NSStepper,
+                                       key: WritableKeyPath<AppSettings, Int>, range: ClosedRange<Int>)
+    private var spacingControls: [SpacingControl] = []
+    private var preservesSpacingDrafts = false
+    private var pendingSpacingValues: [WritableKeyPath<AppSettings, Int>: Int] = [:]
     let editorFont = EditorFontComboBox()
     let editorFontSize = NSTextField(string: "13")
     let editorFontSizeStepper = NSStepper()
@@ -337,6 +342,36 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         choices("Caret blink rate", \.caretBlinkPeriod, [("Fast", 250), ("Normal", 500), ("Slow", 1000), ("No blinking", 0)], "Editing")
         choices("Line wrap", \.wrapIndentMode, [("Default", 0), ("Aligned", 1), ("Indent", 2)], "Editing")
         checkbox("Enable scrolling beyond last line", \.scrollBeyondLastLine, "Editing")
+        func spacingInput(_ title: String, _ key: WritableKeyPath<AppSettings, Int>, maximum: Int, identifier: String) {
+            let field = NSTextField(string: "0")
+            field.alignment = .right
+            field.formatter = IntegerPreferenceFormatter()
+            field.delegate = self
+            field.target = self
+            field.action = #selector(spacingChanged(_:))
+            field.widthAnchor.constraint(equalToConstant: 80).isActive = true
+            field.setAccessibilityIdentifier("duckpad.settings." + identifier)
+            let stepper = NSStepper()
+            stepper.minValue = 0
+            stepper.maxValue = Double(maximum)
+            stepper.increment = 1
+            stepper.valueWraps = false
+            stepper.target = self
+            stepper.action = #selector(stepSpacing(_:))
+            stepper.setAccessibilityIdentifier("duckpad.settings." + identifier + "-stepper")
+            localize { catalog in
+                field.setAccessibilityLabel(catalog.text(title))
+                stepper.setAccessibilityLabel(catalog.text(title))
+                field.toolTip = catalog.text("Enter a whole number from %1$d to %2$d.", arguments: [0, maximum])
+            }
+            spacingControls.append((field, stepper, key, 0...maximum))
+            let row = NSStackView(views: [label(title), field, stepper])
+            row.spacing = 12
+            (pages["Margins/Border/Edge"] as? NSStackView)?.addArrangedSubview(row)
+        }
+        spacingInput("Text left padding (pt)", \.editorLeftPadding, maximum: 32, identifier: "editor-left-padding")
+        spacingInput("Text right padding (pt)", \.editorRightPadding, maximum: 32, identifier: "editor-right-padding")
+        spacingInput("Extra line spacing (pt)", \.editorLineSpacing, maximum: 20, identifier: "editor-line-spacing")
         checkbox("Display line number", \.lineNumbersVisible, "Margins/Border/Edge")
         checkbox("Display bookmark", \.bookmarkMarginVisible, "Margins/Border/Edge")
         checkbox("Show vertical edge", \.edgeLineVisible, "Margins/Border/Edge")
@@ -463,6 +498,13 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     }
 
     public func controlTextDidChange(_ notification: Notification) {
+        if let control = spacingControls.first(where: { notification.object as? NSTextField === $0.field }) {
+            guard !((control.field.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) else { return }
+            guard let value = enteredSpacing(control) else { pendingSpacingValues[control.key] = nil; return }
+            control.stepper.integerValue = value
+            submitSpacing(value, key: control.key)
+            return
+        }
         guard notification.object as? NSTextField === editorFontSize,
               !((editorFontSize.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) else { return }
         guard let size = enteredFontSize else { pendingFontSize = nil; return }
@@ -471,6 +513,10 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     }
 
     public func controlTextDidEndEditing(_ notification: Notification) {
+        if let field = notification.object as? NSTextField, spacingControls.contains(where: { $0.field === field }) {
+            spacingChanged(field)
+            return
+        }
         guard notification.object as? NSTextField === editorFontSize else { return }
         fontSizeChanged(editorFontSize)
     }
@@ -503,7 +549,50 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         startUpdate(proposed, editingSize: true)
     }
 
-    private func startUpdate(_ proposed: AppSettings, editingSize: Bool = false) {
+    private func enteredSpacing(_ control: SpacingControl) -> Int? {
+        let text = control.field.stringValue
+        guard IntegerPreferenceFormatter.accepts(text), let value = Int(text), control.range.contains(value) else { return nil }
+        return value
+    }
+
+    @objc private func spacingChanged(_ sender: NSTextField) {
+        guard let control = spacingControls.first(where: { $0.field === sender }),
+              !((sender.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) else { return }
+        guard let value = enteredSpacing(control) else {
+            pendingSpacingValues[control.key] = nil
+            sender.stringValue = String(settings[keyPath: control.key])
+            control.stepper.integerValue = settings[keyPath: control.key]
+            setStatusForSpacingRange(control.range)
+            return
+        }
+        sender.stringValue = String(value)
+        submitSpacing(value, key: control.key)
+    }
+
+    private func setStatusForSpacingRange(_ range: ClosedRange<Int>) {
+        statusLocalization = { $0.text("Enter a whole number from %1$d to %2$d.", arguments: [range.lowerBound, range.upperBound]) }
+        status.stringValue = statusLocalization?(catalog) ?? ""
+    }
+
+    @objc private func stepSpacing(_ sender: NSStepper) {
+        guard let control = spacingControls.first(where: { $0.stepper === sender }) else { return }
+        control.field.stringValue = String(sender.integerValue)
+        submitSpacing(sender.integerValue, key: control.key)
+    }
+
+    private func submitSpacing(_ value: Int, key: WritableKeyPath<AppSettings, Int>) {
+        guard acceptsUpdates?() ?? true else { return }
+        if isUpdating {
+            pendingSpacingValues[key] = value
+            return
+        }
+        guard settings[keyPath: key] != value else { return }
+        var proposed = settings
+        proposed[keyPath: key] = value
+        startUpdate(proposed, editingSpacing: true)
+    }
+
+    private func startUpdate(_ proposed: AppSettings, editingSize: Bool = false, editingSpacing: Bool = false) {
         guard !isUpdating, acceptsUpdates?() ?? true else {
             NSSound.beep()
             return
@@ -516,17 +605,31 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
            let size = enteredFontSize {
             proposed.editorFontSize = size
         }
+        for control in spacingControls where proposed[keyPath: control.key] == settings[keyPath: control.key] {
+            if !((control.field.currentEditor() as? NSTextView)?.hasMarkedText() ?? false), let value = enteredSpacing(control) {
+                proposed[keyPath: control.key] = value
+            }
+        }
         preservesFontSizeDraft = editingSize
+        preservesSpacingDrafts = editingSpacing
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             var next = proposed
             while true {
                 await self.apply(next)
-                guard let size = self.pendingFontSize else { break }
+                let size = self.pendingFontSize
+                let spacing = self.pendingSpacingValues
                 self.pendingFontSize = nil
-                guard size != self.settings.editorFontSize else { break }
+                self.pendingSpacingValues.removeAll()
                 next = self.settings
-                next.editorFontSize = size
+                if let size { next.editorFontSize = size }
+                for (key, value) in spacing { next[keyPath: key] = value }
+                guard next != self.settings else { break }
+            }
+            self.preservesSpacingDrafts = false
+            for control in self.spacingControls where control.field.currentEditor() == nil {
+                control.field.stringValue = String(self.settings[keyPath: control.key])
+                control.stepper.integerValue = self.settings[keyPath: control.key]
             }
             self.preservesFontSizeDraft = false
             if self.editorFontSize.currentEditor() == nil {
@@ -552,7 +655,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         case .failed(let failure):
             let preserveDraft = preservesFontSizeDraft
             if pendingFontSize == nil { preservesFontSizeDraft = false }
-            render(settings)
+            render(settings, preservingPendingSpacingOnly: true)
             preservesFontSizeDraft = preserveDraft
             setStatus("Could not save preferences: %1$@", failure: failure)
             NSSound.beep()
@@ -560,8 +663,14 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         }
     }
 
-    private func render(_ settings: AppSettings) {
+    private func render(_ settings: AppSettings, preservingPendingSpacingOnly: Bool = false) {
         self.settings = settings
+        for control in spacingControls {
+            if !preservesSpacingDrafts || (preservingPendingSpacingOnly && pendingSpacingValues[control.key] == nil) {
+                control.field.stringValue = String(settings[keyPath: control.key])
+            }
+            control.stepper.integerValue = enteredSpacing(control) ?? settings[keyPath: control.key]
+        }
         if let item = sqlDialect.itemArray.first(where: { $0.representedObject as? String == settings.formatting.sqlDialect.rawValue }) {
             sqlDialect.select(item)
         }
@@ -591,6 +700,10 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
+        for control in spacingControls {
+            control.field.isEnabled = enabled || preservesSpacingDrafts
+            control.stepper.isEnabled = enabled || preservesSpacingDrafts
+        }
         for (button, _) in booleanControls { button.isEnabled = enabled }
         for (popup, _) in numberControls { popup.isEnabled = enabled }
         editorFont.isEnabled = enabled

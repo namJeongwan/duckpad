@@ -7,6 +7,41 @@ import Testing
 
 @Suite(.serialized)
 struct ScintillaEditorGroupTests {
+    @Test @MainActor
+    func plainTextReturnInClonedPanePreservesAuthorityAndUndo() throws {
+        for accepted in [true, false] {
+            let source = "Tier 1\n  - 한글🦆"
+            let fixture = try makeClonedGroup(source: source)
+            defer { fixture.adapter.invalidate() }
+            var edits = 0
+            fixture.adapter.onEdit = { edit in
+                edits += 1
+                return accepted ? .accepted(newRevision: edit.expectedRevision + 1)
+                    : .rejected(currentRevision: edit.expectedRevision)
+            }
+            fixture.secondary.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+            fixture.secondary.insertCommittedText("\n")
+
+            // Snapshot access settles the adapter's deferred rejection recovery.
+            let recovery = try #require(fixture.adapter.recoverySnapshot(for: fixture.buffer.bufferID))
+            let expected = accepted ? source + "\n  " : source
+            #expect(edits == 1)
+            #expect(fixture.primary.contentUTF8 == Data(expected.utf8))
+            #expect(fixture.secondary.contentUTF8 == Data(expected.utf8))
+            #expect(fixture.secondary.caretUTF8Position == expected.utf8.count)
+            #expect(recovery.utf8 == Data(expected.utf8))
+            #expect(recovery.revision == (accepted ? 1 : 0))
+            if accepted {
+                fixture.primary.undo()
+                #expect(fixture.secondary.contentUTF8 == Data(source.utf8))
+                #expect(!fixture.primary.canUndo)
+                fixture.secondary.redo()
+                #expect(fixture.primary.contentUTF8 == Data(expected.utf8))
+                #expect(edits == 3)
+            }
+        }
+    }
+
     @Test @MainActor func dynamicClonesHaveIndependentHostsAndPublishEachEditOnce() throws {
         let adapter = ScintillaEditorAdapter()
         defer { adapter.invalidate() }
