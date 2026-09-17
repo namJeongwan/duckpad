@@ -7,7 +7,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, ProgressiveTextEditorPort, FileOpeningPreviewEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -73,6 +73,15 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
 
     private var activeBuffer: EditorBufferDescriptor?
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
+    private final class PendingTextLoad {
+        let bytes: Data
+        var offset: Int = 0
+        var failure: (any Error)?
+        init(bytes: Data) { self.bytes = bytes }
+    }
+    private var openingPreview: OpeningFilePreviewView?
+    public var openingPreviewByteCount: Int? { openingPreview.map { Int($0.editor.documentByteLength) } }
+    private var pendingTextLoads: [BufferID: PendingTextLoad] = [:]
     private var binaryDocuments: [BufferID: DPScintillaBinaryDocument] = [:]
     private var pendingBinaryViewStates: [BufferID: EditorViewState] = [:]
     private var recoveryBuffers: [BufferID: RecoveryBuffer] = [:]
@@ -184,7 +193,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         if activeBuffer == buffer { return }
         if let activeBuffer {
             storeViewState(bufferID: activeBuffer.bufferID)
-            storeSnapshot(bufferID: activeBuffer.bufferID, revision: activeBuffer.revision)
+            // The retained native view and recovery journal already own the text.
         }
         hideSplit(focusPrimary: false)
         let editorView = preparePrimaryView(for: buffer)
@@ -196,7 +205,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         editorView.frame = primaryHost.bounds
         editorView.autoresizingMask = [.width, .height]
         editorView.isInputEnabled = isInputEnabled(for: buffer.bufferID)
-        primaryHost.addSubview(editorView)
+        primaryHost.addSubview(editorView, positioned: .below, relativeTo: openingPreview?.superview === primaryHost ? openingPreview : nil)
         displayedGroupBuffers = [.primary: buffer]
         displayedGroupViews = [.primary: editorView]
         bufferOwners[buffer.bufferID] = bufferOwners[buffer.bufferID] ?? .primary
@@ -218,7 +227,6 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             if let bufferID = activeBuffer?.bufferID {
                 guard recoverPendingBufferIfNeeded(bufferID) else { return }
                 storeViewState(bufferID: bufferID)
-                storeSnapshot(bufferID: bufferID, revision: currentRevision(for: bufferID))
             }
             hideSplit(focusPrimary: false)
             activeEditorGroup = .primary
@@ -276,7 +284,6 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             if bufferOwners[outgoing.bufferID] == group {
                 storeViewState(bufferID: outgoing.bufferID)
             }
-            storeSnapshot(bufferID: outgoing.bufferID, revision: currentRevision(for: outgoing.bufferID))
         }
         let publisher = preparePrimaryView(for: buffer)
         bufferOwners[buffer.bufferID] = bufferOwners[buffer.bufferID] ?? group
@@ -314,6 +321,66 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             bufferGroupViews[buffer.bufferID]?[source] = nil
             bufferGroupViews[buffer.bufferID]?[destination] = sourceView
         }
+    }
+
+    public func prepareText(_ text: String) async throws -> @MainActor (EditorBufferDescriptor) -> Void {
+        let checkpoint = await Task.detached(priority: .userInitiated) {
+            EditorRecoveryCheckpoint(text: text)
+        }.value
+        try Task.checkCancellation()
+        return { [weak self] buffer in
+            self?.install(EditorTextSnapshot(bufferID: buffer.bufferID, revision: buffer.revision, text: text),
+                          preservingUndo: false, preparedCheckpoint: checkpoint)
+        }
+    }
+
+    public func hasPendingTextLoad(for bufferID: BufferID) -> Bool {
+        pendingTextLoads[bufferID] != nil
+    }
+
+    private func textChunkEnd(_ bytes: Data, from offset: Int, maximum: Int) -> Int {
+        var end = min(bytes.count, offset + maximum)
+        if end < bytes.count {
+            while end > offset, bytes[end] & 0xC0 == 0x80 { end -= 1 }
+            if end > offset, bytes[end - 1] == 0x0D, bytes[end] == 0x0A { end -= 1 }
+        }
+        return end
+    }
+
+    public func finishTextLoad(for buffer: EditorBufferDescriptor,
+                               progress: @escaping @MainActor (Int, Int) -> Void) async throws {
+        guard let pending = pendingTextLoads[buffer.bufferID],
+              let primary = bufferViews[buffer.bufferID] else { throw CancellationError() }
+        if let failure = pending.failure { throw failure }
+        var lastPercent = -1
+        while true {
+            try Task.checkCancellation()
+            guard !isInvalidated, pendingTextLoads[buffer.bufferID] === pending,
+                  currentRevision(for: buffer.bufferID) == buffer.revision else { throw CancellationError() }
+            let total = pending.bytes.count
+            let percent = total == 0 ? 100 : Int(Double(pending.offset) / Double(total) * 100)
+            if percent != lastPercent {
+                lastPercent = percent
+                progress(pending.offset, total)
+            }
+            try Task.checkCancellation()
+            guard pendingTextLoads[buffer.bufferID] === pending else { throw CancellationError() }
+            if pending.offset == total { break }
+            // Keep the preview scrollable and give AppKit time to paint progress.
+            try await Task.sleep(for: .milliseconds(1))
+            try Task.checkCancellation()
+            guard pendingTextLoads[buffer.bufferID] === pending else { throw CancellationError() }
+            let end = textChunkEnd(pending.bytes, from: pending.offset, maximum: 1_024 * 1_024)
+            try primary.appendTextLoadChunk(pending.bytes.subdata(in: pending.offset..<end),
+                                             atOffset: UInt(pending.offset), final: end == total)
+            pending.offset = end
+        }
+        pendingTextLoads.removeValue(forKey: buffer.bufferID)
+        synchronizeRevision(buffer.revision, for: buffer.bufferID)
+        for view in allViews(for: buffer.bufferID) {
+            view.isInputEnabled = isInputEnabled(for: buffer.bufferID)
+        }
+        onEditorStatusChange?()
     }
 
     public func prepareBinary(_ data: Data) async throws -> @MainActor (EditorBufferDescriptor) -> Void {
@@ -376,6 +443,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     private func installBinary(_ document: DPScintillaBinaryDocument, for buffer: EditorBufferDescriptor) {
         guard !isInvalidated else { return }
         let bufferID = buffer.bufferID
+        pendingTextLoads.removeValue(forKey: bufferID)
         if binaryDocuments[bufferID] != nil { storeViewState(bufferID: bufferID) }
         if let restoredState = pendingBinaryViewStates.removeValue(forKey: bufferID) {
             viewStates[bufferID] = restoredState
@@ -420,8 +488,10 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         install(snapshot, preservingUndo: false)
     }
 
-    private func install(_ snapshot: EditorTextSnapshot, preservingUndo: Bool) {
+    private func install(_ snapshot: EditorTextSnapshot, preservingUndo: Bool,
+                         preparedCheckpoint: EditorRecoveryCheckpoint? = nil) {
         guard !isInvalidated else { return }
+        pendingTextLoads.removeValue(forKey: snapshot.bufferID)
         pendingBinaryViewStates.removeValue(forKey: snapshot.bufferID)
         let replacedBinary = binaryDocuments.removeValue(forKey: snapshot.bufferID) != nil
         pendingRecoveryBuffers.remove(snapshot.bufferID)
@@ -430,7 +500,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             storeViewState(bufferID: snapshot.bufferID)
         }
         snapshots[snapshot.bufferID] = snapshot
-        let checkpoint = EditorRecoveryCheckpoint(text: snapshot.text)
+        let checkpoint = preparedCheckpoint ?? EditorRecoveryCheckpoint(text: snapshot.text)
         let bytes = checkpoint.utf8
         recoveryBuffers[snapshot.bufferID] = RecoveryBuffer(
             baseRevision: snapshot.revision,
@@ -444,8 +514,27 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             for: bytes
         )
         acceptedEdits[snapshot.bufferID] = []
+        if preparedCheckpoint != nil, bufferViews[snapshot.bufferID] == nil {
+            bufferViews[snapshot.bufferID] = makeView(for: snapshot.bufferID)
+        }
         guard let editorView = bufferViews[snapshot.bufferID] else { return }
-        load(snapshot, into: editorView, preservingUndo: preservingUndo && !replacedBinary)
+        if preparedCheckpoint != nil {
+            let pending = PendingTextLoad(bytes: bytes)
+            pendingTextLoads[snapshot.bufferID] = pending
+            let end = textChunkEnd(bytes, from: 0, maximum: 64 * 1_024)
+            do {
+                try editorView.beginTextLoad(bytes.subdata(in: 0..<end), totalByteCount: UInt(bytes.count),
+                                             revision: snapshot.revision)
+                pending.offset = end
+                // Complete even an unusually small direct caller's document.
+                if end == bytes.count {
+                    try editorView.appendTextLoadChunk(Data(), atOffset: UInt(end), final: true)
+                }
+            } catch { pending.failure = error }
+            editorView.isInputEnabled = false
+        } else {
+            load(snapshot, into: editorView, preservingUndo: preservingUndo && !replacedBinary)
+        }
         if replacedBinary {
             for peer in allViews(for: snapshot.bufferID) where peer !== editorView {
                 peer.shareDocument(with: editorView)
@@ -464,6 +553,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     public func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? {
         guard binaryDocuments[bufferID] == nil else { return nil }
         guard !isInvalidated else { return nil }
+        if pendingTextLoads[bufferID] != nil { return snapshots[bufferID] }
         guard recoverPendingBufferIfNeeded(bufferID) else { return snapshots[bufferID] }
         if bufferViews[bufferID] != nil {
             storeSnapshot(bufferID: bufferID, revision: currentRevision(for: bufferID))
@@ -540,6 +630,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     public func retire(bufferID: BufferID) {
+        pendingTextLoads.removeValue(forKey: bufferID)
         binaryDocuments.removeValue(forKey: bufferID)
         pendingBinaryViewStates.removeValue(forKey: bufferID)
         snapshots.removeValue(forKey: bufferID)
@@ -614,6 +705,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
 
     public func invalidate() {
         guard !isInvalidated else { return }
+        dismissOpeningPreview()
         isInvalidated = true
         lifecycleGeneration &+= 1
         let editorViews = Array(bufferViews.values)
@@ -656,6 +748,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             internalSecondaryHost.removeFromSuperview()
         }
         snapshots.removeAll()
+        pendingTextLoads.removeAll()
         binaryDocuments.removeAll()
         pendingBinaryViewStates.removeAll()
         recoveryBuffers.removeAll()
@@ -694,7 +787,37 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         additionalGroupHosts.values.forEach { $0.alphaValue = isEnabled ? 1 : 0.65 }
     }
 
-    public func focus() { activeScintillaView?.focusEditor() }
+    public func showOpeningPreview(_ preview: FileOpeningPreview, path: String) {
+        guard !isInvalidated else { return }
+        dismissOpeningPreview()
+        let overlay = OpeningFilePreviewView(path: path)
+        applyDisplayPreferences(to: overlay.editor)
+        overlay.editor.apply(nativePalette(themePalette))
+        guard (try? overlay.editor.loadUTF8(Data(preview.text.utf8), revision: 0, preservingUndo: false)) != nil else {
+            overlay.editor.invalidate()
+            return
+        }
+        overlay.editor.isInputEnabled = false
+        openingPreview = overlay
+        setInputEnabled(inputEnabled)
+        let host = editorGroupHost(for: activeEditorGroup)
+        overlay.frame = host.bounds
+        overlay.autoresizingMask = [.width, .height]
+        host.addSubview(overlay)
+        overlay.editor.focusEditor()
+    }
+
+    public func dismissOpeningPreview() {
+        guard let overlay = openingPreview else { return }
+        let hadFocus = overlay.editor.hasEditorFocus
+        openingPreview = nil
+        overlay.removeFromSuperview()
+        overlay.editor.invalidate()
+        setInputEnabled(inputEnabled)
+        if hadFocus { activeScintillaView?.focusEditor() }
+    }
+
+    public func focus() { (openingPreview?.editor ?? activeScintillaView)?.focusEditor() }
 
     public func split(orientation: EditorSplitOrientation) {
         guard !hasVisibleGroups else { return }
@@ -950,6 +1073,13 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     public func canPerform(_ command: EditorCommand) -> Bool {
+        if let preview = openingPreview?.editor {
+            switch command {
+            case .copy: return preview.canCopy
+            case .selectAll: return preview.canSelectAll
+            default: return false
+            }
+        }
         guard let editorView = activeScintillaView else { return false }
         switch command {
         case .undo:
@@ -973,7 +1103,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     public func perform(_ command: EditorCommand) {
-        guard canPerform(command), let editorView = activeScintillaView else { return }
+        guard canPerform(command), let editorView = openingPreview?.editor ?? activeScintillaView else { return }
         switch command {
         case .undo: editorView.undo()
         case .redo: editorView.redo()
@@ -1198,7 +1328,8 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     public func isReadyForFormatting(_ buffer: EditorBufferDescriptor) -> Bool {
-        guard !isInvalidated, activeBuffer == buffer, let view = activeScintillaView,
+        guard !isInvalidated, openingPreview == nil, activeBuffer == buffer, pendingTextLoads[buffer.bufferID] == nil,
+              let view = activeScintillaView,
               view.revision == buffer.revision else { return false }
         return !view.hasMarkedText()
     }
@@ -1209,7 +1340,8 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         scope: ExtensionCommandContribution.InputScope,
         maximumBytes: Int
     ) throws(ExtensionFailure) -> ExtensionEditorCapture {
-        guard maximumBytes >= 0, activeBuffer == expectedBuffer,
+        guard openingPreview == nil, maximumBytes >= 0, activeBuffer == expectedBuffer,
+              pendingTextLoads[expectedBuffer.bufferID] == nil,
               let editorView = activeScintillaView,
               editorView.revision == expectedBuffer.revision else { throw .staleContext }
         let documentLength = Int(clamping: editorView.documentByteLength)
@@ -1292,7 +1424,8 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         with replacementUTF8: Data,
         expectedRevision: UInt64
     ) -> EditorEditOutcome {
-        guard !isInvalidated, let activeBuffer, let editorView = bufferViews[activeBuffer.bufferID],
+        guard !isInvalidated, openingPreview == nil, let activeBuffer, pendingTextLoads[activeBuffer.bufferID] == nil,
+              let editorView = bufferViews[activeBuffer.bufferID],
               activeBuffer.revision == expectedRevision, expectedRevision < .max,
               range.location >= 0, range.length >= 0 else {
             return .rejected(currentRevision: activeBuffer?.revision ?? expectedRevision)
@@ -1351,7 +1484,8 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         expectedRevision: UInt64,
         accept: ([EditorIncrementalEdit]) -> EditorEditOutcome
     ) -> EditorEditOutcome {
-        guard !isInvalidated, let activeBuffer, let editorView = bufferViews[activeBuffer.bufferID],
+        guard !isInvalidated, openingPreview == nil, let activeBuffer, pendingTextLoads[activeBuffer.bufferID] == nil,
+              let editorView = bufferViews[activeBuffer.bufferID],
               activeBuffer.revision == expectedRevision,
               UInt64(replacements.count) <= UInt64.max - expectedRevision else {
             return .rejected(currentRevision: activeBuffer?.revision ?? expectedRevision)
@@ -1478,7 +1612,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     private func storeSnapshot(bufferID: BufferID, revision: UInt64) {
-        guard binaryDocuments[bufferID] == nil else { return }
+        guard binaryDocuments[bufferID] == nil, pendingTextLoads[bufferID] == nil else { return }
         guard !isInvalidated, let editorView = bufferViews[bufferID],
               let text = String(data: editorView.contentUTF8, encoding: .utf8) else { return }
         snapshots[bufferID] = EditorTextSnapshot(bufferID: bufferID, revision: revision, text: text)
@@ -1680,7 +1814,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         editorView.removeFromSuperview()
         editorView.frame = host.bounds
         editorView.autoresizingMask = [.width, .height]
-        host.addSubview(editorView)
+        host.addSubview(editorView, positioned: .below, relativeTo: openingPreview?.superview === host ? openingPreview : nil)
         if group == .primary { primaryActiveView = editorView }
     }
 
@@ -2080,7 +2214,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     private func isInputEnabled(for bufferID: BufferID) -> Bool {
-        inputEnabled && !readOnlyBuffers.contains(bufferID) && !revisionExhaustedBuffers.contains(bufferID)
+        inputEnabled && openingPreview == nil && pendingTextLoads[bufferID] == nil && !readOnlyBuffers.contains(bufferID) && !revisionExhaustedBuffers.contains(bufferID)
     }
 
     public func setReadOnly(_ isReadOnly: Bool, for bufferID: BufferID) {

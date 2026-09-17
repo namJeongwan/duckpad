@@ -382,6 +382,37 @@ public actor LocalTextFileStore: TextFileStore {
         catch { throw .io(String(describing: error)) }
     }
 
+    public func openingPreview(from url: URL, assuming encoding: TextFileEncoding?) async -> FileOpeningPreview? {
+        await Task.detached(priority: .userInitiated) {
+            // Bound IO before the full read, ownership copy and SHA-256 scan.
+            // This sample carries no file identity and is never saved/recovered.
+            let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+            guard descriptor >= 0 else { return nil }
+            defer { Darwin.close(descriptor) }
+            var info = stat()
+            guard Darwin.fstat(descriptor, &info) == 0,
+                  info.st_mode & S_IFMT == S_IFREG,
+                  info.st_size >= 8 * 1024 * 1024,
+                  info.st_size <= Int.max else { return nil }
+            var bytes = Data(count: 64 * 1024)
+            let count = bytes.withUnsafeMutableBytes {
+                Darwin.pread(descriptor, $0.baseAddress, $0.count, 0)
+            }
+            guard count > 0 else { return nil }
+            bytes.count = count
+            // A prefix may end inside a UTF-8 scalar or UTF-16 surrogate pair.
+            // Strict decoding after trimming at most three bytes preserves both.
+            for trim in 0...3 where trim < count {
+                let sample = Data(bytes.prefix(count - trim))
+                if let decoded = try? TextFileCodec.decode(sample, assuming: encoding),
+                   !BinaryFileContent.isBinary(sample, assuming: encoding) {
+                    return FileOpeningPreview(text: decoded.text, totalByteCount: Int(info.st_size))
+                }
+            }
+            return nil
+        }.value
+    }
+
     public func readForDisplay(from url: URL, assuming encoding: TextFileEncoding?) async throws(TextFileStoreError) -> FileReadResult {
         do {
             return try await Task.detached(priority: .utility) { [contentHasher] in

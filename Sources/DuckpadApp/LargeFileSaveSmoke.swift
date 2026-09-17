@@ -14,12 +14,14 @@ enum LargeFileSaveSmoke {
             let url = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
             precondition(url.lastPathComponent == "Duckpad-Large-Save-Smoke.txt")
             for _ in 0..<3_000 {
-                if workspace.activeFileContext()?.binding?.canonicalPath == url.path { break }
+                if workspace.activeFileContext()?.binding?.canonicalPath == url.path,
+                   files.loadingProgress == nil, editor.activeScintillaView?.isInputEnabled == true { break }
                 try await Task.sleep(for: .milliseconds(20))
             }
             guard workspace.activeFileContext()?.binding?.canonicalPath == url.path,
                   workspace.activeFileContext()?.binding?.securityScopedBookmark != nil,
-                  let view = editor.activeScintillaView else { throw ProbeFailure.failed("bookmarked open") }
+                  files.loadingProgress == nil,
+                  let view = editor.activeScintillaView, view.isInputEnabled else { throw ProbeFailure.failed("bookmarked open") }
             let suffix = Data("저장 성능🦆\n".utf8)
             let expected = try await digest(url, appending: suffix)
             view.setPrimarySelectionUTF8Range(NSRange(location: Int(view.documentByteLength), length: 0))

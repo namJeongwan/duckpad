@@ -1,5 +1,118 @@
 # Large-file saving and recovery
 
+## Latest follow-up: real macOS input-manager queries
+
+The user still reproduced an EOF typing hang in the preview. A five-second
+sample of the actual app had every main-thread sample in
+`SCIContentView.selectedRange` → `CharactersFromPositions` →
+`Document::CountUTF16(0, caret)`. Direct `insertCommittedText` timing had missed
+Cocoa's input-manager queries, which scanned the entire document prefix.
+
+Text documents now allocate Scintilla's maintained UTF-16 line index before
+loading. Cocoa's byte/UTF-16 range conversions use line starts from that index
+and scan only the relevant line fragments. Scintilla maintains it across edits,
+Undo/Redo, shared views, and binary-to-text replacement. No partial document or
+approximate character offsets are passed to the input method.
+
+- A 16 MB Unicode regression performed 32 selected-range/surrounding-text query
+  pairs in 17.46 s before the fix, failing its two-second budget. Afterward the
+  same test passed in 1.38 ms; a subsequent run measured 0.80 ms / 0.27 ms for
+  ordinary text / binary-to-text cases.
+- On the same 1,502,284,197-byte copy, 32 EOF input-manager query pairs took
+  **0.167 ms**. Live typing now calls `NSTextInputClient.insertText` with selected
+  range queries before and after each character. These bursts, including 80 ms
+  character intervals, debounce, and durable recovery, took 1.49–1.76 s, with a
+  maximum main-thread heartbeat gap of 25.08 ms during those bursts.
+- First preview: **16.78 ms**. Complete load: **13.33 s**. Maintaining the extra
+  index increases load time and memory; this run is slower to become fully
+  editable than the earlier preview below. Maximum opening heartbeat gap was
+  0.63 s. An exceptionally long single physical line still requires scanning
+  that line; this change does not make every document layout constant-time.
+- Save after undo / append / truncation: 2.03 / 1.57 / 0.90 s. Dirty termination
+  recovery: 0.41 s. Dirty tab close: 0.16 s. Full saved hashes and final unsaved
+  recovery matched, with no whole native snapshots during typing.
+
+The new input-index and progressive-loading suites passed 11 tests (including
+parameterized ordinary/binary inputs), then the 49-test native bridge suite
+passed independently. Coverage includes Korean marked text, CRLF, non-BMP
+characters, half-surrogate proposed ranges, shared-peer disposal, and reload.
+These are individual local measurements. The first-preview and save smoke
+figures in the following section describe the preceding build, not this one.
+
+## Earlier follow-up: immediate preview and live recovery
+
+Measured on September 17, 2026, using the current 0.6.4-based worktree and a
+release arm64 build. This run copies 1,502,284,197 bytes / 52,339,923 lines;
+the supplied user file is never edited. Unlike the older probe below,
+`--large-file-live` uses the production 250 ms recovery debounce.
+
+- Opening first reads at most 64 KiB from a regular file and shows a read-only
+  sample before copying, hashing, or decoding the complete file. The sample
+  has no workspace buffer, recovery record, or overwrite identity. Failure or
+  cancellation removes it and preserves the preceding document. Unicode scalars
+  split at the prefix boundary are omitted until the complete read.
+- After the full verified read, Scintilla installs a 64 KiB prefix followed by
+  bounded 1 MiB chunks, yielding between chunks and reporting percentage changes.
+  The complete immutable source remains recoverable; mutation and extension
+  input stay blocked until the native document is complete. Reopening a cancelled
+  native load resumes it. The initial, unverified sample reports 0%, not a
+  fabricated estimate of completed verification.
+- Recovery generations now clone the previous blob into a private candidate,
+  compare all bytes, and patch changed regions before durable publication.
+  Files remain independent; corrupted prior bytes are repaired by comparison
+  with the current checkpoint. Unsupported cloning falls back to a full write.
+  Incremental SHA-256 prefix reuse does not change manifest tokens or schema.
+- Tab switches and closure retain native buffers and journals without making
+  an unnecessary full UTF-8 snapshot. Undo/Redo remains attached to the retained
+  native document. Public checkpoints own externally backed input bytes.
+
+| Operation | 0.6.4 baseline | Current follow-up |
+| --- | ---: | ---: |
+| First text preview | No separate preview | 9.65 ms |
+| Complete open / editable | 9.08 s | 7.65 s |
+| Three typing bursts plus recovery, each | 3.36–3.87 s | 1.16–1.43 s |
+| Twenty characters plus grouped undo | — | 2.08 ms |
+| Save after undo | 2.47 s | 2.60 s |
+| Save appended text | 0.90 s | 0.85 s |
+| Save after truncation | 0.70 s | 0.77 s |
+| Recovery barrier with a new unsaved edit | 2.43 s | 0.42 s |
+| Close dirty tab | 2.26 s | 0.15 s |
+
+The first-preview clock includes laying out and drawing the visible sample,
+not just scheduling its read. The intermediate implementation still waited
+for the full read/hash/decode and showed its first text after 3.31 s; the
+bounded prefix read removes that dependency. The final run reported 101
+progress updates, exact saved SHA-256 equality, restored unsaved recovery,
+and zero native snapshot reads during typing.
+
+These are individual local runs, not cold-disk or compositor-latency guarantees.
+Full opening still had a maximum main-actor heartbeat gap of 0.86 s. A typing
+burst includes six characters at 80 ms intervals, the recovery debounce, and
+its durable write; it is not per-keystroke latency. Full-file byte comparisons,
+immutable copies, native text/style/line storage, and cold IO remain significant.
+Explicit saving is **not consistently faster** than 0.6.4 in this run. This is
+not a Vim swap-file implementation or an on-demand editable file mapping.
+
+```sh
+swift run -c release DuckpadPerformanceBenchmark --large-file-live /path/to/large-file.txt
+```
+
+Regression coverage includes gated full-read success/failure/cancellation,
+UTF-8/UTF-16 prefix boundaries, sparse 2 GiB prefix reads, non-regular-file
+fallback, preview command routing, read-only mutation guards, split views,
+interrupted reload, complete recoverability, independent recovery generations,
+corrupted clone repair, and externally backed checkpoint ownership.
+
+The local packaged app (0.6.4, build 42, native arm64, ad-hoc signed) passed
+package verification and Finder/open, bookmark save/relaunch, layout, and
+sandboxed XPC smoke checks. Native Save panel UI automation was skipped.
+The actual sandboxed app appended Korean/emoji text to a disposable 1.5 GB
+copy and saved it in **1.00 s**; a separately streamed full SHA-256 matched,
+then the isolated recovery session was reset and the test process exited.
+This is a local preview, not a notarized release; Intel execution was not tested.
+
+## Earlier measurements (before this follow-up)
+
 Measured on an Apple Silicon Mac, macOS 26.5.1, September 17, 2026, with a release build. The initial fixture contains 1,502,284,069 UTF-8 bytes and 52,339,917 LF separators. The final probe copied the current input again (1,502,284,094 bytes; 52,339,918 LF separators). Each run independently verifies its own copied input. The probe copies its input into a temporary directory; it never edits the supplied file.
 
 ## Confirmed causes and changes

@@ -11,3 +11,5 @@ exclude:
   - verify-site.py
   - test-browser.mjs
   - render-preview.rb
+  - sync-release.rb
+  - test-release-sync.rb

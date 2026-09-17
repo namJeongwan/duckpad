@@ -1,5 +1,6 @@
 import AppKit
 import CryptoKit
+import Darwin
 import DuckpadApplication
 import DuckpadDomain
 import DuckpadEditorAdapter
@@ -12,7 +13,7 @@ import Foundation
 enum LargeFileBenchmark {
     enum Failure: Error { case invariant(String) }
 
-    static func run(path: String) async throws {
+    static func run(path: String, liveAutosave: Bool = false) async throws {
         _ = NSApplication.shared
         NSApplication.shared.setActivationPolicy(.prohibited)
         setbuf(stdout, nil)
@@ -27,7 +28,7 @@ enum LargeFileBenchmark {
         let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
         let recoveryStore = LocalRecoveryStore(root: root.appendingPathComponent("Recovery"))
         let recovery = SessionRecoveryUseCase(workspace: workspace, editor: editor, store: recoveryStore,
-            debounce: .seconds(60))
+            debounce: liveAutosave ? .milliseconds(250) : .seconds(60))
         workspace.onChange = { change in
             binding.render(change)
             recovery.workspaceDidChange(change)
@@ -40,6 +41,13 @@ enum LargeFileBenchmark {
         window.contentView = editor.view
         defer { window.close(); editor.invalidate() }
         _ = await recovery.start()
+        func cpuSeconds() -> Double {
+            var usage = rusage()
+            getrusage(RUSAGE_SELF, &usage)
+            return Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec)
+                + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1_000_000
+        }
+        var stageCPU = cpuSeconds()
         var stage = "open"
         var maxGap = 0.0
         let heartbeat = Task { @MainActor in
@@ -55,9 +63,27 @@ enum LargeFileBenchmark {
         func report(_ start: ContinuousClock.Instant) async {
             await Task.yield()
             print("LARGE_FILE stage=\(stage) ms=\(FormattingBenchmark.milliseconds(start.duration(to: .now))) max_main_gap_ms=\(maxGap)")
+            print("LARGE_FILE cpu_seconds=\(cpuSeconds() - stageCPU)")
+            stageCPU = cpuSeconds()
             maxGap = 0
         }
         var start = ContinuousClock.now
+        let openingStarted = start
+        var firstPreviewMilliseconds: Double?
+        var progressUpdates = 0
+        files.onLoadingProgress = {
+            guard let progress = files.loadingProgress,
+                  let total = progress.totalByteCount, progress.loadedByteCount < total else { return }
+            progressUpdates += 1
+            let hasPreview = editor.openingPreviewByteCount != nil
+                || (progress.loadedByteCount > 0 && editor.activeScintillaView?.documentByteLength ?? 0 > 0)
+            if firstPreviewMilliseconds == nil, hasPreview {
+                window.contentView?.layoutSubtreeIfNeeded()
+                window.contentView?.displayIfNeeded()
+                firstPreviewMilliseconds = FormattingBenchmark.milliseconds(openingStarted.duration(to: .now))
+            }
+        }
+        window.makeKeyAndOrderFront(nil)
         guard case .opened = await files.open(fixture), let view = editor.activeScintillaView else {
             throw Failure.invariant("open")
         }
@@ -65,6 +91,7 @@ enum LargeFileBenchmark {
         window.contentView?.layoutSubtreeIfNeeded()
         window.contentView?.displayIfNeeded()
         await report(start)
+        print("LARGE_FILE first_preview_ms=\(firstPreviewMilliseconds ?? -1) progress_updates=\(progressUpdates)")
         print("LARGE_FILE bytes=\(view.documentByteLength) lines=\(view.lineCount) wrap=\(view.isWordWrapEnabled)")
         // Keep the first probe bounded; --large-file navigates to EOF as a
         // separate measured stage so an unexpected stall is visible in logs.
@@ -73,6 +100,44 @@ enum LargeFileBenchmark {
         start = .now
         view.setPrimarySelectionUTF8Range(NSRange(location: Int(view.documentByteLength), length: 0))
         await report(start)
+        view.focusEditor()
+        guard let inputClient = window.firstResponder as? any NSTextInputClient else {
+            throw Failure.invariant("native input client")
+        }
+        stage = "input_manager_eof_queries"
+        start = .now
+        let eofRange = inputClient.selectedRange()
+        for _ in 0..<32 {
+            guard inputClient.selectedRange() == eofRange else { throw Failure.invariant("input range") }
+            var actual = NSRange(location: NSNotFound, length: 0)
+            guard inputClient.attributedSubstring(forProposedRange: eofRange, actualRange: &actual)?.string == "" else {
+                throw Failure.invariant("input surrounding text")
+            }
+        }
+        await report(start)
+        if liveAutosave {
+            stage = "initial_autosave"
+            start = .now
+            await recovery.waitForPendingAutosave()
+            await report(start)
+            print("LARGE_FILE begin=live_typing")
+            for burst in 0..<3 {
+                stage = "live_typing_autosave_\(burst)"
+                start = .now
+                view.beginGroupedUndo()
+                for character in "asdasd" {
+                    _ = inputClient.selectedRange()
+                    inputClient.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0))
+                    _ = inputClient.selectedRange()
+                    try await Task.sleep(for: .milliseconds(80))
+                }
+                view.endGroupedUndo()
+                await recovery.waitForPendingAutosave()
+                await report(start)
+            }
+            for _ in 0..<3 { view.undo() }
+            await recovery.waitForPendingAutosave()
+        }
         stage = "type_undo"
         let reads = view.snapshotReadCount
         start = .now
@@ -133,6 +198,14 @@ enum LargeFileBenchmark {
               recovered.revision == buffer.revision,
               recovered.utf8.suffix(Data("미저장🦆".utf8).count) == Data("미저장🦆".utf8) else {
             throw Failure.invariant("durable recovery lost final edit")
+        }
+        if liveAutosave, let tab = workspace.snapshot().tabs.first(where: \.isActive) {
+            stage = "close_dirty_tab"
+            start = .now
+            guard case .closed = await workspace.close(tabID: tab.id, decision: .discard) else {
+                throw Failure.invariant("close tab")
+            }
+            await report(start)
         }
         print("LARGE_FILE verified save_exact=true unsaved_recovery=true snapshot_reads_during_typing=0")
     }

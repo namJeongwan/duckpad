@@ -27,6 +27,8 @@ final class TextFileContentHasher: @unchecked Sendable {
         self.maximumCachedBytes = maximumCachedBytes
     }
 
+    func clear() { lock.withLock { snapshot = nil; workByteCount = 0 } }
+
     var lastHashedByteCount: Int { lock.withLock { workByteCount } }
 
     /// Input must be an owned immutable read buffer, not a mapping of a file
@@ -41,8 +43,9 @@ final class TextFileContentHasher: @unchecked Sendable {
                 previous.bytes.withUnsafeBytes { (old: UnsafeRawBufferPointer) in
                     for boundary in previous.boundaries {
                         guard boundary.end <= current.count,
-                              memcmp(current.baseAddress!.advanced(by: offset),
-                                     old.baseAddress!.advanced(by: offset), boundary.end - offset) == 0 else { break }
+                              (current.baseAddress == old.baseAddress ||
+                               memcmp(current.baseAddress!.advanced(by: offset),
+                                      old.baseAddress!.advanced(by: offset), boundary.end - offset) == 0) else { break }
                         if boundary.end.isMultiple(of: chunkSize) || boundary.end == data.count {
                             boundaries.append(boundary)
                         }

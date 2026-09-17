@@ -2358,6 +2358,26 @@ ptrdiff_t ScintillaCocoa::InsertText(NSString *input, CharacterSource charSource
  * Convert from a range of characters to a range of bytes.
  */
 NSRange ScintillaCocoa::PositionsFromCharacters(NSRange rangeCharacters) const {
+	if (IsUnicodeMode() && FlagSet(pdoc->LineCharacterIndex(), LineCharacterIndexType::Utf16)) {
+		const Sci::Position total = pdoc->IndexLineStart(pdoc->LinesTotal(), LineCharacterIndexType::Utf16);
+		const auto bytePosition = [this, total](NSUInteger character) {
+			if (character >= static_cast<NSUInteger>(total))
+				return pdoc->Length();
+			const Sci::Line line = pdoc->LineFromPositionIndex(character, LineCharacterIndexType::Utf16);
+			const Sci::Position offset = character - pdoc->IndexLineStart(line, LineCharacterIndexType::Utf16);
+			const Sci::Position position = pdoc->GetRelativePositionUTF16(pdoc->LineStart(line), offset);
+			return position == Sci::invalidPosition ? pdoc->Length() : position;
+		};
+		const Sci::Position start = bytePosition(rangeCharacters.location);
+		// Derive the endpoint from the actual start, preserving the existing
+		// treatment of ranges beyond EOF or inside a surrogate pair.
+		const Sci::Line line = pdoc->SciLineFromPosition(start);
+		const Sci::Position startCharacter = pdoc->IndexLineStart(line, LineCharacterIndexType::Utf16)
+			+ pdoc->CountUTF16(pdoc->LineStart(line), start);
+		const Sci::Position end = rangeCharacters.length > static_cast<NSUInteger>(total - startCharacter)
+			? pdoc->Length() : bytePosition(startCharacter + rangeCharacters.length);
+		return NSMakeRange(start, end - start);
+	}
 	Sci::Position start = pdoc->GetRelativePositionUTF16(0, rangeCharacters.location);
 	if (start == Sci::invalidPosition)
 		start = pdoc->Length();
@@ -2373,6 +2393,23 @@ NSRange ScintillaCocoa::PositionsFromCharacters(NSRange rangeCharacters) const {
  * Convert from a range of characters from a range of bytes.
  */
 NSRange ScintillaCocoa::CharactersFromPositions(NSRange rangePositions) const {
+	if (IsUnicodeMode() && FlagSet(pdoc->LineCharacterIndex(), LineCharacterIndexType::Utf16)
+		&& rangePositions.location <= static_cast<NSUInteger>(pdoc->Length())
+		&& rangePositions.length <= static_cast<NSUInteger>(pdoc->Length()) - rangePositions.location) {
+		const auto characterPosition = [this](Sci::Position position) {
+			const Sci::Line line = pdoc->SciLineFromPosition(position);
+			return pdoc->IndexLineStart(line, LineCharacterIndexType::Utf16)
+				+ pdoc->CountUTF16(pdoc->LineStart(line), position);
+		};
+		const Sci::Position start = characterPosition(rangePositions.location);
+		if (rangePositions.length == 0)
+			return NSMakeRange(start, 0);
+		// CountUTF16 rounds a partial initial scalar forward and a partial
+		// terminal scalar backward; retain that behavior for byte ranges.
+		const Sci::Position from = pdoc->MovePositionOutsideChar(rangePositions.location, 1, false);
+		const Sci::Position end = characterPosition(NSMaxRange(rangePositions));
+		return NSMakeRange(start, std::max<Sci::Position>(0, end - characterPosition(from)));
+	}
 	const Sci::Position start = pdoc->CountUTF16(0, rangePositions.location);
 	const Sci::Position len = pdoc->CountUTF16(rangePositions.location,
 					  NSMaxRange(rangePositions));

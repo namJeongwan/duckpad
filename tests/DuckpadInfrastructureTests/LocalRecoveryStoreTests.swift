@@ -518,3 +518,52 @@ func incompleteGenerationNeverReplacesPrevious(_ fault: RecoveryStoreFault) asyn
         try await store.commit(invalid, generation: .init(rawValue: 2))
     }
 }
+
+@Test(arguments: [false, true])
+func largeRecoveryReusesPrefixAndKeepsIndependentGenerations(verified: Bool) async throws {
+    let parent = recoveryRoot()
+    let root = parent.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: parent) }
+    let store: LocalRecoveryStore
+    if verified {
+        store = LocalRecoveryStore(verifiedRoot: try #require(LocalRecoveryStore.discoverVerifiedRoots(in: parent).first))
+    } else { store = LocalRecoveryStore(root: root) }
+    let original = String(repeating: "a", count: 8 * 1_024 * 1_024)
+    let first = try recoveryArchive(text: original)
+    _ = try await store.commit(first, generation: .init(rawValue: 1))
+    let id = try #require(first.buffers.keys.first)
+    var edited = Data(original.utf8)
+    edited.append(contentsOf: "한글🦆".utf8)
+    let second = RecoveryArchive(session: first.session, buffers: [id: EditorRecoverySnapshot(
+        bufferID: id, revision: 1, utf8: edited)])
+    _ = try await store.commit(second, generation: .init(rawValue: 2))
+    #expect(await store.lastHashedByteCount == "한글🦆".utf8.count)
+    #expect(try await store.loadLatest()?.archive == second)
+    let name = id.rawValue.uuidString.lowercased() + ".utf8"
+    let firstBlob = root.appendingPathComponent("generations/00000000000000000001/blobs/" + name)
+    #expect(try Data(contentsOf: firstBlob) == Data(original.utf8))
+    // Damage the previous publication. Cloning must compare and repair it,
+    // rather than propagate corruption into a supposedly valid new generation.
+    let secondBlob = root.appendingPathComponent("generations/00000000000000000002/blobs/" + name)
+    let handle = try FileHandle(forWritingTo: secondBlob)
+    try handle.seek(toOffset: 17)
+    try handle.write(contentsOf: Data([0x7A]))
+    try handle.close()
+    _ = try await store.commit(second, generation: .init(rawValue: 3))
+    #expect(try await store.loadLatest()?.archive == second)
+    let thirdBlob = root.appendingPathComponent("generations/00000000000000000003/blobs/" + name)
+    #expect(try Data(contentsOf: thirdBlob) == edited)
+}
+
+@Test func recoveryCheckpointOwnsExternallyBackedBytes() throws {
+    let count = 65_536
+    let storage = UnsafeMutableRawPointer.allocate(byteCount: count, alignment: 16)
+    defer { storage.deallocate() }
+    storage.initializeMemory(as: UInt8.self, repeating: 65, count: count)
+    let borrowed = Data(bytesNoCopy: storage, count: count, deallocator: .none)
+    let checkpoint = EditorRecoveryCheckpoint(utf8: borrowed)
+    storage.storeBytes(of: UInt8(0xFF), as: UInt8.self)
+    #expect(checkpoint.utf8 == Data(repeating: 65, count: count))
+    #expect(checkpoint.isValidUTF8)
+}

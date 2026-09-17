@@ -73,6 +73,7 @@ public protocol TextFileStore: Sendable {
     func clearPersistedSecurityScopedBookmarks() async throws(TextFileStoreError)
     func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL
     func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult
+    func openingPreview(from url: URL, assuming encoding: TextFileEncoding?) async -> FileOpeningPreview?
     /// Returns the complete bytes for text or read-only binary display.
     func readForDisplay(from url: URL, assuming encoding: TextFileEncoding?) async throws(TextFileStoreError) -> FileReadResult
     func currentIdentity(for url: URL) async throws(TextFileStoreError) -> FileIdentity?
@@ -85,6 +86,7 @@ public protocol TextFileStore: Sendable {
 }
 
 public extension TextFileStore {
+    func openingPreview(from url: URL, assuming encoding: TextFileEncoding?) async -> FileOpeningPreview? { nil }
     func changeLocation(of binding: FileBinding, operation: FileLocationOperation) async throws(TextFileStoreError) -> FileLocationReceipt {
         throw .io("File location operations are unavailable")
     }

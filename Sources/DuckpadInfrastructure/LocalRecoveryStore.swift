@@ -100,6 +100,9 @@ public actor LocalRecoveryStore: RecoveryStore {
     // Only a successful publication can seed this hint. Every commit still
     // checks the on-disk generation names; another writer invalidates the hint.
     private var publishedGeneration: PersistenceGeneration?
+    private let contentHasher = TextFileContentHasher()
+
+    var lastHashedByteCount: Int { contentHasher.lastHashedByteCount }
 
     public init(root: URL, fault: RecoveryStoreFault = .none) {
         self.root = root.standardizedFileURL
@@ -139,6 +142,7 @@ public actor LocalRecoveryStore: RecoveryStore {
         let root = self.root
         let fault = self.fault
         let verifiedRoot = self.verifiedRoot
+        let contentHasher = self.contentHasher
         let skipGeneration = publishedGeneration.flatMap { $0 < generation ? $0.rawValue : nil }
         do {
             if let stored = try await Task.detached(priority: .utility, operation: {
@@ -154,7 +158,7 @@ public actor LocalRecoveryStore: RecoveryStore {
             }
             let committed = try await Task.detached(priority: .utility) {
                 guard let verifiedRoot else {
-                    return try Self.commitBlocking(archive, generation: generation, root: root, fault: fault)
+                    return try Self.commitBlocking(archive, generation: generation, root: root, fault: fault, previousGeneration: skipGeneration, contentHasher: contentHasher)
                 }
                 let descriptor = try verifiedRoot.duplicateWritableRootDescriptor()
                 defer { Darwin.close(descriptor) }
@@ -162,7 +166,7 @@ public actor LocalRecoveryStore: RecoveryStore {
                     archive,
                     generation: generation,
                     rootDescriptor: descriptor,
-                    fault: fault
+                    fault: fault, previousGeneration: skipGeneration, contentHasher: contentHasher
                 )
             }.value
             if committed { publishedGeneration = generation }
@@ -173,6 +177,7 @@ public actor LocalRecoveryStore: RecoveryStore {
 
     public func reset() async throws(SessionStoreError) {
         publishedGeneration = nil
+        contentHasher.clear()
         let root = self.root
         let verifiedRoot = self.verifiedRoot
         do {
@@ -667,7 +672,9 @@ public actor LocalRecoveryStore: RecoveryStore {
         _ archive: RecoveryArchive,
         generation: PersistenceGeneration,
         root: URL,
-        fault: RecoveryStoreFault
+        fault: RecoveryStoreFault,
+        previousGeneration: UInt64?,
+        contentHasher: TextFileContentHasher
     ) throws -> Bool {
         guard Set(archive.buffers.keys) == Set(archive.session.buffers.keys) else {
             throw SessionStoreError.corrupt("archive buffer set mismatch")
@@ -682,22 +689,34 @@ public actor LocalRecoveryStore: RecoveryStore {
         let blobs = temporary.appendingPathComponent("blobs", isDirectory: true)
         try secureDirectory(temporary)
         try secureDirectory(blobs)
+        let generationDescriptor = Darwin.open(generations.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard generationDescriptor >= 0 else { throw posix("open recovery generations") }
+        defer { Darwin.close(generationDescriptor) }
+        let previousBlobs = RecoveryBlobWriter.openPreviousBlobs(in: generationDescriptor, generation: previousGeneration)
+        defer { if previousBlobs >= 0 { Darwin.close(previousBlobs) } }
+        let blobDescriptor = Darwin.open(blobs.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard blobDescriptor >= 0 else { throw posix("open recovery blobs") }
+        defer { Darwin.close(blobDescriptor) }
+        let cacheID = archive.buffers.values.max(by: { $0.utf8.count < $1.utf8.count })?.bufferID
+        if archive.buffers.isEmpty { contentHasher.clear() }
         var records: [BlobRecord] = []
         let ordered = archive.buffers.values.sorted { $0.bufferID.rawValue.uuidString < $1.bufferID.rawValue.uuidString }
         for (index, snapshot) in ordered.enumerated() {
             guard archive.session.buffers[snapshot.bufferID]?.revision == snapshot.revision,
-                  String(data: snapshot.utf8, encoding: .utf8) != nil,
+                  snapshot.checkpoint.isValidUTF8,
                   valid(snapshot.viewState, for: snapshot.utf8, bufferID: snapshot.bufferID, session: archive.session) else {
                 throw SessionStoreError.corrupt("invalid archive buffer")
             }
             let file = "\(snapshot.bufferID.rawValue.uuidString.lowercased()).utf8"
-            try writeDurable(snapshot.utf8, to: blobs.appendingPathComponent(file))
+            if try !RecoveryBlobWriter.writeClone(snapshot.utf8, name: file, previousBlobs: previousBlobs, destination: blobDescriptor) {
+                try writeDurable(snapshot.utf8, to: blobs.appendingPathComponent(file))
+            }
             records.append(BlobRecord(
                 bufferID: snapshot.bufferID,
                 revision: snapshot.revision,
                 file: file,
                 byteCount: snapshot.utf8.count,
-                sha256: digest(snapshot.utf8),
+                sha256: snapshot.bufferID == cacheID ? contentHasher.digest(snapshot.utf8) : digest(snapshot.utf8),
                 viewState: snapshot.viewState
             ))
             if index == 0, case .afterFirstBlob = fault {
@@ -749,7 +768,9 @@ public actor LocalRecoveryStore: RecoveryStore {
         _ archive: RecoveryArchive,
         generation: PersistenceGeneration,
         rootDescriptor: Int32,
-        fault: RecoveryStoreFault
+        fault: RecoveryStoreFault,
+        previousGeneration: UInt64?,
+        contentHasher: TextFileContentHasher
     ) throws -> Bool {
         guard Set(archive.buffers.keys) == Set(archive.session.buffers.keys) else {
             throw SessionStoreError.corrupt("archive buffer set mismatch")
@@ -787,24 +808,30 @@ public actor LocalRecoveryStore: RecoveryStore {
         )
         guard blobs >= 0 else { throw posix("open verified recovery blobs") }
         defer { Darwin.close(blobs) }
+        let previousBlobs = RecoveryBlobWriter.openPreviousBlobs(in: generations, generation: previousGeneration)
+        defer { if previousBlobs >= 0 { Darwin.close(previousBlobs) } }
+        let cacheID = archive.buffers.values.max(by: { $0.utf8.count < $1.utf8.count })?.bufferID
+        if archive.buffers.isEmpty { contentHasher.clear() }
         var records: [BlobRecord] = []
         let ordered = archive.buffers.values.sorted {
             $0.bufferID.rawValue.uuidString < $1.bufferID.rawValue.uuidString
         }
         for (index, snapshot) in ordered.enumerated() {
             guard archive.session.buffers[snapshot.bufferID]?.revision == snapshot.revision,
-                  String(data: snapshot.utf8, encoding: .utf8) != nil,
+                  snapshot.checkpoint.isValidUTF8,
                   valid(snapshot.viewState, for: snapshot.utf8, bufferID: snapshot.bufferID, session: archive.session) else {
                 throw SessionStoreError.corrupt("invalid archive buffer")
             }
             let file = "\(snapshot.bufferID.rawValue.uuidString.lowercased()).utf8"
-            try writeDurable(snapshot.utf8, in: blobs, name: file)
+            if try !RecoveryBlobWriter.writeClone(snapshot.utf8, name: file, previousBlobs: previousBlobs, destination: blobs) {
+                try writeDurable(snapshot.utf8, in: blobs, name: file)
+            }
             records.append(BlobRecord(
                 bufferID: snapshot.bufferID,
                 revision: snapshot.revision,
                 file: file,
                 byteCount: snapshot.utf8.count,
-                sha256: digest(snapshot.utf8),
+                sha256: snapshot.bufferID == cacheID ? contentHasher.digest(snapshot.utf8) : digest(snapshot.utf8),
                 viewState: snapshot.viewState
             ))
             if index == 0, case .afterFirstBlob = fault {

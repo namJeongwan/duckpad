@@ -148,6 +148,11 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
          revision:(uint64_t)revision
    preservingUndo:(BOOL)preservingUndo
             error:(NSError * _Nullable * _Nullable)error;
+/// Initial bytes and subsequent chunks must end at UTF-8 boundaries.
+- (BOOL)beginTextLoad:(NSData *)initial totalByteCount:(NSUInteger)total
+             revision:(uint64_t)revision error:(NSError * _Nullable * _Nullable)error;
+- (BOOL)appendTextLoadChunk:(NSData *)chunk atOffset:(NSUInteger)offset
+                    final:(BOOL)final error:(NSError * _Nullable * _Nullable)error;
 - (void)loadBinaryDocument:(DPScintillaBinaryDocument *)document revision:(uint64_t)revision;
 - (BOOL)appendBinaryDocumentChunk:(DPScintillaBinaryDocument *)document
                     maximumBytes:(NSUInteger)maximumBytes
