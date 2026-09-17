@@ -1,10 +1,43 @@
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-  <channel>
-    <title>Duckpad updates</title>
-    <link>https://namjeongwan.github.io/duckpad/</link>
-    <description>Duckpad for macOS</description>
-    <language>en</language>
-    <!-- Bootstrap feed: add an item only after a Sparkle-enabled release is published. -->
-  </channel>
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Duckpad</title>
+        <item>
+            <title>0.7.0</title>
+            <pubDate>Thu, 17 Sep 2026 16:09:04 +0900</pubDate>
+            <sparkle:version>44</sparkle:version>
+            <sparkle:shortVersionString>0.7.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.7.0
+
+- Add Sparkle 2 updates. Duckpad checks at launch and every six hours when automatic checks are enabled. An available update appears as a blue version button at the top right; clicking it opens release notes and the download/install/relaunch flow. Downloads and installation require user interaction.
+- Preserve unsaved documents through the existing recovery and normal termination flow during an update.
+- Simplify About Duckpad with a compact update status/action row, text links, and content-sized layout. Escape closes the window. Cancelling an update check enables checking again.
+- Localize the new interface in all eight supported languages. Update the website download metadata and provide a signed Sparkle feed through GitHub Pages.
+
+App and helpers: **0.7.0 (44)**. Requires **macOS 13 or later**. Distribution includes Apple Silicon and Intel binaries.
+
+## Installation
+
+**Users of 0.6.5 and earlier must install 0.7.0 manually once.** Those versions do not contain Sparkle. After installing 0.7.0, subsequent eligible releases can be installed from within Duckpad.
+
+Download `Duckpad-0.7.0-universal.dmg`, open it, and drag Duckpad into Applications. The ZIP alternative is `Duckpad-0.7.0-universal.zip`; verify downloads against `SHA256SUMS.txt`.
+
+The app is ad-hoc signed, not Developer ID signed or Apple notarized. Sparkle update archives use a separate Ed25519 signature; that signature does not replace Apple's first-install Gatekeeper checks. The private update-signing key remains in Keychain.
+
+## Validation and limitations
+
+Twelve presentation tests passed, including Escape/reopening, update cancellation, and layout/wrapping checks across eight languages and seven update states. Six targeted termination tests passed. Native About renders were visually checked in all eight languages, and the packaged Korean window was checked interactively.
+
+A separately identified sandboxed, ad-hoc-signed fixture upgraded from test build 43 to 44 and relaunched with both unsaved documents restored. Original on-disk contents were unchanged. These were disposable test versions, not public releases.
+
+The final universal 0.7.0 (44) package passed verification and smoke checks, including framework/helper signatures, sandbox entitlements, Finder opening, bookmark save/relaunch, window layout, and XPC isolation. App and both helper versions and architectures match. DMG and ZIP integrity checks passed; SHA-256 checksums accompany the downloads. Feed rejection checks and website validation cover all eight language dictionaries and 32 routes.
+
+Physical Intel/macOS 13 execution, Apple notarization, native Save-panel UI automation, and a six-hour wall-clock update soak were not performed. Update checks poll the feed; they are not real-time push notifications.
+
+Built from merged commit `ffc56b7bded55767e008b445e5fa559d71ef2e9a` (PR #45).
+]]></description>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.7.0/Duckpad-0.7.0-universal.zip" length="25979231" type="application/octet-stream" sparkle:edSignature="LTShDfnk5WdbnSlVg8WoYFaX+jcJrUNK4taavJHi+RIglfF74I/Q0noeRb0b2x0mvoXKDHC4mNg8wPWba6G8Aw=="/>
+        </item>
+    </channel>
 </rss>
