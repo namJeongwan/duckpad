@@ -10,7 +10,7 @@ Apple Developer membership is not required for Sparkle's Ed25519 archive signatu
 
 Ad-hoc signing is not Apple notarization and does not remove first-install Gatekeeper checks. Developer ID signing/notarization remains a separate distribution step. Sparkle supports this development configuration, but production update behavior must be verified with the packaged apps, not merely SwiftPM executables.
 
-Existing 0.6.5 and earlier apps have no automatic installer. Users must manually install the first Sparkle-enabled version once. That version can receive subsequent updates. The initial `duckpad-jekyll/appcast.xml` is deliberately an empty, valid feed until an eligible signed release is available; do not offer older builds that lack Sparkle.
+Existing 0.6.5 and earlier apps have no automatic installer. Users must manually install the first Sparkle-enabled version once. That version can receive subsequent updates. `duckpad-jekyll/appcast.xml` now publishes the signed 0.7.0 (44) ZIP. Do not offer older builds that lack Sparkle.
 
 ## Publishing subsequent updates
 
@@ -26,7 +26,7 @@ Reference: https://sparkle-project.org/documentation/ and https://sparkle-projec
 ## Validation for this change
 
 - Twelve presentation tests passed: badge lifecycle/click routing, Korean text, shared update actions, About status completion/cancellation, Escape/reopening, eight-language layout bounds/wrapping across seven update states and existing menu behavior. Six targeted termination tests passed, including cancellation/failure and unsaved recovery.
-- The native Apple Silicon package passed bundle/framework signature and entitlement verification, Finder/open, bookmark save/relaunch, layout and sandboxed extension smoke checks. Native save-panel UI automation was skipped.
+- The final universal 0.7.0 (44) package passed bundle/framework signature and entitlement verification, Finder/open, bookmark save/relaunch, layout and sandboxed extension smoke checks. Native save-panel UI automation was skipped.
 - A disposable, separately identified sandboxed app used a localhost feed and a Keychain-signed archive to upgrade from test version 0.6.5 (43) to test version 0.6.6 (44). Both apps were ad-hoc signed. The scheduled reminder appeared at the upper right, its button opened Sparkle, and dismissal removed the badge. Download, installation and automatic relaunch succeeded; both the unsaved Korean/emoji scratch and edited file were restored, with the original file unchanged. These are local fixture versions, not published releases.
 - The compact About window was visually checked in Korean in the packaged app, including Escape close/reopen. The borderless update row and footer were also visually checked in native test-host renders across all eight languages; the German failure state was checked for multiline layout. All eight languages contain the six new strings.
-- Apple notarization and execution on Intel hardware were not tested. The initial production feed remains empty until the normal reviewed release/feed publication steps above are completed. The six-hour interval is configured and delegated to Sparkle; a six-hour wall-clock soak was not performed.
+- Apple notarization and execution on Intel hardware were not tested. The 0.7.0 archive matches the published GitHub asset SHA-256, and its Sparkle signature was verified before feed publication. The six-hour interval is configured and delegated to Sparkle; a six-hour wall-clock soak was not performed.
