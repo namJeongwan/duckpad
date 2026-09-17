@@ -225,3 +225,27 @@ insertion. Scintilla otherwise starts with an eight-byte gap; typing a few more
 bytes would reallocate and copy the entire text and style buffers. Reservation
 uses the existing SCI_ALLOCATE API with an overflow guard and does not alter
 text, encoding, selection, or undo behavior.
+
+## Progressive editable text loading
+
+The Duckpad bridge adds an initial UTF-8 preview and bounded append operations
+for large text documents. Loading keeps input disabled, does not collect undo
+or change-history entries, preserves UTF-8/CRLF chunk boundaries, and establishes
+a clean save point when complete. The application retains the complete source
+for recovery throughout loading. This changes only Duckpad bridge files; the
+upstream Scintilla editor/storage implementation remains unchanged.
+
+## Cocoa input-manager UTF-16 indexing
+
+Duckpad allocates Scintilla's maintained UTF-16 line index when creating a text
+buffer, including when replacing a binary document. `cocoa/ScintillaCocoa.mm`
+uses that index in `CharactersFromPositions` and `PositionsFromCharacters`.
+Cocoa's selected-range, surrounding-text, and accessibility queries then scan
+only the relevant line fragments instead of the whole document prefix. The
+unindexed/non-Unicode fallback remains unchanged; Scintilla maintains index
+updates for insertions, deletion, Undo/Redo, and shared documents.
+
+This is a local patch to an upstream Cocoa source file, not generated API code.
+Re-vendoring the official subset must reapply this patch along with the existing
+Cocoa patches; the local bootstrap vendor script copies upstream Cocoa files
+and does not generate or preserve downstream changes automatically.

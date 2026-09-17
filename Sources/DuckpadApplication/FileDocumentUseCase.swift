@@ -487,7 +487,18 @@ public final class FileDocumentUseCase {
         if let existing, encodingHint == nil,
            let context = workspace.fileContext(tabID: existing), !needsBinaryContent(context) {
             switch await workspace.activate(tabID: existing) {
-            case .applied: return .activatedExisting(existing)
+            case .applied:
+                if let textEditor = editor as? any ProgressiveTextEditorPort,
+                   textEditor.hasPendingTextLoad(for: context.buffer.bufferID) {
+                    let failure = await finishLoading({ [weak self] descriptor in
+                        try await textEditor.finishTextLoad(for: descriptor) { loaded, total in
+                            self?.loadingProgress = FileLoadingProgress(path: canonical.path,
+                                loadedByteCount: loaded, totalByteCount: total)
+                        }
+                    }, context: context)
+                    if let failure { return .failed(failure) }
+                }
+                return .activatedExisting(existing)
             case .persistenceFailed(let failure): return .failed(.workspace(failure))
             case .rejected(let error): return .failed(.session(error))
             }
@@ -497,6 +508,18 @@ public final class FileDocumentUseCase {
             return .failed(.unsavedChanges(existing))
         }
         loadingProgress = FileLoadingProgress(path: canonical.path, loadedByteCount: 0, totalByteCount: nil)
+        let previewEditor = editor as? any FileOpeningPreviewEditorPort
+        defer { previewEditor?.dismissOpeningPreview() }
+        if prepared == nil, reopening == nil, let previewEditor,
+           let preview = await store.openingPreview(from: canonical, assuming: encodingHint) {
+            guard !Task.isCancelled else { return .failed(.cancelled) }
+            previewEditor.showOpeningPreview(preview, path: canonical.path)
+            // Zero means the full document is still being read/verified. The
+            // sample is visible, but must not imply any verified load progress.
+            loadingProgress = FileLoadingProgress(path: canonical.path,
+                loadedByteCount: 0, totalByteCount: preview.totalByteCount)
+        }
+        guard !Task.isCancelled else { return .failed(.cancelled) }
         let read: FileReadResult
         if let prepared {
             guard UInt64(prepared.data.count) == prepared.identity.byteCount else {
@@ -1075,6 +1098,19 @@ public final class FileDocumentUseCase {
             } catch is CancellationError { throw .cancelled }
             catch { throw .store(.io(String(describing: error))) }
         }
+        if !preservingUndo, data.count >= 8 * 1_024 * 1_024,
+           let textEditor = editor as? any ProgressiveTextEditorPort {
+            do {
+                let install = try await textEditor.prepareText(decoded.text)
+                return (decoded, install, { [weak self] descriptor in
+                    try await textEditor.finishTextLoad(for: descriptor) { loaded, total in
+                        self?.loadingProgress = FileLoadingProgress(path: path,
+                            loadedByteCount: loaded, totalByteCount: total)
+                    }
+                })
+            } catch is CancellationError { throw .cancelled }
+            catch { throw .store(.io(String(describing: error))) }
+        }
         return (decoded, { [editor] descriptor in
             if preservingUndo {
                 editor.reload(EditorTextSnapshot(bufferID: descriptor.bufferID,
@@ -1094,12 +1130,7 @@ public final class FileDocumentUseCase {
         _ finish: @MainActor (EditorBufferDescriptor) async throws -> Void,
         context: FileWorkspaceContext
     ) async -> FileOperationFailure? {
-        if context.binding?.isReadOnly != true {
-            if let progress = loadingProgress, let total = progress.totalByteCount {
-                loadingProgress = FileLoadingProgress(path: progress.path, loadedByteCount: total, totalByteCount: total)
-            }
-            return nil
-        }
+        (editor as? any FileOpeningPreviewEditorPort)?.dismissOpeningPreview()
         do {
             try await finish(context.buffer)
             guard !Task.isCancelled,

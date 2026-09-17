@@ -7,6 +7,8 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct ChangeHistoryTests {
+    init() { _ = NSApplication.shared }
+
     @Test func editsUndoSaveAndRedoTrackLineChangesWithoutReadingSnapshots() throws {
         let view = DPScintillaEditorView(frame: .zero)
         defer { view.invalidate() }

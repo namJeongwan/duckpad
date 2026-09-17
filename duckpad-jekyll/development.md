@@ -89,8 +89,22 @@ The sitemap lists all 32 language/page combinations. On a project site,
 file only if you control that domain root. For another base path or a custom
 domain, update `_config.yml` and the verification URL expectations together.
 
-Download data was checked against the GitHub v0.6.3 release. The website does not
-change app behavior, app version, signing, release files or the plugin API.
+The checked-in download data prepares version 0.6.5. PR builds use that data;
+live builds first run `sync-release.rb` against GitHub's latest published stable
+release. Missing assets or unexpected download URLs fail the build, keeping the
+previous deployment intact. All languages and software-version structured data
+use the same resolved release, including asset sizes.
+
+After publishing a release and verifying its assets, refresh Pages from `main`:
+
+```sh
+gh workflow run pages.yml --ref main
+```
+
+This uses the existing main-only `github-pages` environment policy. Publishing
+a tag alone does not deploy the site. A version-preparation PR can therefore
+merge before its assets are published without advertising broken downloads.
+The website does not change app signing, release files or the plugin API.
 
 ## Google Search Console
 

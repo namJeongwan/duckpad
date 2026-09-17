@@ -25,45 +25,76 @@ enum ClonedTextFile {
             throw error
         }
         do {
-            var info = stat()
-            guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { throw failure() }
-            let chunkSize = 1_024 * 1_024
-            let scratch = UnsafeMutableRawPointer.allocate(byteCount: chunkSize, alignment: 16)
-            defer { scratch.deallocate() }
-            try data.withUnsafeBytes { (desired: UnsafeRawBufferPointer) in
-                var offset = 0
-                while offset < desired.count {
-                    let length = min(chunkSize, desired.count - offset)
-                    let available = Int(min(Int64(length), max(0, info.st_size - Int64(offset))))
-                    var read = 0
-                    while read < available {
-                        let count = pread(descriptor, scratch.advanced(by: read), available - read, off_t(offset + read))
-                        if count < 0, errno == EINTR { continue }
-                        guard count > 0 else { throw failure() }
-                        read += count
-                    }
-                    let bytes = desired.baseAddress!.advanced(by: offset)
-                    if available != length || memcmp(scratch, bytes, length) != 0 {
-                        var written = 0
-                        while written < length {
-                            let count = pwrite(descriptor, bytes.advanced(by: written), length - written, off_t(offset + written))
-                            if count < 0, errno == EINTR { continue }
-                            guard count > 0 else { throw failure() }
-                            written += count
-                        }
-                    }
-                    offset += length
-                }
-            }
-            if info.st_size != data.count {
-                guard ftruncate(descriptor, off_t(data.count)) == 0 else { throw failure() }
-            }
+            try patch(descriptor, with: data)
             return descriptor
         } catch {
             Darwin.close(descriptor)
             Darwin.unlink(destination.path)
             throw error
         }
+    }
+
+    /// Descriptor-relative variant for a verified recovery directory. The
+    /// source is already opened without following symlinks by the caller.
+    static func prepare(sourceDescriptor: Int32, destinationDirectory: Int32,
+                        name: String, data: Data) throws -> Int32? {
+        guard data.count >= minimumByteCount else { return nil }
+        guard fclonefileat(sourceDescriptor, destinationDirectory, name, 0) == 0 else { return nil }
+        guard fchmodat(destinationDirectory, name, S_IRUSR | S_IWUSR, AT_SYMLINK_NOFOLLOW) == 0 else {
+            let error = failure()
+            unlinkat(destinationDirectory, name, 0)
+            throw error
+        }
+        let descriptor = openat(destinationDirectory, name, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
+        guard descriptor >= 0 else {
+            let error = failure()
+            unlinkat(destinationDirectory, name, 0)
+            throw error
+        }
+        do {
+            try patch(descriptor, with: data)
+            return descriptor
+        } catch {
+            Darwin.close(descriptor)
+            unlinkat(destinationDirectory, name, 0)
+            throw error
+        }
+    }
+
+    private static func patch(_ descriptor: Int32, with data: Data) throws {
+    var info = stat()
+    guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { throw failure() }
+    let chunkSize = 1_024 * 1_024
+    let scratch = UnsafeMutableRawPointer.allocate(byteCount: chunkSize, alignment: 16)
+    defer { scratch.deallocate() }
+    try data.withUnsafeBytes { (desired: UnsafeRawBufferPointer) in
+        var offset = 0
+        while offset < desired.count {
+            let length = min(chunkSize, desired.count - offset)
+            let available = Int(min(Int64(length), max(0, info.st_size - Int64(offset))))
+            var read = 0
+            while read < available {
+                let count = pread(descriptor, scratch.advanced(by: read), available - read, off_t(offset + read))
+                if count < 0, errno == EINTR { continue }
+                guard count > 0 else { throw failure() }
+                read += count
+            }
+            let bytes = desired.baseAddress!.advanced(by: offset)
+            if available != length || memcmp(scratch, bytes, length) != 0 {
+                var written = 0
+                while written < length {
+                    let count = pwrite(descriptor, bytes.advanced(by: written), length - written, off_t(offset + written))
+                    if count < 0, errno == EINTR { continue }
+                    guard count > 0 else { throw failure() }
+                    written += count
+                }
+            }
+            offset += length
+        }
+    }
+    if info.st_size != data.count {
+        guard ftruncate(descriptor, off_t(data.count)) == 0 else { throw failure() }
+    }
     }
 
     private static func failure() -> NSError {

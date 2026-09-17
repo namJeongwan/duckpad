@@ -12,13 +12,20 @@ public struct EditorRecoveryCheckpoint: Equatable, Sendable {
     }
 
     public init(utf8: Data) {
-        self.utf8 = utf8
+        // A caller may supply memory-mapped or externally backed Data. Own the
+        // bytes so later file changes cannot alter this immutable checkpoint.
+        self.utf8 = utf8.withUnsafeBytes { Data($0) }
         isValidated = false
     }
 
     init(validatedUTF8: Data) {
         utf8 = validatedUTF8
         isValidated = true
+    }
+
+    /// Trusted checkpoints have already been validated during construction.
+    public var isValidUTF8: Bool {
+        isValidated || String(data: utf8, encoding: .utf8) != nil
     }
 
     public static func == (lhs: Self, rhs: Self) -> Bool { lhs.utf8 == rhs.utf8 }

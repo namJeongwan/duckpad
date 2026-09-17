@@ -207,6 +207,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     BOOL _suppressEdit;
     BOOL _requestedInputEnabled;
     BOOL _binaryDocument;
+    BOOL _loadingText;
+    NSUInteger _loadingTextTotal;
+    BOOL _loadingTextHasEOL;
     std::string _binarySelectionBeforeAppend;
     NSInteger _binaryFirstVisibleLine;
     NSInteger _binaryHorizontalScroll;
@@ -286,6 +289,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         _searchMarkerPeers = [NSHashTable weakObjectsHashTable];
         [_searchMarkerPeers addObject:self];
         [_scintilla message:SCI_SETCODEPAGE wParam:SC_CP_UTF8];
+        // Maintain the index while loading/editing, before Cocoa's input manager
+        // can ask for document-wide UTF-16 coordinates on every key event.
+        [_scintilla message:SCI_ALLOCATELINECHARACTERINDEX wParam:SC_LINECHARACTERINDEX_UTF16];
         _publishesDocumentEdits = YES;
         [self updateModificationEventMask];
         [_scintilla message:SCI_SETUNDOSELECTIONHISTORY
@@ -545,6 +551,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         return [self fail:DPScintillaErrorInvalidUTF8 description:@"Content is not valid UTF-8" error:error];
     }
     [self cancelPendingSmartIndentation];
+    const BOOL interruptedTextLoad = _loadingText;
+    // An incomplete preview has no user edits and must never become an undo target.
+    if (interruptedTextLoad) preservingUndo = NO;
+    _loadingText = NO;
     _suppressEdit = YES;
     _pendingSmartCaretPosition = -1;
     _pendingSmartInsertionEnd = -1;
@@ -555,6 +565,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_SETDOCPOINTER wParam:0 lParam:0];
         [_scintilla message:SCI_SETLAYOUTCACHE wParam:SC_CACHE_NONE];
         [_scintilla message:SCI_SETCODEPAGE wParam:SC_CP_UTF8];
+        // Maintain the index while loading/editing, before Cocoa's input manager
+        // can ask for document-wide UTF-16 coordinates on every key event.
+        [_scintilla message:SCI_ALLOCATELINECHARACTERINDEX wParam:SC_LINECHARACTERINDEX_UTF16];
         [_scintilla message:SCI_SETUNDOSELECTIONHISTORY wParam:SC_UNDO_SELECTION_HISTORY_ENABLED];
         _binaryDocument = NO;
         [self updateModificationEventMask];
@@ -564,7 +577,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETMARGINWIDTHN wParam:3 lParam:3];
     [_scintilla message:SCI_SETEOLMODE wParam:DPEOLModeForUTF8(content)];
     if (!preservingUndo || ![content isEqualToData:self.contentUTF8]) {
-        const BOOL collectingUndo = [_scintilla message:SCI_GETUNDOCOLLECTION] != 0;
+        const BOOL collectingUndo = interruptedTextLoad || [_scintilla message:SCI_GETUNDOCOLLECTION] != 0;
         if (preservingUndo) [_scintilla message:SCI_BEGINUNDOACTION];
         else [_scintilla message:SCI_SETUNDOCOLLECTION wParam:0];
         [_scintilla message:SCI_CLEARALL];
@@ -598,8 +611,59 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     return YES;
 }
 
+- (BOOL)beginTextLoad:(NSData *)initial totalByteCount:(NSUInteger)total
+             revision:(uint64_t)revision error:(NSError **)error {
+    if (total < initial.length || total > static_cast<NSUInteger>(PTRDIFF_MAX) - 64 * 1024) {
+        return [self fail:DPScintillaErrorInvalidRange description:@"Invalid text load size" error:error];
+    }
+    if (![self loadUTF8:initial revision:revision error:error]) return NO;
+    _loadingText = YES;
+    _loadingTextTotal = total;
+    _loadingTextHasEOL = memchr(initial.bytes, '\r', initial.length) || memchr(initial.bytes, '\n', initial.length);
+    [_scintilla message:SCI_SETCHANGEHISTORY wParam:SC_CHANGE_HISTORY_DISABLED];
+    [_scintilla message:SCI_SETUNDOCOLLECTION wParam:0];
+    [_scintilla message:SCI_ALLOCATE wParam:total + 64 * 1024];
+    [_scintilla setEditable:NO];
+    return YES;
+}
+
+- (BOOL)appendTextLoadChunk:(NSData *)chunk atOffset:(NSUInteger)offset
+                    final:(BOOL)final error:(NSError **)error {
+    if (!_loadingText || offset != self.documentByteLength || offset > _loadingTextTotal
+        || chunk.length > _loadingTextTotal - offset
+        || final != (offset + chunk.length == _loadingTextTotal)
+        || [[NSString alloc] initWithData:chunk encoding:NSUTF8StringEncoding] == nil) {
+        return [self fail:DPScintillaErrorInvalidRange description:@"Invalid text load chunk" error:error];
+    }
+    if (!_loadingTextHasEOL && (memchr(chunk.bytes, '\r', chunk.length) || memchr(chunk.bytes, '\n', chunk.length))) {
+        [_scintilla message:SCI_SETEOLMODE wParam:DPEOLModeForUTF8(chunk)];
+        _loadingTextHasEOL = YES;
+    }
+    _suppressEdit = YES;
+    [_scintilla setEditable:YES];
+    [_scintilla message:SCI_APPENDTEXT wParam:chunk.length lParam:(sptr_t)chunk.bytes];
+    [_scintilla setEditable:NO];
+    _suppressEdit = NO;
+    if (self.documentByteLength != offset + chunk.length) {
+        return [self fail:DPScintillaErrorInvalidRange description:@"Incomplete text load" error:error];
+    }
+    if (final) {
+        _loadingText = NO;
+        [_scintilla message:SCI_SETUNDOCOLLECTION wParam:1];
+        [_scintilla message:SCI_EMPTYUNDOBUFFER];
+        [_scintilla message:SCI_SETSAVEPOINT];
+        [_scintilla message:SCI_SETCHANGEHISTORY wParam:SC_CHANGE_HISTORY_ENABLED | SC_CHANGE_HISTORY_MARKERS];
+        [_scintilla setEditable:_requestedInputEnabled && _revision != UINT64_MAX];
+    }
+    [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
+    _statusContentGeneration += 1;
+    if (self.onStatusChange) self.onStatusChange();
+    return YES;
+}
+
 - (void)loadBinaryDocument:(DPScintillaBinaryDocument *)document revision:(uint64_t)revision {
     [self cancelPendingSmartIndentation];
+    _loadingText = NO;
     [self resetSearchOverviewDocument];
     _suppressEdit = YES;
     _binaryDocument = YES;
@@ -687,6 +751,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         expectedRevision:(uint64_t)expectedRevision
        resultingRevision:(uint64_t)resultingRevision
                     error:(NSError **)error {
+    if ([_scintilla message:SCI_GETREADONLY] != 0) {
+        return [self fail:DPScintillaErrorInvalidRange description:@"Document is read-only" error:error];
+    }
     if (expectedRevision != _revision) {
         return [self fail:DPScintillaErrorStaleRevision description:@"Expected revision is stale" error:error];
     }
@@ -737,6 +804,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                      error:(NSError **)error {
     if (ranges.count != replacements.count) {
         return [self fail:DPScintillaErrorInvalidRange description:@"Batch ranges and replacements differ" error:error];
+    }
+    if ([_scintilla message:SCI_GETREADONLY] != 0) {
+        return [self fail:DPScintillaErrorInvalidRange description:@"Document is read-only" error:error];
     }
     if (expectedRevision != _revision) {
         return [self fail:DPScintillaErrorStaleRevision description:@"Expected batch revision is stale" error:error];
@@ -863,7 +933,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (BOOL)isInputEnabled { return [_scintilla isEditable]; }
 - (void)setInputEnabled:(BOOL)value {
     _requestedInputEnabled = value;
-    [_scintilla setEditable:value && !_binaryDocument && _revision != UINT64_MAX];
+    [_scintilla setEditable:value && !_binaryDocument && !_loadingText && _revision != UINT64_MAX];
 }
 - (BOOL)isWordWrapEnabled { return [_scintilla message:SCI_GETWRAPMODE] != SC_WRAP_NONE; }
 - (void)setWordWrapEnabled:(BOOL)value {
@@ -1099,13 +1169,14 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_searchMarkerPeers addObject:self];
     _searchMarkerOffsets = source->_searchMarkerOffsets;
     _binaryDocument = source->_binaryDocument;
+    _loadingText = source->_loadingText;
     [_scintilla message:SCI_SETLAYOUTCACHE wParam:_binaryDocument ? SC_CACHE_PAGE : SC_CACHE_NONE];
     [_scintilla message:SCI_SETUNDOSELECTIONHISTORY
                  wParam:_binaryDocument ? SC_UNDO_SELECTION_HISTORY_DISABLED : SC_UNDO_SELECTION_HISTORY_ENABLED];
     if (_binaryDocument) [_scintilla message:SCI_SETWRAPMODE wParam:SC_WRAP_NONE];
     const sptr_t document = [source->_scintilla message:SCI_GETDOCPOINTER];
     [_scintilla message:SCI_SETDOCPOINTER wParam:0 lParam:document];
-    [_scintilla message:SCI_SETCHANGEHISTORY wParam:_binaryDocument ? SC_CHANGE_HISTORY_DISABLED
+    [_scintilla message:SCI_SETCHANGEHISTORY wParam:(_binaryDocument || _loadingText) ? SC_CHANGE_HISTORY_DISABLED
         : SC_CHANGE_HISTORY_ENABLED | SC_CHANGE_HISTORY_MARKERS];
     [_scintilla message:SCI_SETMARGINWIDTHN wParam:3 lParam:_binaryDocument ? 0 : 3];
     [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
@@ -1123,7 +1194,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)synchronizeRevision:(uint64_t)revision {
     _revision = revision;
-    [_scintilla setEditable:_requestedInputEnabled && !_binaryDocument && revision != UINT64_MAX];
+    if (_documentPublisher != nil) _loadingText = _documentPublisher->_loadingText;
+    [_scintilla setEditable:_requestedInputEnabled && !_binaryDocument && !_loadingText && revision != UINT64_MAX];
 }
 - (void)recordSavePointAtRevision:(uint64_t)revision {
     if (!_binaryDocument && _revision == revision) [_scintilla message:SCI_SETSAVEPOINT];

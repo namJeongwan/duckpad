@@ -91,8 +91,8 @@ private enum DuckpadPerformanceBenchmark {
     @MainActor
     static func main() async {
         do {
-            if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--large-file" {
-                try await LargeFileBenchmark.run(path: CommandLine.arguments[2])
+            if CommandLine.arguments.count == 3, ["--large-file", "--large-file-live"].contains(CommandLine.arguments[1]) {
+                try await LargeFileBenchmark.run(path: CommandLine.arguments[2], liveAutosave: CommandLine.arguments[1] == "--large-file-live")
                 return
             }
             if CommandLine.arguments.count == 3,
