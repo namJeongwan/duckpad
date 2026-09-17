@@ -655,6 +655,58 @@ struct LanguageEditorAdapterTests {
     }
 
     @Test @MainActor
+    func plainTextReturnPreservesLeadingWhitespaceAndOneUndo() throws {
+        for eol in ["\n", "\r\n", "\r"] {
+            for indent in ["  ", "\t ", ""] {
+                let (window, view) = hostedView()
+                let source = "Tier 1" + eol + indent + "- 한글🦆"
+                try view.loadUTF8(Data(source.utf8), revision: 0)
+                #expect(view.applyLexerNamed("null", keywords: [], tabWidth: 4, useTabs: false,
+                                            folding: false, braceMatching: false, maximumStyleBytes: 1_000_000))
+                view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+                view.focusEditor()
+                view.resetInstrumentation()
+
+                try sendKeyEvent(characters: "\r", charactersIgnoringModifiers: "\r", keyCode: 36, to: window)
+
+                let expected = source + eol + indent
+                #expect(view.snapshotReadCount == 0)
+                #expect(view.contentUTF8 == Data(expected.utf8))
+                #expect(view.caretUTF8Position == expected.utf8.count)
+                #expect(view.revision == 1)
+                view.undo()
+                #expect(view.contentUTF8 == Data(source.utf8))
+                #expect(!view.canUndo)
+                view.redo()
+                #expect(view.contentUTF8 == Data(expected.utf8))
+            }
+        }
+    }
+
+    @Test @MainActor
+    func plainTextIndentationDoesNotApplyCodeRulesOrTransformBulkInput() throws {
+        for (source, caret, input, expected) in [
+            ("  {}", 3, "\n", "  {\n  }"),
+            ("  [", 3, "\n", "  [\n  "),
+            ("  (", 3, "\n", "  (\n  "),
+            ("  ", 2, "\n", "  \n  "),
+            ("  note", 1, "\n", " \n  note"),
+            ("  note", 0, "\n", "\n  note"),
+            ("  note", 6, "\nnext", "  note\nnext"),
+        ] {
+            let (_, view) = hostedView()
+            try view.loadUTF8(Data(source.utf8), revision: 0)
+            #expect(view.applyLexerNamed("null", keywords: [], tabWidth: 4, useTabs: false,
+                                        folding: false, braceMatching: false, maximumStyleBytes: 1_000_000))
+            view.setPrimarySelectionUTF8Range(NSRange(location: caret, length: 0))
+            view.insertCommittedText(input)
+            #expect(view.contentUTF8 == Data(expected.utf8))
+            view.undo()
+            #expect(view.contentUTF8 == Data(source.utf8))
+        }
+    }
+
+    @Test @MainActor
     func plainTextAndPasteDoNotTriggerSmartPairing() throws {
         let (_, plainTextView) = hostedView()
         try plainTextView.loadUTF8(Data(), revision: 0)

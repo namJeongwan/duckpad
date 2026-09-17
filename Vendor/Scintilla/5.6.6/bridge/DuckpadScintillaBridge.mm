@@ -236,6 +236,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     BOOL _publishesDocumentEdits;
     __weak DPScintillaEditorView *_documentPublisher;
     BOOL _smartEditingEnabled;
+    BOOL _plainTextIndentationEnabled;
     BOOL _highlightCurrentLine;
     NSString *_editorFontName;
     double _editorFontSize;
@@ -595,6 +596,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _pendingSmartInsertionEnd = -1;
     _pendingSmartCharacter = 0;
     _smartEditingEnabled = NO;
+    _plainTextIndentationEnabled = NO;
     _braceMatchingEnabled = NO;
     _foldingEnabled = NO;
     _foldRecoveryProgressPending = NO;
@@ -1056,7 +1058,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         ? SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT
             | SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE
         : 0;
-    if (_smartEditingEnabled) mask |= SC_MOD_INSERTCHECK;
+    if (_smartEditingEnabled || _plainTextIndentationEnabled) mask |= SC_MOD_INSERTCHECK;
     [_scintilla message:SCI_SETMODEVENTMASK wParam:mask];
 }
 
@@ -1516,6 +1518,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _pendingSmartInsertionEnd = -1;
     _pendingSmartCharacter = 0;
     _braceMatchingEnabled = nextBraceMatchingEnabled;
+    _plainTextIndentationEnabled = !_binaryDocument && [lexerName isEqualToString:@"null"];
     _smartEditingEnabled = _braceMatchingEnabled
         && ![effectiveName isEqualToString:@"null"];
     [self updateModificationEventMask];
@@ -2517,13 +2520,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         if ([directInputInitiator prepareClosingDelimiterDedent:notification]) return;
     }
     if ([self prepareClosingDelimiterDedent:notification]) return;
-    if (!_smartEditingEnabled || [[_scintilla content] hasMarkedText]
+    if ((!_smartEditingEnabled && !_plainTextIndentationEnabled) || [[_scintilla content] hasMarkedText]
         || notification->length <= 0 || notification->text == nullptr) return;
     if (notification->length > 2) return;
     const std::string inserted(notification->text, static_cast<size_t>(notification->length));
     const BOOL isNewline = inserted == "\n" || inserted == "\r" || inserted == "\r\n";
     const int opening = inserted.size() == 1 ? static_cast<unsigned char>(inserted[0]) : 0;
-    const char *pair = DPSmartPairForOpening(opening);
+    const char *pair = _smartEditingEnabled ? DPSmartPairForOpening(opening) : nullptr;
     BOOL isDirectInput = inputOwner->_textInputSourceKnown
         && inputOwner->_directInputInsertion;
     if (!inputOwner->_textInputSourceKnown
@@ -2563,6 +2566,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         if (character != ' ' && character != '\t') break;
         if (baseIndent.size() >= static_cast<size_t>(DPSmartIndentScanLimit)) return;
         baseIndent.push_back(static_cast<char>(character));
+    }
+    if (_plainTextIndentationEnabled) {
+        const std::string replacement = inserted + baseIndent;
+        [_scintilla message:SCI_CHANGEINSERTION
+                     wParam:(uptr_t)replacement.size()
+                     lParam:reinterpret_cast<sptr_t>(replacement.c_str())];
+        return;
     }
     NSInteger previous = position - 1;
     NSInteger trailingWhitespaceLength = 0;

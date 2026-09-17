@@ -170,3 +170,13 @@ the scale; clicking unfolds and centers the actual match. During idle wrapping,
 positions remain inside each line's current display span. Wrapped text panes with
 no persistent layout cache temporarily reuse a single-line cache for the mapping
 pass and restore the previous setting afterward.
+
+Plain-text Return handling in the Duckpad-owned bridge preserves the current
+line's leading spaces and tabs for a single empty caret. This basic indentation
+is independent of code-only bracket pairing/block indentation, keeps the native
+line-ending mode and one-step undo, and retains the existing direct-input,
+selection, IME, and bounded whitespace-scan guards. Requested code lexers that
+fall back to `null` do not gain plain-text behavior. Local Notepad++ reference:
+`PowerEditor/src/Notepad_plus.cpp`, `Notepad_plus::maintainIndentation`, basic
+indentation fallback (lines 3925–3946). The bridge is not generated; no upstream
+Scintilla/Lexilla files are changed.
