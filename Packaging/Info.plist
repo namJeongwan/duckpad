@@ -55,9 +55,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.6.5</string>
+    <string>0.7.0</string>
     <key>CFBundleVersion</key>
-    <string>43</string>
+    <string>44</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
     <key>LSMinimumSystemVersion</key>
@@ -70,5 +70,21 @@
     <string>NSApplication</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
+	<key>SUFeedURL</key>
+	<string>https://namjeongwan.github.io/duckpad/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>cuw8OvAQ/9YXcCs5LhsWJMOpyVfY6g5K6gVt5Vu7frI=</string>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>21600</integer>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 </dict>
 </plist>

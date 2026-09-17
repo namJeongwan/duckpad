@@ -3,7 +3,7 @@ import AppKit
 
 @MainActor
 public final class DuckpadAboutWindowController: NSWindowController {
-    let updateTitle = NSTextField(labelWithString: "")
+    let updateTitle = NSTextField(wrappingLabelWithString: "")
     let updateDetail = NSTextField(wrappingLabelWithString: "")
     let updateButton: NSButton
     private let updateIcon = NSImageView()
@@ -15,8 +15,8 @@ public final class DuckpadAboutWindowController: NSWindowController {
     private let copy = NSButton()
     private let star = NSButton()
     private let releases = NSButton()
-    private let footer = NSTextField(labelWithString: "")
     private let report = NSButton()
+    private let layout = NSStackView()
 
     private var catalog = L10n.catalog
 
@@ -27,8 +27,8 @@ public final class DuckpadAboutWindowController: NSWindowController {
     public init(target: DuckpadAppInfoController) {
         appInfo = target.appInfo
         updateButton = NSButton(title: L10n.text("Check for Updates"), target: target, action: #selector(target.performUpdate(_:)))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 430),
+        let window = DuckpadAboutWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 220),
             styleMask: [.titled, .closable], backing: .buffered, defer: false
         )
         window.title = L10n.text("About Duckpad")
@@ -42,15 +42,15 @@ public final class DuckpadAboutWindowController: NSWindowController {
         content.blendingMode = .behindWindow
         content.state = .active
         window.contentView = content
-        let icon = NSImageView(image: NSApplication.shared.applicationIconImage ?? NSImage(size: NSSize(width: 72, height: 72)))
+        let icon = NSImageView(image: NSApplication.shared.applicationIconImage ?? NSImage(size: NSSize(width: 64, height: 64)))
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.setAccessibilityElement(false)
-        icon.widthAnchor.constraint(equalToConstant: 72).isActive = true
-        icon.heightAnchor.constraint(equalToConstant: 72).isActive = true
+        icon.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 64).isActive = true
 
         let title = NSTextField(labelWithString: "Duckpad")
-        title.font = .systemFont(ofSize: 27, weight: .bold)
-        tagline.stringValue = localized("A focused text editor for macOS.")
+        title.font = .systemFont(ofSize: 23, weight: .semibold)
+        tagline.stringValue = localized("Text editor for macOS.")
         tagline.font = .systemFont(ofSize: 13)
         tagline.textColor = .secondaryLabelColor
         version.stringValue = target.appInfo.versionDescription
@@ -69,40 +69,58 @@ public final class DuckpadAboutWindowController: NSWindowController {
         versionRow.alignment = .centerY
         versionRow.spacing = 7
 
-        let card = NSBox()
-        card.boxType = .custom
-        card.cornerRadius = 12
-        card.borderColor = .separatorColor
-        card.fillColor = .controlBackgroundColor
-        card.contentViewMargins = NSSize(width: 14, height: 14)
-        updateTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+        updateTitle.font = .systemFont(ofSize: 13, weight: .medium)
         updateTitle.setAccessibilityIdentifier("duckpad.about.update-status")
+        updateTitle.maximumNumberOfLines = 0
         updateDetail.font = .systemFont(ofSize: 11)
         updateDetail.textColor = .secondaryLabelColor
-        updateDetail.maximumNumberOfLines = 3
+        updateDetail.maximumNumberOfLines = 0
         let messages = NSStackView(views: [updateTitle, updateDetail])
         messages.orientation = .vertical
         messages.alignment = .leading
-        messages.spacing = 4
-        messages.widthAnchor.constraint(equalToConstant: 275).isActive = true
+        messages.spacing = 3
+        updateTitle.widthAnchor.constraint(equalTo: messages.widthAnchor).isActive = true
+        updateDetail.widthAnchor.constraint(equalTo: messages.widthAnchor).isActive = true
         updateIcon.imageScaling = .scaleProportionallyUpOrDown
-        updateIcon.widthAnchor.constraint(equalToConstant: 22).isActive = true
-        updateIcon.heightAnchor.constraint(equalToConstant: 22).isActive = true
         progress.style = .spinning
         progress.controlSize = .small
         progress.isDisplayedWhenStopped = false
+        let indicator = NSView()
+        for view in [updateIcon, progress] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            indicator.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.centerXAnchor.constraint(equalTo: indicator.centerXAnchor),
+                view.centerYAnchor.constraint(equalTo: indicator.centerYAnchor),
+                view.widthAnchor.constraint(equalToConstant: 16),
+                view.heightAnchor.constraint(equalToConstant: 16),
+            ])
+        }
         updateButton.bezelStyle = .rounded
         updateButton.controlSize = .small
         updateButton.font = .systemFont(ofSize: 11, weight: .medium)
         updateButton.setAccessibilityIdentifier("duckpad.about.update-action")
+        updateButton.setContentHuggingPriority(.required, for: .horizontal)
         updateButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let actions = NSStackView(views: [progress, updateButton])
-        actions.orientation = .vertical
-        actions.spacing = 6
-        let cardRow = NSStackView(views: [updateIcon, messages, actions])
-        cardRow.alignment = .centerY
-        cardRow.spacing = 10
-        card.contentView = cardRow
+        let updateRow = NSView()
+        for view in [indicator, messages, updateButton] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            updateRow.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            indicator.leadingAnchor.constraint(equalTo: updateRow.leadingAnchor),
+            indicator.centerYAnchor.constraint(equalTo: updateRow.centerYAnchor),
+            indicator.widthAnchor.constraint(equalToConstant: 16),
+            indicator.heightAnchor.constraint(equalToConstant: 16),
+            messages.leadingAnchor.constraint(equalTo: indicator.trailingAnchor, constant: 8),
+            messages.trailingAnchor.constraint(equalTo: updateButton.leadingAnchor, constant: -16),
+            messages.centerYAnchor.constraint(equalTo: updateRow.centerYAnchor),
+            messages.topAnchor.constraint(greaterThanOrEqualTo: updateRow.topAnchor),
+            messages.bottomAnchor.constraint(lessThanOrEqualTo: updateRow.bottomAnchor),
+            updateButton.trailingAnchor.constraint(equalTo: updateRow.trailingAnchor),
+            updateButton.centerYAnchor.constraint(equalTo: updateRow.centerYAnchor),
+            updateRow.heightAnchor.constraint(greaterThanOrEqualToConstant: 28),
+        ])
 
         star.target = target
         star.action = #selector(target.performStarOnGitHub(_:))
@@ -114,41 +132,45 @@ public final class DuckpadAboutWindowController: NSWindowController {
         releases.target = target
         releases.action = #selector(target.performOpenReleaseNotes(_:))
         releases.bezelStyle = .rounded
-        let links = NSStackView(views: [star, releases])
-        links.spacing = 10
-        let separator = NSBox()
-        separator.boxType = .separator
-        footer.stringValue = localized("Built for macOS.")
-        footer.font = .systemFont(ofSize: 11)
-        footer.textColor = .tertiaryLabelColor
         report.target = target
         report.action = #selector(target.performReportIssue(_:))
-        report.isBordered = false
-        report.font = .systemFont(ofSize: 11)
-        report.contentTintColor = .secondaryLabelColor
-        let footerRow = NSStackView(views: [footer, NSView(), report])
-        footerRow.alignment = .centerY
-
-        let stack = NSStackView(views: [icon, title, tagline, versionRow, card, links, separator, footerRow])
+        for button in [star, releases, report] {
+            button.isBordered = false
+            button.contentTintColor = .secondaryLabelColor
+            button.controlSize = .small
+            button.font = .systemFont(ofSize: 11)
+        }
+        let links = NSStackView(views: [star, releases, report])
+        links.spacing = 16
+        let footerSeparator = NSBox()
+        footerSeparator.boxType = .separator
+        let separator = NSBox()
+        separator.boxType = .separator
+        let details = NSStackView(views: [title, tagline, versionRow])
+        details.orientation = .vertical
+        details.alignment = .leading
+        details.spacing = 5
+        let header = NSStackView(views: [icon, details, NSView()])
+        header.alignment = .centerY
+        header.spacing = 16
+        let stack = layout
+        for view in [header, separator, updateRow, footerSeparator, links] { stack.addArrangedSubview(view) }
         stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 9
-        stack.setCustomSpacing(4, after: title)
-        stack.setCustomSpacing(18, after: versionRow)
-        stack.setCustomSpacing(16, after: card)
-        stack.setCustomSpacing(16, after: links)
+        stack.alignment = .leading
+        stack.spacing = 14
+        stack.setCustomSpacing(16, after: header)
         stack.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -16),
-            card.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            card.heightAnchor.constraint(equalToConstant: 88),
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 18),
+            header.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            updateRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            footerSeparator.widthAnchor.constraint(equalTo: stack.widthAnchor),
             separator.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            footerRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
+        window.initialFirstResponder = updateButton
         updateState = target.state
         refreshLocalization()
     }
@@ -159,16 +181,15 @@ public final class DuckpadAboutWindowController: NSWindowController {
     public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
         self.catalog = catalog
         window?.title = localized("About Duckpad")
-        tagline.stringValue = localized("A focused text editor for macOS.")
+        tagline.stringValue = localized("Text editor for macOS.")
         version.stringValue = appInfo.version.map {
             localized("Version %1$@", L10n.argument($0)) + (appInfo.build.map { " (\($0))" } ?? "")
         } ?? localized("Development build")
         copy.setAccessibilityLabel(localized("Copy app info"))
         copy.toolTip = localized("Copy version and macOS information")
-        star.title = localized("Star on GitHub")
+        star.title = "GitHub"
         star.toolTip = localized("Support Duckpad with a star on GitHub")
         releases.title = localized("Release Notes")
-        footer.stringValue = localized("Built for macOS.")
         report.title = localized("Report an Issue ↗")
         render(updateState)
     }
@@ -179,24 +200,22 @@ public final class DuckpadAboutWindowController: NSWindowController {
         updateButton.title = localized("Check for Updates")
         updateIcon.contentTintColor = .secondaryLabelColor
         var symbol = "arrow.triangle.2.circlepath"
+        updateDetail.stringValue = ""
+        updateIcon.isHidden = state == .checking
         progress.stopAnimation(nil)
         progress.isHidden = state != .checking
         switch state {
         case .idle:
-            updateTitle.stringValue = localized("Keep Duckpad up to date")
-            updateDetail.stringValue = localized("Get the latest improvements from GitHub Releases.")
+            updateTitle.stringValue = localized("Software Updates")
         case .checking:
             updateTitle.stringValue = localized("Checking for updates…")
-            updateDetail.stringValue = localized("Looking for the latest Duckpad release.")
             progress.startAnimation(nil)
         case .current:
             updateTitle.stringValue = localized("You're up to date")
-            updateDetail.stringValue = localized("No newer release is available.")
             updateIcon.contentTintColor = .systemGreen
             symbol = "checkmark.circle.fill"
         case .available(let release):
-            updateTitle.stringValue = localized("Duckpad %1$@ is available", L10n.argument(release.version))
-            updateDetail.stringValue = localized("Download the update from GitHub Releases.")
+            updateTitle.stringValue = localized("New version: %1$@", L10n.argument(release.version))
             updateButton.title = localized("Download Update")
             updateIcon.contentTintColor = .controlAccentColor
             symbol = "arrow.down.circle.fill"
@@ -206,7 +225,6 @@ public final class DuckpadAboutWindowController: NSWindowController {
             updateButton.title = localized("View Release")
         case .noRelease:
             updateTitle.stringValue = localized("No releases yet")
-            updateDetail.stringValue = localized("Published releases will appear here.")
         case .failed:
             updateTitle.stringValue = localized("Couldn't check for updates")
             updateDetail.stringValue = localized("Try again, or open Release Notes below.")
@@ -215,5 +233,14 @@ public final class DuckpadAboutWindowController: NSWindowController {
             symbol = "exclamationmark.circle"
         }
         updateIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        updateDetail.isHidden = updateDetail.stringValue.isEmpty
+        // Fit translated status text instead of reserving an empty update card.
+        window?.contentView?.layoutSubtreeIfNeeded()
+        if let window {
+            let height = ceil(layout.fittingSize.height) + 36
+            let top = window.frame.maxY
+            window.setContentSize(NSSize(width: 480, height: height))
+            window.setFrameOrigin(NSPoint(x: window.frame.minX, y: top - window.frame.height))
+        }
     }
 }

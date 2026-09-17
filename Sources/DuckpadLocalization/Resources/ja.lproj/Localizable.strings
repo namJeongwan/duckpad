@@ -729,3 +729,12 @@
 "Text right padding (pt)" = "本文の右余白 (pt)";
 "Extra line spacing (pt)" = "行間の追加スペース (pt)";
 "Enter a whole number from %1$d to %2$d." = "%1$dから%2$dまでの整数を入力してください。";
+
+"New version: %1$@" = "新しいバージョン: %1$@";
+"View update and install…" = "更新内容を確認してインストール…";
+
+"Text editor for macOS." = "macOS用テキストエディタ";
+"Check for a newer version of Duckpad." = "Duckpadの新しいバージョンを確認します。";
+"View the changes and install the update." = "変更内容を確認してアップデートをインストールします。";
+
+"Software Updates" = "ソフトウェアアップデート";

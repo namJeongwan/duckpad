@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$REPOSITORY_ROOT/build/Duckpad.app"
 IDENTITY="-"
-SHORT_VERSION="0.6.5"
-BUILD_VERSION="43"
+SHORT_VERSION="0.7.0"
+BUILD_VERSION="44"
 NOTARY_PROFILE=""
 ARCHITECTURE="universal"
 
@@ -88,6 +88,16 @@ mkdir -p "$APP/Contents/Resources/ThirdPartyLicenses"
 install -m 0644 "$REPOSITORY_ROOT/Vendor/Scintilla/5.6.6/License.txt" "$APP/Contents/Resources/ThirdPartyLicenses/Scintilla.txt"
 install -m 0644 "$REPOSITORY_ROOT/Vendor/Lexilla/5.5.3/License.txt" "$APP/Contents/Resources/ThirdPartyLicenses/Lexilla.txt"
 install -m 0644 "$REPOSITORY_ROOT/Vendor/WAMR/2.4.5/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/WAMR.txt"
+install -m 0644 "$REPOSITORY_ROOT/.build/checkouts/Sparkle/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/Sparkle.txt"
+
+# SwiftPM links the binary framework; the standalone bundle must embed it,
+# including its symlinks and out-of-sandbox installer service.
+SPARKLE_SOURCE="$REPOSITORY_ROOT/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$SPARKLE_SOURCE" "$SPARKLE"
+# Duckpad already has outgoing network access, so Sparkle's downloader XPC is unused.
+rm -rf "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
 
 for RESOURCE_BUNDLE in Duckpad_DuckpadApp.bundle Duckpad_DuckpadEditorAdapter.bundle Duckpad_DuckpadInfrastructure.bundle Duckpad_DuckpadPresentation.bundle Duckpad_DuckpadLocalization.bundle; do
     if [[ ! -d "$BIN_PATH/$RESOURCE_BUNDLE" ]]; then
@@ -107,6 +117,10 @@ plutil -lint "$APP/Contents/Info.plist" "$XPC/Contents/Info.plist" "$INSTALLER/C
 
 SIGNING_FLAGS=(--force --sign "$IDENTITY" --options runtime)
 if [[ "$IDENTITY" != "-" ]]; then SIGNING_FLAGS+=(--timestamp); fi
+codesign "${SIGNING_FLAGS[@]}" "$SPARKLE/Versions/B/XPCServices/Installer.xpc"
+codesign "${SIGNING_FLAGS[@]}" "$SPARKLE/Versions/B/Autoupdate"
+codesign "${SIGNING_FLAGS[@]}" "$SPARKLE/Versions/B/Updater.app"
+codesign "${SIGNING_FLAGS[@]}" "$SPARKLE"
 codesign "${SIGNING_FLAGS[@]}" --entitlements "$REPOSITORY_ROOT/Packaging/PluginRuntime.entitlements" "$XPC"
 codesign "${SIGNING_FLAGS[@]}" "$INSTALLER"
 codesign "${SIGNING_FLAGS[@]}" --entitlements "$REPOSITORY_ROOT/Packaging/Duckpad.entitlements" "$APP"

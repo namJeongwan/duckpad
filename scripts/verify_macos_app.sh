@@ -15,7 +15,7 @@ test -x "$APP/Contents/MacOS/Duckpad"
 test -x "$XPC/Contents/MacOS/DuckpadPluginRuntime"
 test ! -e "$APP/Contents/MacOS/DuckpadPluginHost"
 test -f "$APP/Contents/Resources/Duckpad.icns"
-for ENGINE in Scintilla Lexilla WAMR; do
+for ENGINE in Scintilla Lexilla WAMR Sparkle; do
     test -s "$APP/Contents/Resources/ThirdPartyLicenses/$ENGINE.txt"
 done
 test -f "$APP/Contents/Resources/Duckpad_DuckpadInfrastructure.bundle/Languages.json"
@@ -65,7 +65,7 @@ plutil -lint "$TEMP_ROOT/app.plist" "$TEMP_ROOT/xpc.plist" >/dev/null
 for KEY in com.apple.security.print com.apple.security.cs.disable-library-validation; do
     [[ "$(/usr/libexec/PlistBuddy -c "Print :$KEY" "$TEMP_ROOT/app.plist")" == "true" ]]
 done
-[[ "$(plutil -p "$TEMP_ROOT/app.plist" | grep -c 'com.apple.security' | tr -d ' ')" == "6" ]]
+[[ "$(plutil -p "$TEMP_ROOT/app.plist" | grep -c 'com.apple.security' | tr -d ' ')" == "7" ]]
 [[ "$(plutil -p "$TEMP_ROOT/xpc.plist" | grep -c 'com.apple.security' | tr -d ' ')" == "1" ]]
 
 codesign -dv --verbose=4 "$APP" 2> "$TEMP_ROOT/app-signature.txt"
@@ -85,5 +85,26 @@ grep -Eq "flags=.*runtime" "$TEMP_ROOT/installer-signature.txt"
 INSTALLER_TEAM="$(sed -n 's/^TeamIdentifier=//p' "$TEMP_ROOT/installer-signature.txt")"
 [[ "$APP_TEAM" == "$INSTALLER_TEAM" ]]
 [[ "$(lipo -archs "$INSTALLER/Contents/MacOS/DuckpadNativeInstaller")" == "$APP_ARCHES" ]]
+python3 - "$APP" "$TEMP_ROOT/app.plist" <<'PY'
+import base64, plistlib, subprocess, sys
+from pathlib import Path
+app = Path(sys.argv[1])
+info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+entitlements = plistlib.loads(Path(sys.argv[2]).read_bytes())
+assert len(base64.b64decode(info['SUPublicEDKey'], validate=True)) == 32
+assert info['SUFeedURL'] == 'https://namjeongwan.github.io/duckpad/appcast.xml'
+assert info['SUEnableInstallerLauncherService'] and info['SUVerifyUpdateBeforeExtraction']
+assert info['SUEnableAutomaticChecks'] and info['SUScheduledCheckInterval'] == 21600
+assert not info['SUAllowsAutomaticUpdates'] and not info['SUAutomaticallyUpdate']
+assert entitlements['com.apple.security.temporary-exception.mach-lookup.global-name'] == [
+    info['CFBundleIdentifier'] + '-spks', info['CFBundleIdentifier'] + '-spki']
+framework = app / 'Contents/Frameworks/Sparkle.framework'
+assert (framework / 'Sparkle').is_file()
+assert (framework / 'Versions/B/XPCServices/Installer.xpc').is_dir()
+assert not (framework / 'Versions/B/XPCServices/Downloader.xpc').exists()
+assert set(subprocess.check_output(['lipo', '-archs', str(framework / 'Sparkle')], text=True).split()) == {'arm64', 'x86_64'}
+linked = subprocess.check_output(['otool', '-L', str(app / 'Contents/MacOS/Duckpad')], text=True)
+assert '@rpath/Sparkle.framework/Versions/B/Sparkle' in linked
+PY
 codesign --verify --deep --strict --verbose=2 "$APP"
 echo "PASS: verified Duckpad app bundle, resources, XPC isolation, and signatures"

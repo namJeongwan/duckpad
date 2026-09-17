@@ -22,6 +22,8 @@ public final class DuckpadAppInfoController: NSObject, NSMenuItemValidation {
             aboutWindow?.render(state)
         }
     }
+    public var onCheckForUpdates: (() -> Void)?
+
     private let loadRelease: @Sendable () async throws -> AppRelease?
     private let openURL: (URL) -> Bool
     private var aboutWindow: DuckpadAboutWindowController?
@@ -38,6 +40,12 @@ public final class DuckpadAppInfoController: NSObject, NSMenuItemValidation {
     }
 
     deinit { checkTask?.cancel() }
+
+    public func updateStatus(_ state: UpdateState) { self.state = state }
+
+    public func finishUpdateCheck() {
+        if state == .checking { state = .idle }
+    }
 
     public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
         aboutWindow?.refreshLocalization(catalog: catalog)
@@ -78,11 +86,13 @@ public final class DuckpadAppInfoController: NSObject, NSMenuItemValidation {
     }
 
     @objc public func performCheckForUpdates(_ sender: Any? = nil) {
+        if let onCheckForUpdates { onCheckForUpdates(); return }
         performShowAbout(sender)
         checkInBackground()
     }
 
     @objc public func performUpdate(_ sender: Any? = nil) {
+        if let onCheckForUpdates { onCheckForUpdates(); return }
         switch state {
         case .available(let release), .development(let release): _ = openURL(release.url)
         default: performCheckForUpdates(sender)

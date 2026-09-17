@@ -83,3 +83,14 @@ urls = [entry.text for entry in sitemap.findall('.//{http://www.sitemaps.org/sch
 assert len(urls) == len(set(urls)) == 32
 assert set(urls) == {'https://namjeongwan.github.io/duckpad' + lang['prefix'] + p['route'] for lang in LANGUAGES for p in PAGES}
 print(f'PASS: {len(REFERENCE)} keys × 8 languages; 32 routes, metadata, alternate links, local links, structured data, verification file and sitemap')
+
+# Sparkle needs the raw XML at the stable URL in every deployed site.
+feed = ET.parse(OUTPUT / 'appcast.xml').getroot()
+assert feed.tag == 'rss' and feed.attrib.get('version') == '2.0'
+assert feed.find('channel') is not None
+for item in feed.findall('./channel/item'):
+    enclosure = item.find('enclosure')
+    assert enclosure is not None
+    assert enclosure.attrib['url'].startswith('https://github.com/namJeongwan/duckpad/releases/download/v')
+    assert enclosure.attrib.get('{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature')
+print('PASS: Sparkle appcast is present and well formed')

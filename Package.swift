@@ -20,6 +20,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "6.2.4"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
     ],
     targets: [
         .target(name: "DuckpadArchiveBridge", publicHeadersPath: "include", linkerSettings: [.linkedLibrary("z")]),
@@ -198,6 +199,7 @@ let package = Package(
         .executableTarget(
             name: "DuckpadApp",
             dependencies: [
+                .product(name: "Sparkle", package: "Sparkle"),
                 "DuckpadApplication",
                 "DuckpadDomain",
                 "DuckpadInfrastructure",
@@ -209,7 +211,8 @@ let package = Package(
                 .copy("Resources/AppIcon.iconset"),
                 .copy("Resources/Duckpad.icns"),
                 .copy("Resources/AppIcon-SOURCE.md"),
-            ]
+            ],
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         .executableTarget(
             name: "DuckpadNativeInstaller",

@@ -729,3 +729,12 @@
 "Text right padding (pt)" = "Margem direita do texto (pt)";
 "Extra line spacing (pt)" = "Espaçamento adicional entre linhas (pt)";
 "Enter a whole number from %1$d to %2$d." = "Digite um número inteiro de %1$d a %2$d.";
+
+"New version: %1$@" = "Nova versão: %1$@";
+"View update and install…" = "Ver atualização e instalar…";
+
+"Text editor for macOS." = "Editor de texto para macOS.";
+"Check for a newer version of Duckpad." = "Verifique se há uma nova versão do Duckpad.";
+"View the changes and install the update." = "Veja as alterações e instale a atualização.";
+
+"Software Updates" = "Atualizações de software";
