@@ -5,11 +5,15 @@ on:
     paths:
       - 'duckpad-jekyll/**'
       - '.github/workflows/pages.yml'
+      - 'scripts/prepare_sparkle_feed.py'
+      - 'scripts/test_prepare_sparkle_feed.py'
   push:
     branches: [main]
     paths:
       - 'duckpad-jekyll/**'
       - '.github/workflows/pages.yml'
+      - 'scripts/prepare_sparkle_feed.py'
+      - 'scripts/test_prepare_sparkle_feed.py'
   workflow_dispatch:
 
 permissions:
@@ -29,7 +33,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Test release metadata selection
-        run: ruby duckpad-jekyll/test-release-sync.rb
+        run: |
+          ruby duckpad-jekyll/test-release-sync.rb
+          python3 scripts/test_prepare_sparkle_feed.py
       - name: Select published download assets
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:

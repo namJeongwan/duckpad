@@ -769,3 +769,10 @@
 "Text right padding (pt)" = "본문 오른쪽 여백 (pt)";
 "Extra line spacing (pt)" = "추가 줄 간격 (pt)";
 "Enter a whole number from %1$d to %2$d." = "%1$d부터 %2$d까지의 정수를 입력하세요.";
+
+"New version: %1$@" = "새로운 버전: %1$@";
+"View update and install…" = "업데이트 내용 확인 및 설치…";
+
+"Text editor for macOS." = "macOS용 텍스트 편집기";
+"Check for a newer version of Duckpad." = "새 버전이 있는지 확인합니다.";
+"View the changes and install the update." = "변경 사항을 확인하고 업데이트를 설치하세요.";

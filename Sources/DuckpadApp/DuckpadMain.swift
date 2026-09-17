@@ -17,9 +17,12 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private var windowRecoveryRoots: [ObjectIdentifier: URL] = [:]
     private var settingsWindowController: DuckpadSettingsWindowController?
     private lazy var projectController: DuckpadAppInfoController = {
-        let client = GitHubReleaseClient()
-        return DuckpadAppInfoController(loadRelease: { try await client.latestRelease() })
+        let controller = DuckpadAppInfoController(loadRelease: { nil })
+        controller.onCheckForUpdates = { [weak self] in self?.checkForAppUpdates() }
+        return controller
     }()
+    private var appUpdater: SparkleUpdateController?
+    private var availableUpdateVersion: String?
     private let terminationCoordinator = ApplicationTerminationCoordinator()
     private var environment: [String: String] = [:]
     private var recoveryBase: URL!
@@ -150,7 +153,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         drainPendingFinderOpenRequests()
         restoreAdditionalWindows()
         if Bundle.main.bundleURL.pathExtension == "app", !environment.keys.contains(where: { $0.hasPrefix("DUCKPAD_") && $0.contains("SMOKE") }) {
-            projectController.checkInBackground()
+            startAppUpdater()
         }
 
         if environment["DUCKPAD_PERFORMANCE_LAUNCH_SMOKE"] == "1" {
@@ -951,6 +954,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 self.windowController = self.windowControllers.values.first
             }
         }
+        controller.showAvailableUpdate(version: availableUpdateVersion) { [weak self] in self?.checkForAppUpdates() }
         installMainMenu(target: controller)
     }
 
@@ -1067,6 +1071,55 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         let requests = pendingFinderOpenRequests
         pendingFinderOpenRequests.removeAll()
         for urls in requests { openDocumentURLs(urls, replyTo: NSApplication.shared) }
+    }
+
+    private func startAppUpdater() {
+        guard appUpdater == nil else { return }
+        let updater = SparkleUpdateController()
+        updater.onStatusChange = { [weak self] status in
+            guard let self else { return }
+            switch status {
+            case .checking: projectController.updateStatus(.checking)
+            case .failed: projectController.updateStatus(.failed)
+            case .finished: projectController.finishUpdateCheck()
+            case .available(let version):
+                if let release = AppRelease(tag: "v" + version) {
+                    projectController.updateStatus(.available(release))
+                }
+            case .current:
+                if let version = projectController.appInfo.version,
+                   let release = AppRelease(tag: "v\(version)") {
+                    projectController.updateStatus(.current(release))
+                }
+            }
+        }
+        updater.onAvailableVersion = { [weak self] version in
+            guard let self else { return }
+            availableUpdateVersion = version
+            for controller in windowControllers.values {
+                controller.showAvailableUpdate(version: version) { [weak self] in self?.checkForAppUpdates() }
+            }
+        }
+        do {
+            try updater.start()
+            appUpdater = updater
+        } catch {
+            projectController.updateStatus(.failed)
+            NSLog("Duckpad updater could not start: %@", String(describing: error))
+        }
+    }
+
+    private func checkForAppUpdates() {
+        guard terminationCoordinator.permitsApplicationCommands else { return }
+        if appUpdater == nil { startAppUpdater() }
+        guard let appUpdater else {
+            let alert = NSAlert()
+            alert.messageText = L10n.text("Couldn't check for updates")
+            alert.informativeText = L10n.text("Try again, or open Release Notes below.")
+            alert.runModal()
+            return
+        }
+        appUpdater.checkForUpdates()
     }
 
     private func installMainMenu(target: DuckpadWindowController) {

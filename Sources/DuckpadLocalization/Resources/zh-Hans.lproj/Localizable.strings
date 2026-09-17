@@ -729,3 +729,10 @@
 "Text right padding (pt)" = "正文右侧留白 (pt)";
 "Extra line spacing (pt)" = "额外行距 (pt)";
 "Enter a whole number from %1$d to %2$d." = "请输入 %1$d 到 %2$d 之间的整数。";
+
+"New version: %1$@" = "新版本：%1$@";
+"View update and install…" = "查看更新并安装…";
+
+"Text editor for macOS." = "macOS 文本编辑器";
+"Check for a newer version of Duckpad." = "检查是否有新版本的 Duckpad。";
+"View the changes and install the update." = "查看更改并安装更新。";

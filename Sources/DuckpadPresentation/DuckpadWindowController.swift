@@ -31,6 +31,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private lazy var searchWindowController = SearchWindowController(searchView: searchPanel)
     let liveFileBanner = LiveFileChangeBanner(frame: .zero)
     let commandBar = WindowCommandBarView(frame: .zero)
+    private var updateAccessory: UpdateTitlebarAccessoryController?
     private var statusBarHeightConstraint: NSLayoutConstraint!
     private var appPreferences = AppSettings.defaults
     let statusBar = DocumentStatusBarView(frame: .zero)
@@ -1139,7 +1140,28 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         if languageChanged { refreshLocalization(catalog: LocalizationCatalog(language: settings.appLanguage)) }
     }
 
+    public func showAvailableUpdate(version: String?, onClick: @escaping () -> Void) {
+        guard let window else { return }
+        guard let version else {
+            if let accessory = updateAccessory,
+               let index = window.titlebarAccessoryViewControllers.firstIndex(of: accessory) {
+                window.removeTitlebarAccessoryViewController(at: index)
+            }
+            updateAccessory = nil
+            return
+        }
+        if let accessory = updateAccessory {
+            accessory.onClick = onClick
+            accessory.update(version: version)
+        } else {
+            let accessory = UpdateTitlebarAccessoryController(version: version, onClick: onClick)
+            updateAccessory = accessory
+            window.addTitlebarAccessoryViewController(accessory)
+        }
+    }
+
     public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        updateAccessory?.refreshLocalization(catalog: catalog)
         markdownPreviewPanel?.refreshLocalization(catalog: catalog)
         workspaceSidebar.refreshLocalization(catalog: catalog)
         searchPanel.refreshLocalization(catalog: catalog)

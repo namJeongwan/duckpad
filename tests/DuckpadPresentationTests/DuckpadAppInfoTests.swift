@@ -1,11 +1,99 @@
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
+import DuckpadLocalization
 import DuckpadInfrastructure
 @testable import DuckpadPresentation
 import Testing
 
 @Suite(.serialized) @MainActor struct DuckpadAppInfoTests {
+    @Test func escapeClosesAboutWithAButtonFocusedAndCanReopen() throws {
+        _ = NSApplication.shared
+        let target = DuckpadAppInfoController(loadRelease: { nil })
+        let about = DuckpadAboutWindowController(target: target)
+        defer { about.close() }
+        let window = try #require(about.window)
+        about.showWindow(nil)
+        window.makeFirstResponder(about.updateButton)
+        #expect(window.isVisible)
+        let escape = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero,
+            modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+            context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+            isARepeat: false, keyCode: 53))
+        #expect(window.performKeyEquivalent(with: escape))
+        #expect(!window.isVisible)
+        about.showWindow(nil)
+        #expect(window.isVisible)
+        window.cancelOperation(nil)
+        #expect(!window.isVisible)
+    }
+
+    @Test func externalUpdaterStatusReplacesIdleAboutState() throws {
+        let target = DuckpadAppInfoController(loadRelease: { nil })
+        target.updateStatus(.checking)
+        #expect(target.state == .checking)
+        let release = try #require(AppRelease(tag: "v0.7.0"))
+        target.updateStatus(.available(release))
+        #expect(target.state == .available(release))
+        target.updateStatus(.current(release))
+        #expect(target.state == .current(release))
+        target.updateStatus(.failed)
+        #expect(target.state == .failed)
+    }
+
+    @Test func cancellingExternalCheckEnablesRetryAndFinishingPreservesResults() throws {
+        let target = DuckpadAppInfoController(loadRelease: { nil })
+        target.onCheckForUpdates = { [weak target] in target?.updateStatus(.checking) }
+        let check = NSMenuItem(title: "Check for Updates…",
+            action: #selector(target.performCheckForUpdates(_:)), keyEquivalent: "")
+        target.performCheckForUpdates()
+        #expect(!target.validateMenuItem(check))
+        // Sparkle's Cancel path completes without either an error or a result.
+        target.finishUpdateCheck()
+        #expect(target.state == .idle)
+        #expect(target.validateMenuItem(check))
+        target.performCheckForUpdates()
+        let release = try #require(AppRelease(tag: "v0.7.0"))
+        target.updateStatus(.available(release))
+        target.finishUpdateCheck()
+        #expect(target.state == .available(release))
+        #expect(target.validateMenuItem(check))
+    }
+
+    @Test func installedUpdaterOwnsBothMenuAndAboutActions() async {
+        var checks = 0
+        var opened = false
+        let target = DuckpadAppInfoController(loadRelease: { nil }, openURL: { _ in opened = true; return true })
+        target.onCheckForUpdates = { checks += 1 }
+        target.performCheckForUpdates()
+        target.performUpdate()
+        #expect(checks == 2)
+        #expect(!opened)
+        #expect(target.state == .idle)
+    }
+
+    @Test func updateBadgeTracksAvailabilityWithoutDuplicatingAccessories() throws {
+        _ = NSApplication.shared
+        let document = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()), previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
+        defer { document.close() }
+        let window = try #require(document.window)
+        var clicks = 0
+        document.showAvailableUpdate(version: "0.7.0") { clicks += 1 }
+        let badge = try #require(window.titlebarAccessoryViewControllers.first as? UpdateTitlebarAccessoryController)
+        #expect(badge.layoutAttribute == .right)
+        badge.refreshLocalization(catalog: LocalizationCatalog(language: .korean))
+        #expect(badge.button.title == "새로운 버전: 0.7.0")
+        badge.button.performClick(nil)
+        #expect(clicks == 1)
+        document.showAvailableUpdate(version: "0.7.1") { clicks += 10 }
+        #expect(window.titlebarAccessoryViewControllers.count == 1)
+        #expect(badge.button.title.contains("0.7.1"))
+        badge.button.performClick(nil)
+        #expect(clicks == 11)
+        document.showAvailableUpdate(version: nil) {}
+        #expect(window.titlebarAccessoryViewControllers.isEmpty)
+    }
+
     @Test func comparesVersionsWithoutOfferingDowngradesAndOpensTheRealRelease() async throws {
         let release = try #require(AppRelease(tag: "v0.10.0"))
         for installed in ["0.9.9", "0.10.0", "1.0.0"] {
