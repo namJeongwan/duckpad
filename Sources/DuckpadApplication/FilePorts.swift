@@ -238,33 +238,59 @@ public enum TextFileCodec {
         return result
     }
 
+    /// Encode an immutable editor checkpoint without making a String/UTF-8
+    /// round trip for ordinary UTF-8 saves. Callers validate the checkpoint
+    /// while materializing editor deltas before invoking this method.
+    public static func encodeUTF8(
+        _ utf8: Data,
+        encoding: TextFileEncoding,
+        byteOrderMark: ByteOrderMark,
+        lineEnding: LineEnding
+    ) -> Data {
+        let normalized = convertUTF8(utf8, to: lineEnding)
+        if encoding == .utf8 {
+            guard byteOrderMark == .present else { return normalized }
+            var result = utf8BOM
+            result.append(normalized)
+            return result
+        }
+        return encode(String(decoding: normalized, as: UTF8.self),
+                      encoding: encoding, byteOrderMark: byteOrderMark)
+    }
+
     public static func convert(_ text: String, to lineEnding: LineEnding) -> String {
         guard lineEnding != .mixed, lineEnding != .none else { return text }
-        let separator: String
-        switch lineEnding {
-        case .lf: separator = "\n"
-        case .crlf: separator = "\r\n"
-        case .cr: separator = "\r"
-        case .mixed, .none: return text
-        }
-        let scalars = text.unicodeScalars
-        var result = ""
-        var index = scalars.startIndex
-        while index < scalars.endIndex {
-            let scalar = scalars[index]
-            if scalar.value == 13 {
-                let next = scalars.index(after: index)
-                index = next < scalars.endIndex && scalars[next].value == 10 ? scalars.index(after: next) : next
-                result += separator
-            } else if scalar.value == 10 {
-                index = scalars.index(after: index)
-                result += separator
-            } else {
-                result.unicodeScalars.append(scalar)
-                index = scalars.index(after: index)
+        return String(decoding: convertUTF8(Data(text.utf8), to: lineEnding), as: UTF8.self)
+    }
+
+    private static func convertUTF8(_ utf8: Data, to lineEnding: LineEnding) -> Data {
+        guard lineEnding != .mixed, lineEnding != .none else { return utf8 }
+        return utf8.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+            // libc scans use vectorized loads; LF-only documents are the common
+            // large-file case and need no scalar pass or allocation.
+            guard let base = bytes.baseAddress, !bytes.isEmpty else { return utf8 }
+            if lineEnding == .lf, memchr(base, 13, bytes.count) == nil { return utf8 }
+            if lineEnding == .cr, memchr(base, 10, bytes.count) == nil { return utf8 }
+            // An already-normalized file needs neither allocation nor copying.
+            let existing = detectLineEnding(inUTF8: utf8)
+            guard existing != .none, existing != lineEnding else { return utf8 }
+            var result = Data()
+            result.reserveCapacity(bytes.count)
+            var start = 0
+            var index = 0
+            while index < bytes.count {
+                let byte = bytes[index]
+                guard byte == 13 || byte == 10 else { index += 1; continue }
+                result.append(contentsOf: bytes[start..<index])
+                if lineEnding != .lf { result.append(13) }
+                if lineEnding != .cr { result.append(10) }
+                if byte == 13, index + 1 < bytes.count, bytes[index + 1] == 10 { index += 1 }
+                index += 1
+                start = index
             }
+            result.append(contentsOf: bytes[start..<bytes.count])
+            return result
         }
-        return result
     }
 
     private static func decodeUTF16(_ bytes: Data.SubSequence, littleEndian: Bool) throws(TextFileCodecError) -> String {
@@ -294,33 +320,29 @@ public enum TextFileCodec {
     }
 
     private static func detectLineEnding(_ text: String) -> LineEnding {
-        var lf = 0
-        var crlf = 0
-        var cr = 0
-        let scalars = text.unicodeScalars
-        var index = scalars.startIndex
-        while index < scalars.endIndex {
-            if scalars[index].value == 13 {
-                let next = scalars.index(after: index)
-                if next < scalars.endIndex, scalars[next].value == 10 {
-                    crlf += 1
-                    index = scalars.index(after: next)
-                } else {
-                    cr += 1
-                    index = next
-                }
-            } else if scalars[index].value == 10 {
-                lf += 1
-                index = scalars.index(after: index)
-            } else {
-                index = scalars.index(after: index)
+        detectLineEnding(inUTF8: Data(text.utf8))
+    }
+
+    public static func detectLineEnding(inUTF8 utf8: Data) -> LineEnding {
+        utf8.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+            var kinds: UInt8 = 0
+            var index = 0
+            while index < bytes.count {
+                if bytes[index] == 13 {
+                    if index + 1 < bytes.count, bytes[index + 1] == 10 {
+                        kinds |= 2
+                        index += 1
+                    } else { kinds |= 4 }
+                } else if bytes[index] == 10 { kinds |= 1 }
+                if kinds.nonzeroBitCount > 1 { return .mixed }
+                index += 1
+            }
+            switch kinds {
+            case 1: return .lf
+            case 2: return .crlf
+            case 4: return .cr
+            default: return .none
             }
         }
-        let kinds = [lf, crlf, cr].filter { $0 > 0 }.count
-        if kinds == 0 { return .none }
-        if kinds > 1 { return .mixed }
-        if crlf > 0 { return .crlf }
-        if cr > 0 { return .cr }
-        return .lf
     }
 }

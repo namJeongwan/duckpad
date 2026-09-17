@@ -177,13 +177,21 @@ public struct EditorViewState: Codable, Equatable, Sendable {
 public struct EditorRecoverySnapshot: Equatable, Sendable {
     public let bufferID: BufferID
     public let revision: UInt64
-    public let utf8: Data
+    public let checkpoint: EditorRecoveryCheckpoint
+    public var utf8: Data { checkpoint.utf8 }
     public let viewState: EditorViewState
 
     public init(bufferID: BufferID, revision: UInt64, utf8: Data, viewState: EditorViewState = EditorViewState()) {
         self.bufferID = bufferID
         self.revision = revision
-        self.utf8 = utf8
+        self.checkpoint = EditorRecoveryCheckpoint(utf8: utf8)
+        self.viewState = viewState
+    }
+
+    init(bufferID: BufferID, revision: UInt64, checkpoint: EditorRecoveryCheckpoint, viewState: EditorViewState) {
+        self.bufferID = bufferID
+        self.revision = revision
+        self.checkpoint = checkpoint
         self.viewState = viewState
     }
 }
@@ -207,7 +215,8 @@ public struct EditorRecoveryCapture: Equatable, Sendable {
     public let bufferID: BufferID
     public let baseRevision: UInt64
     public let revision: UInt64
-    public let baseUTF8: Data
+    public let checkpoint: EditorRecoveryCheckpoint
+    public var baseUTF8: Data { checkpoint.utf8 }
     public let deltas: [EditorRecoveryDelta]
     public let viewState: EditorViewState
 
@@ -219,10 +228,22 @@ public struct EditorRecoveryCapture: Equatable, Sendable {
         deltas: [EditorRecoveryDelta] = [],
         viewState: EditorViewState = EditorViewState()
     ) {
+        self.init(bufferID: bufferID, baseRevision: baseRevision, revision: revision,
+                  checkpoint: EditorRecoveryCheckpoint(utf8: baseUTF8), deltas: deltas, viewState: viewState)
+    }
+
+    public init(
+        bufferID: BufferID,
+        baseRevision: UInt64,
+        revision: UInt64,
+        checkpoint: EditorRecoveryCheckpoint,
+        deltas: [EditorRecoveryDelta] = [],
+        viewState: EditorViewState = EditorViewState()
+    ) {
         self.bufferID = bufferID
         self.baseRevision = baseRevision
         self.revision = revision
-        self.baseUTF8 = baseUTF8
+        self.checkpoint = checkpoint
         self.deltas = deltas
         self.viewState = viewState
     }
@@ -231,7 +252,7 @@ public struct EditorRecoveryCapture: Equatable, Sendable {
     public func materializedSnapshot() throws(SessionStoreError) -> EditorRecoverySnapshot {
         var bytes = baseUTF8
         var currentRevision = baseRevision
-        guard String(data: bytes, encoding: .utf8) != nil else {
+        guard checkpoint.isValidated || String(data: bytes, encoding: .utf8) != nil else {
             throw .corrupt("invalid recovery checkpoint UTF-8")
         }
         for delta in deltas {
@@ -252,13 +273,15 @@ public struct EditorRecoveryCapture: Equatable, Sendable {
             bytes.replaceSubrange(start..<end, with: delta.replacementUTF8)
             currentRevision += 1
         }
-        guard currentRevision == revision, String(data: bytes, encoding: .utf8) != nil else {
+        // The base and each replacement were validated, and every cut was at
+        // a code-point boundary. Revalidating the full result adds no safety.
+        guard currentRevision == revision else {
             throw .corrupt("recovery delta revision mismatch")
         }
         return EditorRecoverySnapshot(
             bufferID: bufferID,
             revision: revision,
-            utf8: bytes,
+            checkpoint: EditorRecoveryCheckpoint(validatedUTF8: bytes),
             viewState: viewState
         )
     }

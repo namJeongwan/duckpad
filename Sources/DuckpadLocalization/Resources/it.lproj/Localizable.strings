@@ -724,3 +724,8 @@
 "Uninstalling Plugin…" = "Disinstallazione del plugin…";
 "Plugin Uninstalled" = "Plugin disinstallato";
 "Plugin Uninstallation Failed" = "Disinstallazione del plugin non riuscita";
+
+"Text left padding (pt)" = "Margine sinistro del testo (pt)";
+"Text right padding (pt)" = "Margine destro del testo (pt)";
+"Extra line spacing (pt)" = "Interlinea aggiuntiva (pt)";
+"Enter a whole number from %1$d to %2$d." = "Inserisci un numero intero da %1$d a %2$d.";

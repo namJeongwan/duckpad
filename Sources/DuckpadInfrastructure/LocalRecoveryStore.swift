@@ -97,6 +97,9 @@ public actor LocalRecoveryStore: RecoveryStore {
     public let root: URL
     private let fault: RecoveryStoreFault
     private let verifiedRoot: VerifiedRecoveryRoot?
+    // Only a successful publication can seed this hint. Every commit still
+    // checks the on-disk generation names; another writer invalidates the hint.
+    private var publishedGeneration: PersistenceGeneration?
 
     public init(root: URL, fault: RecoveryStoreFault = .none) {
         self.root = root.standardizedFileURL
@@ -136,12 +139,13 @@ public actor LocalRecoveryStore: RecoveryStore {
         let root = self.root
         let fault = self.fault
         let verifiedRoot = self.verifiedRoot
+        let skipGeneration = publishedGeneration.flatMap { $0 < generation ? $0.rawValue : nil }
         do {
             if let stored = try await Task.detached(priority: .utility, operation: {
-                guard let verifiedRoot else { return try Self.loadBlocking(root: root) }
+                guard let verifiedRoot else { return try Self.loadBlocking(root: root, skippingPublishedGeneration: skipGeneration) }
                 let descriptor = try verifiedRoot.duplicateRootDescriptor()
                 defer { Darwin.close(descriptor) }
-                return try Self.loadBlocking(rootDescriptor: descriptor)
+                return try Self.loadBlocking(rootDescriptor: descriptor, skippingPublishedGeneration: skipGeneration)
             }).value, stored.generation >= generation {
                 guard stored.generation != generation || stored.archive == archive else {
                     throw SessionStoreError.corrupt("recovery generation collision")
@@ -161,12 +165,14 @@ public actor LocalRecoveryStore: RecoveryStore {
                     fault: fault
                 )
             }.value
+            if committed { publishedGeneration = generation }
             return committed ? .committed : .superseded(durableGeneration: generation)
         } catch let error as SessionStoreError { throw error }
         catch { throw .unavailable(String(describing: error)) }
     }
 
     public func reset() async throws(SessionStoreError) {
+        publishedGeneration = nil
         let root = self.root
         let verifiedRoot = self.verifiedRoot
         do {
@@ -348,7 +354,7 @@ public actor LocalRecoveryStore: RecoveryStore {
         guard fsync(directory) == 0 else { throw posix("sync recovery tree directory") }
     }
 
-    private static func loadBlocking(root: URL) throws -> StoredRecoveryArchive? {
+    private static func loadBlocking(root: URL, skippingPublishedGeneration: UInt64? = nil) throws -> StoredRecoveryArchive? {
         let generations = root.appendingPathComponent("generations", isDirectory: true)
         guard FileManager.default.fileExists(atPath: generations.path) else { return nil }
         let names = try FileManager.default.contentsOfDirectory(atPath: generations.path)
@@ -356,6 +362,13 @@ public actor LocalRecoveryStore: RecoveryStore {
             guard !name.hasPrefix("."), let value = UInt64(name) else { return nil }
             return (value, name)
         }.sorted { $0.0 > $1.0 }
+        // Preflight for a newer write needs only the generation ordering when
+        // this instance published the latest generation. The new archive is
+        // independently validated and written from its immutable bytes below;
+        // no old blob is reused. loadLatest always performs full validation.
+        if let skippingPublishedGeneration, candidates.first?.0 == skippingPublishedGeneration {
+            return nil
+        }
         var rejected = 0
         var rejectedDirectories: [URL] = []
         for (value, name) in candidates {
@@ -380,7 +393,7 @@ public actor LocalRecoveryStore: RecoveryStore {
         return nil
     }
 
-    private static func loadBlocking(rootDescriptor: Int32) throws -> StoredRecoveryArchive? {
+    private static func loadBlocking(rootDescriptor: Int32, skippingPublishedGeneration: UInt64? = nil) throws -> StoredRecoveryArchive? {
         let generations = openat(
             rootDescriptor,
             "generations",
@@ -394,6 +407,13 @@ public actor LocalRecoveryStore: RecoveryStore {
             guard !name.hasPrefix("."), let value = UInt64(name) else { return nil }
             return (value, name)
         }.sorted { $0.0 > $1.0 }
+        // Preflight for a newer write needs only the generation ordering when
+        // this instance published the latest generation. The new archive is
+        // independently validated and written from its immutable bytes below;
+        // no old blob is reused. loadLatest always performs full validation.
+        if let skippingPublishedGeneration, candidates.first?.0 == skippingPublishedGeneration {
+            return nil
+        }
         var rejected = 0
         var rejectedNames: [String] = []
         for (value, name) in candidates {
@@ -1012,15 +1032,21 @@ public actor LocalRecoveryStore: RecoveryStore {
               state.bookmarkedLines.count <= EditorViewState.maximumBookmarkCount else { return false }
         var maximumLine = binaryByteCount ?? 0
         if binaryByteCount != nil, state.firstVisibleLine > byteCount { return false }
-        var index = 0
-        while index < utf8.count {
-            if utf8[index] == 0x0D {
-                maximumLine += 1
-                if index + 1 < utf8.count, utf8[index + 1] == 0x0A { index += 1 }
-            } else if utf8[index] == 0x0A {
-                maximumLine += 1
+        // Line count is only needed to bound bookmarks. Most documents have
+        // none; scanning gigabytes here otherwise delays every save and quit.
+        if !state.bookmarkedLines.isEmpty {
+            utf8.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+                var index = 0
+                while index < bytes.count {
+                    if bytes[index] == 0x0D {
+                        maximumLine += 1
+                        if index + 1 < bytes.count, bytes[index + 1] == 0x0A { index += 1 }
+                    } else if bytes[index] == 0x0A {
+                        maximumLine += 1
+                    }
+                    index += 1
+                }
             }
-            index += 1
         }
         guard state.bookmarkedLines.allSatisfy({ $0 >= 0 && $0 <= maximumLine }) else { return false }
         if binaryByteCount == nil {

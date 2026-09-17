@@ -236,6 +236,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     BOOL _publishesDocumentEdits;
     __weak DPScintillaEditorView *_documentPublisher;
     BOOL _smartEditingEnabled;
+    BOOL _plainTextIndentationEnabled;
     BOOL _highlightCurrentLine;
     NSString *_editorFontName;
     double _editorFontSize;
@@ -333,6 +334,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_SETINDENTATIONGUIDES wParam:SC_IV_LOOKBOTH];
         _highlightCurrentLine = YES;
         [self applyPalette:DPScintillaPaletteLight];
+        [self configureTextLayoutWithLeftPadding:0 rightPadding:8 lineSpacing:4];
         _requestedInputEnabled = YES;
         self.accessibilityIdentifier = @"duckpad.editor.scintilla";
     }
@@ -562,14 +564,24 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETMARGINWIDTHN wParam:3 lParam:3];
     [_scintilla message:SCI_SETEOLMODE wParam:DPEOLModeForUTF8(content)];
     if (!preservingUndo || ![content isEqualToData:self.contentUTF8]) {
+        const BOOL collectingUndo = [_scintilla message:SCI_GETUNDOCOLLECTION] != 0;
         if (preservingUndo) [_scintilla message:SCI_BEGINUNDOACTION];
+        else [_scintilla message:SCI_SETUNDOCOLLECTION wParam:0];
         [_scintilla message:SCI_CLEARALL];
         if (content.length > 0) {
+            // Scintilla's first bulk insertion otherwise leaves only eight
+            // spare bytes. The first few keystrokes then reallocate/copy both
+            // the text and style buffers (gigabytes for a large file).
+            constexpr NSUInteger editingReserve = 64 * 1024;
+            if (!preservingUndo && content.length <= NSIntegerMax - editingReserve) {
+                [_scintilla message:SCI_ALLOCATE wParam:content.length + editingReserve];
+            }
             [_scintilla message:SCI_ADDTEXT
                          wParam:(uptr_t)content.length
                          lParam:(sptr_t)content.bytes];
         }
         if (preservingUndo) [_scintilla message:SCI_ENDUNDOACTION];
+        else [_scintilla message:SCI_SETUNDOCOLLECTION wParam:collectingUndo];
     }
     if (!preservingUndo) {
         [_scintilla message:SCI_EMPTYUNDOBUFFER];
@@ -595,6 +607,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _pendingSmartInsertionEnd = -1;
     _pendingSmartCharacter = 0;
     _smartEditingEnabled = NO;
+    _plainTextIndentationEnabled = NO;
     _braceMatchingEnabled = NO;
     _foldingEnabled = NO;
     _foldRecoveryProgressPending = NO;
@@ -874,6 +887,23 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (void)setLineEndingsVisible:(BOOL)visible { [_scintilla message:SCI_SETVIEWEOL wParam:visible]; }
 - (NSString *)editorFontName { return _editorFontName; }
 - (double)editorFontSize { return _editorFontSize; }
+
+- (NSInteger)editorLeftPadding { return [_scintilla message:SCI_GETMARGINLEFT]; }
+- (NSInteger)editorRightPadding { return [_scintilla message:SCI_GETMARGINRIGHT]; }
+- (NSInteger)editorLineSpacing {
+    return [_scintilla message:SCI_GETEXTRAASCENT] + [_scintilla message:SCI_GETEXTRADESCENT];
+}
+
+- (void)configureTextLayoutWithLeftPadding:(NSInteger)leftPadding
+                            rightPadding:(NSInteger)rightPadding
+                             lineSpacing:(NSInteger)lineSpacing {
+    const NSInteger spacing = MIN(MAX(lineSpacing, 0), 20);
+    [_scintilla message:SCI_SETMARGINLEFT wParam:0 lParam:MIN(MAX(leftPadding, 0), 32)];
+    [_scintilla message:SCI_SETMARGINRIGHT wParam:0 lParam:MIN(MAX(rightPadding, 0), 32)];
+    // Split the extra line height around the font's normal metrics.
+    [_scintilla message:SCI_SETEXTRAASCENT wParam:spacing / 2 lParam:0];
+    [_scintilla message:SCI_SETEXTRADESCENT wParam:spacing - spacing / 2 lParam:0];
+}
 - (void)configureEditorFont:(NSString *)name size:(double)size {
     double boundedSize = std::isfinite(size) ? std::round(MAX(6.0, MIN(72.0, size)) * 100.0) / 100.0 : 13.0;
     NSFont *font = [NSFont fontWithName:name size:boundedSize] ?: [NSFont fontWithName:@"Menlo" size:boundedSize];
@@ -896,7 +926,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         ? [_scintilla message:SCI_TEXTWIDTH wParam:STYLE_LINENUMBER
                        lParam:reinterpret_cast<sptr_t>(digits.c_str())] + 8
         : 0;
-    [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:width];
+    if ([_scintilla message:SCI_GETMARGINWIDTHN wParam:0] != width) {
+        [_scintilla message:SCI_SETMARGINWIDTHN wParam:0 lParam:width];
+    }
     _searchOverviewNeedsRefresh = YES;
 }
 
@@ -1056,7 +1088,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         ? SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT
             | SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE
         : 0;
-    if (_smartEditingEnabled) mask |= SC_MOD_INSERTCHECK;
+    if (_smartEditingEnabled || _plainTextIndentationEnabled) mask |= SC_MOD_INSERTCHECK;
     [_scintilla message:SCI_SETMODEVENTMASK wParam:mask];
 }
 
@@ -1220,7 +1252,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)scintillaWillInsertTextFromSource:(SCITextInputSource)source {
     _textInputSourceKnown = YES;
-    _directInputInsertion = source == SCITextInputSourceDirect;
+    _directInputInsertion = source == SCITextInputSourceDirect || source == SCITextInputSourceDirectNewline;
+    if (source == SCITextInputSourceDirectNewline) {
+        _directInputByteLengthKnown = YES;
+        _directInputByteLength = 1; // A single Return command, independent of the document's EOL width.
+    }
     if (!_directInputByteLengthKnown && _directInputInsertion) {
         NSEvent *event = NSApp.currentEvent;
         if (event.type == NSEventTypeKeyDown && event.characters != nil) {
@@ -1516,6 +1552,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _pendingSmartInsertionEnd = -1;
     _pendingSmartCharacter = 0;
     _braceMatchingEnabled = nextBraceMatchingEnabled;
+    _plainTextIndentationEnabled = !_binaryDocument && [lexerName isEqualToString:@"null"];
     _smartEditingEnabled = _braceMatchingEnabled
         && ![effectiveName isEqualToString:@"null"];
     [self updateModificationEventMask];
@@ -1664,8 +1701,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETMARGINBACKN wParam:1 lParam:gutterBackground];
     [_scintilla message:SCI_SETMARGINBACKN wParam:2 lParam:gutterBackground];
     [_scintilla message:SCI_SETMARGINBACKN wParam:3 lParam:gutterBackground];
+    // Scintilla colour values are 0xBBGGRR: modified lines use blue in both palettes.
+    const int modifiedColour = dark ? 0xF4B564 : 0xD57E24;
     const int changeColors[] = { dark ? 0xE8B574 : 0xB57838, dark ? 0x87BC72 : 0x528A36,
-                                 dark ? 0x64B5F4 : 0x247ED5, dark ? 0x64B5F4 : 0x247ED5 };
+                                 modifiedColour, modifiedColour };
     for (int index = 0; index < 4; ++index) {
         const int marker = SC_MARKNUM_HISTORY_REVERTED_TO_ORIGIN + index;
         [_scintilla message:SCI_MARKERSETFORE wParam:marker lParam:changeColors[index]];
@@ -1673,10 +1712,6 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     }
     [_scintilla message:SCI_SETFOLDMARGINCOLOUR wParam:1 lParam:gutterBackground];
     [_scintilla message:SCI_SETFOLDMARGINHICOLOUR wParam:1 lParam:gutterBackground];
-    [_scintilla message:SCI_SETMARGINLEFT wParam:0 lParam:8];
-    [_scintilla message:SCI_SETMARGINRIGHT wParam:0 lParam:8];
-    [_scintilla message:SCI_SETEXTRAASCENT wParam:2 lParam:0];
-    [_scintilla message:SCI_SETEXTRADESCENT wParam:2 lParam:0];
     [_scintilla message:SCI_STYLESETFORE wParam:STYLE_BRACELIGHT lParam:dark ? 0x80FFFF : 0x7A3D00];
     [_scintilla message:SCI_STYLESETBACK wParam:STYLE_BRACELIGHT lParam:dark ? 0x503000 : 0xB8F1FF];
     [_scintilla message:SCI_STYLESETBOLD wParam:STYLE_BRACELIGHT lParam:1];
@@ -2517,13 +2552,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         if ([directInputInitiator prepareClosingDelimiterDedent:notification]) return;
     }
     if ([self prepareClosingDelimiterDedent:notification]) return;
-    if (!_smartEditingEnabled || [[_scintilla content] hasMarkedText]
+    if ((!_smartEditingEnabled && !_plainTextIndentationEnabled) || [[_scintilla content] hasMarkedText]
         || notification->length <= 0 || notification->text == nullptr) return;
     if (notification->length > 2) return;
     const std::string inserted(notification->text, static_cast<size_t>(notification->length));
     const BOOL isNewline = inserted == "\n" || inserted == "\r" || inserted == "\r\n";
     const int opening = inserted.size() == 1 ? static_cast<unsigned char>(inserted[0]) : 0;
-    const char *pair = DPSmartPairForOpening(opening);
+    const char *pair = _smartEditingEnabled ? DPSmartPairForOpening(opening) : nullptr;
     BOOL isDirectInput = inputOwner->_textInputSourceKnown
         && inputOwner->_directInputInsertion;
     if (!inputOwner->_textInputSourceKnown
@@ -2563,6 +2598,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         if (character != ' ' && character != '\t') break;
         if (baseIndent.size() >= static_cast<size_t>(DPSmartIndentScanLimit)) return;
         baseIndent.push_back(static_cast<char>(character));
+    }
+    if (_plainTextIndentationEnabled) {
+        const std::string replacement = inserted + baseIndent;
+        [_scintilla message:SCI_CHANGEINSERTION
+                     wParam:(uptr_t)replacement.size()
+                     lParam:reinterpret_cast<sptr_t>(replacement.c_str())];
+        return;
     }
     NSInteger previous = position - 1;
     NSInteger trailingWhitespaceLength = 0;
@@ -2685,6 +2727,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     if (notification->nmhdr.code != SCN_MODIFIED) return;
     const int flags = notification->modificationType;
     if (flags & (SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT)) {
+        if (notification->linesAdded != 0) {
+            // The publisher receives text notifications for every shared pane.
+            // Update each pane's width while preserving its own visibility/font/zoom.
+            for (DPScintillaEditorView *peer in _searchMarkerPeers) {
+                [peer updateLineNumberMargin:[peer->_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
+            }
+        }
         ++_statusContentGeneration;
         [self clearSearchHighlights];
     }

@@ -301,6 +301,99 @@ struct LanguageEditorAdapterTests {
         #expect(primary.contentUTF8 == Data("base".utf8))
     }
 
+    @Test @MainActor func lineNumberMarginGrowsAcrossDigitBoundaryInEveryPane() throws {
+        let adapter = ScintillaEditorAdapter()
+        defer { adapter.invalidate() }
+        let buffer = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        let source = String(repeating: "\n", count: 99_998)
+        adapter.install(.init(bufferID: buffer.bufferID, revision: 0, text: source))
+        adapter.display(buffer)
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        let primary = try #require(adapter.activeScintillaView)
+        adapter.setEditorGroupOrientation(.sideBySide)
+        let group = EditorGroupID()
+        adapter.assign(buffer, from: .primary, to: group, cloning: true)
+        adapter.display(buffer, in: group)
+        adapter.activateEditorGroup(group)
+        let clone = try #require(adapter.activeScintillaView)
+        func width(_ view: DPScintillaEditorView) throws -> Int {
+            try sendTestingScintillaMessage(2243, wParam: 0, to: view)
+        }
+        clone.zoomLevel = 3
+        let original = try width(primary)
+        let cloneOriginal = try width(clone)
+        #expect(cloneOriginal > original)
+        clone.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+        clone.insertCommittedText("\n")
+        #expect(primary.lineCount == 100_000)
+        let expanded = try width(primary)
+        #expect(expanded > original)
+        let cloneExpanded = try width(clone)
+        #expect(cloneExpanded > cloneOriginal)
+        clone.undo()
+        #expect(primary.lineCount == 99_999)
+        #expect(try width(primary) == original && width(clone) == cloneOriginal)
+        clone.redo()
+        #expect(try width(primary) == expanded && width(clone) == cloneExpanded)
+        // Hiding a pane's line numbers remains respected while its peer is edited.
+        _ = try sendTestingScintillaMessage(2242, wParam: 0, lParam: 0, to: clone)
+        primary.undo()
+        #expect(try width(primary) == original && width(clone) == 0)
+        primary.redo()
+        #expect(try width(primary) == expanded && width(clone) == 0)
+        #expect(primary.contentUTF8 == Data((source + "\n").utf8))
+    }
+
+    @Test @MainActor func editorSpacingPersistsAcrossPanesAndRestylingWithoutEditingText() throws {
+        let adapter = ScintillaEditorAdapter()
+        defer { adapter.invalidate() }
+        let buffer = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        let text = "메모\n  indented"
+        adapter.install(.init(bufferID: buffer.bufferID, revision: 0, text: text))
+        adapter.display(buffer)
+        let primary = try #require(adapter.activeScintillaView)
+        #expect(primary.editorLeftPadding == 0 && primary.editorRightPadding == 8 && primary.editorLineSpacing == 4)
+        adapter.onEdit = { .accepted(newRevision: $0.expectedRevision + 1) }
+        primary.setPrimarySelectionUTF8Range(NSRange(location: text.utf8.count, length: 0))
+        primary.insertCommittedText("!")
+        adapter.setZoomLevel(2)
+        adapter.split(orientation: .sideBySide)
+        let secondary = try #require(adapter.secondaryScintillaView)
+        let settings = AppSettings(editorLeftPadding: 3, editorRightPadding: 12, editorLineSpacing: 7)
+        adapter.applyPreferences(settings)
+        #expect(secondary.editorLeftPadding == 3 && secondary.editorRightPadding == 12 && secondary.editorLineSpacing == 7)
+        adapter.setEditorGroupOrientation(.sideBySide)
+        let group = EditorGroupID()
+        adapter.assign(buffer, from: .primary, to: group, cloning: true)
+        adapter.display(.init(bufferID: buffer.bufferID, revision: 1), in: group)
+        adapter.activateEditorGroup(group)
+        let clone = try #require(adapter.activeScintillaView)
+        #expect(adapter.applyLanguage(.init(languageID: .plainText, lexerName: "null", indentation: .init(), folding: false, braceMatching: false)))
+        for view in [primary, clone] {
+            view.apply(.dark)
+            view.configureEditorFont("Monaco", size: 18)
+            #expect(view.editorLeftPadding == 3 && view.editorRightPadding == 12 && view.editorLineSpacing == 7)
+            #expect(view.contentUTF8 == Data((text + "!").utf8))
+            #expect(view.revision == 1 && view.canUndo)
+        }
+        #expect(primary.zoomLevel == 2)
+        clone.undo()
+        #expect(primary.contentUTF8 == Data(text.utf8))
+        clone.redo()
+        #expect(primary.contentUTF8 == Data((text + "!").utf8))
+        adapter.applyPreferences(AppSettings(editorLeftPadding: 6, editorRightPadding: 4, editorLineSpacing: 0))
+        for view in [primary, clone] {
+            #expect(view.editorLeftPadding == 6 && view.editorRightPadding == 4 && view.editorLineSpacing == 0)
+        }
+        let another = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        adapter.install(.init(bufferID: another.bufferID, revision: 0, text: "new"))
+        adapter.display(another, in: group)
+        let newView = try #require(adapter.activeScintillaView)
+        #expect(newView.editorLeftPadding == 6 && newView.editorRightPadding == 4 && newView.editorLineSpacing == 0)
+        newView.configureTextLayout(withLeftPadding: -1, rightPadding: .max, lineSpacing: .max)
+        #expect(newView.editorLeftPadding == 0 && newView.editorRightPadding == 32 && newView.editorLineSpacing == 20)
+    }
+
     @Test @MainActor func editorFontPreferencesReachClonesAndPreserveUndoAndZoom() throws {
         let adapter = ScintillaEditorAdapter()
         defer { adapter.invalidate() }
@@ -651,6 +744,85 @@ struct LanguageEditorAdapterTests {
             #expect(view.incrementalNotificationCount == 0)
             view.undo()
             #expect(view.contentUTF8.isEmpty)
+        }
+    }
+
+    @Test @MainActor
+    func koreanCompositionCommitThenNewlineCommandKeepsIndentation() throws {
+        for eol in ["\n", "\r\n", "\r"] {
+            let (window, view) = hostedView()
+            let source = "test" + eol + "  - "
+            try view.loadUTF8(Data(source.utf8), revision: 0)
+            #expect(view.applyLexerNamed("null", keywords: [], tabWidth: 4, useTabs: false,
+                                        folding: false, braceMatching: false, maximumStyleBytes: 1_000_000))
+            view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+            view.focusEditor()
+            view.setMarkedText("한", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+            let client = try #require(window.firstResponder as? NSTextInputClient)
+            client.insertText("한", replacementRange: NSRange(location: NSNotFound, length: 0))
+            #expect(!view.hasMarkedText())
+            let committed = source + "한"
+            #expect(view.contentUTF8 == Data(committed.utf8))
+            client.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+            let expected = committed + eol + "  "
+            #expect(view.contentUTF8 == Data(expected.utf8))
+            #expect(view.caretUTF8Position == expected.utf8.count)
+            view.undo()
+            #expect(view.contentUTF8 == Data(committed.utf8))
+            view.redo()
+            #expect(view.contentUTF8 == Data(expected.utf8))
+        }
+    }
+
+    @Test @MainActor
+    func plainTextReturnPreservesLeadingWhitespaceAndOneUndo() throws {
+        for eol in ["\n", "\r\n", "\r"] {
+            for indent in ["  ", "\t ", ""] {
+                let (window, view) = hostedView()
+                let source = "Tier 1" + eol + indent + "- 한글🦆"
+                try view.loadUTF8(Data(source.utf8), revision: 0)
+                #expect(view.applyLexerNamed("null", keywords: [], tabWidth: 4, useTabs: false,
+                                            folding: false, braceMatching: false, maximumStyleBytes: 1_000_000))
+                view.setPrimarySelectionUTF8Range(NSRange(location: source.utf8.count, length: 0))
+                view.focusEditor()
+                view.resetInstrumentation()
+
+                try sendKeyEvent(characters: "\r", charactersIgnoringModifiers: "\r", keyCode: 36, to: window)
+
+                let expected = source + eol + indent
+                #expect(view.snapshotReadCount == 0)
+                #expect(view.contentUTF8 == Data(expected.utf8))
+                #expect(view.caretUTF8Position == expected.utf8.count)
+                #expect(view.revision == 1)
+                view.undo()
+                #expect(view.contentUTF8 == Data(source.utf8))
+                #expect(!view.canUndo)
+                view.redo()
+                #expect(view.contentUTF8 == Data(expected.utf8))
+            }
+        }
+    }
+
+    @Test @MainActor
+    func plainTextIndentationDoesNotApplyCodeRulesOrTransformBulkInput() throws {
+        for (source, caret, input, expected) in [
+            ("  {}", 3, "\n", "  {\n  }"),
+            ("  [", 3, "\n", "  [\n  "),
+            ("  (", 3, "\n", "  (\n  "),
+            ("  ", 2, "\n", "  \n  "),
+            ("  note", 1, "\n", " \n  note"),
+            ("  note", 0, "\n", "\n  note"),
+            ("  note", 6, "\nnext", "  note\nnext"),
+        ] {
+            let (_, view) = hostedView()
+            try view.loadUTF8(Data(source.utf8), revision: 0)
+            #expect(view.applyLexerNamed("null", keywords: [], tabWidth: 4, useTabs: false,
+                                        folding: false, braceMatching: false, maximumStyleBytes: 1_000_000))
+            view.setPrimarySelectionUTF8Range(NSRange(location: caret, length: 0))
+            view.insertCommittedText(input)
+            #expect(view.contentUTF8 == Data(expected.utf8))
+            view.undo()
+            #expect(view.contentUTF8 == Data(source.utf8))
         }
     }
 

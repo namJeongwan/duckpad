@@ -87,6 +87,14 @@ private final class RecoveryEditorFake: EditorPort {
         return EditorTextSnapshot(bufferID: bufferID, revision: value.revision, text: text)
     }
     func recoverySnapshot(for bufferID: BufferID) -> EditorRecoverySnapshot? { values[bufferID] }
+    func moveCaret(to position: Int) {
+        guard let active, let old = values[active.bufferID] else { return }
+        var view = old.viewState
+        view.anchorUTF8 = position
+        view.caretUTF8 = position
+        values[active.bufferID] = EditorRecoverySnapshot(bufferID: old.bufferID,
+            revision: old.revision, utf8: old.utf8, viewState: view)
+    }
     func installRecovery(_ snapshot: EditorRecoverySnapshot) { values[snapshot.bufferID] = snapshot }
     func retire(bufferID: BufferID) { values.removeValue(forKey: bufferID) }
     func setInputEnabled(_ isEnabled: Bool) { inputEnabled = isEnabled }
@@ -292,7 +300,7 @@ private func recoveredFileBinding() -> FileBinding {
 
 @Test @MainActor func editDuringBlockedSnapshotCommitSchedulesFollowUpAndRemainsDirty() async throws {
     let store = RecoveryStoreFake()
-    let (workspace, editor, _, recovery) = recoveryHarness(store: store)
+    let (workspace, editor, _, recovery) = recoveryHarness(store: store, debounce: .seconds(60))
     _ = await recovery.start()
     #expect(editor.insert("A") == .accepted(newRevision: 1))
     await workspace.waitForPendingPersistence()
@@ -302,7 +310,7 @@ private func recoveredFileBinding() -> FileBinding {
     #expect(editor.insert("B") == .accepted(newRevision: 2))
     await store.releaseBlockedCommit()
     _ = await firstFlush.value
-    await recovery.waitForPendingAutosave()
+    _ = await recovery.flush()
 
     let latest = try #require(await store.latest())
     #expect(latest.archive.buffers.values.first?.utf8 == Data("AB".utf8))
@@ -312,9 +320,9 @@ private func recoveredFileBinding() -> FileBinding {
 
 @Test @MainActor func terminationFlushWaitsForOlderWriteAndPersistsNewestAcceptedEdit() async throws {
     let store = RecoveryStoreFake()
-    let (workspace, editor, _, recovery) = recoveryHarness(store: store)
+    let (workspace, editor, _, recovery) = recoveryHarness(store: store, debounce: .seconds(60))
     _ = await recovery.start()
-    await recovery.waitForPendingAutosave()
+    _ = await recovery.flush()
     #expect(editor.insert("A") == .accepted(newRevision: 1))
     await workspace.waitForPendingPersistence()
 
@@ -442,4 +450,83 @@ private func recoveredFileBinding() -> FileBinding {
     _ = await reopenedRecovery.start()
     #expect(reopened.snapshot().tabs.map(\.id) == [original.last!.id])
     #expect(reopenedEditor.snapshot(for: original.last!.buffer.bufferID)?.text == "keep unsaved text 🦆")
+}
+
+@Test @MainActor func unchangedFlushAndTerminationReuseDurableRecovery() async {
+    let store = RecoveryStoreFake()
+    let (_, editor, _, recovery) = recoveryHarness(store: store)
+    _ = await recovery.start()
+    _ = editor.insert("unsaved 한글 🦆")
+    await recovery.waitForPendingAutosave()
+    let before = await store.commitCount
+    let first = await recovery.flush()
+    #expect(await recovery.flushForTermination() == first)
+    #expect(await store.commitCount == before)
+}
+
+@Test @MainActor func queuedFlushCapturesCurrentSessionAfterOlderWrite() async throws {
+    let store = RecoveryStoreFake()
+    let (workspace, editor, _, recovery) = recoveryHarness(store: store, debounce: .seconds(60))
+    _ = await recovery.start()
+    _ = editor.insert("A")
+    await workspace.waitForPendingPersistence()
+    await store.armBlockedCommit()
+    let first = Task { await recovery.flush() }
+    await store.waitUntilCommitEntered()
+    let queued = Task { await recovery.flush() }
+    await Task.yield()
+    _ = editor.insert("B")
+    await store.releaseBlockedCommit()
+    _ = await first.value
+    guard case .saved = await queued.value else {
+        Issue.record("queued flush used stale metadata after waiting")
+        return
+    }
+    #expect((await store.latest())?.archive.buffers.values.first?.utf8 == Data("AB".utf8))
+}
+
+@Test @MainActor func unchangedRevisionStillPersistsMovedCaretAndResetClearsDurableHint() async {
+    let store = RecoveryStoreFake()
+    let (_, editor, _, recovery) = recoveryHarness(store: store, debounce: .seconds(60))
+    _ = await recovery.start()
+    _ = editor.insert("abc")
+    _ = await recovery.flush()
+    let before = await store.commitCount
+    editor.moveCaret(to: 2)
+    _ = await recovery.flushForTermination()
+    #expect(await store.commitCount == before + 1)
+    #expect((await store.latest())?.archive.buffers.values.first?.viewState.caretUTF8 == 2)
+    _ = await recovery.reset()
+    _ = await recovery.flushForTermination()
+    #expect(await store.commitCount == before + 2)
+    #expect((await store.latest())?.archive.buffers.values.first?.utf8 == Data("abc".utf8))
+}
+
+@Test func recoveryDeltaMaterializationValidatesEverySpliceWithoutChangingUnicode() throws {
+    let id = BufferID()
+    let deltas = [
+        EditorRecoveryDelta(expectedRevision: 0, range: .init(location: 3, length: 4), replacementUTF8: Data("🦆".utf8)),
+        EditorRecoveryDelta(expectedRevision: 1, range: .init(location: 0, length: 3), replacementUTF8: Data("가".utf8)),
+    ]
+    let capture = EditorRecoveryCapture(bufferID: id, baseRevision: 0, revision: 2,
+        baseUTF8: Data("한🙂\r\n".utf8), deltas: deltas)
+    #expect(try capture.materializedSnapshot().utf8 == Data("가🦆\r\n".utf8))
+    for delta in [
+        EditorRecoveryDelta(expectedRevision: 0, range: .init(location: 1, length: 0), replacementUTF8: Data()),
+        EditorRecoveryDelta(expectedRevision: 0, range: .init(location: 0, length: 1), replacementUTF8: Data()),
+        EditorRecoveryDelta(expectedRevision: 0, range: .init(location: 0, length: 0), replacementUTF8: Data([0x80])),
+        EditorRecoveryDelta(expectedRevision: 1, range: .init(location: 0, length: 0), replacementUTF8: Data()),
+    ] {
+        let invalid = EditorRecoveryCapture(bufferID: id, baseRevision: 0, revision: 1,
+            baseUTF8: Data("한".utf8), deltas: [delta])
+        #expect(throws: SessionStoreError.self) { try invalid.materializedSnapshot() }
+    }
+    #expect(throws: SessionStoreError.self) {
+        try EditorRecoveryCapture(bufferID: id, baseRevision: 0, revision: 0,
+            baseUTF8: Data([0xFF])).materializedSnapshot()
+    }
+    #expect(throws: SessionStoreError.self) {
+        try EditorRecoveryCapture(bufferID: id, baseRevision: 0, revision: 1,
+            baseUTF8: Data()).materializedSnapshot()
+    }
 }

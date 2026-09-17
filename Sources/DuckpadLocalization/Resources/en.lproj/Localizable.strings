@@ -764,3 +764,8 @@
 "Uninstalling Plugin…" = "Uninstalling Plugin…";
 "Plugin Uninstalled" = "Plugin Uninstalled";
 "Plugin Uninstallation Failed" = "Plugin Uninstallation Failed";
+
+"Text left padding (pt)" = "Text left padding (pt)";
+"Text right padding (pt)" = "Text right padding (pt)";
+"Extra line spacing (pt)" = "Extra line spacing (pt)";
+"Enter a whole number from %1$d to %2$d." = "Enter a whole number from %1$d to %2$d.";

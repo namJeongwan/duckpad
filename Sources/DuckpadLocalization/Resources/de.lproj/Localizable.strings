@@ -724,3 +724,8 @@
 "Uninstalling Plugin…" = "Plugin wird deinstalliert…";
 "Plugin Uninstalled" = "Plugin deinstalliert";
 "Plugin Uninstallation Failed" = "Plugin-Deinstallation fehlgeschlagen";
+
+"Text left padding (pt)" = "Linker Textabstand (pt)";
+"Text right padding (pt)" = "Rechter Textabstand (pt)";
+"Extra line spacing (pt)" = "Zusätzlicher Zeilenabstand (pt)";
+"Enter a whole number from %1$d to %2$d." = "Geben Sie eine ganze Zahl von %1$d bis %2$d ein.";

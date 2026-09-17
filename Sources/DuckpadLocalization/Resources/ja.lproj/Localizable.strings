@@ -724,3 +724,8 @@
 "Uninstalling Plugin…" = "プラグインをアンインストール中…";
 "Plugin Uninstalled" = "プラグインをアンインストールしました";
 "Plugin Uninstallation Failed" = "プラグインのアンインストールに失敗しました";
+
+"Text left padding (pt)" = "本文の左余白 (pt)";
+"Text right padding (pt)" = "本文の右余白 (pt)";
+"Extra line spacing (pt)" = "行間の追加スペース (pt)";
+"Enter a whole number from %1$d to %2$d." = "%1$dから%2$dまでの整数を入力してください。";
