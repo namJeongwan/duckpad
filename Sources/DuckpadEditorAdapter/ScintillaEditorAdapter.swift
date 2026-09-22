@@ -195,6 +195,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             storeViewState(bufferID: activeBuffer.bufferID)
             // The retained native view and recovery journal already own the text.
         }
+        let restoreEditorFocus = activeScintillaView?.hasEditorFocus == true
         hideSplit(focusPrimary: false)
         let editorView = preparePrimaryView(for: buffer)
         activeBuffer = buffer
@@ -211,6 +212,9 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         bufferOwners[buffer.bufferID] = bufferOwners[buffer.bufferID] ?? .primary
         bufferGroupViews[buffer.bufferID, default: [:]][.primary] = editorView
         restoreSplitViewState(for: buffer.bufferID, primary: editorView)
+        // Removing the outgoing view makes the window its own first responder.
+        // Transfer editor focus in the same turn, before session persistence.
+        if restoreEditorFocus { focus() }
     }
 
     public func setEditorGroupOrientation(_ orientation: EditorGroupSplitOrientation?) {
@@ -288,6 +292,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         let publisher = preparePrimaryView(for: buffer)
         bufferOwners[buffer.bufferID] = bufferOwners[buffer.bufferID] ?? group
         let editorView = groupView(for: buffer.bufferID, group: group, publisher: publisher)
+        let restoreEditorFocus = displayedGroupViews[group]?.hasEditorFocus == true
         attach(editorView, to: group)
         displayedGroupBuffers[group] = buffer
         displayedGroupViews[group] = editorView
@@ -296,6 +301,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         if activeEditorGroup == group {
             activeBuffer = buffer
         }
+        if restoreEditorFocus { editorView.focusEditor() }
     }
 
     public func assign(
