@@ -3,36 +3,38 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.7.1</title>
-            <pubDate>Tue, 22 Sep 2026 18:07:00 +0900</pubDate>
-            <sparkle:version>45</sparkle:version>
-            <sparkle:shortVersionString>0.7.1</sparkle:shortVersionString>
+            <title>0.7.2</title>
+            <pubDate>Wed, 23 Sep 2026 09:08:32 +0900</pubDate>
+            <sparkle:version>46</sparkle:version>
+            <sparkle:shortVersionString>0.7.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.7.1
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.7.2
 
-Fix keyboard focus after switching tabs with Option-Command-Left/Right or the last-used-tab command. Typing now continues in the destination editor without clicking the document first. Focus transfers as the editor changes, without waiting for session persistence. The fix also covers editor groups and preserves focus in other controls when they were already active.
+Keep the new-version badge visible after dismissing the update window, cancelling installation, or encountering an update error. Click the badge again to reopen the update window. Explicitly skipping a version still clears the badge, as does a subsequent check that finds no available update.
 
-App and helpers: **0.7.1 (45)**. Requires **macOS 13 or later**. Distribution includes Apple Silicon and Intel binaries.
+Move the badge up by 4 points to align it with the window controls. The status bar and editor layout are unchanged.
+
+App and helpers: **0.7.2 (46)**. Requires **macOS 13 or later**. Distribution includes Apple Silicon and Intel binaries.
 
 ## Installation
 
-Download `Duckpad-0.7.1-universal.dmg`, open it, and drag Duckpad into Applications. The ZIP alternative is `Duckpad-0.7.1-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Users on 0.7.0 can update in the app once the signed Sparkle feed is published; older versions require manual installation.
+Download `Duckpad-0.7.2-universal.dmg`, open it, and drag Duckpad into Applications. The ZIP alternative is `Duckpad-0.7.2-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Users on 0.7.0 or later can update in the app once the signed Sparkle feed is published; older versions require manual installation.
 
 The app is ad-hoc signed, not Developer ID signed or Apple notarized. Sparkle archives use a separate Ed25519 signature.
 
 ## Validation and limitations
 
-The keyboard-navigation regression failed before the fix and passed afterward, including focus at activation and typing after activation persistence in previous, next, and last-used tabs. Focus preservation checks cover single and grouped editors and verify that other controls retain focus. Existing editor-group and Korean composition/Undo/Redo checks are included in the targeted regression run. The existing edit gate during a pending tab-activation transaction is unchanged.
+The dismissal and badge-alignment regressions failed before the fixes and passed afterward. All 15 targeted updater and app-information tests passed, including explicit skip, cancellation, update errors, no-update results, and repeated presentation. A separate app with a local update feed verified dismissal, reopening from the badge, explicit skip, and alignment with the window controls.
 
-The reported intermittent duplicate character when switching Korean/English with Caps Lock was not reproduced, including a manual test. This release does not change IME handling or claim to fix that issue.
+This release does not change text input handling or claim to fix the intermittent Korean/English Caps Lock input issue. Physical Intel/macOS 13 execution and Apple notarization were not performed. Final universal package and update-feed verification results are recorded in the published release.
 
-Physical Intel/macOS 13 execution and Apple notarization were not performed. Final package and update-feed verification results are recorded in the published release.
+## Release verification
 
-The universal app passed bundle/resource/helper signature and entitlement verification, Finder opening, bookmarked save/relaunch, window layout, and sandboxed XPC extension/isolation smokes. App and both helpers contain arm64 and x86_64 and report 0.7.1 (45). DMG and ZIP integrity checks passed. Native Save-panel UI automation was skipped.
+Built from the same Git tree as merged commit `5e14986947a145fa85e411b21d2d43d611564e79` (PR #49). All three executables report 0.7.2 (46) and contain arm64 and x86_64 slices.
 
-Built from merged commit `8f5dfd303a87b360d77f8df8b0bd162a95090fda` ([PR #47](https://github.com/namJeongwan/duckpad/pull/47)).
+App bundle, bundled resources, entitlements, and signatures passed verification. Isolated Finder/Open With, bookmark save/relaunch, window resizing, and sandboxed extension/XPC isolation smoke checks passed. Native save-panel automation was skipped. DMG integrity, ZIP integrity, and uploaded asset SHA-256 hashes are verified before this release is published.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.7.1/Duckpad-0.7.1-universal.zip" length="25979820" type="application/octet-stream" sparkle:edSignature="eIb63mqKv4JhfExLTyXzsffMezOeL0FsegQcoB8cDKv1XpEBwnjzn3AkXljWDlnz1DwWYYnx6c1xQUfjDGElDQ=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.7.2/Duckpad-0.7.2-universal.zip" length="25980921" type="application/octet-stream" sparkle:edSignature="1wlJQyGBIcUDRESJXmFMhqICtPH5Ir1oKBvh45Wdta1y3uyQ4weWTluM802FV/mPVerXmMKt6a2xAkBUk2WOBQ=="/>
         </item>
     </channel>
 </rss>
