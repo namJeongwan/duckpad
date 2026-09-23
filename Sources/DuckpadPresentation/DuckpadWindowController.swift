@@ -1674,6 +1674,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performRedo(_ sender: Any? = nil) { performEditorCommand(.redo) }
     @objc public func performCut(_ sender: Any? = nil) { performEditorCommand(.cut) }
     @objc public func performCopy(_ sender: Any? = nil) { performEditorCommand(.copy) }
+    @objc public func performCopyAsPlainText(_ sender: Any? = nil) {
+        guard let editor = actionableEditorCommands as? any EditorCopyExportPort,
+              editor.canPerform(.copy) else { return }
+        editor.copyAsPlainText()
+    }
+    @objc public func performCopyAsImage(_ sender: Any? = nil) {
+        guard let editor = actionableEditorCommands as? any EditorCopyExportPort,
+              editor.canCopyAsImage else { return }
+        if !editor.copyAsImage() {
+            let alert = NSAlert()
+            alert.messageText = L10n.text("Could not copy selection as an image")
+            alert.informativeText = L10n.text("Select a smaller, continuous section of text and try again.")
+            if let window { alert.beginSheetModal(for: window) }
+        }
+    }
     @objc public func performPaste(_ sender: Any? = nil) { performEditorCommand(.paste) }
     @objc public func performDelete(_ sender: Any? = nil) { performEditorCommand(.delete) }
     @objc public func performSelectAll(_ sender: Any? = nil) { performEditorCommand(.selectAll) }
@@ -1883,6 +1898,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         if menuItem.action == #selector(performFormatDocument(_:)) {
             return workspaceInteractionsAreActionable && formattingUseCase?.canFormat == true
+        }
+        if menuItem.action == #selector(performCopyAsPlainText(_:)) {
+            return (actionableEditorCommands as? any EditorCopyExportPort)?.canPerform(.copy) ?? false
+        }
+        if menuItem.action == #selector(performCopyAsImage(_:)) {
+            return (actionableEditorCommands as? any EditorCopyExportPort)?.canCopyAsImage ?? false
         }
         if let command = editorCommand(for: menuItem.action) {
             return actionableEditorCommands?.canPerform(command) ?? false

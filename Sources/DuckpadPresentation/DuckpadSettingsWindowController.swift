@@ -225,6 +225,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             booleanControls.append((button, key))
             (pages[category] as? NSStackView)?.addArrangedSubview(button)
         }
+        checkbox("Include formatting when copying", \.copyWithFormatting, "Editing")
         func choices(_ title: String, _ key: WritableKeyPath<AppSettings, Int>, _ choices: [(String, Int)], _ category: String) {
             let popup = NSPopUpButton(frame: .zero, pullsDown: false)
             for (label, value) in choices {

@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const output = path.resolve(root, '../../Sources/DuckpadPresentation/Resources/MarkdownPreview');
 await mkdir(output, { recursive: true });
+await build({ entryPoints: [path.join(root, 'clipboard.mjs')], bundle: true, format: 'iife', target: 'safari16', minify: true,
+  outfile: path.join(output, 'clipboard.js'), legalComments: 'eof' });
 await build({ entryPoints: [path.join(root, 'preview.mjs')], bundle: true, format: 'iife', target: 'safari16', minify: true,
   outfile: path.join(output, 'preview.js'), legalComments: 'eof' });
 await cp(path.join(root, 'node_modules/katex/dist/fonts'), path.join(output, 'fonts'), { recursive: true });

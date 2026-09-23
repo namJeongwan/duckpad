@@ -249,3 +249,24 @@ This is a local patch to an upstream Cocoa source file, not generated API code.
 Re-vendoring the official subset must reapply this patch along with the existing
 Cocoa patches; the local bootstrap vendor script copies upstream Cocoa files
 and does not generate or preserve downstream changes automatically.
+
+## Bounded rich clipboard export
+
+`ScintillaCocoa::Cut` suppresses the optional rich-copy callback while calling
+`Editor::Cut`, which internally dispatches virtual `Copy`. Scoped restoration
+keeps keyboard, native context-menu and SCI_CUT on the original plain clipboard
+path without affecting later ordinary copies.
+
+Selection presentation uses the displayed font size (including Scintilla's
+additive zoom and one-point minimum) and `SCI_TEXTHEIGHT` for line spacing.
+The HTML writer maps these Cocoa screen points to CSS pixels to avoid the
+96/72 enlargement caused by CSS `pt` units.
+
+Duckpad adds an optional `scintillaDidCopyToPasteboard:` delegate notification
+in `cocoa/ScintillaView.h` and `cocoa/ScintillaCocoa.mm`, after ordinary native
+Copy. This includes keyboard, menu and native context-menu copy; cut, drag and
+rectangular clipboard semantics remain unchanged. The Duckpad-owned bridge
+reads only a bounded single stream selection and its existing style bytes,
+without recolorizing the document. Swift adds HTML/RTF and offers explicit PNG
+export. No acquisition/regeneration script is tracked for this Cocoa patch;
+reacquiring upstream requires reapplying it alongside the existing patches.

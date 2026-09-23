@@ -797,7 +797,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         let editor = ScintillaEditorAdapter(defaultViewState: EditorViewState(
             wordWrapEnabled: settings.defaultWordWrapEnabled,
             wrapMarkerVisible: settings.defaultWrapMarkerVisible
-        ))
+        ), markdownClipboardRenderer: MarkdownClipboardRenderer())
         editor.applyPreferences(settings)
         let recoveryStore = verifiedRecoveryRoot.map { LocalRecoveryStore(verifiedRoot: $0) }
             ?? LocalRecoveryStore(root: recoveryRoot)

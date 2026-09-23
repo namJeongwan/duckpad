@@ -208,6 +208,10 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
      replacementRange:(NSRange)replacementRange;
 - (void)unmarkText;
 - (BOOL)hasMarkedText;
+// Called after ordinary native copy (including the context menu), never cut/drag.
+@property(nonatomic, copy, nullable) void (^didCopySelection)(NSPasteboard *pasteboard);
+- (nullable NSAttributedString *)copyPresentationWithMaximumBytes:(NSUInteger)maximumBytes;
+- (void)copySelectionAsPlainText;
 - (void)copySelection;
 - (void)cutSelection;
 - (void)paste;

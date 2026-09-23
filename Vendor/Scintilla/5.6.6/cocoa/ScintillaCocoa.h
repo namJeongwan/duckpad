@@ -102,6 +102,7 @@ private:
 	bool capturedMouse;
 	bool isFirstResponder;
 	bool isActive;
+	bool suppressCopyNotification = false;
 
 	Point sizeClient;
 
@@ -266,5 +267,4 @@ public:
 
 
 }
-
 

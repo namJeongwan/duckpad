@@ -1462,6 +1462,69 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 - (void)unmarkText { [[_scintilla content] unmarkText]; }
 - (BOOL)hasMarkedText { return [[_scintilla content] hasMarkedText]; }
+- (void)scintillaDidCopyToPasteboard:(NSPasteboard *)pasteboard {
+    if (self.didCopySelection) self.didCopySelection(pasteboard);
+}
+- (void)copySelectionAsPlainText {
+    void (^handler)(NSPasteboard *) = self.didCopySelection;
+    self.didCopySelection = nil;
+    @try { [[_scintilla content] copy:nil]; }
+    @finally { self.didCopySelection = handler; }
+}
+- (NSAttributedString *)copyPresentationWithMaximumBytes:(NSUInteger)maximumBytes {
+    // Keep rectangular/multiple selections on Scintilla's existing clipboard path.
+    if ([_scintilla message:SCI_GETSELECTIONS] != 1
+        || [_scintilla message:SCI_GETSELECTIONMODE] != SC_SEL_STREAM
+        || [_scintilla message:SCI_GETSELECTIONNCARETVIRTUALSPACE wParam:0] != 0
+        || [_scintilla message:SCI_GETSELECTIONNANCHORVIRTUALSPACE wParam:0] != 0) return nil;
+    const sptr_t start = [_scintilla message:SCI_GETSELECTIONSTART];
+    const sptr_t end = [_scintilla message:SCI_GETSELECTIONEND];
+    const NSUInteger length = end - start;
+    if (!length || length > MIN(maximumBytes, (NSUInteger)1048576)) return nil;
+    // Read only selected bytes and their existing styles. Never force lexing to EOF.
+    std::vector<char> bytes(length * 2 + 2);
+    Sci_TextRangeFull range = {{start, end}, bytes.data()};
+    [_scintilla message:SCI_GETSTYLEDTEXTFULL wParam:0 lParam:reinterpret_cast<sptr_t>(&range)];
+    // Match ViewStyle::FontRealised: zoom is additive, with a one-point minimum.
+    const double displayedFontSize = MAX(1.0, _editorFontSize + self.zoomLevel);
+    NSFont *font = [NSFont fontWithName:_editorFontName size:displayedFontSize]
+        ?: [NSFont monospacedSystemFontOfSize:displayedFontSize weight:NSFontWeightRegular];
+    NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+    paragraph.minimumLineHeight = [_scintilla message:SCI_TEXTHEIGHT wParam:0];
+    paragraph.maximumLineHeight = paragraph.minimumLineHeight;
+    paragraph.tabStops = @[];
+    paragraph.defaultTabInterval = [@" " sizeWithAttributes:@{NSFontAttributeName:font}].width
+        * MAX(1, [_scintilla message:SCI_GETTABWIDTH]);
+    const int lightColors[] = {0x202020, 0x397A32, 0x7C2F8E, 0xA23B00, 0x176A7A, 0x204F9B, 0x2020D0};
+    int colors[256];
+    std::fill(std::begin(colors), std::end(colors), lightColors[0]);
+    for (const auto &[style, role] : _semanticStyleRoles) {
+        if (style >= 0 && style < 256 && role >= 0 && role < 7) colors[style] = lightColors[role];
+    }
+    NSMutableAttributedString *result = [[NSMutableAttributedString alloc] initWithString:@""];
+    NSUInteger runCount = 0;
+    for (NSUInteger index = 0; index < length;) {
+        if (++runCount > 4096) return nil;
+        unsigned char style = bytes[index * 2 + 1];
+        std::string run;
+        do { run.push_back(bytes[index++ * 2]); }
+        while (index < length && (unsigned char)bytes[index * 2 + 1] == style);
+        NSString *text = [[NSString alloc] initWithBytes:run.data() length:run.size() encoding:NSUTF8StringEncoding];
+        if (!text) return nil;
+        int color = colors[style];
+        NSColor *foreground = [NSColor colorWithSRGBRed:(color & 255) / 255.0
+            green:((color >> 8) & 255) / 255.0 blue:((color >> 16) & 255) / 255.0 alpha:1];
+        NSFontTraitMask traits = 0;
+        if ([_scintilla message:SCI_STYLEGETBOLD wParam:style]) traits |= NSBoldFontMask;
+        if ([_scintilla message:SCI_STYLEGETITALIC wParam:style]) traits |= NSItalicFontMask;
+        NSFont *runFont = traits ? [[NSFontManager sharedFontManager] convertFont:font toHaveTrait:traits] : font;
+        [result appendAttributedString:[[NSAttributedString alloc] initWithString:text attributes:@{
+            NSFontAttributeName:runFont, NSForegroundColorAttributeName:foreground,
+            NSParagraphStyleAttributeName:paragraph
+        }]];
+    }
+    return result;
+}
 - (void)copySelection { [[_scintilla content] copy:nil]; }
 - (void)cutSelection { if ([self preflightUserMutation]) [[_scintilla content] cut:nil]; }
 - (void)paste { if ([self preflightUserMutation]) [[_scintilla content] paste:nil]; }
