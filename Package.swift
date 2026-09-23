@@ -242,6 +242,11 @@ let package = Package(
             resources: [.copy("performance-budgets.v1.json")]
         ),
         .testTarget(
+            name: "DuckpadAppTests",
+            dependencies: ["DuckpadApp", .product(name: "Sparkle", package: "Sparkle"),
+                           .product(name: "Testing", package: "swift-testing")]
+        ),
+        .testTarget(
             name: "DuckpadDomainTests",
             dependencies: ["DuckpadDomain", .product(name: "Testing", package: "swift-testing")]
         ),

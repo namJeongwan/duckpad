@@ -39,6 +39,7 @@ final class SparkleUpdateController: NSObject, SPUUpdaterDelegate,
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
+        onAvailableVersion?(nil)
         onStatusChange?(.current)
     }
 
@@ -64,7 +65,15 @@ final class SparkleUpdateController: NSObject, SPUUpdaterDelegate,
         onAvailableVersion?(update.displayVersionString)
     }
 
+    func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice,
+                 forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
+        // Respect an explicit skip; dismissal and cancelled installation leave
+        // the available version actionable from the badge.
+        if choice == .skip { onAvailableVersion?(nil) }
+    }
+
     func standardUserDriverWillFinishUpdateSession() {
-        onAvailableVersion?(nil)
+        // Sparkle also finishes sessions on dismissal, cancellation, or error.
+        // None of those means the known update is no longer available.
     }
 }
