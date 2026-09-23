@@ -738,3 +738,9 @@
 "View the changes and install the update." = "変更内容を確認してアップデートをインストールします。";
 
 "Software Updates" = "ソフトウェアアップデート";
+
+"Include formatting when copying" = "コピー時に書式を含める";
+"Copy as Plain Text" = "書式なしでコピー";
+"Copy as Image" = "画像としてコピー";
+"Could not copy selection as an image" = "選択範囲を画像としてコピーできませんでした";
+"Select a smaller, continuous section of text and try again." = "連続したテキストを短く選択して、もう一度お試しください。";

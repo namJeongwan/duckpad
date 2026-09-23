@@ -19,6 +19,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var editorLeftPadding: Int
     public var editorRightPadding: Int
     public var editorLineSpacing: Int
+    public var copyWithFormatting: Bool
     public var liveFileReloadEnabled: Bool
 
     public var menuBarVisible: Bool
@@ -64,6 +65,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         editorLeftPadding: Int = 0,
         editorRightPadding: Int = 8,
         editorLineSpacing: Int = 4,
+        copyWithFormatting: Bool = true,
         liveFileReloadEnabled: Bool = true,
         menuBarVisible: Bool = true,
         statusBarVisible: Bool = true,
@@ -104,6 +106,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.editorLeftPadding = editorLeftPadding
         self.editorRightPadding = editorRightPadding
         self.editorLineSpacing = editorLineSpacing
+        self.copyWithFormatting = copyWithFormatting
         self.liveFileReloadEnabled = liveFileReloadEnabled
         self.menuBarVisible = menuBarVisible
         self.statusBarVisible = statusBarVisible
@@ -147,6 +150,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         editorLeftPadding = min(max(try values.decodeIfPresent(Int.self, forKey: .editorLeftPadding) ?? 0, 0), 32)
         editorRightPadding = min(max(try values.decodeIfPresent(Int.self, forKey: .editorRightPadding) ?? 8, 0), 32)
         editorLineSpacing = min(max(try values.decodeIfPresent(Int.self, forKey: .editorLineSpacing) ?? 4, 0), 20)
+        copyWithFormatting = try values.decodeIfPresent(Bool.self, forKey: .copyWithFormatting) ?? true
         liveFileReloadEnabled = try values.decodeIfPresent(Bool.self, forKey: .liveFileReloadEnabled) ?? true
         menuBarVisible = try values.decodeIfPresent(Bool.self, forKey: .menuBarVisible) ?? true
         statusBarVisible = try values.decodeIfPresent(Bool.self, forKey: .statusBarVisible) ?? true

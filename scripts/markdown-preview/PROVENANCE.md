@@ -5,6 +5,12 @@ The app bundles the generated assets under
 `parser.mjs` and `preview.mjs` by `build.mjs`; do not hand-edit generated JavaScript.
 The app requires neither Node nor a CDN at runtime.
 
+`clipboard.mjs` also builds `clipboard.js` from the same pinned markdown-it
+dependency for synchronous JavaScriptCore clipboard export. It renders headings,
+lists, tables and inline formatting with inline styles. Unlike preview, clipboard
+export disables raw HTML, allows only HTTP(S)/mailto links, and emits image alt
+text instead of resource URLs. No new dependency is introduced.
+
 Direct runtime dependencies (exact dependency tree: `package-lock.json`):
 
 - markdown-it 15.0.2 — https://github.com/markdown-it/markdown-it — MIT

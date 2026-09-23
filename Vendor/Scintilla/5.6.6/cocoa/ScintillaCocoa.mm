@@ -1075,6 +1075,10 @@ void ScintillaCocoa::Copy() {
 		SelectionText selectedText;
 		CopySelectionRange(&selectedText);
 		CopyToClipboard(selectedText);
+		id copyDelegate = sciView.delegate;
+		if (!suppressCopyNotification && [copyDelegate respondsToSelector: @selector(scintillaDidCopyToPasteboard:)]) {
+			[copyDelegate scintillaDidCopyToPasteboard: [NSPasteboard generalPasteboard]];
+		}
 	}
 }
 
@@ -2601,6 +2605,14 @@ void ScintillaCocoa::DeleteBackward() {
 }
 
 void ScintillaCocoa::Cut() {
+	// Editor::Cut calls virtual Copy(). Keep every cut entry point on the
+	// native clipboard path, restoring state even on an exceptional exit.
+	struct RestoreNotification {
+		bool &flag;
+		bool previous;
+		~RestoreNotification() { flag = previous; }
+	} restore {suppressCopyNotification, suppressCopyNotification};
+	suppressCopyNotification = true;
 	Editor::Cut();
 }
 
@@ -2812,5 +2824,4 @@ void ScintillaCocoa::HideFindIndicator() {
 	}
 #endif
 }
-
 

@@ -738,3 +738,9 @@
 "View the changes and install the update." = "查看更改并安装更新。";
 
 "Software Updates" = "软件更新";
+
+"Include formatting when copying" = "复制时包含格式";
+"Copy as Plain Text" = "复制为纯文本";
+"Copy as Image" = "复制为图片";
+"Could not copy selection as an image" = "无法将所选内容复制为图片";
+"Select a smaller, continuous section of text and try again." = "请选择较短的连续文本后重试。";

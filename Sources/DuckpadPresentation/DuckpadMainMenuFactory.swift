@@ -75,6 +75,8 @@ public enum DuckpadMainMenuFactory {
         editMenu.addItem(.separator())
         add("Cut", #selector(DuckpadWindowController.performCut(_:)), "x", target, to: editMenu)
         add("Copy", #selector(DuckpadWindowController.performCopy(_:)), "c", target, to: editMenu)
+        add("Copy as Plain Text", #selector(DuckpadWindowController.performCopyAsPlainText(_:)), "", target, modifiers: [], to: editMenu)
+        add("Copy as Image", #selector(DuckpadWindowController.performCopyAsImage(_:)), "", target, modifiers: [], to: editMenu)
         add("Paste", #selector(DuckpadWindowController.performPaste(_:)), "v", target, to: editMenu)
         add("Delete", #selector(DuckpadWindowController.performDelete(_:)), "", target, modifiers: [], to: editMenu)
         editMenu.addItem(.separator())

@@ -7,7 +7,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, ProgressiveTextEditorPort, FileOpeningPreviewEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, ProgressiveTextEditorPort, FileOpeningPreviewEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, EditorCopyExportPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -88,6 +88,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     private var viewStates: [BufferID: EditorViewState] = [:]
     private var acceptedEdits: [BufferID: [EditorIncrementalEdit]] = [:]
     private var displayPreferences = AppSettings.defaults
+    private let markdownClipboardRenderer: (any MarkdownClipboardRendering)?
     private var bufferViews: [BufferID: DPScintillaEditorView] = [:]
     private var secondaryBufferViews: [BufferID: DPScintillaEditorView] = [:]
     private var groupPeerViews: [BufferID: [DPScintillaEditorView]] = [:]
@@ -153,8 +154,10 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         DPScintillaConfigureResourceDirectory(directory)
     }
 
-    public init(defaultViewState: EditorViewState = EditorViewState()) {
+    public init(defaultViewState: EditorViewState = EditorViewState(),
+                markdownClipboardRenderer: (any MarkdownClipboardRendering)? = nil) {
         self.defaultViewState = defaultViewState
+        self.markdownClipboardRenderer = markdownClipboardRenderer
         Self.prepareResources()
         splitView.dividerStyle = .thin
         splitView.isVertical = true
@@ -898,6 +901,23 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
 
     private func applyDisplayPreferences(to view: DPScintillaEditorView) {
         let settings = displayPreferences
+        view.didCopySelection = { [weak self, weak view] pasteboard in
+            guard let self, self.displayPreferences.copyWithFormatting, let view,
+                  let presentation = view.copyPresentation(withMaximumBytes: UInt(RichClipboardWriter.maximumTextBytes)) else { return }
+            let isMarkdown = self.languageConfigurations.contains { bufferID, configuration in
+                configuration.languageID.rawValue == "markdown" && self.allViews(for: bufferID).contains { $0 === view }
+            }
+            if isMarkdown {
+                guard pasteboard.string(forType: .string) == presentation.string,
+                      let html = self.markdownClipboardRenderer?.html(for: presentation.string) else { return }
+                // Do not publish source-form RTF beside rendered HTML: receivers
+                // choosing RTF would otherwise display the Markdown punctuation.
+                pasteboard.addTypes([.html], owner: nil)
+                pasteboard.setData(html, forType: .html)
+                return
+            }
+            RichClipboardWriter.addRepresentations(presentation, tabWidth: Int(view.configuredTabWidth), to: pasteboard)
+        }
         view.configureEditorFont(settings.editorFontName, size: settings.editorFontSize)
         view.configureTextLayout(withLeftPadding: settings.editorLeftPadding,
                                  rightPadding: settings.editorRightPadding,
@@ -1122,6 +1142,22 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
              .uppercase, .lowercase, .indent, .unindent, .trimTrailingWhitespace:
             editorView.perform(nativeEditingCommand(command))
         }
+    }
+
+    public var canCopyAsImage: Bool {
+        guard let view = openingPreview?.editor ?? activeScintillaView else { return false }
+        return view.canCopy && view.selectionCount == 1
+    }
+
+    public func copyAsPlainText() {
+        guard canPerform(.copy) else { return }
+        (openingPreview?.editor ?? activeScintillaView)?.copySelectionAsPlainText()
+    }
+
+    public func copyAsImage() -> Bool {
+        guard let view = openingPreview?.editor ?? activeScintillaView,
+              let presentation = view.copyPresentation(withMaximumBytes: UInt(RichClipboardWriter.maximumImageBytes)) else { return false }
+        return RichClipboardWriter.copyImage(presentation, to: .general)
     }
 
     private func nativeEditingCommand(_ command: EditorCommand) -> DPScintillaEditingCommand {

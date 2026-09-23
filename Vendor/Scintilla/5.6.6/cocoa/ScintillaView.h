@@ -51,6 +51,7 @@ typedef NS_ENUM(NSInteger, SCITextInputSource) {
 - (void) scintillaWillInsertTextFromSource: (SCITextInputSource) source;
 - (BOOL) scintillaHandleDirectSelectionText: (NSString *) text;
 - (void) scintillaDidInsertText;
+- (void) scintillaDidCopyToPasteboard: (NSPasteboard *) board;
 @end
 
 /**

@@ -738,3 +738,9 @@
 "View the changes and install the update." = "Änderungen ansehen und das Update installieren.";
 
 "Software Updates" = "Softwareupdates";
+
+"Include formatting when copying" = "Beim Kopieren Formatierung einschließen";
+"Copy as Plain Text" = "Als unformatierten Text kopieren";
+"Copy as Image" = "Als Bild kopieren";
+"Could not copy selection as an image" = "Auswahl konnte nicht als Bild kopiert werden";
+"Select a smaller, continuous section of text and try again." = "Wählen Sie einen kürzeren, zusammenhängenden Textabschnitt und versuchen Sie es erneut.";

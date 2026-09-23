@@ -778,3 +778,9 @@
 "View the changes and install the update." = "View the changes and install the update.";
 
 "Software Updates" = "Software Updates";
+
+"Include formatting when copying" = "Include formatting when copying";
+"Copy as Plain Text" = "Copy as Plain Text";
+"Copy as Image" = "Copy as Image";
+"Could not copy selection as an image" = "Could not copy selection as an image";
+"Select a smaller, continuous section of text and try again." = "Select a smaller, continuous section of text and try again.";
