@@ -23,7 +23,7 @@ final class UpdateTitlebarAccessoryController: NSTitlebarAccessoryViewController
         button.imageHugsTitle = true
         button.alignment = .center
         button.setAccessibilityIdentifier("duckpad.update.available")
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 24))
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 32))
         view.addSubview(button)
         update(version: version)
     }
@@ -42,8 +42,8 @@ final class UpdateTitlebarAccessoryController: NSTitlebarAccessoryViewController
         button.setAccessibilityLabel(button.title)
         button.setAccessibilityHelp(button.toolTip)
         let width = min(240, button.intrinsicContentSize.width + 20)
-        view.setFrameSize(NSSize(width: width + 8, height: 24))
-        button.frame = NSRect(x: 0, y: 2, width: width, height: 20)
+        view.setFrameSize(NSSize(width: width + 8, height: 32))
+        button.frame = NSRect(x: 0, y: 6, width: width, height: 20)
         (button.cell as? NSButtonCell)?.lineBreakMode = .byTruncatingTail
     }
 

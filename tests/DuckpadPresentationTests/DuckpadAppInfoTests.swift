@@ -81,6 +81,12 @@ import Testing
         document.showAvailableUpdate(version: "0.7.0") { clicks += 1 }
         let badge = try #require(window.titlebarAccessoryViewControllers.first as? UpdateTitlebarAccessoryController)
         #expect(badge.layoutAttribute == .right)
+        window.contentView?.superview?.layoutSubtreeIfNeeded()
+        let closeButton = try #require(window.standardWindowButton(.closeButton))
+        let badgeCenter = badge.button.convert(badge.button.bounds, to: nil).midY
+        let closeCenter = closeButton.convert(closeButton.bounds, to: nil).midY
+        #expect(abs(badgeCenter - closeCenter) <= 1)
+
         badge.refreshLocalization(catalog: LocalizationCatalog(language: .korean))
         #expect(badge.button.title == "새로운 버전: 0.7.0")
         badge.button.performClick(nil)
