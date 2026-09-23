@@ -10,7 +10,7 @@ Apple Developer membership is not required for Sparkle's Ed25519 archive signatu
 
 Ad-hoc signing is not Apple notarization and does not remove first-install Gatekeeper checks. Developer ID signing/notarization remains a separate distribution step. Sparkle supports this development configuration, but production update behavior must be verified with the packaged apps, not merely SwiftPM executables.
 
-Existing 0.6.5 and earlier apps have no automatic installer. Users must manually install the first Sparkle-enabled version once. That version can receive subsequent updates. `duckpad-jekyll/appcast.xml` now publishes the signed 0.7.1 (45) ZIP. Do not offer older builds that lack Sparkle.
+Existing 0.6.5 and earlier apps have no automatic installer. Users must manually install the first Sparkle-enabled version once. That version can receive subsequent updates. `duckpad-jekyll/appcast.xml` now publishes the signed 0.7.2 (46) ZIP. Do not offer older builds that lack Sparkle.
 
 ## Publishing subsequent updates
 
