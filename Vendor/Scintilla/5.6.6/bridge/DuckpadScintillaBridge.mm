@@ -496,6 +496,12 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (NSUInteger)languageConfigurationCount { return _languageConfigurationCount; }
 - (NSUInteger)commentCommandInspectedByteCount { return _commentCommandInspectedByteCount; }
 - (NSUInteger)synchronouslyStyledByteCount { return _synchronouslyStyledByteCount; }
+- (BOOL)additionalSelectionTyping { return [_scintilla message:SCI_GETADDITIONALSELECTIONTYPING] != 0; }
+- (void)setAdditionalSelectionTyping:(BOOL)enabled { [_scintilla message:SCI_SETADDITIONALSELECTIONTYPING wParam:enabled]; }
+- (NSString *)insertionLineEnding {
+    const sptr_t mode = [_scintilla message:SCI_GETEOLMODE];
+    return mode == SC_EOL_CRLF ? @"\r\n" : (mode == SC_EOL_CR ? @"\r" : @"\n");
+}
 - (NSUInteger)configuredTabWidth { return (NSUInteger)[_scintilla message:SCI_GETTABWIDTH]; }
 - (BOOL)configuredUseTabs { return [_scintilla message:SCI_GETUSETABS] != 0; }
 - (NSInteger)highlightedBraceUTF8Position { return _highlightedBraceUTF8Position; }
@@ -1729,6 +1735,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                      lParam:reinterpret_cast<sptr_t>("1")];
     }
     _languageStylingFallback = overBudget && ![lexerName isEqualToString:@"null"];
+    [_scintilla message:SCI_SETINDENT wParam:MAX(1, MIN(tabWidth, 16))];
     [_scintilla message:SCI_SETTABWIDTH wParam:MAX(1, MIN(tabWidth, 16))];
     [_scintilla message:SCI_SETUSETABS wParam:useTabs ? 1 : 0];
     const BOOL effectiveFolding = folding && !overBudget;
@@ -1781,7 +1788,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETWRAPINDENTMODE wParam:wrapMode lParam:0];
 }
 
+- (void)configureIndentationSize:(NSUInteger)size tabWidth:(NSUInteger)width {
+    [_scintilla message:SCI_SETINDENT wParam:MAX(1, MIN(size, 16))];
+    [_scintilla message:SCI_SETTABWIDTH wParam:MAX(1, MIN(width, 16))];
+}
+
 - (void)configureIndentationWithWidth:(NSUInteger)width useTabs:(BOOL)useTabs {
+    [_scintilla message:SCI_SETINDENT wParam:MAX(1, MIN(width, 16))];
     [_scintilla message:SCI_SETTABWIDTH wParam:MAX(1, MIN(width, 16))];
     [_scintilla message:SCI_SETUSETABS wParam:useTabs ? 1 : 0];
 }
@@ -2495,7 +2508,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const NSUInteger tabWidth = static_cast<NSUInteger>(MAX(1, [_scintilla message:SCI_GETTABWIDTH]));
     const NSUInteger currentColumns = DPIndentationColumns(original, tabWidth);
     if (currentColumns == 0) return NO;
-    const NSUInteger targetColumns = currentColumns > tabWidth ? currentColumns - tabWidth : 0;
+    const NSUInteger indentWidth = static_cast<NSUInteger>(MAX(1, [_scintilla message:SCI_GETINDENT]));
+    const NSUInteger targetColumns = currentColumns > indentWidth ? currentColumns - indentWidth : 0;
     if (targetColumns >= currentColumns) return NO;
     const std::string replacement = DPCanonicalIndentation(
         targetColumns,
@@ -2762,20 +2776,27 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const NSUInteger tabWidth = static_cast<NSUInteger>(MAX(
         1, [_scintilla message:SCI_GETTABWIDTH]
     ));
+    const NSUInteger indentWidth = static_cast<NSUInteger>(MAX(1, [_scintilla message:SCI_GETINDENT]));
     const BOOL useTabs = [_scintilla message:SCI_GETUSETABS] != 0;
-    const std::string indentUnit = useTabs ? "\t" : std::string(tabWidth, ' ');
     std::string innerIndent = baseIndent;
-    if (previousStartsBlock) innerIndent += indentUnit;
     std::string closerIndent = baseIndent;
-    if (!previousIsOpener && !closerIndent.empty()) {
-        if (closerIndent.back() == '\t') {
-            closerIndent.pop_back();
-        } else {
-            NSUInteger removed = 0;
-            while (!closerIndent.empty() && closerIndent.back() == ' ' && removed < tabWidth) {
-                closerIndent.pop_back();
-                removed += 1;
+    if (indentWidth == tabWidth) {
+        const std::string indentUnit = useTabs ? "\t" : std::string(tabWidth, ' ');
+        if (previousStartsBlock) innerIndent += indentUnit;
+        if (!previousIsOpener && !closerIndent.empty()) {
+            if (closerIndent.back() == '\t') closerIndent.pop_back();
+            else {
+                NSUInteger removed = 0;
+                while (!closerIndent.empty() && closerIndent.back() == ' ' && removed < tabWidth) {
+                    closerIndent.pop_back(); removed += 1;
+                }
             }
+        }
+    } else {
+        const NSUInteger baseColumns = DPIndentationColumns(baseIndent, tabWidth);
+        if (previousStartsBlock) innerIndent = DPCanonicalIndentation(baseColumns + indentWidth, tabWidth, useTabs);
+        if (!previousIsOpener && !closerIndent.empty()) {
+            closerIndent = DPCanonicalIndentation(baseColumns > indentWidth ? baseColumns - indentWidth : 0, tabWidth, useTabs);
         }
     }
     std::string replacement = inserted + innerIndent;

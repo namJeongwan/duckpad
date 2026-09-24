@@ -113,6 +113,7 @@ public final class FileDocumentUseCase {
     private var pendingLivePaths = Set<String>()
     public private(set) var externalChanges: [TabID: LiveFileChange] = [:]
     public var onExternalChanges: (() -> Void)?
+    public var conventionsUseCase: DocumentConventionsUseCase?
     public var formattingUseCase: DocumentFormattingUseCase?
     public private(set) var loadingProgress: FileLoadingProgress? {
         didSet { if oldValue != loadingProgress { onLoadingProgress?() } }
@@ -508,6 +509,7 @@ public final class FileDocumentUseCase {
             return .failed(.unsavedChanges(existing))
         }
         loadingProgress = FileLoadingProgress(path: canonical.path, loadedByteCount: 0, totalByteCount: nil)
+        async let openingRules = conventionsUseCase?.rules(for: canonical)
         let previewEditor = editor as? any FileOpeningPreviewEditorPort
         defer { previewEditor?.dismissOpeningPreview() }
         if prepared == nil, reopening == nil, let previewEditor,
@@ -520,26 +522,32 @@ public final class FileDocumentUseCase {
                 loadedByteCount: 0, totalByteCount: preview.totalByteCount)
         }
         guard !Task.isCancelled else { return .failed(.cancelled) }
+        let rules = await openingRules
+        let readEncoding = encodingHint ?? rules?.charset?.0
         let read: FileReadResult
         if let prepared {
             guard UInt64(prepared.data.count) == prepared.identity.byteCount else {
                 return .failed(.store(.io("\(canonical.path): incomplete file read")))
             }
             // An explicit text encoding needs the store's full overwrite identity.
-            if encodingHint != nil, BinaryFileContent.isBinary(prepared.data) {
-                read = try await store.readForDisplay(from: canonical, assuming: encodingHint)
+            if readEncoding != nil, BinaryFileContent.isBinary(prepared.data) {
+                read = try await store.readForDisplay(from: canonical, assuming: readEncoding)
             } else {
                 read = prepared
             }
         } else {
-            read = try await store.readForDisplay(from: canonical, assuming: encodingHint)
+            read = try await store.readForDisplay(from: canonical, assuming: readEncoding)
         }
         guard UInt64(read.data.count) == read.identity.byteCount else {
             return .failed(.store(.io("\(canonical.path): incomplete file read")))
         }
         guard !Task.isCancelled else { return .failed(.cancelled) }
+        // Project charset is a fallback for BOM-less files, not an explicit
+        // Open As request. Decode the actual bytes before any save conversion.
+        let projectEncoding = TextFileCodec.byteOrderMarkEncoding(in: read.data) == nil ? rules?.charset?.0 : nil
+        let decodingEncoding = encodingHint ?? projectEncoding
         let contents: PreparedContents
-        do { contents = try await prepareContents(read.data, assuming: encodingHint, strictEncoding: true, preservingUndo: reopening != nil) }
+        do { contents = try await prepareContents(read.data, assuming: decodingEncoding, strictEncoding: true, preservingUndo: reopening != nil) }
         catch { return .failed(error) }
         let decoded = contents.decoded
         let binding = FileBinding(
@@ -631,14 +639,15 @@ public final class FileDocumentUseCase {
         }
         guard let binding = context.binding else { return .requiresDestination(context.tabID) }
         guard !binding.isReadOnly else { return .failed(.readOnly) }
-        // Merely viewing a permissively decoded file must not rewrite its
-        // original bytes when Save is pressed without an edit or conversion.
+        // Skip immediately only when no save rules need inspecting. Otherwise
+        // decide after cleanup, so explicitly enabled actions also run on clean files.
         if conversion == nil,
+           conventionsUseCase?.mayAffectSave != true,
            formattingUseCase?.settings.formatOnSave != true || formattingUseCase?.canFormat == false,
            workspace.snapshot().tabs.first(where: { $0.id == context.tabID })?.isDirty == false {
             return .saved(context.tabID)
         }
-        return await save(context: context, to: URL(fileURLWithPath: binding.canonicalPath), conversion: conversion, overwrite: false)
+        return await save(context: context, to: URL(fileURLWithPath: binding.canonicalPath), conversion: conversion, overwrite: false, skipUnchanged: true)
     }
 
     public func saveAs(
@@ -923,7 +932,8 @@ public final class FileDocumentUseCase {
         to url: URL,
         conversion: TextFileConversion?,
         overwrite: Bool,
-        renewingAccess: Bool = false
+        renewingAccess: Bool = false,
+        skipUnchanged: Bool = false
     ) async -> FileSaveOutcome {
         guard context.binding?.isReadOnly != true else { return .failed(.readOnly) }
         let access: SecurityScopedFileAccess
@@ -944,7 +954,8 @@ public final class FileDocumentUseCase {
             to: canonical,
             conversion: conversion,
             overwrite: overwrite,
-            securityScopedBookmark: access.bookmark
+            securityScopedBookmark: access.bookmark,
+            skipUnchanged: skipUnchanged
         )
         if case .saved = outcome {
             if let oldPath, oldPath != canonical.path {
@@ -967,7 +978,8 @@ public final class FileDocumentUseCase {
         to url: URL,
         conversion: TextFileConversion?,
         overwrite: Bool,
-        securityScopedBookmark: Data?
+        securityScopedBookmark: Data?,
+        skipUnchanged: Bool
     ) async -> FileSaveOutcome {
         guard workspace.fileContext(tabID: context.tabID) == context else {
             pendingConflict = nil
@@ -994,6 +1006,24 @@ public final class FileDocumentUseCase {
                 return .failed(.comparisonInvalidated)
             }
         }
+        var rules = EditorConventions()
+        if let conventionsUseCase, (editor as? any BinaryEditorPort)?.hasBinaryContent(for: context.buffer.bufferID) != true {
+            do { (context, rules) = try await conventionsUseCase.prepareSave(context: context, destination: url) }
+            catch is CancellationError { return .cancelled(context.tabID) }
+            catch { return .failed(.comparisonInvalidated) }
+        }
+        let existingFormat = outputFormat(context: context, conversion: conversion)
+        let format = conversion ?? TextFileConversion(
+            encoding: rules.charset?.0 ?? existingFormat.encoding,
+            byteOrderMark: rules.charset?.1 ?? existingFormat.byteOrderMark,
+            lineEnding: rules.lineEnding ?? existingFormat.lineEnding)
+        // Do not replace an unchanged file just because rules were inspected.
+        // Save As must still write its destination, even for an empty document.
+        if skipUnchanged, conversion == nil, context.binding?.canonicalPath == url.path,
+           workspace.snapshot().tabs.first(where: { $0.id == context.tabID })?.isDirty == false,
+           format == existingFormat {
+            return .saved(context.tabID)
+        }
         guard let snapshot = editor.recoveryCapture(for: context.buffer.bufferID) else {
             return .failed(.editorSnapshotUnavailable(context.buffer.bufferID))
         }
@@ -1004,7 +1034,6 @@ public final class FileDocumentUseCase {
                 actual: snapshot.revision
             ))
         }
-        let format = outputFormat(context: context, conversion: conversion)
         let encoding = format.encoding
         let bom = format.byteOrderMark
         // Bound EOL is a durable format choice, not a one-shot transformation.
@@ -1137,6 +1166,7 @@ public final class FileDocumentUseCase {
                   workspace.fileContext(tabID: context.tabID)?.buffer == context.buffer else {
                 throw CancellationError()
             }
+            conventionsUseCase?.documentOpened(context.buffer.bufferID)
             externalChanges.removeValue(forKey: context.tabID)
             onExternalChanges?()
             return nil

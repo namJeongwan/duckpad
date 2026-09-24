@@ -261,6 +261,7 @@ public struct EditorLanguageConfiguration: Equatable, Sendable {
     public let keywords: [String]
     public let comments: LanguageCommentSyntax
     public let indentation: LanguageIndentation
+    public let documentTabWidth: Int?
     public let folding: Bool
     public let braceMatching: Bool
     public let maximumStyleBytes: Int
@@ -273,13 +274,15 @@ public struct EditorLanguageConfiguration: Equatable, Sendable {
         indentation: LanguageIndentation,
         folding: Bool,
         braceMatching: Bool,
-        maximumStyleBytes: Int = 16 * 1_024 * 1_024
+        maximumStyleBytes: Int = 16 * 1_024 * 1_024,
+        documentTabWidth: Int? = nil
     ) {
         self.languageID = languageID
         self.lexerName = lexerName
         self.keywords = keywords
         self.comments = comments
         self.indentation = indentation
+        self.documentTabWidth = documentTabWidth
         self.folding = folding
         self.braceMatching = braceMatching
         self.maximumStyleBytes = max(1_024, maximumStyleBytes)

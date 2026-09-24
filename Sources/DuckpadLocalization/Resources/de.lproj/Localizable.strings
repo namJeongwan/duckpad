@@ -744,3 +744,33 @@
 "Copy as Image" = "Als Bild kopieren";
 "Could not copy selection as an image" = "Auswahl konnte nicht als Bild kopiert werden";
 "Select a smaller, continuous section of text and try again." = "Wählen Sie einen kürzeren, zusammenhängenden Textabschnitt und versuchen Sie es erneut.";
+
+"Use .editorconfig rules" = "Regeln aus .editorconfig verwenden";
+
+"Detect indentation from document" = "Einrückung im Dokument erkennen";
+
+"Trim trailing whitespace on save" = "Leerzeichen am Zeilenende beim Speichern entfernen";
+
+"Insert final newline on save" = "Beim Speichern abschließenden Zeilenumbruch einfügen";
+
+"Snippets" = "Textbausteine";
+
+"Snippets…" = "Textbausteine…";
+
+"Snippet name" = "Name des Textbausteins";
+
+"Snippet text" = "Inhalt des Textbausteins";
+
+"New snippet" = "Neuer Textbaustein";
+
+"Insert snippet" = "Einfügen";
+
+"All languages" = "Alle Sprachen";
+
+"Use ${1:name}, $2 and $0 for fields. Tab moves forward, Shift+Tab moves back, and Esc finishes. Repeated numbers edit together." = "Felder mit ${1:name}, $2 und $0 festlegen. Tab: weiter, Umschalt+Tab: zurück, Esc: beenden. Gleiche Nummern werden gemeinsam bearbeitet.";
+
+"Could not insert snippet. Select an editable document and try again." = "Einfügen fehlgeschlagen. Ein bearbeitbares Dokument mit passender Sprache auswählen und erneut versuchen.";
+
+"Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "Name und Inhalt eingeben. Grenzen: 200 Einträge, 256 Byte pro Name und 64 KB pro Inhalt.";
+
+"Could not save snippets. Try again." = "Speichern fehlgeschlagen. Bitte erneut versuchen.";

@@ -53,6 +53,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let folderSearchUseCase: FolderSearchUseCase?
     private var languageUseCase: LanguageWorkspaceUseCase?
     private let documentIntelligenceUseCase: DocumentIntelligenceUseCase?
+    private var snippetPanel: SnippetPanel?
+    public var onSnippetsChanged: (([TextSnippet], [TextSnippet]) async -> Bool)?
     private var formattingUseCase: DocumentFormattingUseCase?
     private var extensionUseCase: ExtensionWorkspaceUseCase?
     private var workspaceBrowserUseCase: WorkspaceBrowserUseCase?
@@ -663,6 +665,26 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    @objc public func performSnippets(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, let window, window.attachedSheet == nil,
+              let editor = activeEditor as? any SnippetEditorPort,
+              let buffer = workspace.activeFileContext()?.buffer else { return }
+        var savedSnippets = appPreferences.snippets
+        let panel = SnippetPanel()
+        snippetPanel = panel
+        panel.present(in: window, snippets: appPreferences.snippets, activeLanguage: (activeEditor as? any LanguageEditorPort)?.activeLanguageID.rawValue ?? "text", onDismiss: { [weak editor] in editor?.focus() }, languages: languageUseCase?.registry.definitions ?? [],
+            onSave: { [weak self] entries in
+                let saved = await self?.onSnippetsChanged?(entries, savedSnippets) ?? false
+                if saved { savedSnippets = entries }
+                return saved
+            },
+            onInsert: { [weak self, weak editor] template in
+                guard let self, self.workspace.activeFileContext()?.buffer == buffer,
+                      let editor, editor.canInsertSnippet else { return false }
+                return editor.insertSnippet(template)
+            })
+    }
+
     @objc public func performFormatDocument(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable, formattingUseCase?.canFormat == true,
               let context = workspace.activeFileContext() else { return }
@@ -1131,6 +1153,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         let languageChanged = appPreferences.appLanguage != settings.appLanguage
         appPreferences = settings
         fileUseCase?.setLiveReloadEnabled(settings.liveFileReloadEnabled)
+        fileUseCase?.conventionsUseCase?.settingsDidChange(settings)
         formattingUseCase?.settings = settings.formatting
         searchPanel.applyPreferences(settings)
         commandBar.setBarVisible(settings.menuBarVisible)
@@ -1886,6 +1909,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(performSnippets(_:)) {
+            return workspaceInteractionsAreActionable && window?.attachedSheet == nil && activeEditor is any SnippetEditorPort
+        }
         if menuItem.action == #selector(performCloseMarkdownPreview(_:)) {
             menuItem.isHidden = !isMarkdownPreviewVisible
             return isMarkdownPreviewVisible && window?.attachedSheet == nil

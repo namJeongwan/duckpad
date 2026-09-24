@@ -117,3 +117,15 @@ private final class AppSettingsStoreFake: AppSettingsStore {
     _ = await useCase.update(AppSettings(editorLeftPadding: .max, editorRightPadding: -1, editorLineSpacing: -1))
     #expect(useCase.state.settings == AppSettings(editorLeftPadding: 32, editorRightPadding: 0, editorLineSpacing: 0))
 }
+
+@Test @MainActor func editorConventionsSnippetsSurviveOldSettingsAndRejectStalePanels() async {
+    let store = AppSettingsStoreFake()
+    let useCase = AppSettingsUseCase(store: store)
+    let oldSettings = useCase.state.settings
+    let snippets = [TextSnippet(name: "Hello", body: "${1:world}")]
+    _ = await useCase.updateSnippets(snippets, expected: [])
+    _ = await useCase.update(oldSettings)
+    #expect(useCase.state.settings.snippets == snippets)
+    if case .failed = await useCase.updateSnippets([], expected: []) {} else { Issue.record("stale panel overwrote snippets") }
+    #expect(store.saved.last?.snippets == snippets)
+}

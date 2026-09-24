@@ -784,3 +784,33 @@
 "Copy as Image" = "Copy as Image";
 "Could not copy selection as an image" = "Could not copy selection as an image";
 "Select a smaller, continuous section of text and try again." = "Select a smaller, continuous section of text and try again.";
+
+"Use .editorconfig rules" = "Use .editorconfig rules";
+
+"Detect indentation from document" = "Detect indentation from document";
+
+"Trim trailing whitespace on save" = "Trim trailing whitespace on save";
+
+"Insert final newline on save" = "Insert final newline on save";
+
+"Snippets" = "Snippets";
+
+"Snippets…" = "Snippets…";
+
+"Snippet name" = "Snippet name";
+
+"Snippet text" = "Snippet text";
+
+"New snippet" = "New snippet";
+
+"Insert snippet" = "Insert snippet";
+
+"All languages" = "All languages";
+
+"Use ${1:name}, $2 and $0 for fields. Tab moves forward, Shift+Tab moves back, and Esc finishes. Repeated numbers edit together." = "Use ${1:name}, $2 and $0 for fields. Tab moves forward, Shift+Tab moves back, and Esc finishes. Repeated numbers edit together.";
+
+"Could not insert snippet. Select an editable document and try again." = "Could not insert snippet. Select an editable document and try again.";
+
+"Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet.";
+
+"Could not save snippets. Try again." = "Could not save snippets. Try again.";

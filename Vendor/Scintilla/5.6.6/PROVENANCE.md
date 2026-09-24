@@ -270,3 +270,9 @@ reads only a bounded single stream selection and its existing style bytes,
 without recolorizing the document. Swift adds HTML/RTF and offers explicit PNG
 export. No acquisition/regeneration script is tracked for this Cocoa patch;
 reacquiring upstream requires reapplying it alongside the existing patches.
+
+Editor conventions and snippets extend Duckpad-owned `bridge/` only: independent
+SCI_SETINDENT/SCI_SETTABWIDTH configuration, the current EOL string, and a scoped
+SCI_SETADDITIONALSELECTIONTYPING option for linked snippet fields. No upstream
+engine source is changed for these features. These façade files are maintained
+in-tree and are not regenerated from the upstream archive.

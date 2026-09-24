@@ -744,3 +744,33 @@
 "Copy as Image" = "Copia come immagine";
 "Could not copy selection as an image" = "Impossibile copiare la selezione come immagine";
 "Select a smaller, continuous section of text and try again." = "Seleziona un tratto di testo continuo più breve e riprova.";
+
+"Use .editorconfig rules" = "Usa le regole .editorconfig";
+
+"Detect indentation from document" = "Rileva il rientro del documento";
+
+"Trim trailing whitespace on save" = "Rimuovi gli spazi a fine riga al salvataggio";
+
+"Insert final newline on save" = "Aggiungi una nuova riga finale al salvataggio";
+
+"Snippets" = "Frammenti";
+
+"Snippets…" = "Frammenti…";
+
+"Snippet name" = "Nome del frammento";
+
+"Snippet text" = "Contenuto del frammento";
+
+"New snippet" = "Nuovo frammento";
+
+"Insert snippet" = "Inserisci";
+
+"All languages" = "Tutti i linguaggi";
+
+"Use ${1:name}, $2 and $0 for fields. Tab moves forward, Shift+Tab moves back, and Esc finishes. Repeated numbers edit together." = "Usa ${1:name}, $2 e $0 per i campi. Tab avanza, Maiusc+Tab torna indietro, Esc termina. I numeri ripetuti si modificano insieme.";
+
+"Could not insert snippet. Select an editable document and try again." = "Inserimento non riuscito. Seleziona un documento modificabile nel linguaggio del frammento e riprova.";
+
+"Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "Inserisci nome e contenuto. Limiti: 200 frammenti, 256 byte per nome e 64 KB per frammento.";
+
+"Could not save snippets. Try again." = "Impossibile salvare i frammenti. Riprova.";

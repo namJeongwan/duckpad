@@ -214,6 +214,7 @@ public enum LanguageServiceState: Equatable, Sendable {
 
 @MainActor
 public final class LanguageWorkspaceUseCase {
+    public var conventions: DocumentConventionsUseCase?
     public let registry: LanguageRegistry
     private let detector: LanguageDetector
     private let workspace: ScratchWorkspaceUseCase
@@ -285,15 +286,17 @@ public final class LanguageWorkspaceUseCase {
         guard let definition = registry[detection.languageID] else {
             return publish(.degraded("Language unavailable: \(detection.languageID.rawValue)"))
         }
+        let indent = conventions?.indentation(defaults: definition.capabilities.indentation)
         let configuration = EditorLanguageConfiguration(
             languageID: definition.id,
             lexerName: definition.lexerName,
             keywords: definition.keywordLists,
             comments: definition.capabilities.comments,
-            indentation: definition.capabilities.indentation,
+            indentation: indent?.0 ?? definition.capabilities.indentation,
             folding: definition.capabilities.supportsFolding,
             braceMatching: definition.capabilities.supportsBraceMatching,
-            maximumStyleBytes: maximumStyleBytes
+            maximumStyleBytes: maximumStyleBytes,
+            documentTabWidth: indent?.1
         )
         let applied = AppliedLanguage(
             configuration: configuration,
