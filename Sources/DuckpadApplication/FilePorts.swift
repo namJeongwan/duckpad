@@ -158,6 +158,13 @@ public struct TextFileConversion: Equatable, Sendable {
 public enum TextFileCodec {
     private static let utf8BOM = Data([0xEF, 0xBB, 0xBF])
 
+    public static func byteOrderMarkEncoding(in data: Data) -> TextFileEncoding? {
+        if data.starts(with: utf8BOM) { return .utf8 }
+        if data.starts(with: [0xFF, 0xFE]) { return .utf16LittleEndian }
+        if data.starts(with: [0xFE, 0xFF]) { return .utf16BigEndian }
+        return nil
+    }
+
     /// Opening arbitrary files is permissive; strict decoding remains available
     /// to callers that need to validate an encoding or guarantee a round trip.
     public static func decodeForDisplay(

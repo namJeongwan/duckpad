@@ -8,6 +8,12 @@ import DuckpadScintillaBridge
 /// buffer identity/revision/dirty metadata.
 @MainActor
 public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, ProgressiveTextEditorPort, FileOpeningPreviewEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, EditorCopyExportPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+    var snippetSession: SnippetSession?
+    var snippetBuffer: BufferID?
+    var snippetKeyMonitor: Any?
+    weak var snippetView: DPScintillaEditorView?
+    var snippetPreviousAdditionalTyping = false
+
     private struct RecoveryBuffer {
         var baseRevision: UInt64
         var revision: UInt64
@@ -71,7 +77,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     public var onFoldStateChange: (() -> Void)?
     public var onEditorGroupFocus: ((EditorGroupID) -> Void)?
 
-    private var activeBuffer: EditorBufferDescriptor?
+    private(set) var activeBuffer: EditorBufferDescriptor?
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
     private final class PendingTextLoad {
         let bytes: Data
@@ -183,6 +189,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     public func display(_ buffer: EditorBufferDescriptor) {
+        if snippetBuffer != buffer.bufferID { cancelSnippet() }
         guard !isInvalidated else { return }
         if hasVisibleGroups {
             display(buffer, in: activeEditorGroup)
@@ -261,6 +268,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     public func activateEditorGroup(_ group: EditorGroupID) {
+        if activeEditorGroup != group { cancelSnippet() }
         guard !isInvalidated,
               group == .primary || hasVisibleGroups,
               let descriptor = displayedGroupBuffers[group],
@@ -278,6 +286,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     public func display(_ buffer: EditorBufferDescriptor, in group: EditorGroupID) {
+        if group == activeEditorGroup, snippetBuffer != buffer.bufferID { cancelSnippet() }
         guard !isInvalidated else { return }
         if !hasVisibleGroups {
             guard group == .primary else { return }
@@ -499,6 +508,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
 
     private func install(_ snapshot: EditorTextSnapshot, preservingUndo: Bool,
                          preparedCheckpoint: EditorRecoveryCheckpoint? = nil) {
+        if snippetBuffer == snapshot.bufferID { cancelSnippet() }
         guard !isInvalidated else { return }
         pendingTextLoads.removeValue(forKey: snapshot.bufferID)
         pendingBinaryViewStates.removeValue(forKey: snapshot.bufferID)
@@ -639,6 +649,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     public func retire(bufferID: BufferID) {
+        if snippetBuffer == bufferID { cancelSnippet() }
         pendingTextLoads.removeValue(forKey: bufferID)
         binaryDocuments.removeValue(forKey: bufferID)
         pendingBinaryViewStates.removeValue(forKey: bufferID)
@@ -713,6 +724,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     public func invalidate() {
+        cancelSnippet()
         guard !isInvalidated else { return }
         dismissOpeningPreview()
         isInvalidated = true
@@ -894,7 +906,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         for view in views { applyDisplayPreferences(to: view) }
         for bufferID in bufferViews.keys {
             for view in allViews(for: bufferID) {
-                applyIndentationPreferences(to: view, indentation: languageConfigurations[bufferID]?.indentation ?? .init())
+                applyIndentationPreferences(to: view, configuration: languageConfigurations[bufferID])
             }
         }
     }
@@ -934,10 +946,14 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
                               wrapIndentMode: settings.wrapIndentMode)
     }
 
-    private func applyIndentationPreferences(to view: DPScintillaEditorView, indentation: LanguageIndentation) {
+    private func applyIndentationPreferences(to view: DPScintillaEditorView, configuration: EditorLanguageConfiguration?) {
         let settings = displayPreferences
-        view.configureIndentation(withWidth: UInt(clamping: settings.overrideLanguageIndentation ? settings.indentationWidth : indentation.width),
-                                  useTabs: settings.overrideLanguageIndentation ? settings.indentationUsesTabs : indentation.useTabs)
+        let indentation = configuration?.indentation ?? .init()
+        let useGlobal = configuration?.documentTabWidth == nil && settings.overrideLanguageIndentation
+        let width = useGlobal ? settings.indentationWidth : indentation.width
+        view.configureIndentation(withWidth: UInt(clamping: width),
+                                  useTabs: useGlobal ? settings.indentationUsesTabs : indentation.useTabs)
+        view.configureIndentationSize(UInt(clamping: width), tabWidth: UInt(clamping: configuration?.documentTabWidth ?? width))
     }
 
     public var isWhitespaceVisible: Bool { activeScintillaView?.isWhitespaceVisible ?? false }
@@ -1276,7 +1292,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
                 braceMatching: configuration.braceMatching,
                 maximumStyleBytes: UInt(configuration.maximumStyleBytes)
             ) else { return false }
-            applyIndentationPreferences(to: editorView, indentation: configuration.indentation)
+            applyIndentationPreferences(to: editorView, configuration: configuration)
             editorView.apply(nativePalette(themePalette))
         }
         languageConfigurations[bufferID] = configuration
@@ -1629,6 +1645,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     private func appendRecovery(_ edit: EditorIncrementalEdit, resultingRevision: UInt64) {
+        updateSnippet(edit)
         guard !isInvalidated,
               recoveryBuffers[edit.bufferID]?.revision == edit.expectedRevision,
               let byteCount = recoveryBuffers[edit.bufferID]?.byteCount,
@@ -2351,7 +2368,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             braceMatching: configuration.braceMatching,
             maximumStyleBytes: UInt(configuration.maximumStyleBytes)
         )
-        applyIndentationPreferences(to: editorView, indentation: configuration.indentation)
+        applyIndentationPreferences(to: editorView, configuration: configuration)
         editorView.apply(nativePalette(themePalette))
         guard applied, storedConfiguration != nil else { return }
         if editorView.configuredFoldingEnabled {

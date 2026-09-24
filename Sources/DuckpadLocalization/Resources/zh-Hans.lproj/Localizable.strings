@@ -744,3 +744,33 @@
 "Copy as Image" = "复制为图片";
 "Could not copy selection as an image" = "无法将所选内容复制为图片";
 "Select a smaller, continuous section of text and try again." = "请选择较短的连续文本后重试。";
+
+"Use .editorconfig rules" = ".editorconfig 规则";
+
+"Detect indentation from document" = "检测文档缩进";
+
+"Trim trailing whitespace on save" = "保存时删除行尾空白";
+
+"Insert final newline on save" = "保存时添加文件末尾换行";
+
+"Snippets" = "代码片段";
+
+"Snippets…" = "代码片段…";
+
+"Snippet name" = "片段名称";
+
+"Snippet text" = "片段内容";
+
+"New snippet" = "新建片段";
+
+"Insert snippet" = "插入片段";
+
+"All languages" = "所有语言";
+
+"Use ${1:name}, $2 and $0 for fields. Tab moves forward, Shift+Tab moves back, and Esc finishes. Repeated numbers edit together." = "使用 ${1:name}、$2 和 $0 指定输入位置。Tab 前进，Shift+Tab 后退，Esc 结束。相同编号的内容同时编辑。";
+
+"Could not insert snippet. Select an editable document and try again." = "无法插入片段。请选择与片段语言匹配的可编辑文档后重试。";
+
+"Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "请输入名称和内容。上限：200个片段，名称256字节，内容64KB。";
+
+"Could not save snippets. Try again." = "无法保存片段，请重试。";

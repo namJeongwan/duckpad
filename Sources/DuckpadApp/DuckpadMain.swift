@@ -823,6 +823,11 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             editor: editor,
             configurationIssue: languageConfigurationIssue
         )
+        let conventions = DocumentConventionsUseCase(reader: LocalEditorConfigReader(accessStore: fileStore), workspace: workspace, editor: editor)
+        conventions.settings = settings
+        languageUseCase.conventions = conventions
+        conventions.onRulesChanged = { [weak languageUseCase] in _ = languageUseCase?.refreshActive() }
+        fileUseCase.conventionsUseCase = conventions
         let documentIntelligenceUseCase = DocumentIntelligenceUseCase(editor: editor)
         // Install/Enable authorizes declared plugin capabilities without a separate permission UI.
         let allowsDevelopmentExtensions = true
@@ -922,6 +927,15 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             var settings = self.settingsUseCase.state.settings
             settings.markdownImageDropAction = action
             switch await self.settingsUseCase.update(settings) {
+            case .saved(let saved), .savedWithWarning(let saved, _): self.apply(saved); return true
+            case .failed: return false
+            }
+        }
+        controller.onSnippetsChanged = { [weak self] entries, expected in
+            guard let self, self.terminationCoordinator.permitsApplicationCommands else { return false }
+            let update = Task { await self.settingsUseCase.updateSnippets(entries, expected: expected) }
+            self.terminationCoordinator.trackApplicationTask(Task { _ = await update.value })
+            switch await update.value {
             case .saved(let saved), .savedWithWarning(let saved, _): self.apply(saved); return true
             case .failed: return false
             }

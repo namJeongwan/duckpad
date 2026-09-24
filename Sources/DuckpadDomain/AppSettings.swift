@@ -19,6 +19,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var editorLeftPadding: Int
     public var editorRightPadding: Int
     public var editorLineSpacing: Int
+    public var editorConfigEnabled: Bool
+    public var detectIndentation: Bool
+    public var trimWhitespaceOnSave: Bool
+    public var finalNewlineOnSave: Bool
     public var copyWithFormatting: Bool
     public var liveFileReloadEnabled: Bool
 
@@ -52,6 +56,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var findSelectionMaximumCharacters: Int
     public var monospacedFindFields: Bool
     public var markdownImageDropAction: Int
+    public var snippets: [TextSnippet]
     public var formatting: FormattingSettings
 
     public init(
@@ -65,6 +70,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         editorLeftPadding: Int = 0,
         editorRightPadding: Int = 8,
         editorLineSpacing: Int = 4,
+        editorConfigEnabled: Bool = true,
+        detectIndentation: Bool = true,
+        trimWhitespaceOnSave: Bool = false,
+        finalNewlineOnSave: Bool = false,
         copyWithFormatting: Bool = true,
         liveFileReloadEnabled: Bool = true,
         menuBarVisible: Bool = true,
@@ -94,6 +103,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         findSelectionMaximumCharacters: Int = 1024,
         monospacedFindFields: Bool = false,
         markdownImageDropAction: Int = 0,
+        snippets: [TextSnippet] = [],
         formatting: FormattingSettings = .init()
     ) {
         self.schemaVersion = schemaVersion
@@ -106,6 +116,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.editorLeftPadding = editorLeftPadding
         self.editorRightPadding = editorRightPadding
         self.editorLineSpacing = editorLineSpacing
+        self.editorConfigEnabled = editorConfigEnabled
+        self.detectIndentation = detectIndentation
+        self.trimWhitespaceOnSave = trimWhitespaceOnSave
+        self.finalNewlineOnSave = finalNewlineOnSave
         self.copyWithFormatting = copyWithFormatting
         self.liveFileReloadEnabled = liveFileReloadEnabled
         self.menuBarVisible = menuBarVisible
@@ -135,6 +149,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.findSelectionMaximumCharacters = findSelectionMaximumCharacters
         self.monospacedFindFields = monospacedFindFields
         self.markdownImageDropAction = markdownImageDropAction
+        self.snippets = snippets
         self.formatting = formatting
     }
 
@@ -150,6 +165,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         editorLeftPadding = min(max(try values.decodeIfPresent(Int.self, forKey: .editorLeftPadding) ?? 0, 0), 32)
         editorRightPadding = min(max(try values.decodeIfPresent(Int.self, forKey: .editorRightPadding) ?? 8, 0), 32)
         editorLineSpacing = min(max(try values.decodeIfPresent(Int.self, forKey: .editorLineSpacing) ?? 4, 0), 20)
+        editorConfigEnabled = try values.decodeIfPresent(Bool.self, forKey: .editorConfigEnabled) ?? true
+        detectIndentation = try values.decodeIfPresent(Bool.self, forKey: .detectIndentation) ?? true
+        trimWhitespaceOnSave = try values.decodeIfPresent(Bool.self, forKey: .trimWhitespaceOnSave) ?? false
+        finalNewlineOnSave = try values.decodeIfPresent(Bool.self, forKey: .finalNewlineOnSave) ?? false
         copyWithFormatting = try values.decodeIfPresent(Bool.self, forKey: .copyWithFormatting) ?? true
         liveFileReloadEnabled = try values.decodeIfPresent(Bool.self, forKey: .liveFileReloadEnabled) ?? true
         menuBarVisible = try values.decodeIfPresent(Bool.self, forKey: .menuBarVisible) ?? true
@@ -179,6 +198,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         findSelectionMaximumCharacters = try values.decodeIfPresent(Int.self, forKey: .findSelectionMaximumCharacters) ?? 1024
         monospacedFindFields = try values.decodeIfPresent(Bool.self, forKey: .monospacedFindFields) ?? false
         markdownImageDropAction = try values.decodeIfPresent(Int.self, forKey: .markdownImageDropAction) ?? 0
+        snippets = try values.decodeIfPresent([TextSnippet].self, forKey: .snippets) ?? []
         formatting = try values.decodeIfPresent(FormattingSettings.self, forKey: .formatting) ?? .init()
     }
 }

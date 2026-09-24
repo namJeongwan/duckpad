@@ -744,3 +744,33 @@
 "Copy as Image" = "Copiar como imagem";
 "Could not copy selection as an image" = "Não foi possível copiar a seleção como imagem";
 "Select a smaller, continuous section of text and try again." = "Selecione um trecho contínuo de texto menor e tente novamente.";
+
+"Use .editorconfig rules" = "Usar regras .editorconfig";
+
+"Detect indentation from document" = "Detectar recuo do documento";
+
+"Trim trailing whitespace on save" = "Remover espaços no fim das linhas ao salvar";
+
+"Insert final newline on save" = "Adicionar quebra de linha final ao salvar";
+
+"Snippets" = "Trechos";
+
+"Snippets…" = "Trechos…";
+
+"Snippet name" = "Nome do trecho";
+
+"Snippet text" = "Conteúdo do trecho";
+
+"New snippet" = "Novo trecho";
+
+"Insert snippet" = "Inserir";
+
+"All languages" = "Todas as linguagens";
+
+"Use ${1:name}, $2 and $0 for fields. Tab moves forward, Shift+Tab moves back, and Esc finishes. Repeated numbers edit together." = "Use ${1:name}, $2 e $0 para os campos. Tab avança, Shift+Tab volta e Esc encerra. Números repetidos são editados juntos.";
+
+"Could not insert snippet. Select an editable document and try again." = "Não foi possível inserir. Selecione um documento editável na linguagem do trecho e tente novamente.";
+
+"Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "Informe nome e conteúdo. Limites: 200 trechos, 256 bytes por nome e 64 KB por trecho.";
+
+"Could not save snippets. Try again." = "Não foi possível salvar os trechos. Tente novamente.";

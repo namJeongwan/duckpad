@@ -98,6 +98,8 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
                      caretBlinkPeriod:(NSInteger)caretBlinkPeriod
                  scrollBeyondLastLine:(BOOL)scrollBeyondLastLine
                        wrapIndentMode:(NSInteger)wrapIndentMode;
+@property(nonatomic) BOOL additionalSelectionTyping;
+@property(nonatomic, readonly, copy) NSString *insertionLineEnding;
 @property(nonatomic, readonly) NSUInteger selectionCount;
 @property(nonatomic, readonly, copy) NSData *pasteSelectionIdentity;
 @property(nonatomic, readonly) NSUInteger caretUTF8Position;
@@ -232,6 +234,7 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
            braceMatching:(BOOL)braceMatching
         maximumStyleBytes:(NSUInteger)maximumStyleBytes;
 - (NSData *)contentPrefixUTF8WithMaximumLength:(NSUInteger)maximumLength;
+- (void)configureIndentationSize:(NSUInteger)size tabWidth:(NSUInteger)width;
 - (void)configureIndentationWithWidth:(NSUInteger)width useTabs:(BOOL)useTabs;
 - (void)configureGuidesWithIndentation:(BOOL)indentation virtualSpace:(BOOL)virtualSpace edgeVisible:(BOOL)edgeVisible edgeColumn:(NSInteger)edgeColumn;
 - (void)applyPalette:(DPScintillaPalette)palette;

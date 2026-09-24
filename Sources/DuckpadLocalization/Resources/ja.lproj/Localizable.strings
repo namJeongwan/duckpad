@@ -744,3 +744,33 @@
 "Copy as Image" = "画像としてコピー";
 "Could not copy selection as an image" = "選択範囲を画像としてコピーできませんでした";
 "Select a smaller, continuous section of text and try again." = "連続したテキストを短く選択して、もう一度お試しください。";
+
+"Use .editorconfig rules" = ".editorconfig のルールを使用";
+
+"Detect indentation from document" = "文書のインデントを検出";
+
+"Trim trailing whitespace on save" = "保存時に行末の空白を削除";
+
+"Insert final newline on save" = "保存時に末尾の改行を追加";
+
+"Snippets" = "スニペット";
+
+"Snippets…" = "スニペット…";
+
+"Snippet name" = "スニペット名";
+
+"Snippet text" = "スニペットの内容";
+
+"New snippet" = "新しいスニペット";
+
+"Insert snippet" = "挿入";
+
+"All languages" = "すべての言語";
+
+"Use ${1:name}, $2 and $0 for fields. Tab moves forward, Shift+Tab moves back, and Esc finishes. Repeated numbers edit together." = "${1:name}、$2、$0で入力位置を指定します。Tabで次へ、Shift+Tabで前へ移動し、Escで終了します。同じ番号は同時に編集されます。";
+
+"Could not insert snippet. Select an editable document and try again." = "挿入できません。スニペットの言語に一致する編集可能な文書を選択してください。";
+
+"Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "名前と内容を入力してください。上限は200件、名前256バイト、内容64KBです。";
+
+"Could not save snippets. Try again." = "保存できませんでした。もう一度お試しください。";

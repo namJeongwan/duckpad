@@ -744,3 +744,33 @@
 "Copy as Image" = "Copier en tant qu’image";
 "Could not copy selection as an image" = "Impossible de copier la sélection en tant qu’image";
 "Select a smaller, continuous section of text and try again." = "Sélectionnez un passage de texte continu plus court et réessayez.";
+
+"Use .editorconfig rules" = "Utiliser les règles .editorconfig";
+
+"Detect indentation from document" = "Détecter l’indentation du document";
+
+"Trim trailing whitespace on save" = "Supprimer les espaces en fin de ligne à l’enregistrement";
+
+"Insert final newline on save" = "Ajouter un saut de ligne final à l’enregistrement";
+
+"Snippets" = "Extraits";
+
+"Snippets…" = "Extraits…";
+
+"Snippet name" = "Nom de l’extrait";
+
+"Snippet text" = "Contenu de l’extrait";
+
+"New snippet" = "Nouvel extrait";
+
+"Insert snippet" = "Insérer";
+
+"All languages" = "Toutes les langues";
+
+"Use ${1:name}, $2 and $0 for fields. Tab moves forward, Shift+Tab moves back, and Esc finishes. Repeated numbers edit together." = "Définissez les champs avec ${1:name}, $2 et $0. Tab avance, Maj+Tab recule, Échap termine. Les numéros identiques sont modifiés ensemble.";
+
+"Could not insert snippet. Select an editable document and try again." = "Insertion impossible. Sélectionnez un document modifiable dans la langue de l’extrait et réessayez.";
+
+"Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "Saisissez un nom et un contenu. Limites : 200 extraits, 256 octets par nom et 64 Ko par extrait.";
+
+"Could not save snippets. Try again." = "Impossible d’enregistrer les extraits. Réessayez.";

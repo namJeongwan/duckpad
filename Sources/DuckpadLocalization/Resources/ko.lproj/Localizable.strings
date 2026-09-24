@@ -784,3 +784,33 @@
 "Copy as Image" = "이미지로 복사";
 "Could not copy selection as an image" = "선택한 내용을 이미지로 복사할 수 없습니다";
 "Select a smaller, continuous section of text and try again." = "연속된 텍스트를 더 짧게 선택한 뒤 다시 시도하세요.";
+
+"Use .editorconfig rules" = ".editorconfig 규칙 사용";
+
+"Detect indentation from document" = "문서에서 들여쓰기 감지";
+
+"Trim trailing whitespace on save" = "저장 시 줄 끝 공백 제거";
+
+"Insert final newline on save" = "저장 시 파일 끝에 줄바꿈 추가";
+
+"Snippets" = "스니펫";
+
+"Snippets…" = "스니펫…";
+
+"Snippet name" = "스니펫 이름";
+
+"Snippet text" = "스니펫 내용";
+
+"New snippet" = "새 스니펫";
+
+"Insert snippet" = "삽입";
+
+"All languages" = "모든 언어";
+
+"Use ${1:name}, $2 and $0 for fields. Tab moves forward, Shift+Tab moves back, and Esc finishes. Repeated numbers edit together." = "${1:name}, $2, $0으로 입력 위치를 지정하세요. Tab은 다음, Shift+Tab은 이전으로 이동하고 Esc로 끝냅니다. 같은 번호는 함께 수정됩니다.";
+
+"Could not insert snippet. Select an editable document and try again." = "스니펫을 삽입할 수 없습니다. 스니펫의 언어와 일치하는 편집 가능한 문서를 선택해 다시 시도하세요.";
+
+"Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "이름과 내용을 입력하세요. 최대 200개, 이름 256바이트, 내용 64KB까지 저장할 수 있습니다.";
+
+"Could not save snippets. Try again." = "스니펫을 저장하지 못했습니다. 다시 시도하세요.";

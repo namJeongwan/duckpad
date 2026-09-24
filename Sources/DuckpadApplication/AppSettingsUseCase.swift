@@ -34,6 +34,8 @@ public enum AppSettingsUpdateOutcome: Equatable, Sendable {
 @MainActor
 public final class AppSettingsUseCase {
     private let store: any AppSettingsStore
+    private var updating = false
+    private var updateWaiters: [CheckedContinuation<Void, Never>] = []
     public private(set) var state: AppSettingsState = .ready(.defaults)
     public var onChange: ((AppSettingsState) -> Void)?
 
@@ -61,6 +63,39 @@ public final class AppSettingsUseCase {
 
     @discardableResult
     public func update(_ settings: AppSettings) async -> AppSettingsUpdateOutcome {
+        await acquireUpdate()
+        defer { releaseUpdate() }
+        // An already-open preferences window must not overwrite newer snippets.
+        var proposed = settings
+        proposed.snippets = state.settings.snippets
+        return await persist(proposed)
+    }
+
+    public func updateSnippets(_ snippets: [TextSnippet], expected: [TextSnippet]) async -> AppSettingsUpdateOutcome {
+        await acquireUpdate()
+        defer { releaseUpdate() }
+        guard state.settings.snippets == expected else { return .failed(.writeFailed("snippet list changed")) }
+        guard snippets.count <= 200, Set(snippets.map(\.id)).count == snippets.count,
+              snippets.allSatisfy({ !$0.name.isEmpty && !$0.body.isEmpty && $0.name.utf8.count <= 256 && $0.body.utf8.count <= 65_536 }),
+              let data = try? JSONEncoder().encode(snippets), data.count <= 768 * 1024 else {
+            return .failed(.writeFailed("snippet storage limit exceeded"))
+        }
+        var proposed = state.settings
+        proposed.snippets = snippets
+        return await persist(proposed)
+    }
+
+    private func acquireUpdate() async {
+        if !updating { updating = true; return }
+        await withCheckedContinuation { updateWaiters.append($0) }
+    }
+
+    private func releaseUpdate() {
+        if updateWaiters.isEmpty { updating = false }
+        else { updateWaiters.removeFirst().resume() }
+    }
+
+    private func persist(_ settings: AppSettings) async -> AppSettingsUpdateOutcome {
         var normalized = settings
         normalized.schemaVersion = AppSettings.currentSchemaVersion
         normalized.editorFontSize = settings.editorFontSize.isFinite ? (min(max(settings.editorFontSize, 6), 72) * 100).rounded() / 100 : 13
