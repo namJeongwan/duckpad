@@ -3,38 +3,48 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.7.2</title>
-            <pubDate>Wed, 23 Sep 2026 09:08:32 +0900</pubDate>
-            <sparkle:version>46</sparkle:version>
-            <sparkle:shortVersionString>0.7.2</sparkle:shortVersionString>
+            <title>0.8.0</title>
+            <pubDate>Thu, 24 Sep 2026 11:07:53 +0900</pubDate>
+            <sparkle:version>47</sparkle:version>
+            <sparkle:shortVersionString>0.8.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.7.2
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.8.0
 
-Keep the new-version badge visible after dismissing the update window, cancelling installation, or encountering an update error. Click the badge again to reopen the update window. Explicitly skipping a version still clears the badge, as does a subsequent check that finds no available update.
+Duckpad adds file-based EditorConfig rules, indentation detection, optional save cleanup, and reusable snippets. These features are built into the app and do not require plugins.
 
-Move the badge up by 4 points to align it with the window controls. The status bar and editor layout are unchanged.
+- Read `.editorconfig` from a saved file's folder and accessible ancestors. Supported rules cover indentation, tab width, line endings, UTF-8/UTF-16 encoding, trailing whitespace, and final newlines. Explicit rules take precedence over detected indentation and app defaults.
+- Detect existing tab/space indentation from a bounded sample without rewriting the document. EditorConfig and detection are enabled by default and can be disabled in Preferences.
+- Optionally remove trailing spaces or add a final newline on save. Both app-wide cleanup options default to off; file rules can override them. Changes participate in Undo and recovery, with existing external-file conflict checks preserved.
+- Use **Edit → Snippets…** to save and insert reusable text. Templates support numbered placeholders, linked occurrences, Tab/Shift+Tab navigation, a final cursor position, and optional language scope.
+- Localize the new controls in all eight supported languages.
 
-App and helpers: **0.7.2 (46)**. Requires **macOS 13 or later**. Distribution includes Apple Silicon and Intel binaries.
+This release also includes the rich clipboard copying previously merged after 0.7.2: Markdown can be copied as rendered content, and code can retain editor formatting for compatible rich-text destinations.
+
+App and helpers: **0.8.0 (47)**. Requires **macOS 13 or later**. Distribution includes Apple Silicon and Intel binaries.
 
 ## Installation
 
-Download `Duckpad-0.7.2-universal.dmg`, open it, and drag Duckpad into Applications. The ZIP alternative is `Duckpad-0.7.2-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Users on 0.7.0 or later can update in the app once the signed Sparkle feed is published; older versions require manual installation.
+Download `Duckpad-0.8.0-universal.dmg`, open it, and drag Duckpad into Applications. The ZIP alternative is `Duckpad-0.8.0-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Users on 0.7.0 or later can update in the app once the signed Sparkle feed is published.
 
 The app is ad-hoc signed, not Developer ID signed or Apple notarized. Sparkle archives use a separate Ed25519 signature.
 
-## Validation and limitations
+## Compatibility and limitations
 
-The dismissal and badge-alignment regressions failed before the fixes and passed afterward. All 15 targeted updater and app-information tests passed, including explicit skip, cancellation, update errors, no-update results, and repeated presentation. A separate app with a local update feed verified dismissal, reopening from the badge, explicit skip, and alignment with the window controls.
+Unsaved documents have no folder-based EditorConfig rules until saved. macOS sandbox permissions can prevent access to a sibling configuration file; grant access to the folder or open `.editorconfig` once in that case. Existing text is not automatically reformatted on open. Enabling trailing-space cleanup also removes Markdown's two-space hard line breaks. An explicit `insert_final_newline=false` rule removes terminal line breaks.
 
-This release does not change text input handling or claim to fix the intermittent Korean/English Caps Lock input issue. Physical Intel/macOS 13 execution and Apple notarization were not performed. Final universal package and update-feed verification results are recorded in the published release.
+EditorConfig supports a bounded subset of patterns and properties; Latin-1 is not supported. Snippets do not support nested placeholders, choices, transformations, or executable scripts. See [editor conventions and snippets](https://github.com/namJeongwan/duckpad/blob/main/docs/editor-conventions.md) for supported syntax and limits.
+
+## Validation
+
+Unit and native Scintilla integration tests cover rule inheritance, indentation, save/Save As, BOM and encoding precedence, cleanup of unchanged files, external conflicts, Undo/recovery, placeholder navigation, and linked typing. Korean snippet-panel layout and persistence were checked; other locale layouts and physical Intel/macOS 13 execution were not checked. Final package, archive, and update-feed results are recorded in the published release.
 
 ## Release verification
 
-Built from the same Git tree as merged commit `5e14986947a145fa85e411b21d2d43d611564e79` (PR #49). All three executables report 0.7.2 (46) and contain arm64 and x86_64 slices.
+Built from the same Git tree as merged commit `504dba44441045d2553621f2f7ed91d81c911451` (PR #52). The app and both helpers report 0.8.0 (47) and contain arm64 and x86_64 slices.
 
-App bundle, bundled resources, entitlements, and signatures passed verification. Isolated Finder/Open With, bookmark save/relaunch, window resizing, and sandboxed extension/XPC isolation smoke checks passed. Native save-panel automation was skipped. DMG integrity, ZIP integrity, and uploaded asset SHA-256 hashes are verified before this release is published.
+All 201 related tests passed; the final reviewed glob correction passed six EditorConfig tests. Translation validation passed for 728 strings and four plural entries in eight languages. App bundle, resources, entitlements, and signatures passed verification. Isolated Finder/Open With, bookmark save/relaunch, window resizing, and sandboxed extension/XPC isolation checks passed. Native save-panel automation was skipped. DMG and ZIP integrity and uploaded SHA-256 hashes are checked before publication. Physical Intel/macOS 13 execution and other locale layouts were not verified.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.7.2/Duckpad-0.7.2-universal.zip" length="25980921" type="application/octet-stream" sparkle:edSignature="1wlJQyGBIcUDRESJXmFMhqICtPH5Ir1oKBvh45Wdta1y3uyQ4weWTluM802FV/mPVerXmMKt6a2xAkBUk2WOBQ=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.8.0/Duckpad-0.8.0-universal.zip" length="26627602" type="application/octet-stream" sparkle:edSignature="c+gY9c+heN0t+6jOZbGNXWpLx4sOdKRmD0uXnxXYpi6pgm19r3bHJ/HsJNETCkMsZpQrF6lIVgCCagYRRJg8DA=="/>
         </item>
     </channel>
 </rss>
