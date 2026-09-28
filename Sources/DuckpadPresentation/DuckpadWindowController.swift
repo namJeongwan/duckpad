@@ -1932,6 +1932,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return (actionableEditorCommands as? any EditorCopyExportPort)?.canCopyAsImage ?? false
         }
         if let command = editorCommand(for: menuItem.action) {
+            if let focusedTextEditing { return focusedTextEditing.canPerform(command) }
             return actionableEditorCommands?.canPerform(command) ?? false
         }
         if let choice = fileEncodingChoice(for: menuItem.action) {
@@ -2139,12 +2140,22 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    var editingCommandWindow: () -> NSWindow? = { NSApp.keyWindow }
+
+    private var focusedTextEditing: FocusedTextEditing? {
+        guard let textView = editingCommandWindow()?.firstResponder as? NSTextView,
+              !textView.isDescendant(of: editorHostView) else { return nil }
+        return FocusedTextEditing(textView: textView)
+    }
+
     private var actionableEditorCommands: (any EditorCommandPort)? {
         guard editorCommandsAreActionable else { return nil }
         return activeEditor as? any EditorCommandPort
     }
 
     private var editorCommandsAreActionable: Bool {
+        guard focusedTextEditing == nil, window?.attachedSheet == nil,
+              editingCommandWindow() == nil || editingCommandWindow() === window else { return false }
         let snapshot = workspace.snapshot()
         return snapshot.startup == .ready
             && snapshot.activeBuffer != nil
@@ -2184,6 +2195,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func performEditorCommand(_ command: EditorCommand) {
+        if let focusedTextEditing {
+            focusedTextEditing.perform(command)
+            return
+        }
         guard let editor = actionableEditorCommands, editor.canPerform(command) else { return }
         editor.perform(command)
     }
