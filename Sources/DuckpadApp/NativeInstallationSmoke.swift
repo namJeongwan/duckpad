@@ -3,6 +3,21 @@ import Darwin
 import DuckpadInfrastructure
 
 enum NativeInstallationSmoke {
+    static func checkTerminalCommandConflict() async {
+        do {
+            try await NativeInstallerClient().installTerminalCommand()
+            fputs("FAIL: terminal installer replaced the conflicting command.\n", stderr)
+            exit(1)
+        } catch {
+            guard String(describing: error).contains("Code=516") else {
+                FileHandle.standardError.write(Data("Terminal registration XPC smoke failed: \(error)\n".utf8))
+                exit(1)
+            }
+            print("PASS: authenticated terminal registration XPC preserves the existing command")
+            exit(0)
+        }
+    }
+
     static func run(verifyOnly: Bool) async {
         do {
             guard let source = Bundle.main.url(forResource: "Clipboard", withExtension: "duckpad-plugin") else { throw CocoaError(.fileNoSuchFile) }

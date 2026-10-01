@@ -8,6 +8,14 @@ public struct NativeInstallerClient: Sendable {
     public func install(files: [String: Data]) async throws {
         let frame = try JSONEncoder().encode(files)
         guard frame.count <= NativeInstallerXPC.maximumFrameBytes else { throw ExtensionFailure.limitExceeded("native package") }
+        try await perform(frame: frame)
+    }
+
+    public func installTerminalCommand() async throws {
+        try await perform(frame: nil)
+    }
+
+    private func perform(frame: Data?) async throws {
         let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/XPCServices/DuckpadNativeInstaller.xpc")
         let requirement = try NativeInstallerXPC.requirement(for: helper)
         let call = Call()
@@ -31,7 +39,7 @@ public struct NativeInstallerClient: Sendable {
         private let lock = NSLock()
         private var continuation: CheckedContinuation<Void, Error>?
         private var result: Result<Void, Error>?
-        func start(_ continuation: CheckedContinuation<Void, Error>, frame: Data) {
+        func start(_ continuation: CheckedContinuation<Void, Error>, frame: Data?) {
             lock.lock()
             if let result { lock.unlock(); continuation.resume(with: result); return }
             self.continuation = continuation
@@ -40,9 +48,16 @@ public struct NativeInstallerClient: Sendable {
             guard let proxy = connection.remoteObjectProxyWithErrorHandler({ self.finish(.failure($0)) }) as? DuckpadNativeInstallerProtocol else {
                 finish(.failure(ExtensionFailure.hostUnavailable("native installer unavailable"))); return
             }
-            proxy.install(frame) { digest, error in
-                if let digest, error == nil, digest.count == 64 { self.finish(.success(())) }
-                else { self.finish(.failure(ExtensionFailure.hostUnavailable(error ?? "native installation failed"))) }
+            if let frame {
+                proxy.install(frame) { digest, error in
+                    if let digest, error == nil, digest.count == 64 { self.finish(.success(())) }
+                    else { self.finish(.failure(ExtensionFailure.hostUnavailable(error ?? "native installation failed"))) }
+                }
+            } else {
+                proxy.installTerminalCommand { error in
+                    if let error { self.finish(.failure(ExtensionFailure.hostUnavailable(error))) }
+                    else { self.finish(.success(())) }
+                }
             }
         }
         func finish(_ result: Result<Void, Error>) {

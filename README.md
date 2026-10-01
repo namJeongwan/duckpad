@@ -20,6 +20,27 @@ Requires macOS 13 or later. Supports Apple Silicon and Intel Macs.
 
 This early release is not notarized by Apple. See the release notes for installation instructions.
 
+## Terminal
+
+Duckpad automatically installs the `duckpad` command on the first launch after
+installation or an update. Open a new terminal window, then run:
+
+```sh
+duckpad .
+duckpad test.txt
+duckpad a.txt b.txt
+```
+
+Folders open in the workspace sidebar; existing files open in editor tabs.
+An already running Duckpad receives the request in its active window.
+
+The command lives in `~/.local/bin`. Duckpad appends a PATH entry to `.zprofile`
+and `.bash_profile` for zsh and bash without replacing existing settings or
+another `duckpad` command. Existing commands on PATH retain priority. Custom
+startup locations (including `ZDOTDIR`) and other shells need `~/.local/bin` on their PATH.
+To uninstall the command, remove `~/.local/bin/duckpad`; the PATH entry can stay
+if other programs use that directory.
+
 ## Development
 
 Requires macOS and Xcode Command Line Tools with Swift 6 or later. Run the commands below from the repository root.

@@ -58,6 +58,10 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     func applicationDidFinishLaunching(_ notification: Notification) {
         installDevelopmentAppIcon()
         environment = ProcessInfo.processInfo.environment
+        if environment["DUCKPAD_TERMINAL_REGISTRATION_SMOKE"] == "1" {
+            Task { await NativeInstallationSmoke.checkTerminalCommandConflict() }
+            return
+        }
         if environment["DUCKPAD_MARKDOWN_SMOKE"] == "1" {
             Task { @MainActor in await BuiltInMarkdownSmoke.run() }
             return
@@ -154,6 +158,10 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         restoreAdditionalWindows()
         if Bundle.main.bundleURL.pathExtension == "app", !environment.keys.contains(where: { $0.hasPrefix("DUCKPAD_") && $0.contains("SMOKE") }) {
             startAppUpdater()
+            Task {
+                do { try await NativeInstallerClient().installTerminalCommand() }
+                catch { NSLog("Duckpad terminal command registration failed: %@", String(describing: error)) }
+            }
         }
 
         if environment["DUCKPAD_PERFORMANCE_LAUNCH_SMOKE"] == "1" {
@@ -281,15 +289,28 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         } else if let expectedPath = environment["DUCKPAD_FINDER_SMOKE_EXPECT"] {
             Task { @MainActor in
                 await controller.waitForStartup()
-                let expected = URL(fileURLWithPath: expectedPath).standardizedFileURL.path
-                for _ in 0..<4_000 {
-                    if workspace.activeFileContext()?.binding?.canonicalPath == expected { break }
-                    await Task.yield()
+                let expectedURL = URL(fileURLWithPath: expectedPath).resolvingSymlinksInPath().standardizedFileURL
+                let isFolder = (try? expectedURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                let requestWasHandled = {
+                    isFolder
+                        ? workspaceBrowserUseCase.roots.contains(where: { $0.canonicalPath == expectedURL.path && $0.isAvailable })
+                            && controller.workspaceSidebarSmokeState().isVisible
+                        : workspace.activeFileContext()?.binding?.canonicalPath == expectedURL.path
                 }
-                precondition(
-                    workspace.activeFileContext()?.binding?.canonicalPath == expected,
-                    "Finder/Open With request did not bind the requested document"
-                )
+                let deadline = ContinuousClock.now + .seconds(10)
+                while !requestWasHandled(), ContinuousClock.now < deadline {
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+                precondition(requestWasHandled(), "Finder/Open With request did not open the requested path")
+                if isFolder {
+                    let root = workspaceBrowserUseCase.roots.first { $0.canonicalPath == expectedURL.path }!
+                    let entries = try? await workspaceBrowserUseCase.children(rootID: root.id, relativeDirectory: "")
+                    precondition(
+                        entries?.contains { $0.name == "test.txt" } == true,
+                        "external folder request did not grant sandbox access"
+                    )
+                    print("Duckpad terminal folder smoke ready: LaunchServices -> workspace sidebar -> readable directory")
+                }
                 print("Duckpad Finder smoke ready: LaunchServices -> queued open -> bound document")
                 fflush(stdout)
                 Darwin._exit(0)

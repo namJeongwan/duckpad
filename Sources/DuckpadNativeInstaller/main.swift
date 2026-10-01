@@ -10,7 +10,15 @@ private final class Reply: @unchecked Sendable {
 
 private final class Installer: NSObject, DuckpadNativeInstallerProtocol {
     let store: ManagedNativePackageStore
-    init(root: URL) { store = ManagedNativePackageStore(root: root) }
+    let terminalCommand: TerminalCommandInstaller
+    init(root: URL, home: URL, app: URL) {
+        store = ManagedNativePackageStore(root: root)
+        terminalCommand = TerminalCommandInstaller(home: home, app: app)
+    }
+    func installTerminalCommand(withReply reply: @escaping (String?) -> Void) {
+        do { try terminalCommand.install(); reply(nil) }
+        catch { reply(String(describing: error)) }
+    }
     func install(_ signedFiles: Data, withReply reply: @escaping (String?, String?) -> Void) {
         guard signedFiles.count <= NativeInstallerXPC.maximumFrameBytes else { reply(nil, "package exceeds limit"); return }
         let reply = Reply(reply)
@@ -35,7 +43,7 @@ private final class Listener: NSObject, NSXPCListenerDelegate {
         guard let account = getpwuid(getuid()) else { throw CocoaError(.fileNoSuchFile) }
         let home = URL(fileURLWithPath: String(cString: account.pointee.pw_dir), isDirectory: true)
         let root = home.appendingPathComponent("Library/Containers/com.namjeongwan.duckpad/Data/Library/Application Support/Duckpad/NativePluginModules", isDirectory: true)
-        installer = Installer(root: root)
+        installer = Installer(root: root, home: home, app: app)
     }
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         guard connection.effectiveUserIdentifier == geteuid() else { return false }

@@ -3,6 +3,7 @@ import Security
 
 @objc public protocol DuckpadNativeInstallerProtocol {
     func install(_ signedFiles: Data, withReply reply: @escaping (String?, String?) -> Void)
+    func installTerminalCommand(withReply reply: @escaping (String?) -> Void)
 }
 
 public enum NativeInstallerXPC {
