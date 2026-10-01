@@ -69,6 +69,42 @@ private final class BlockingWorkspacePanel: FilePanelPresenting {
     func cancelOutstandingPanels() { cancellationRequests += 1 }
 }
 
+@Test @MainActor func externalFolderOpenAddsWorkspaceRootAndRevealsHiddenSidebar() async throws {
+    _ = NSApplication.shared
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("duckpad-cli-folder-\(UUID())")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let browser = WorkspaceBrowserUseCase(store: PresentationWorkspaceRootStore())
+    let controller = DuckpadWindowController(
+        workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()),
+        previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
+        workspaceBrowserUseCase: browser,
+        automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    if controller.workspaceSidebarSmokeState().isVisible { controller.performToggleWorkspaceSidebar() }
+    let opened = await withCheckedContinuation { continuation in
+        controller.openExternalURLs([directory]) { continuation.resume(returning: $0) }
+    }
+    #expect(opened)
+    #expect(browser.roots.map(\.canonicalPath) == [directory.path])
+    #expect(controller.workspaceSidebarSmokeState().isVisible)
+    let reopened = await withCheckedContinuation { continuation in
+        controller.openExternalURLs([directory]) { continuation.resume(returning: $0) }
+    }
+    #expect(reopened)
+    #expect(browser.roots.count == 1)
+    let link = directory.appendingPathComponent("workspace-link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: directory)
+    let linked = await withCheckedContinuation { continuation in
+        controller.openExternalURLs([link]) { continuation.resume(returning: $0) }
+    }
+    #expect(linked)
+    #expect(browser.roots.count == 1)
+}
+
 @Test @MainActor func workspaceSidebarLoadsChildrenPersistsExpansionAndRoutesContextActions() {
     _ = NSApplication.shared
     let root = WorkspaceRoot(

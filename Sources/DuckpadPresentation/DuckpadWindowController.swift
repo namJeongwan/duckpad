@@ -2331,14 +2331,41 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 return
             }
             await self.waitForStartup()
-            guard self.workspaceInteractionsAreActionable,
-                  let fileUseCase = self.fileUseCase else {
+            guard self.workspaceInteractionsAreActionable else {
                 completion?(false)
                 return
             }
             var succeeded = true
-            let outcomes = await fileUseCase.open(fileURLs)
-            for (url, outcome) in zip(fileURLs, outcomes) {
+            var documents: [URL] = []
+            for url in fileURLs {
+                guard !Task.isCancelled, !self.hasTornDownWindow else {
+                    completion?(false)
+                    return
+                }
+                let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+                guard (try? resolved.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+                    documents.append(url)
+                    continue
+                }
+                guard self.workspaceBrowserCommandsAreActionable, let browser = self.workspaceBrowserUseCase else {
+                    succeeded = false
+                    continue
+                }
+                if self.workspaceSidebar.superview == nil { self.performToggleWorkspaceSidebar() }
+                if !browser.roots.contains(where: { $0.canonicalPath == resolved.path && $0.isAvailable }) {
+                    if case .failed = await browser.addRoot(url) { succeeded = false }
+                }
+            }
+            guard !documents.isEmpty else {
+                completion?(succeeded)
+                return
+            }
+            guard let fileUseCase = self.fileUseCase else {
+                completion?(false)
+                return
+            }
+            let outcomes = await fileUseCase.open(documents)
+            for (url, outcome) in zip(documents, outcomes) {
                 guard !Task.isCancelled, !self.hasTornDownWindow else {
                     succeeded = false
                     break
