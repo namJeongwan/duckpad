@@ -3,36 +3,50 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.8.1</title>
-            <pubDate>Mon, 28 Sep 2026 15:40:30 +0900</pubDate>
-            <sparkle:version>48</sparkle:version>
-            <sparkle:shortVersionString>0.8.1</sparkle:shortVersionString>
+            <title>0.9.0</title>
+            <pubDate>Thu, 01 Oct 2026 15:33:28 +0900</pubDate>
+            <sparkle:version>49</sparkle:version>
+            <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.8.1
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.9.0
 
-Fix editing commands in the Find and Replace window. Pasting into a focused search field now changes that field instead of the document. Cut, Copy, Select All, Undo, and Redo also follow the focused native text control. Unavailable field commands do not fall through to the document.
+Open Duckpad directly from the terminal. The app automatically registers the `duckpad` command on its first launch after installation or an update. Open a new zsh or bash terminal window, then run:
 
-App and helpers: **0.8.1 (48)**. Requires **macOS 13 or later**. Distribution includes Apple Silicon and Intel binaries. Existing file formats and settings are unchanged.
+```sh
+duckpad .
+duckpad test.txt
+duckpad a.txt b.txt
+```
+
+Folders open in the workspace sidebar and existing files open in editor tabs. Requests go to the active window when Duckpad is already running. Spaces and leading dashes in file names are supported; quote paths containing spaces.
+
+The command is installed in `~/.local/bin`. Duckpad preserves existing shell settings and does not replace another program's `duckpad` command. Updates refresh the launcher without duplicating its PATH entry. Other shells need `~/.local/bin` on their PATH.
+
+App and helpers: **0.9.0 (49)**. Requires **macOS 13 or later**. Distribution includes Apple Silicon and Intel binaries. Existing document formats are unchanged.
 
 ## Installation
 
-Download `Duckpad-0.8.1-universal.dmg`, open it, and drag Duckpad into Applications. The ZIP alternative is `Duckpad-0.8.1-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Users on 0.7.0 or later can update in the app once the signed Sparkle feed is published.
+Download `Duckpad-0.9.0-universal.dmg`, open it, and drag Duckpad into Applications. The ZIP alternative is `Duckpad-0.9.0-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Users on 0.7.0 or later can update in the app once the signed Sparkle feed is published.
 
 The app is ad-hoc signed, not Developer ID signed or Apple notarized. Sparkle archives use a separate Ed25519 signature.
 
 ## Validation and limitations
 
-The regression test reproduced document changes before the fix. Twelve focused tests pass after the fix, covering Find/Replace field editing, document isolation, Undo/Redo, menu validation, search interaction, and editor command availability. The field-routing tests use real AppKit panels and menu actions with an injected key-window provider.
+Focused tests cover executable installation, repeated registration, update path changes, preservation of shell settings and existing commands, folder opening, and existing file batch behavior. An isolated sandboxed app opens both `duckpad .` and a file with spaces and a leading dash through the generated launcher.
 
-An interactive Command-V check could not be completed because macOS would not bring the isolated test app to the foreground. Physical Intel hardware and macOS 13 execution were not checked. Final package, archive, and update-feed results are recorded in the published release.
+Opening an already running terminal does not change that shell's PATH. Open a new terminal window after the first app launch. Custom shell startup locations and shells other than zsh/bash require their own PATH configuration. Nonexistent files are not created by the launcher. Physical Intel hardware and macOS 13 execution were not checked. Final package, archive, automatic-registration, and update-feed results are recorded in the published release.
 
 ## Release verification
 
-Built from the same Git tree as merged commit `4c45d5a661b3172824b6d31fe9883317a2075019` (PR #54). The app and both helpers report 0.8.1 (48) and contain arm64 and x86_64 slices.
+Built from merged commit `6d4cf588a631c8c9a5da1cbb87c6010316c4f0eb` (PR #56). The app and both helpers report 0.9.0 (49) and contain arm64 and x86_64 slices.
 
-Twelve focused tests passed. App bundle, resources, entitlements, and signatures passed verification. Isolated Finder/Open With, bookmark save/relaunch, window resizing, and sandboxed extension/XPC isolation checks passed. Native save-panel automation was skipped. DMG and ZIP integrity and uploaded SHA-256 hashes are checked before publication. Interactive Command-V verification and physical Intel/macOS 13 execution were not completed, as noted above.
+Seven focused tests passed. App resources, entitlements, XPC isolation and signatures passed verification. Isolated Finder/Open With, bookmark save/relaunch, window resizing, and extension/XPC checks passed. The generated CLI opened a folder, a directory symlink and a spaced filename beginning with a dash in an isolated sandboxed app. A real signed app exercised authenticated terminal-registration XPC and preserved an existing command without changing shell profiles.
+
+A disposable, separately identified sandboxed fixture completed a Keychain-signed Sparkle upgrade from 0.8.1 (48) to 0.9.0 (49), including automatic relaunch and recovery of an unsaved Korean/emoji scratch.
+
+Native save-panel automation was skipped. Physical Intel/macOS 13 execution and Apple notarization were not checked. DMG and ZIP integrity and uploaded SHA-256 digests are verified before publication. The Sparkle feed is published separately after the release assets.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.8.1/Duckpad-0.8.1-universal.zip" length="26629195" type="application/octet-stream" sparkle:edSignature="nTPkqhRMz8wVT84wjdhzjsA3+54QeJ70+7kikXinI7nJl3AfNNgDOoq991aSjjBBwGNV6+b547rMkGuRIzIJBQ=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.9.0/Duckpad-0.9.0-universal.zip" length="26667239" type="application/octet-stream" sparkle:edSignature="YvT1mDtZ61g+Dyd03mPh4ZMKh/miwjI0z7OjeIpqDHwVNh53049gaOfpLA/QMJlWbOCHehbAdoacGGd4f0wVCw=="/>
         </item>
     </channel>
 </rss>
