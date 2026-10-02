@@ -3,50 +3,45 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.9.0</title>
-            <pubDate>Thu, 01 Oct 2026 15:33:28 +0900</pubDate>
-            <sparkle:version>49</sparkle:version>
-            <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
+            <title>0.9.1</title>
+            <pubDate>Fri, 02 Oct 2026 09:10:56 +0900</pubDate>
+            <sparkle:version>50</sparkle:version>
+            <sparkle:shortVersionString>0.9.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.9.0
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.9.1
 
-Open Duckpad directly from the terminal. The app automatically registers the `duckpad` command on its first launch after installation or an update. Open a new zsh or bash terminal window, then run:
+This patch improves workspace navigation and makes the sidebar, menus, tabs, status bar, and editor surfaces more consistent.
 
-```sh
-duckpad .
-duckpad test.txt
-duckpad a.txt b.txt
-```
+- Resize the workspace sidebar by dragging its boundary. Its width is preserved when hidden and shown again.
+- Show or hide the workspace with **Command-B**, the sidebar button, or the View menu. Workspace open/close commands and accessibility descriptions are localized in all eight supported languages.
+- Long file names retain their full text and can be read with horizontal scrolling. Hovering over a clipped name immediately reveals its full name on the same row, extending beside the sidebar. The expansion does not take keyboard focus or intercept file clicks, and closes when the pointer leaves, the workspace scrolls, or the window changes.
+- File icons match editor tabs. Sidebar rows, controls, hover states, and light/dark colors use consistent spacing and surfaces. Editor indentation guides and fold markers are quieter.
 
-Folders open in the workspace sidebar and existing files open in editor tabs. Requests go to the active window when Duckpad is already running. Spaces and leading dashes in file names are supported; quote paths containing spaces.
-
-The command is installed in `~/.local/bin`. Duckpad preserves existing shell settings and does not replace another program's `duckpad` command. Updates refresh the launcher without duplicating its PATH entry. Other shells need `~/.local/bin` on their PATH.
-
-App and helpers: **0.9.0 (49)**. Requires **macOS 13 or later**. Distribution includes Apple Silicon and Intel binaries. Existing document formats are unchanged.
+App and helpers: **0.9.1 (50)**. Requires **macOS 13 or later**. Includes Apple Silicon and Intel binaries. Existing documents, session formats, and the `duckpad` terminal command remain compatible.
 
 ## Installation
 
-Download `Duckpad-0.9.0-universal.dmg`, open it, and drag Duckpad into Applications. The ZIP alternative is `Duckpad-0.9.0-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Users on 0.7.0 or later can update in the app once the signed Sparkle feed is published.
+Download `Duckpad-0.9.1-universal.dmg`, open it, and drag Duckpad into Applications. Alternatively, extract `Duckpad-0.9.1-universal.zip`. Verify downloads against `SHA256SUMS.txt`. In-app updates become available after publication of the signed Sparkle feed.
 
-The app is ad-hoc signed, not Developer ID signed or Apple notarized. Sparkle archives use a separate Ed25519 signature.
+The app is ad-hoc signed, not Developer ID signed or Apple notarized. The Sparkle archive uses a separate Ed25519 signature.
 
 ## Validation and limitations
 
-Focused tests cover executable installation, repeated registration, update path changes, preservation of shell settings and existing commands, folder opening, and existing file batch behavior. An isolated sandboxed app opens both `duckpad .` and a file with spaces and a leading dash through the generated launcher.
+Regression checks cover sidebar sizing, width restoration, scrolling, immediate filename expansion, focus preservation, expansion dismissal, workspace commands, localized menus, icon reuse, and native editor guides/folding. A separate preview session was used to check sidebar dragging, mouse/Command-B toggling, and horizontal scrolling without editing user documents.
 
-Opening an already running terminal does not change that shell's PATH. Open a new terminal window after the first app launch. Custom shell startup locations and shells other than zsh/bash require their own PATH configuration. Nonexistent files are not created by the launcher. Physical Intel hardware and macOS 13 execution were not checked. Final package, archive, automatic-registration, and update-feed results are recorded in the published release.
+The physical pointer's filename hover expansion could not be visually confirmed through the UI automation tool; synchronous hover-event tests verify its native panel, full text, alignment, and cleanup. Physical Intel hardware and macOS 13 execution were not checked. Only Korean preview UI was manually inspected; all eight localization resources are checked for matching keys. Final package, archive, smoke, and update-feed results are recorded in the published release.
 
 ## Release verification
 
-Built from merged commit `6d4cf588a631c8c9a5da1cbb87c6010316c4f0eb` (PR #56). The app and both helpers report 0.9.0 (49) and contain arm64 and x86_64 slices.
+Built from merged commit `ef2e1192ab280cba4420ac8e09359eb1d66793ca` (PR #58). The app and both helpers report 0.9.1 (50), include arm64 and x86_64 slices, and pass resource, entitlement, XPC isolation, and signature verification.
 
-Seven focused tests passed. App resources, entitlements, XPC isolation and signatures passed verification. Isolated Finder/Open With, bookmark save/relaunch, window resizing, and extension/XPC checks passed. The generated CLI opened a folder, a directory symlink and a spaced filename beginning with a dash in an isolated sandboxed app. A real signed app exercised authenticated terminal-registration XPC and preserved an existing command without changing shell profiles.
+The final explicit serial Swift run reported 1,123 tests across 76 suites with zero failures; seven conditional probes were skipped. Six focused menu/sidebar tests and the separately enabled native-menu probe passed. All eight localization resources have matching keys and pass plist validation. The initial default parallel attempt was interrupted after time-budget/event-loop contention; it is not reported as passing.
 
-A disposable, separately identified sandboxed fixture completed a Keychain-signed Sparkle upgrade from 0.8.1 (48) to 0.9.0 (49), including automatic relaunch and recovery of an unsaved Korean/emoji scratch.
+Isolated Finder/Open With, bookmark save/relaunch, window layout, and extension/XPC isolation smoke checks passed. DMG and ZIP integrity and SHA-256 checks passed. Uploaded asset digests are matched to the local files before publication.
 
-Native save-panel automation was skipped. Physical Intel/macOS 13 execution and Apple notarization were not checked. DMG and ZIP integrity and uploaded SHA-256 digests are verified before publication. The Sparkle feed is published separately after the release assets.
+Native save-panel automation, binary/print/large-document conditional probes, and two separate clipboard plugin fixtures were not exercised. Physical filename hover, Intel/macOS 13 execution, and Apple notarization remain unverified. The signed Sparkle feed is published through a separate reviewed PR after these release assets.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.9.0/Duckpad-0.9.0-universal.zip" length="26667239" type="application/octet-stream" sparkle:edSignature="YvT1mDtZ61g+Dyd03mPh4ZMKh/miwjI0z7OjeIpqDHwVNh53049gaOfpLA/QMJlWbOCHehbAdoacGGd4f0wVCw=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.9.1/Duckpad-0.9.1-universal.zip" length="26726601" type="application/octet-stream" sparkle:edSignature="rzZaPgv0LWlVQT2CCq4Vu5gmxk2dd8r2/ZzoOadtPKGAPQ2XUwbmJKTPFoWi7UqbyR9LUQjVkNnSPfQM5Az7Dg=="/>
         </item>
     </channel>
 </rss>
