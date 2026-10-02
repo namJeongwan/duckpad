@@ -13,6 +13,7 @@
 #include "ILexer.h"
 #include "Lexilla.h"
 #include "SciLexer.h"
+#include "DPScintillaLegacyStyleRoles.h"
 
 @interface DPScintillaBinaryDocument (DuckpadAttachment)
 - (void)attachToScintillaView:(ScintillaView *)view;
@@ -1706,14 +1707,18 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         if (const char *description = lexer->DescriptionOfStyle(style)) semantic += description;
         std::transform(semantic.begin(), semantic.end(), semantic.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         int role = 0;
-        if (semantic.find("comment") != std::string::npos) role = 1;
+        if (semantic.find("error") != std::string::npos || semantic.find("bad") != std::string::npos
+            || semantic.find("unterminated") != std::string::npos) role = 6;
+        else if (semantic.find("comment") != std::string::npos) role = 1;
         else if (semantic.find("number") != std::string::npos) role = 2;
         else if (semantic.find("keyword") != std::string::npos || semantic.find("word") != std::string::npos) role = 3;
         else if (semantic.find("string") != std::string::npos || semantic.find("character") != std::string::npos) role = 4;
         else if (semantic.find("operator") != std::string::npos || semantic.find("brace") != std::string::npos) role = 5;
-        else if (semantic.find("error") != std::string::npos || semantic.find("bad") != std::string::npos) role = 6;
+        else if (semantic.find("property") != std::string::npos || semantic.find("attribute") != std::string::npos
+                 || semantic.find("tag") != std::string::npos) role = 7;
         _semanticStyleRoles.emplace_back(style, role);
     }
+    if (namedStyles == 0) DPAppendLegacyStyleRoles(effectiveName.UTF8String, _semanticStyleRoles);
     // Legacy Markdown has style IDs but does not publish NamedStyles metadata.
     if ([effectiveName isEqualToString:@"markdown"]) {
         for (int style = SCE_MARKDOWN_DEFAULT; style <= SCE_MARKDOWN_CODEBK; ++style) {
@@ -1827,6 +1832,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const int stringColour = dark ? 0x7DD6E8 : 0x176A7A;
     const int operatorColour = dark ? 0xA9C7FF : 0x204F9B;
     const int errorColour = dark ? 0x8080FF : 0x2020D0;
+    const int propertyColour = dark ? 0xF7BD87 : 0xA05F30;
     [_scintilla message:SCI_STYLESETFORE wParam:STYLE_DEFAULT lParam:foreground];
     [_scintilla message:SCI_STYLESETBACK wParam:STYLE_DEFAULT lParam:background];
     [_scintilla message:SCI_STYLESETFONT wParam:STYLE_DEFAULT lParam:reinterpret_cast<sptr_t>(_editorFontName.UTF8String)];
@@ -1887,6 +1893,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
             case 4: colour = stringColour; break;
             case 5: colour = operatorColour; break;
             case 6: colour = errorColour; break;
+            case 7: colour = propertyColour; break;
             default: break;
         }
         [_scintilla message:SCI_STYLESETFORE wParam:style lParam:colour];
