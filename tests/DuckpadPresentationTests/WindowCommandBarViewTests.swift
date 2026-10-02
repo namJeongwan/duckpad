@@ -76,6 +76,66 @@ private func hostCommandBar(
 
 @Suite(.serialized)
 struct WindowCommandBarViewTests {
+    @Test @MainActor func workspaceToggleAlignsAndDistinguishesVisibilityHoverAndPress() throws {
+        _ = NSApplication.shared
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            let target = CommandBarTarget()
+            let (window, bar) = hostCommandBar(mainMenu: makeCommandBarMenu(target: target), appearance: appearance)
+            defer { bar.tearDown(); window.contentView = nil; window.close() }
+            let button = try #require(bar.subviews.compactMap { $0 as? NSButton }.first {
+                $0.accessibilityIdentifier() == "duckpad.workspace.toggle"
+            })
+            let cell = try #require(button.cell as? NSButtonCell)
+            #expect(cell.showsStateBy.isEmpty)
+            #expect(cell.highlightsBy.isEmpty)
+            let file = try #require(bar.button(named: "File"))
+            #expect(button.frame.midY == file.frame.midY)
+            let imageRect = try #require((button.cell as? NSButtonCell)?.imageRect(forBounds: button.bounds))
+            #expect(abs(imageRect.midX - button.bounds.midX) <= 1)
+            #expect(abs(imageRect.midY - button.bounds.midY) <= 1)
+            let event = try #require(NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 1, trackingNumber: 0, userData: nil))
+            let closedImage = try #require(button.image?.tiffRepresentation)
+            func capture(_ state: String) throws {
+                guard let directory = ProcessInfo.processInfo.environment["DUCKPAD_CHROME_TEST_IMAGES"] else { return }
+                let bitmap = try #require(bar.bitmapImageRepForCachingDisplay(in: bar.bounds))
+                bar.cacheDisplay(in: bar.bounds, to: bitmap)
+                let destination = URL(fileURLWithPath: directory)
+                try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                let name = "workspace-\(appearance == .aqua ? "light" : "dark")-\(state).png"
+                try #require(bitmap.representation(using: .png, properties: [:])).write(to: destination.appendingPathComponent(name))
+            }
+            var clicks = 0
+            bar.onToggleWorkspace = { clicks += 1 }
+            for visible in [false, true] {
+                bar.setWorkspaceVisible(visible)
+                let renderedImage = try #require(button.image?.tiffRepresentation)
+                #expect((renderedImage != closedImage) == visible)
+                #expect(button.state == (visible ? .on : .off))
+                button.updateTrackingAreas()
+                let resting = button.layer?.backgroundColor
+                let state = visible ? "open" : "closed"
+                try capture(state)
+                button.mouseEntered(with: event)
+                let hovering = button.layer?.backgroundColor
+                #expect(hovering != resting)
+                try capture(state + "-hover")
+                button.highlight(true)
+                #expect(button.layer?.backgroundColor != hovering)
+                try capture(state + "-pressed")
+                button.highlight(false)
+                #expect(button.layer?.backgroundColor == hovering)
+                button.mouseExited(with: event)
+                #expect(button.layer?.backgroundColor == resting)
+                button.performClick(nil)
+            }
+            #expect(clicks == 2)
+            button.isEnabled = false
+            button.performClick(nil)
+            #expect(clicks == 2)
+        }
+    }
+
     // Native menu tracking mutates NSApplication's process-wide event loop.
     // Run this UI probe in its own test process, not before unrelated AppKit tests.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["DUCKPAD_NATIVE_MENU_PROBE"] == "1"))

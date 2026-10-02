@@ -774,3 +774,6 @@
 "Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "Informe nome e conteúdo. Limites: 200 trechos, 256 bytes por nome e 64 KB por trecho.";
 
 "Could not save snippets. Try again." = "Não foi possível salvar os trechos. Tente novamente.";
+"Open Folder…" = "Abrir pasta…";
+"Show Workspace" = "Mostrar espaço de trabalho";
+"Hide Workspace" = "Ocultar espaço de trabalho";

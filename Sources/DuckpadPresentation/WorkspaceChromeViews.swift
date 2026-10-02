@@ -36,8 +36,10 @@ final class WorkspaceBarView: NSView {
     }
 
     private func applyAppearance() {
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        separator.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.72).cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = WorkspaceColors.chrome.cgColor
+            separator.backgroundColor = WorkspaceColors.border.cgColor
+        }
     }
 }
 

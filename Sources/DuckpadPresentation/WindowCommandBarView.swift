@@ -7,7 +7,7 @@ import AppKit
 /// the bar. AppKit validation, state, shortcuts, targets, and actions therefore
 /// remain authoritative in the application's native main menu.
 @MainActor
-public final class WindowCommandBarView: NSVisualEffectView {
+public final class WindowCommandBarView: NSView {
     public static let presentedMenuTitles = [
         "File", "Edit", "Search", "View", "Encoding",
         "Language", "Preferences", "Tools", "Plugins", "Window", "Help",
@@ -16,6 +16,10 @@ public final class WindowCommandBarView: NSVisualEffectView {
     public private(set) var menuTitles: [String] = []
     public private(set) var activeMenuTitle: String?
 
+    public var onToggleWorkspace: (() -> Void)?
+    private let workspaceButton = StatusBarButton(image: NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: nil)!, target: nil, action: nil)
+    private var workspaceVisible = false
+    private var workspaceCatalog = L10n.catalog
     private var barHeight: NSLayoutConstraint!
     private let stackView = NSStackView()
     private let bottomSeparator = NSBox()
@@ -34,11 +38,7 @@ public final class WindowCommandBarView: NSVisualEffectView {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
-        material = .headerView
-        blendingMode = .withinWindow
-        state = .followsWindowActiveState
-        // A native separator stays above the visual-effect material and
-        // resolves its color in this window's effective appearance.
+        // Keep AppKit menu controls and a native separator on a flat surface.
         bottomSeparator.boxType = .separator
         bottomSeparator.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bottomSeparator)
@@ -46,6 +46,26 @@ public final class WindowCommandBarView: NSVisualEffectView {
         setAccessibilityRole(.group)
         setAccessibilityIdentifier("duckpad.window.command-bar")
         setAccessibilityLabel(L10n.text("Application commands"))
+
+        workspaceButton.target = self
+        workspaceButton.action = #selector(toggleWorkspace)
+        workspaceButton.bezelStyle = .inline
+        workspaceButton.isBordered = false
+        if let cell = workspaceButton.cell as? NSButtonCell {
+            // StatusBarButton owns hover/press paint; keep AppKit from painting a second badge.
+            cell.showsStateBy = []
+            cell.highlightsBy = []
+        }
+        workspaceButton.imagePosition = .imageOnly
+        workspaceButton.imageScaling = .scaleProportionallyDown
+        workspaceButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        workspaceButton.contentTintColor = .secondaryLabelColor
+        workspaceButton.wantsLayer = true
+        workspaceButton.layer?.cornerRadius = 4
+        workspaceButton.translatesAutoresizingMaskIntoConstraints = false
+        workspaceButton.setAccessibilityIdentifier("duckpad.workspace.toggle")
+        addSubview(workspaceButton)
+        setWorkspaceVisible(false)
 
         stackView.orientation = .horizontal
         stackView.alignment = .centerY
@@ -57,10 +77,14 @@ public final class WindowCommandBarView: NSVisualEffectView {
         barHeight = heightAnchor.constraint(equalToConstant: 27)
         NSLayoutConstraint.activate([
             barHeight,
-            stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            workspaceButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            workspaceButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            workspaceButton.widthAnchor.constraint(equalToConstant: 26),
+            workspaceButton.heightAnchor.constraint(equalToConstant: 23),
+            stackView.leadingAnchor.constraint(equalTo: workspaceButton.trailingAnchor, constant: 2),
             stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             stackView.topAnchor.constraint(equalTo: topAnchor),
-            stackView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
             bottomSeparator.leadingAnchor.constraint(equalTo: leadingAnchor),
             bottomSeparator.trailingAnchor.constraint(equalTo: trailingAnchor),
             bottomSeparator.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -102,6 +126,20 @@ public final class WindowCommandBarView: NSVisualEffectView {
         updateTrackingAreas()
     }
 
+    public func setWorkspaceVisible(_ visible: Bool, catalog: LocalizationCatalog? = nil) {
+        workspaceVisible = visible
+        if let catalog { workspaceCatalog = catalog }
+        let label = workspaceCatalog.text(visible ? "Hide Workspace" : "Show Workspace")
+        workspaceButton.setAccessibilityLabel(label)
+        workspaceButton.toolTip = label + " (⌘B)"
+        workspaceButton.state = visible ? .on : .off
+        workspaceButton.image = NSImage(systemSymbolName: visible ? "rectangle.leftthird.inset.filled" : "sidebar.left",
+                                       accessibilityDescription: label)
+        workspaceButton.contentTintColor = visible ? .labelColor : .secondaryLabelColor
+    }
+
+    @objc private func toggleWorkspace() { onToggleWorkspace?() }
+
     public func menu(named title: String) -> NSMenu? { menusByTitle[title] }
 
     public func button(named title: String) -> NSPopUpButton? { buttonsByTitle[title] }
@@ -125,6 +163,8 @@ public final class WindowCommandBarView: NSVisualEffectView {
     }
 
     public func tearDown() {
+        onToggleWorkspace = nil
+        workspaceButton.resetPointerState()
         dismissMenu()
         stopPointerTracking()
         removeMenuButtons()
@@ -400,7 +440,10 @@ public final class WindowCommandBarView: NSVisualEffectView {
     }
 
     private func applyAppearance() {
-        layer?.backgroundColor = NSColor.clear.cgColor
+        setWorkspaceVisible(workspaceVisible)
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = WorkspaceColors.chrome.cgColor
+        }
         for title in menuTitles {
             guard let button = buttonsByTitle[title] else { continue }
             applyVisualState(to: button, title: title)

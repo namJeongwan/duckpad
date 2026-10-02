@@ -18,6 +18,39 @@ private typealias ScintillaMessageInvocation = @convention(c) (
 @Suite(.serialized)
 struct LanguageEditorAdapterTests {
     @Test @MainActor
+    func indentGuidesRemainSubtleAcrossPaletteAndLexerChanges() throws {
+        let (window, view) = hostedView()
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        try view.loadUTF8(Data("{\n    \"a\": {\n        \"b\": true\n    }\n}".utf8), revision: 0)
+        for palette: DPScintillaPalette in [.light, .dark, .highContrastLight, .highContrastDark] {
+            view.apply(palette)
+            #expect(view.applyLexerNamed("json", keywords: [], tabWidth: 4, useTabs: false,
+                                        folding: true, braceMatching: true, maximumStyleBytes: 1_000_000))
+            // A continuous editor surface, with arrows instead of connected fold boxes.
+            #expect(try sendTestingScintillaMessage(2482, wParam: 33, to: view) == sendTestingScintillaMessage(2482, wParam: 32, to: view))
+            #expect(try sendTestingScintillaMessage(2529, wParam: 31, to: view) == 6)
+            #expect(try sendTestingScintillaMessage(2529, wParam: 30, to: view) == 2)
+            #expect(try sendTestingScintillaMessage(2529, wParam: 29, to: view) == 5)
+            let guide = view.foregroundColor(forStyle: 37)
+            let text = view.foregroundColor(forStyle: 32)
+            #expect(guide != text)
+            if let directory = ProcessInfo.processInfo.environment["DUCKPAD_WORKSPACE_SNAPSHOTS"] {
+                window.appearance = NSAppearance(named: palette == .dark || palette == .highContrastDark ? .darkAqua : .aqua)
+                view.layoutSubtreeIfNeeded()
+                let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                let destination = URL(fileURLWithPath: directory)
+                try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                try #require(bitmap.representation(using: .png, properties: [:])).write(to: destination.appendingPathComponent("guides-\(palette.rawValue).png"))
+            }
+            #expect(try sendTestingScintillaMessage(2482, wParam: 37, to: view) == sendTestingScintillaMessage(2482, wParam: 32, to: view))
+        }
+        #expect(view.contentUTF8 == Data("{\n    \"a\": {\n        \"b\": true\n    }\n}".utf8))
+        #expect(!view.canUndo)
+    }
+
+    @Test @MainActor
     func markdownStylesHaveVisibleColorsAndResetWhenLanguageChanges() throws {
         let (_, view) = hostedView()
         try view.loadUTF8(Data("# Heading\n\n**bold** and `code`\n\n```rust\nfn main() {}\n```".utf8), revision: 0)

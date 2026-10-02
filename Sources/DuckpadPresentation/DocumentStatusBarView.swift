@@ -106,9 +106,9 @@ final class DocumentStatusBarView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.setFill()
+        WorkspaceColors.chrome.setFill()
         bounds.fill()
-        NSColor.separatorColor.setFill()
+        WorkspaceColors.border.setFill()
         let pixel = 1 / (window?.backingScaleFactor ?? 2)
         NSRect(x: 0, y: bounds.maxY - pixel, width: bounds.width, height: pixel).fill()
         for field in fields.dropFirst() {

@@ -814,3 +814,6 @@
 "Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "이름과 내용을 입력하세요. 최대 200개, 이름 256바이트, 내용 64KB까지 저장할 수 있습니다.";
 
 "Could not save snippets. Try again." = "스니펫을 저장하지 못했습니다. 다시 시도하세요.";
+"Open Folder…" = "폴더 열기…";
+"Show Workspace" = "작업 공간 표시";
+"Hide Workspace" = "작업 공간 숨기기";

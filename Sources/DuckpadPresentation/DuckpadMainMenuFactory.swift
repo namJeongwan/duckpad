@@ -44,6 +44,8 @@ public enum DuckpadMainMenuFactory {
         add("New", #selector(DuckpadWindowController.performNewScratch(_:)), "n", target, to: fileMenu)
         add("New Window", #selector(DuckpadWindowController.performNewWindow(_:)), "n", target, modifiers: [.command, .shift], to: fileMenu)
         add("Open…", #selector(DuckpadWindowController.performOpenFile(_:)), "o", target, to: fileMenu)
+        add("Open Folder…", #selector(DuckpadWindowController.performAddWorkspaceFolder(_:)), "", target, modifiers: [], to: fileMenu)
+        add("Remove Folder from Workspace", #selector(DuckpadWindowController.performRemoveWorkspaceFolder(_:)), "", target, modifiers: [], to: fileMenu)
         fileMenu.addItem(makeOpenRecentItem(
             applicationTarget: applicationTarget,
             urls: recentDocumentURLs, settings: settings
@@ -162,6 +164,7 @@ public enum DuckpadMainMenuFactory {
             modifiers: [.command, .shift],
             to: viewMenu
         )
+        add("Workspace", #selector(DuckpadWindowController.performToggleWorkspaceSidebar(_:)), "b", target, to: viewMenu)
         viewMenu.addItem(.separator())
         add(
             "Function List…",

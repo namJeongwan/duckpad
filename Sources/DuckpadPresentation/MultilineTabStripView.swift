@@ -332,16 +332,16 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         if active {
             view.layer?.backgroundColor = (isHovered
                 ? NSColor.controlAccentColor.withAlphaComponent(0.13)
-                : NSColor.textBackgroundColor.withAlphaComponent(0.98)).cgColor
+                : WorkspaceColors.editor).cgColor
             separatorColor = isHovered
                 ? NSColor.controlAccentColor.withAlphaComponent(0.48)
-                : NSColor.separatorColor.withAlphaComponent(0.52)
+                : WorkspaceColors.border
         } else if isHovered {
             view.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.11).cgColor
             separatorColor = NSColor.controlAccentColor.withAlphaComponent(0.34)
         } else {
-            view.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.44).cgColor
-            separatorColor = NSColor.separatorColor.withAlphaComponent(0.32)
+            view.layer?.backgroundColor = WorkspaceColors.panel.cgColor
+            separatorColor = WorkspaceColors.border
         }
         trailingSeparator.backgroundColor = separatorColor.cgColor
         bottomSeparator.backgroundColor = separatorColor.cgColor
@@ -1562,8 +1562,8 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
 
     private func applyAppearance() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-            bottomSeparator.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.72).cgColor
+            layer?.backgroundColor = WorkspaceColors.panel.cgColor
+            bottomSeparator.backgroundColor = WorkspaceColors.border.cgColor
         }
     }
 }
