@@ -1,0 +1,327 @@
+// Duckpad fallback colors for lexers that omit ILexer5 named-style metadata.
+// Style identifiers come from pinned Lexilla 5.5.3 LexicalStyles.iface / SciLexer.h.
+#pragma once
+#include <initializer_list>
+#include <string_view>
+#include <utility>
+#include <vector>
+#include "SciLexer.h"
+
+inline void DPAppendLegacyStyleRoles(std::string_view lexer, std::vector<std::pair<int, int>> &roles) {
+    enum { comment = 1, number = 2, keyword = 3, string = 4, operatorRole = 5, error = 6, property = 7 };
+    struct Entry { std::string_view lexer; std::initializer_list<std::pair<int, int>> roles; };
+    // ponytail: pinned style IDs; refresh this table when upgrading Lexilla.
+    static const Entry entries[] = {
+        {"COBOL", {
+            {SCE_COBOL_COMMENT, comment}, {SCE_COBOL_COMMENTLINE, comment}, {SCE_COBOL_COMMENTDOC, comment},
+            {SCE_COBOL_NUMBER, number}, {SCE_COBOL_WORD, keyword}, {SCE_COBOL_STRING, string},
+            {SCE_COBOL_CHARACTER, string}, {SCE_COBOL_WORD3, keyword}, {SCE_COBOL_PREPROCESSOR, keyword},
+            {SCE_COBOL_OPERATOR, operatorRole}, {SCE_COBOL_WORD2, keyword},
+        }},
+        {"ada", {
+            {SCE_ADA_WORD, keyword}, {SCE_ADA_NUMBER, number}, {SCE_ADA_DELIMITER, operatorRole},
+            {SCE_ADA_CHARACTER, string}, {SCE_ADA_CHARACTEREOL, error}, {SCE_ADA_STRING, string},
+            {SCE_ADA_STRINGEOL, error}, {SCE_ADA_LABEL, property}, {SCE_ADA_COMMENTLINE, comment},
+            {SCE_ADA_ILLEGAL, error},
+        }},
+        {"asciidoc", {
+            {SCE_ASCIIDOC_STRONG1, keyword}, {SCE_ASCIIDOC_STRONG2, keyword}, {SCE_ASCIIDOC_EM1, comment},
+            {SCE_ASCIIDOC_EM2, comment}, {SCE_ASCIIDOC_HEADER1, keyword}, {SCE_ASCIIDOC_HEADER2, keyword},
+            {SCE_ASCIIDOC_HEADER3, keyword}, {SCE_ASCIIDOC_HEADER4, keyword}, {SCE_ASCIIDOC_HEADER5, keyword},
+            {SCE_ASCIIDOC_HEADER6, keyword}, {SCE_ASCIIDOC_ULIST_ITEM, operatorRole},
+            {SCE_ASCIIDOC_OLIST_ITEM, operatorRole}, {SCE_ASCIIDOC_BLOCKQUOTE, comment},
+            {SCE_ASCIIDOC_LINK, operatorRole}, {SCE_ASCIIDOC_CODEBK, string}, {SCE_ASCIIDOC_PASSBK, string},
+            {SCE_ASCIIDOC_COMMENT, comment}, {SCE_ASCIIDOC_COMMENTBK, comment}, {SCE_ASCIIDOC_LITERAL, string},
+            {SCE_ASCIIDOC_LITERALBK, string}, {SCE_ASCIIDOC_ATTRIB, property}, {SCE_ASCIIDOC_ATTRIBVAL, property},
+            {SCE_ASCIIDOC_MACRO, keyword},
+        }},
+        {"au3", {
+            {SCE_AU3_COMMENT, comment}, {SCE_AU3_COMMENTBLOCK, comment}, {SCE_AU3_NUMBER, number},
+            {SCE_AU3_FUNCTION, keyword}, {SCE_AU3_KEYWORD, keyword}, {SCE_AU3_MACRO, keyword},
+            {SCE_AU3_STRING, string}, {SCE_AU3_OPERATOR, operatorRole}, {SCE_AU3_PREPROCESSOR, keyword},
+        }},
+        {"caml", {
+            {SCE_CAML_TAGNAME, property}, {SCE_CAML_KEYWORD, keyword}, {SCE_CAML_KEYWORD2, keyword},
+            {SCE_CAML_KEYWORD3, keyword}, {SCE_CAML_OPERATOR, operatorRole}, {SCE_CAML_NUMBER, number},
+            {SCE_CAML_CHAR, string}, {SCE_CAML_STRING, string}, {SCE_CAML_COMMENT, comment},
+            {SCE_CAML_COMMENT1, comment}, {SCE_CAML_COMMENT2, comment}, {SCE_CAML_COMMENT3, comment},
+        }},
+        {"cmake", {
+            {SCE_CMAKE_COMMENT, comment}, {SCE_CMAKE_STRINGDQ, string}, {SCE_CMAKE_STRINGLQ, string},
+            {SCE_CMAKE_STRINGRQ, string}, {SCE_CMAKE_COMMANDS, keyword}, {SCE_CMAKE_PARAMETERS, property},
+            {SCE_CMAKE_USERDEFINED, keyword}, {SCE_CMAKE_WHILEDEF, keyword}, {SCE_CMAKE_FOREACHDEF, keyword},
+            {SCE_CMAKE_IFDEFINEDEF, keyword}, {SCE_CMAKE_MACRODEF, keyword}, {SCE_CMAKE_STRINGVAR, string},
+            {SCE_CMAKE_NUMBER, number},
+        }},
+        {"coffeescript", {
+            {SCE_COFFEESCRIPT_COMMENT, comment}, {SCE_COFFEESCRIPT_COMMENTLINE, comment},
+            {SCE_COFFEESCRIPT_COMMENTDOC, comment}, {SCE_COFFEESCRIPT_NUMBER, number},
+            {SCE_COFFEESCRIPT_WORD, keyword}, {SCE_COFFEESCRIPT_STRING, string},
+            {SCE_COFFEESCRIPT_CHARACTER, string}, {SCE_COFFEESCRIPT_PREPROCESSOR, keyword},
+            {SCE_COFFEESCRIPT_OPERATOR, operatorRole}, {SCE_COFFEESCRIPT_STRINGEOL, error},
+            {SCE_COFFEESCRIPT_VERBATIM, string}, {SCE_COFFEESCRIPT_REGEX, string},
+            {SCE_COFFEESCRIPT_COMMENTLINEDOC, comment}, {SCE_COFFEESCRIPT_WORD2, keyword},
+            {SCE_COFFEESCRIPT_COMMENTDOCKEYWORD, comment}, {SCE_COFFEESCRIPT_COMMENTDOCKEYWORDERROR, error},
+            {SCE_COFFEESCRIPT_GLOBALCLASS, property}, {SCE_COFFEESCRIPT_STRINGRAW, string},
+            {SCE_COFFEESCRIPT_TRIPLEVERBATIM, string}, {SCE_COFFEESCRIPT_COMMENTBLOCK, comment},
+            {SCE_COFFEESCRIPT_VERBOSE_REGEX, string}, {SCE_COFFEESCRIPT_VERBOSE_REGEX_COMMENT, comment},
+            {SCE_COFFEESCRIPT_INSTANCEPROPERTY, property},
+        }},
+        {"conf", {
+            {SCE_CONF_COMMENT, comment}, {SCE_CONF_NUMBER, number}, {SCE_CONF_IDENTIFIER, property},
+            {SCE_CONF_PARAMETER, property}, {SCE_CONF_STRING, string}, {SCE_CONF_OPERATOR, operatorRole},
+            {SCE_CONF_IP, number}, {SCE_CONF_DIRECTIVE, keyword},
+        }},
+        {"css", {
+            {SCE_CSS_TAG, property}, {SCE_CSS_CLASS, property}, {SCE_CSS_PSEUDOCLASS, property},
+            {SCE_CSS_UNKNOWN_PSEUDOCLASS, property}, {SCE_CSS_OPERATOR, operatorRole},
+            {SCE_CSS_IDENTIFIER, property}, {SCE_CSS_UNKNOWN_IDENTIFIER, property}, {SCE_CSS_VALUE, string},
+            {SCE_CSS_COMMENT, comment}, {SCE_CSS_ID, property}, {SCE_CSS_IMPORTANT, keyword},
+            {SCE_CSS_DIRECTIVE, keyword}, {SCE_CSS_DOUBLESTRING, string}, {SCE_CSS_SINGLESTRING, string},
+            {SCE_CSS_IDENTIFIER2, property}, {SCE_CSS_ATTRIBUTE, property}, {SCE_CSS_IDENTIFIER3, property},
+            {SCE_CSS_PSEUDOELEMENT, property}, {SCE_CSS_EXTENDED_IDENTIFIER, property},
+            {SCE_CSS_EXTENDED_PSEUDOCLASS, property}, {SCE_CSS_EXTENDED_PSEUDOELEMENT, property},
+            {SCE_CSS_GROUP_RULE, keyword}, {SCE_CSS_VARIABLE, property},
+        }},
+        {"d", {
+            {SCE_D_COMMENT, comment}, {SCE_D_COMMENTLINE, comment}, {SCE_D_COMMENTDOC, comment},
+            {SCE_D_COMMENTNESTED, comment}, {SCE_D_NUMBER, number}, {SCE_D_WORD, keyword}, {SCE_D_WORD2, keyword},
+            {SCE_D_WORD3, keyword}, {SCE_D_TYPEDEF, keyword}, {SCE_D_STRING, string}, {SCE_D_STRINGEOL, error},
+            {SCE_D_CHARACTER, string}, {SCE_D_OPERATOR, operatorRole}, {SCE_D_COMMENTLINEDOC, comment},
+            {SCE_D_COMMENTDOCKEYWORD, comment}, {SCE_D_COMMENTDOCKEYWORDERROR, error}, {SCE_D_STRINGB, string},
+            {SCE_D_STRINGR, string}, {SCE_D_WORD5, keyword}, {SCE_D_WORD6, keyword}, {SCE_D_WORD7, keyword},
+        }},
+        {"diff", {
+            {SCE_DIFF_COMMENT, comment}, {SCE_DIFF_COMMAND, keyword}, {SCE_DIFF_HEADER, keyword},
+            {SCE_DIFF_POSITION, property}, {SCE_DIFF_DELETED, error}, {SCE_DIFF_ADDED, comment},
+            {SCE_DIFF_CHANGED, keyword}, {SCE_DIFF_PATCH_ADD, comment}, {SCE_DIFF_PATCH_DELETE, error},
+            {SCE_DIFF_REMOVED_PATCH_ADD, error}, {SCE_DIFF_REMOVED_PATCH_DELETE, error},
+        }},
+        {"erlang", {
+            {SCE_ERLANG_COMMENT, comment}, {SCE_ERLANG_NUMBER, number}, {SCE_ERLANG_KEYWORD, keyword},
+            {SCE_ERLANG_STRING, string}, {SCE_ERLANG_OPERATOR, operatorRole}, {SCE_ERLANG_ATOM, string},
+            {SCE_ERLANG_FUNCTION_NAME, keyword}, {SCE_ERLANG_CHARACTER, string}, {SCE_ERLANG_MACRO, keyword},
+            {SCE_ERLANG_RECORD, property}, {SCE_ERLANG_PREPROC, keyword}, {SCE_ERLANG_NODE_NAME, string},
+            {SCE_ERLANG_COMMENT_FUNCTION, comment}, {SCE_ERLANG_COMMENT_MODULE, comment},
+            {SCE_ERLANG_COMMENT_DOC, comment}, {SCE_ERLANG_COMMENT_DOC_MACRO, comment},
+            {SCE_ERLANG_ATOM_QUOTED, string}, {SCE_ERLANG_MACRO_QUOTED, string},
+            {SCE_ERLANG_RECORD_QUOTED, string}, {SCE_ERLANG_NODE_NAME_QUOTED, string}, {SCE_ERLANG_BIFS, keyword},
+            {SCE_ERLANG_MODULES, property}, {SCE_ERLANG_MODULES_ATT, property},
+        }},
+        {"f77", {
+            {SCE_F_COMMENT, comment}, {SCE_F_NUMBER, number}, {SCE_F_STRING1, string}, {SCE_F_STRING2, string},
+            {SCE_F_STRINGEOL, error}, {SCE_F_OPERATOR, operatorRole}, {SCE_F_WORD, keyword},
+            {SCE_F_WORD2, keyword}, {SCE_F_WORD3, keyword}, {SCE_F_PREPROCESSOR, keyword},
+            {SCE_F_OPERATOR2, operatorRole}, {SCE_F_LABEL, property},
+        }},
+        {"forth", {
+            {SCE_FORTH_COMMENT, comment}, {SCE_FORTH_COMMENT_ML, comment}, {SCE_FORTH_CONTROL, keyword},
+            {SCE_FORTH_KEYWORD, keyword}, {SCE_FORTH_DEFWORD, keyword}, {SCE_FORTH_PREWORD1, keyword},
+            {SCE_FORTH_PREWORD2, keyword}, {SCE_FORTH_NUMBER, number}, {SCE_FORTH_STRING, string},
+        }},
+        {"fortran", {
+            {SCE_F_COMMENT, comment}, {SCE_F_NUMBER, number}, {SCE_F_STRING1, string}, {SCE_F_STRING2, string},
+            {SCE_F_STRINGEOL, error}, {SCE_F_OPERATOR, operatorRole}, {SCE_F_WORD, keyword},
+            {SCE_F_WORD2, keyword}, {SCE_F_WORD3, keyword}, {SCE_F_PREPROCESSOR, keyword},
+            {SCE_F_OPERATOR2, operatorRole}, {SCE_F_LABEL, property},
+        }},
+        {"fsharp", {
+            {SCE_FSHARP_KEYWORD, keyword}, {SCE_FSHARP_KEYWORD2, keyword}, {SCE_FSHARP_KEYWORD3, keyword},
+            {SCE_FSHARP_KEYWORD4, keyword}, {SCE_FSHARP_KEYWORD5, keyword}, {SCE_FSHARP_COMMENT, comment},
+            {SCE_FSHARP_COMMENTLINE, comment}, {SCE_FSHARP_PREPROCESSOR, keyword},
+            {SCE_FSHARP_OPERATOR, operatorRole}, {SCE_FSHARP_NUMBER, number}, {SCE_FSHARP_CHARACTER, string},
+            {SCE_FSHARP_STRING, string}, {SCE_FSHARP_VERBATIM, string}, {SCE_FSHARP_QUOTATION, string},
+            {SCE_FSHARP_ATTRIBUTE, property},
+        }},
+        {"haskell", {
+            {SCE_HA_KEYWORD, keyword}, {SCE_HA_NUMBER, number}, {SCE_HA_STRING, string},
+            {SCE_HA_CHARACTER, string}, {SCE_HA_CLASS, property}, {SCE_HA_MODULE, property},
+            {SCE_HA_CAPITAL, property}, {SCE_HA_DATA, keyword}, {SCE_HA_IMPORT, keyword},
+            {SCE_HA_OPERATOR, operatorRole}, {SCE_HA_INSTANCE, keyword}, {SCE_HA_COMMENTLINE, comment},
+            {SCE_HA_COMMENTBLOCK, comment}, {SCE_HA_COMMENTBLOCK2, comment}, {SCE_HA_COMMENTBLOCK3, comment},
+            {SCE_HA_PRAGMA, keyword}, {SCE_HA_PREPROCESSOR, keyword}, {SCE_HA_STRINGEOL, error},
+            {SCE_HA_RESERVED_OPERATOR, operatorRole}, {SCE_HA_LITERATE_COMMENT, comment},
+            {SCE_HA_LITERATE_CODEDELIM, string},
+        }},
+        {"inno", {
+            {SCE_INNO_COMMENT, comment}, {SCE_INNO_KEYWORD, keyword}, {SCE_INNO_PARAMETER, property},
+            {SCE_INNO_SECTION, property}, {SCE_INNO_PREPROC, keyword}, {SCE_INNO_COMMENT_PASCAL, comment},
+            {SCE_INNO_KEYWORD_PASCAL, keyword}, {SCE_INNO_KEYWORD_USER, keyword},
+            {SCE_INNO_STRING_DOUBLE, string}, {SCE_INNO_STRING_SINGLE, string},
+        }},
+        {"json", {
+            {SCE_JSON_NUMBER, number}, {SCE_JSON_STRING, string}, {SCE_JSON_STRINGEOL, error},
+            {SCE_JSON_PROPERTYNAME, property}, {SCE_JSON_ESCAPESEQUENCE, string}, {SCE_JSON_LINECOMMENT, comment},
+            {SCE_JSON_BLOCKCOMMENT, comment}, {SCE_JSON_OPERATOR, operatorRole}, {SCE_JSON_URI, string},
+            {SCE_JSON_COMPACTIRI, string}, {SCE_JSON_KEYWORD, keyword}, {SCE_JSON_LDKEYWORD, keyword},
+            {SCE_JSON_ERROR, error},
+        }},
+        {"latex", {
+            {SCE_L_COMMAND, keyword}, {SCE_L_TAG, property}, {SCE_L_MATH, keyword}, {SCE_L_COMMENT, comment},
+            {SCE_L_TAG2, property}, {SCE_L_MATH2, keyword}, {SCE_L_COMMENT2, comment}, {SCE_L_VERBATIM, string},
+            {SCE_L_SHORTCMD, keyword}, {SCE_L_ERROR, error},
+        }},
+        {"lisp", {
+            {SCE_LISP_COMMENT, comment}, {SCE_LISP_NUMBER, number}, {SCE_LISP_KEYWORD, keyword},
+            {SCE_LISP_KEYWORD_KW, keyword}, {SCE_LISP_SYMBOL, operatorRole}, {SCE_LISP_STRING, string},
+            {SCE_LISP_STRINGEOL, error}, {SCE_LISP_OPERATOR, operatorRole}, {SCE_LISP_MULTI_COMMENT, comment},
+        }},
+        {"matlab", {
+            {SCE_MATLAB_COMMENT, comment}, {SCE_MATLAB_COMMAND, keyword}, {SCE_MATLAB_NUMBER, number},
+            {SCE_MATLAB_KEYWORD, keyword}, {SCE_MATLAB_STRING, string}, {SCE_MATLAB_OPERATOR, operatorRole},
+            {SCE_MATLAB_DOUBLEQUOTESTRING, string},
+        }},
+        {"mysql", {
+            {SCE_MYSQL_COMMENT, comment}, {SCE_MYSQL_COMMENTLINE, comment}, {SCE_MYSQL_NUMBER, number},
+            {SCE_MYSQL_MAJORKEYWORD, keyword}, {SCE_MYSQL_KEYWORD, keyword},
+            {SCE_MYSQL_PROCEDUREKEYWORD, keyword}, {SCE_MYSQL_STRING, string}, {SCE_MYSQL_SQSTRING, string},
+            {SCE_MYSQL_DQSTRING, string}, {SCE_MYSQL_OPERATOR, operatorRole}, {SCE_MYSQL_FUNCTION, keyword},
+            {SCE_MYSQL_QUOTEDIDENTIFIER, string}, {SCE_MYSQL_USER1, keyword}, {SCE_MYSQL_USER2, keyword},
+            {SCE_MYSQL_USER3, keyword}, {SCE_MYSQL_HIDDENCOMMAND, keyword},
+        }},
+        {"nsis", {
+            {SCE_NSIS_COMMENT, comment}, {SCE_NSIS_STRINGDQ, string}, {SCE_NSIS_STRINGLQ, string},
+            {SCE_NSIS_STRINGRQ, string}, {SCE_NSIS_FUNCTION, keyword}, {SCE_NSIS_LABEL, property},
+            {SCE_NSIS_USERDEFINED, keyword}, {SCE_NSIS_SECTIONDEF, property}, {SCE_NSIS_SUBSECTIONDEF, property},
+            {SCE_NSIS_IFDEFINEDEF, keyword}, {SCE_NSIS_MACRODEF, keyword}, {SCE_NSIS_STRINGVAR, string},
+            {SCE_NSIS_NUMBER, number}, {SCE_NSIS_SECTIONGROUP, property}, {SCE_NSIS_PAGEEX, keyword},
+            {SCE_NSIS_FUNCTIONDEF, keyword}, {SCE_NSIS_COMMENTBOX, comment},
+        }},
+        {"octave", {
+            {SCE_MATLAB_COMMENT, comment}, {SCE_MATLAB_COMMAND, keyword}, {SCE_MATLAB_NUMBER, number},
+            {SCE_MATLAB_KEYWORD, keyword}, {SCE_MATLAB_STRING, string}, {SCE_MATLAB_OPERATOR, operatorRole},
+            {SCE_MATLAB_DOUBLEQUOTESTRING, string},
+        }},
+        {"po", {
+            {SCE_PO_COMMENT, comment}, {SCE_PO_MSGID, property}, {SCE_PO_MSGID_TEXT, string},
+            {SCE_PO_MSGSTR, property}, {SCE_PO_MSGSTR_TEXT, string}, {SCE_PO_MSGCTXT, property},
+            {SCE_PO_MSGCTXT_TEXT, string}, {SCE_PO_FUZZY, keyword}, {SCE_PO_PROGRAMMER_COMMENT, comment},
+            {SCE_PO_MSGID_TEXT_EOL, error}, {SCE_PO_MSGSTR_TEXT_EOL, error}, {SCE_PO_MSGCTXT_TEXT_EOL, error},
+            {SCE_PO_ERROR, error},
+        }},
+        {"powershell", {
+            {SCE_POWERSHELL_COMMENT, comment}, {SCE_POWERSHELL_STRING, string},
+            {SCE_POWERSHELL_CHARACTER, string}, {SCE_POWERSHELL_NUMBER, number},
+            {SCE_POWERSHELL_OPERATOR, operatorRole}, {SCE_POWERSHELL_KEYWORD, keyword},
+            {SCE_POWERSHELL_CMDLET, keyword}, {SCE_POWERSHELL_ALIAS, keyword}, {SCE_POWERSHELL_FUNCTION, keyword},
+            {SCE_POWERSHELL_USER1, keyword}, {SCE_POWERSHELL_COMMENTSTREAM, comment},
+            {SCE_POWERSHELL_HERE_STRING, string}, {SCE_POWERSHELL_HERE_CHARACTER, string},
+            {SCE_POWERSHELL_COMMENTDOCKEYWORD, comment},
+        }},
+        {"props", {
+            {SCE_PROPS_COMMENT, comment}, {SCE_PROPS_SECTION, property}, {SCE_PROPS_ASSIGNMENT, operatorRole},
+            {SCE_PROPS_DEFVAL, string}, {SCE_PROPS_KEY, property},
+        }},
+        {"r", {
+            {SCE_R_COMMENT, comment}, {SCE_R_KWORD, keyword}, {SCE_R_BASEKWORD, keyword},
+            {SCE_R_OTHERKWORD, keyword}, {SCE_R_NUMBER, number}, {SCE_R_STRING, string}, {SCE_R_STRING2, string},
+            {SCE_R_OPERATOR, operatorRole}, {SCE_R_INFIX, operatorRole}, {SCE_R_INFIXEOL, error},
+            {SCE_R_BACKTICKS, string}, {SCE_R_RAWSTRING, string}, {SCE_R_RAWSTRING2, string},
+            {SCE_R_ESCAPESEQUENCE, string},
+        }},
+        {"raku", {
+            {SCE_RAKU_ERROR, error}, {SCE_RAKU_COMMENTLINE, comment}, {SCE_RAKU_COMMENTEMBED, comment},
+            {SCE_RAKU_POD, comment}, {SCE_RAKU_CHARACTER, string}, {SCE_RAKU_HEREDOC_Q, string},
+            {SCE_RAKU_HEREDOC_QQ, string}, {SCE_RAKU_STRING, string}, {SCE_RAKU_STRING_Q, string},
+            {SCE_RAKU_STRING_QQ, string}, {SCE_RAKU_STRING_Q_LANG, string}, {SCE_RAKU_STRING_VAR, string},
+            {SCE_RAKU_REGEX, string}, {SCE_RAKU_REGEX_VAR, string}, {SCE_RAKU_NUMBER, number},
+            {SCE_RAKU_PREPROCESSOR, keyword}, {SCE_RAKU_OPERATOR, operatorRole}, {SCE_RAKU_WORD, keyword},
+            {SCE_RAKU_FUNCTION, keyword}, {SCE_RAKU_TYPEDEF, keyword}, {SCE_RAKU_POSITIONAL, property},
+            {SCE_RAKU_CLASS, property},
+        }},
+        {"rebol", {
+            {SCE_REBOL_COMMENTLINE, comment}, {SCE_REBOL_COMMENTBLOCK, comment}, {SCE_REBOL_PREFACE, keyword},
+            {SCE_REBOL_OPERATOR, operatorRole}, {SCE_REBOL_CHARACTER, string}, {SCE_REBOL_QUOTEDSTRING, string},
+            {SCE_REBOL_BRACEDSTRING, string}, {SCE_REBOL_NUMBER, number}, {SCE_REBOL_PAIR, number},
+            {SCE_REBOL_TUPLE, number}, {SCE_REBOL_BINARY, number}, {SCE_REBOL_MONEY, number},
+            {SCE_REBOL_TAG, property}, {SCE_REBOL_FILE, string}, {SCE_REBOL_EMAIL, string},
+            {SCE_REBOL_URL, string}, {SCE_REBOL_DATE, number}, {SCE_REBOL_TIME, number},
+            {SCE_REBOL_WORD, keyword}, {SCE_REBOL_WORD2, keyword}, {SCE_REBOL_WORD3, keyword},
+            {SCE_REBOL_WORD4, keyword}, {SCE_REBOL_WORD5, keyword}, {SCE_REBOL_WORD6, keyword},
+            {SCE_REBOL_WORD7, keyword}, {SCE_REBOL_WORD8, keyword},
+        }},
+        {"registry", {
+            {SCE_REG_COMMENT, comment}, {SCE_REG_VALUENAME, property}, {SCE_REG_STRING, string},
+            {SCE_REG_HEXDIGIT, number}, {SCE_REG_VALUETYPE, keyword}, {SCE_REG_ADDEDKEY, property},
+            {SCE_REG_DELETEDKEY, property}, {SCE_REG_ESCAPED, string}, {SCE_REG_KEYPATH_GUID, property},
+            {SCE_REG_STRING_GUID, string}, {SCE_REG_PARAMETER, property}, {SCE_REG_OPERATOR, operatorRole},
+        }},
+        {"sas", {
+            {SCE_SAS_COMMENT, comment}, {SCE_SAS_COMMENTLINE, comment}, {SCE_SAS_COMMENTBLOCK, comment},
+            {SCE_SAS_NUMBER, number}, {SCE_SAS_OPERATOR, operatorRole}, {SCE_SAS_STRING, string},
+            {SCE_SAS_TYPE, keyword}, {SCE_SAS_WORD, keyword}, {SCE_SAS_GLOBAL_MACRO, keyword},
+            {SCE_SAS_MACRO, keyword}, {SCE_SAS_MACRO_KEYWORD, keyword}, {SCE_SAS_BLOCK_KEYWORD, keyword},
+            {SCE_SAS_MACRO_FUNCTION, keyword},
+        }},
+        {"smalltalk", {
+            {SCE_ST_STRING, string}, {SCE_ST_NUMBER, number}, {SCE_ST_COMMENT, comment},
+            {SCE_ST_SYMBOL, operatorRole}, {SCE_ST_BINARY, operatorRole}, {SCE_ST_BOOL, keyword},
+            {SCE_ST_SELF, keyword}, {SCE_ST_SUPER, keyword}, {SCE_ST_NIL, keyword}, {SCE_ST_RETURN, keyword},
+            {SCE_ST_SPECIAL, operatorRole}, {SCE_ST_KWSEND, keyword}, {SCE_ST_ASSIGN, operatorRole},
+            {SCE_ST_CHARACTER, string}, {SCE_ST_SPEC_SEL, keyword},
+        }},
+        {"sql", {
+            {SCE_SQL_COMMENT, comment}, {SCE_SQL_COMMENTLINE, comment}, {SCE_SQL_COMMENTDOC, comment},
+            {SCE_SQL_NUMBER, number}, {SCE_SQL_WORD, keyword}, {SCE_SQL_STRING, string},
+            {SCE_SQL_CHARACTER, string}, {SCE_SQL_OPERATOR, operatorRole}, {SCE_SQL_SQLPLUS_COMMENT, comment},
+            {SCE_SQL_COMMENTLINEDOC, comment}, {SCE_SQL_WORD2, keyword}, {SCE_SQL_COMMENTDOCKEYWORD, comment},
+            {SCE_SQL_COMMENTDOCKEYWORDERROR, error}, {SCE_SQL_USER1, keyword}, {SCE_SQL_USER2, keyword},
+            {SCE_SQL_USER3, keyword}, {SCE_SQL_USER4, keyword}, {SCE_SQL_QUOTEDIDENTIFIER, string},
+            {SCE_SQL_QOPERATOR, string},
+        }},
+        {"stata", {
+            {SCE_STATA_COMMENT, comment}, {SCE_STATA_COMMENTLINE, comment}, {SCE_STATA_COMMENTBLOCK, comment},
+            {SCE_STATA_NUMBER, number}, {SCE_STATA_OPERATOR, operatorRole}, {SCE_STATA_STRING, string},
+            {SCE_STATA_TYPE, keyword}, {SCE_STATA_WORD, keyword}, {SCE_STATA_GLOBAL_MACRO, keyword},
+            {SCE_STATA_MACRO, keyword},
+        }},
+        {"tads3", {
+            {SCE_T3_PREPROCESSOR, keyword}, {SCE_T3_BLOCK_COMMENT, comment}, {SCE_T3_LINE_COMMENT, comment},
+            {SCE_T3_OPERATOR, operatorRole}, {SCE_T3_KEYWORD, keyword}, {SCE_T3_NUMBER, number},
+            {SCE_T3_S_STRING, string}, {SCE_T3_D_STRING, string}, {SCE_T3_X_STRING, string},
+            {SCE_T3_LIB_DIRECTIVE, keyword}, {SCE_T3_HTML_TAG, property}, {SCE_T3_HTML_STRING, string},
+            {SCE_T3_USER1, keyword}, {SCE_T3_USER2, keyword}, {SCE_T3_USER3, keyword},
+            {SCE_T3_BRACE, operatorRole},
+        }},
+        {"tcl", {
+            {SCE_TCL_COMMENT, comment}, {SCE_TCL_COMMENTLINE, comment}, {SCE_TCL_NUMBER, number},
+            {SCE_TCL_WORD_IN_QUOTE, keyword}, {SCE_TCL_IN_QUOTE, string}, {SCE_TCL_OPERATOR, operatorRole},
+            {SCE_TCL_SUB_BRACE, operatorRole}, {SCE_TCL_WORD, keyword}, {SCE_TCL_WORD2, keyword},
+            {SCE_TCL_WORD3, keyword}, {SCE_TCL_WORD4, keyword}, {SCE_TCL_WORD5, keyword},
+            {SCE_TCL_WORD6, keyword}, {SCE_TCL_WORD7, keyword}, {SCE_TCL_WORD8, keyword},
+            {SCE_TCL_COMMENT_BOX, comment}, {SCE_TCL_BLOCK_COMMENT, comment},
+        }},
+        {"toml", {
+            {SCE_TOML_COMMENT, comment}, {SCE_TOML_IDENTIFIER, property}, {SCE_TOML_KEYWORD, keyword},
+            {SCE_TOML_NUMBER, number}, {SCE_TOML_TABLE, property}, {SCE_TOML_KEY, property},
+            {SCE_TOML_ERROR, error}, {SCE_TOML_OPERATOR, operatorRole}, {SCE_TOML_STRING_SQ, string},
+            {SCE_TOML_STRING_DQ, string}, {SCE_TOML_TRIPLE_STRING_SQ, string},
+            {SCE_TOML_TRIPLE_STRING_DQ, string}, {SCE_TOML_ESCAPECHAR, string}, {SCE_TOML_DATETIME, number},
+            {SCE_TOML_STRINGEOL, error},
+        }},
+        {"verilog", {
+            {SCE_V_COMMENT, comment}, {SCE_V_COMMENTLINE, comment}, {SCE_V_COMMENTLINEBANG, comment},
+            {SCE_V_NUMBER, number}, {SCE_V_WORD, keyword}, {SCE_V_STRING, string}, {SCE_V_WORD2, keyword},
+            {SCE_V_WORD3, keyword}, {SCE_V_PREPROCESSOR, keyword}, {SCE_V_OPERATOR, operatorRole},
+            {SCE_V_STRINGEOL, error}, {SCE_V_COMMENT_WORD, comment},
+        }},
+        {"vhdl", {
+            {SCE_VHDL_COMMENT, comment}, {SCE_VHDL_COMMENTLINEBANG, comment}, {SCE_VHDL_NUMBER, number},
+            {SCE_VHDL_STRING, string}, {SCE_VHDL_OPERATOR, operatorRole}, {SCE_VHDL_STRINGEOL, error},
+            {SCE_VHDL_KEYWORD, keyword}, {SCE_VHDL_STDOPERATOR, operatorRole}, {SCE_VHDL_ATTRIBUTE, property},
+            {SCE_VHDL_STDFUNCTION, keyword}, {SCE_VHDL_STDPACKAGE, keyword}, {SCE_VHDL_STDTYPE, keyword},
+            {SCE_VHDL_USERWORD, keyword}, {SCE_VHDL_BLOCK_COMMENT, comment},
+        }},
+        {"yaml", {
+            {SCE_YAML_COMMENT, comment}, {SCE_YAML_IDENTIFIER, property}, {SCE_YAML_KEYWORD, keyword},
+            {SCE_YAML_NUMBER, number}, {SCE_YAML_TEXT, string}, {SCE_YAML_ERROR, error},
+            {SCE_YAML_OPERATOR, operatorRole},
+        }},
+    };
+    for (const auto &entry : entries) {
+        if (entry.lexer == lexer) {
+            roles.assign(entry.roles.begin(), entry.roles.end());
+            return;
+        }
+    }
+}
