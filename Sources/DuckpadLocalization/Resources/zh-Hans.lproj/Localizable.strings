@@ -774,3 +774,6 @@
 "Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "请输入名称和内容。上限：200个片段，名称256字节，内容64KB。";
 
 "Could not save snippets. Try again." = "无法保存片段，请重试。";
+"Open Folder…" = "打开文件夹…";
+"Show Workspace" = "显示工作区";
+"Hide Workspace" = "隐藏工作区";

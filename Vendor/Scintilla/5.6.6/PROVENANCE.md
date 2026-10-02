@@ -276,3 +276,13 @@ SCI_SETINDENT/SCI_SETTABWIDTH configuration, the current EOL string, and a scope
 SCI_SETADDITIONALSELECTIONTYPING option for linked snippet fields. No upstream
 engine source is changed for these features. These façade files are maintained
 in-tree and are not regenerated from the upstream archive.
+
+### Workspace palette and subtle folding guides
+
+The Duckpad-owned bridge assigns STYLE_INDENTGUIDE an independent light/dark
+colour after every palette reset, including lexer changes. High-contrast modes
+use a stronger guide colour. The guide background remains the editor background.
+The editor and gutter share a neutral background matching the workspace chrome
+palette. Folder markers use arrows without connected vertical lines; their
+colour follows the line numbers, with stronger contrast in accessible palettes.
+Only bridge code changes; no upstream source or generated file is modified.

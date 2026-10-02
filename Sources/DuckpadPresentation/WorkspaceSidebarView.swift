@@ -4,56 +4,8 @@ import DuckpadApplication
 import DuckpadDomain
 
 @MainActor
-private final class WorkspaceOutlineView: NSOutlineView {
-    var onPressReturn: (() -> Void)?
-
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36 || event.keyCode == 76 {
-            onPressReturn?()
-            return
-        }
-        super.keyDown(with: event)
-    }
-}
-
-@MainActor
-final class WorkspaceSidebarNode: NSObject {
-    enum Kind { case root, directory, file }
-
-    let rootID: WorkspaceRootID
-    let relativePath: String
-    let name: String
-    let kind: Kind
-    let isAvailable: Bool
-    weak var parent: WorkspaceSidebarNode?
-    var children: [WorkspaceSidebarNode]?
-    var isLoading = false
-    var failure: WorkspaceBrowserFailure?
-
-    init(root: WorkspaceRoot) {
-        rootID = root.id
-        relativePath = ""
-        name = root.displayName
-        kind = .root
-        isAvailable = root.isAvailable
-        children = root.isAvailable ? nil : []
-    }
-
-    init(entry: WorkspaceBrowserEntry, parent: WorkspaceSidebarNode) {
-        rootID = entry.rootID
-        relativePath = entry.relativePath
-        name = entry.name
-        kind = entry.kind == .directory ? .directory : .file
-        isAvailable = true
-        self.parent = parent
-        children = kind == .directory ? nil : []
-    }
-
-    var isExpandable: Bool { isAvailable && kind != .file }
-}
-
-@MainActor
 final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
+    var onClose: (() -> Void)?
     var onAddRoot: (() -> Void)?
     var onRemoveRoot: ((WorkspaceRootID) -> Void)?
     var onOpenFile: ((WorkspaceBrowserEntry) -> Void)?
@@ -62,10 +14,12 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     var onDropFolder: ((URL) -> Void)?
     var onRevealPath: ((String) -> Void)?
 
-    private let header = NSVisualEffectView(frame: .zero)
+    private let header = NSView(frame: .zero)
     private let title = NSTextField(labelWithString: L10n.text("Workspace"))
-    private let addButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: L10n.text("Add Folder"))!, target: nil, action: nil)
-    private let removeButton = NSButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: L10n.text("Remove Folder"))!, target: nil, action: nil)
+    private let addButton = StatusBarButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: L10n.text("Add Folder"))!, target: nil, action: nil)
+    private let removeButton = StatusBarButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: L10n.text("Remove Folder"))!, target: nil, action: nil)
+    private let closeButton = StatusBarButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)!, target: nil, action: nil)
+    private var contentWidth: CGFloat = 0
     private let outline = WorkspaceOutlineView(frame: .zero)
     private let scroll = NSScrollView(frame: .zero)
     private let emptyLabel = NSTextField(wrappingLabelWithString: L10n.text("Add a folder to browse files here."))
@@ -83,17 +37,24 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         setAccessibilityIdentifier("duckpad.workspace.sidebar")
         registerForDraggedTypes([.fileURL])
 
-        header.material = .headerView
-        header.blendingMode = .withinWindow
-        header.state = .active
+        wantsLayer = true
+        header.wantsLayer = true
+        header.setAccessibilityIdentifier("duckpad.workspace.header")
         header.translatesAutoresizingMaskIntoConstraints = false
         title.font = .systemFont(ofSize: 12, weight: .semibold)
         title.translatesAutoresizingMaskIntoConstraints = false
-        for button in [addButton, removeButton] {
+        title.lineBreakMode = .byTruncatingTail
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for button in [addButton, removeButton, closeButton] {
             button.bezelStyle = .inline
             button.isBordered = false
+            button.imagePosition = .imageOnly
             button.imageScaling = .scaleProportionallyDown
+            button.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+            button.contentTintColor = .secondaryLabelColor
+            button.controlSize = .small
             button.translatesAutoresizingMaskIntoConstraints = false
+            button.heightAnchor.constraint(equalToConstant: 24).isActive = true
             header.addSubview(button)
         }
         addButton.target = self
@@ -101,6 +62,9 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         removeButton.target = self
         removeButton.action = #selector(removePressed)
         removeButton.isEnabled = false
+        closeButton.target = self
+        closeButton.action = #selector(closePressed)
+        closeButton.setAccessibilityIdentifier("duckpad.workspace.close")
         header.addSubview(title)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("workspace"))
@@ -108,7 +72,14 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         outline.addTableColumn(column)
         outline.outlineTableColumn = column
         outline.headerView = nil
-        outline.rowSizeStyle = .small
+        column.resizingMask = []
+        column.minWidth = 0
+        column.maxWidth = .greatestFiniteMagnitude
+        outline.columnAutoresizingStyle = .noColumnAutoresizing
+        outline.style = .plain
+        outline.rowHeight = 26
+        outline.intercellSpacing = NSSize(width: 0, height: 0)
+        outline.usesAutomaticRowHeights = false
         outline.indentationPerLevel = 14
         outline.dataSource = self
         outline.delegate = self
@@ -122,7 +93,12 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         outline.setAccessibilityIdentifier("duckpad.workspace.outline")
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
+        scroll.hasHorizontalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.borderType = .noBorder
+        scroll.usesPredominantAxisScrolling = false
+        scroll.drawsBackground = true
         scroll.translatesAutoresizingMaskIntoConstraints = false
         addSubview(header)
         addSubview(scroll)
@@ -137,15 +113,19 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
             header.topAnchor.constraint(equalTo: topAnchor),
-            header.heightAnchor.constraint(equalToConstant: 30),
+            header.heightAnchor.constraint(equalToConstant: 34),
             title.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 9),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: removeButton.leadingAnchor, constant: -6),
             title.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             removeButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: -2),
             removeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             removeButton.widthAnchor.constraint(equalToConstant: 24),
-            addButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -4),
+            addButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
             addButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             addButton.widthAnchor.constraint(equalToConstant: 24),
+            closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -4),
+            closeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 24),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
@@ -154,6 +134,17 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             emptyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
             emptyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+        refreshLocalization()
+        applyAppearance()
+    }
+
+    private func applyAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = WorkspaceColors.panel.cgColor
+            header.layer?.backgroundColor = WorkspaceColors.panel.cgColor
+            outline.backgroundColor = WorkspaceColors.panel
+            scroll.backgroundColor = WorkspaceColors.panel
+        }
     }
 
     @available(*, unavailable)
@@ -163,16 +154,22 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     func apply(roots: [WorkspaceRoot]) -> Bool {
         displayedFailure = nil
         let structureChanged = self.roots.count != roots.count || !zip(self.roots, roots).allSatisfy {
-            $0.id == $1.id && $0.canonicalPath == $1.canonicalPath && $0.isAvailable == $1.isAvailable
+            $0.id == $1.id && $0.displayName == $1.displayName && $0.canonicalPath == $1.canonicalPath && $0.isAvailable == $1.isAvailable
         }
+        let previousPaths = Dictionary(uniqueKeysWithValues: self.roots.map { ($0.id, $0.canonicalPath) })
         self.roots = roots
-        title.stringValue = L10n.text("Workspace")
-        title.toolTip = nil
-        emptyLabel.stringValue = L10n.text("Add a folder to browse files here.")
+        title.stringValue = localizationCatalog.text("Workspace")
+        title.toolTip = localizationCatalog.text("Workspace")
+        emptyLabel.stringValue = localizationCatalog.text("Add a folder to browse files here.")
         emptyLabel.isHidden = !roots.isEmpty
         if structureChanged {
-            rootNodes = roots.map(WorkspaceSidebarNode.init(root:))
-            outline.reloadData()
+            reloadPreservingNavigation {
+                rootNodes = roots.map { root in
+                    rootNodes.first { previousPaths[root.id] == root.canonicalPath && $0.rootID == root.id && $0.name == root.displayName
+                        && $0.isAvailable == root.isAvailable } ?? WorkspaceSidebarNode(root: root)
+                }
+                outline.reloadData()
+            }
         }
         updateRemoveButton()
         return structureChanged
@@ -186,8 +183,15 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         guard let parent = node(rootID: rootID, relativePath: relativeDirectory) else { return }
         parent.isLoading = false
         parent.failure = nil
-        parent.children = entries.map { WorkspaceSidebarNode(entry: $0, parent: parent) }
-        outline.reloadItem(parent, reloadChildren: true)
+        reloadPreservingNavigation {
+            let previous = Dictionary(uniqueKeysWithValues: (parent.children ?? []).map { ($0.relativePath, $0) })
+            parent.children = entries.map { entry in
+                if let node = previous[entry.relativePath], node.name == entry.name,
+                   (node.kind == .directory) == (entry.kind == .directory) { return node }
+                return WorkspaceSidebarNode(entry: entry, parent: parent)
+            }
+            outline.reloadItem(parent, reloadChildren: true)
+        }
     }
 
     func applyChildrenFailure(
@@ -200,9 +204,10 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         parent.isLoading = false
         parent.failure = failure
         parent.children = nil
-        title.stringValue = L10n.text("Workspace ⚠")
-        title.toolTip = PresentationErrorText.message(failure)
+        title.stringValue = localizationCatalog.text("Workspace ⚠")
+        title.toolTip = PresentationErrorText.message(failure, catalog: localizationCatalog)
         outline.reloadItem(parent, reloadChildren: true)
+        updateContentWidth()
     }
 
     func setInteractionsEnabled(_ enabled: Bool) {
@@ -214,10 +219,10 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
 
     func presentFailure(_ failure: WorkspaceBrowserFailure) {
         displayedFailure = failure
-        title.stringValue = L10n.text("Workspace ⚠")
-        title.toolTip = PresentationErrorText.message(failure)
+        title.stringValue = localizationCatalog.text("Workspace ⚠")
+        title.toolTip = PresentationErrorText.message(failure, catalog: localizationCatalog)
         if roots.isEmpty {
-            emptyLabel.stringValue = L10n.text("Workspace unavailable\n%1$@", L10n.argument(PresentationErrorText.message(failure)))
+            emptyLabel.stringValue = localizationCatalog.text("Workspace unavailable\n%1$@", arguments: [PresentationErrorText.message(failure, catalog: localizationCatalog)])
             emptyLabel.isHidden = false
         }
     }
@@ -232,6 +237,8 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
                   let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) else { continue }
             cell.toolTip = PresentationErrorText.message(failure, catalog: catalog)
         }
+        closeButton.setAccessibilityLabel(catalog.text("Hide Workspace"))
+        closeButton.toolTip = catalog.text("Hide Workspace") + " (⌘B)"
         setAccessibilityLabel(catalog.text("Workspace"))
         title.stringValue = catalog.text(displayedFailure == nil ? "Workspace" : "Workspace ⚠")
         addButton.setAccessibilityLabel(catalog.text("Add Folder"))
@@ -246,6 +253,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             title.toolTip = detail
             if roots.isEmpty { emptyLabel.stringValue = catalog.text("Workspace unavailable\n%1$@", arguments: [detail]) }
         } else {
+            title.toolTip = catalog.text("Workspace")
             emptyLabel.stringValue = catalog.text("Add a folder to browse files here.")
         }
     }
@@ -299,8 +307,10 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             let image = NSImageView(frame: .zero)
             image.imageScaling = .scaleProportionallyUpOrDown
             image.translatesAutoresizingMaskIntoConstraints = false
-            let label = NSTextField(labelWithString: "")
-            label.lineBreakMode = .byTruncatingMiddle
+            let label = WorkspaceFilenameField(labelWithString: "")
+            label.lineBreakMode = .byClipping
+            label.cell?.isScrollable = true
+            label.maximumNumberOfLines = 1
             label.translatesAutoresizingMaskIntoConstraints = false
             cell.imageView = image
             cell.textField = label
@@ -309,8 +319,8 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             NSLayoutConstraint.activate([
                 image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
                 image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                image.widthAnchor.constraint(equalToConstant: 21),
-                image.heightAnchor.constraint(equalToConstant: 21),
+                image.widthAnchor.constraint(equalToConstant: 16),
+                image.heightAnchor.constraint(equalToConstant: 16),
                 label.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 5),
                 label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
                 label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
@@ -325,15 +335,19 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             symbol = "exclamationmark.triangle"
         } else {
             switch node.kind {
-            case .root: symbol = node.isAvailable ? "folder.fill" : "folder.badge.questionmark"
+            case .root: symbol = node.isAvailable ? "folder" : "folder.badge.questionmark"
             case .directory: symbol = "folder"
             case .file: symbol = "doc.text"
             }
         }
-        cell.imageView?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        cell.toolTip = node.failure.map { PresentationErrorText.message($0, catalog: localizationCatalog) } ?? (node.kind == .root
+        cell.imageView?.image = node.kind == .file && node.failure == nil
+            ? MaterialFileIconTheme.shared.icon(for: node.name, appearance: effectiveAppearance).image
+            : NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        cell.imageView?.contentTintColor = node.kind == .file && node.failure == nil ? nil : .secondaryLabelColor
+        cell.toolTip = node.failure.map { PresentationErrorText.message($0, catalog: localizationCatalog) }
+        cell.imageView?.toolTip = node.failure == nil ? (node.kind == .root
             ? roots.first(where: { $0.id == node.rootID })?.canonicalPath
-            : node.relativePath)
+            : node.relativePath) : nil
         cell.setAccessibilityLabel(node.name)
         return cell
     }
@@ -348,11 +362,13 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
 
     func outlineViewItemDidExpand(_ notification: Notification) {
         guard let node = notification.userInfo?["NSObject"] as? WorkspaceSidebarNode else { return }
+        updateContentWidth()
         publishNavigation(rootID: node.rootID)
     }
 
     func outlineViewItemDidCollapse(_ notification: Notification) {
         guard let node = notification.userInfo?["NSObject"] as? WorkspaceSidebarNode else { return }
+        updateContentWidth()
         publishNavigation(rootID: node.rootID)
     }
 
@@ -376,18 +392,20 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         let row = outline.clickedRow
         contextNode = row >= 0 ? outline.item(atRow: row) as? WorkspaceSidebarNode : selectedNode
         guard let contextNode else { return }
-        let reveal = menu.addItem(withTitle: L10n.text("Reveal in Finder"), action: #selector(revealContextPath), keyEquivalent: "")
+        let reveal = menu.addItem(withTitle: localizationCatalog.text("Reveal in Finder"), action: #selector(revealContextPath), keyEquivalent: "")
         reveal.target = self
         reveal.isEnabled = contextNode.isAvailable
         menu.addItem(.separator())
         let remove = menu.addItem(
-            withTitle: L10n.text("Remove Folder from Workspace"),
+            withTitle: localizationCatalog.text("Remove Folder from Workspace"),
             action: #selector(removeContextRoot),
             keyEquivalent: ""
         )
         remove.target = self
         remove.isEnabled = interactionsEnabled
     }
+
+    @objc private func closePressed() { onClose?() }
 
     @objc private func addPressed() { if interactionsEnabled { onAddRoot?() } }
 
@@ -420,6 +438,75 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     @objc private func removeContextRoot() {
         guard interactionsEnabled, let rootID = contextNode?.rootID else { return }
         onRemoveRoot?(rootID)
+    }
+
+    override func layout() {
+        super.layout()
+        fitColumnWidth()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAppearance()
+        outline.enumerateAvailableRowViews { row, _ in row.needsDisplay = true }
+        for row in 0..<outline.numberOfRows {
+            guard let node = outline.item(atRow: row) as? WorkspaceSidebarNode,
+                  node.kind == .file,
+                  let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView else { continue }
+            cell.imageView?.image = MaterialFileIconTheme.shared.icon(for: node.name, appearance: effectiveAppearance).image
+        }
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        let identifier = NSUserInterfaceItemIdentifier("WorkspaceRow")
+        let row = outlineView.makeView(withIdentifier: identifier, owner: self) as? WorkspaceSidebarRowView ?? WorkspaceSidebarRowView()
+        row.identifier = identifier
+        return row
+    }
+
+    private func reloadPreservingNavigation(_ reload: () -> Void) {
+        let selected = selectedNode
+        let origin = scroll.contentView.bounds.origin
+        var expanded: [WorkspaceSidebarNode] = []
+        for root in rootNodes {
+            traverse(root) { if outline.isItemExpanded($0) { expanded.append($0) } }
+        }
+        let wasRestoring = isRestoringNavigation
+        isRestoringNavigation = true
+        defer { isRestoringNavigation = wasRestoring }
+        reload()
+        for node in expanded where self.node(rootID: node.rootID, relativePath: node.relativePath) === node {
+            outline.expandItem(node)
+        }
+        if let selected {
+            let row = outline.row(forItem: selected)
+            if row >= 0 { outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+        }
+        updateContentWidth()
+        scroll.contentView.scroll(to: scroll.contentView.constrainBoundsRect(
+            NSRect(origin: origin, size: scroll.contentView.bounds.size)).origin)
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    private func updateContentWidth() {
+        contentWidth = 0
+        for row in 0..<outline.numberOfRows {
+            guard let node = outline.item(atRow: row) as? WorkspaceSidebarNode else { continue }
+            let font = NSFont.systemFont(ofSize: 12, weight: node.kind == .root ? .semibold : .regular)
+            let textWidth = (node.name as NSString).size(withAttributes: [.font: font]).width
+            let indent = CGFloat(outline.level(forItem: node) + 1) * outline.indentationPerLevel
+            contentWidth = max(contentWidth, ceil(textWidth) + indent + 44)
+        }
+        fitColumnWidth()
+    }
+
+    private func fitColumnWidth() {
+        guard let column = outline.tableColumns.first else { return }
+        let width = max(contentWidth, scroll.contentSize.width)
+        if abs(column.width - width) > 0.5 { column.width = width }
+        if abs(outline.frame.width - width) > 0.5 {
+            outline.setFrameSize(NSSize(width: width, height: outline.frame.height))
+        }
     }
 
     private var selectedNode: WorkspaceSidebarNode? {

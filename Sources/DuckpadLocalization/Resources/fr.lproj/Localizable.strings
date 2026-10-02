@@ -774,3 +774,6 @@
 "Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "Saisissez un nom et un contenu. Limites : 200 extraits, 256 octets par nom et 64 Ko par extrait.";
 
 "Could not save snippets. Try again." = "Impossible d’enregistrer les extraits. Réessayez.";
+"Open Folder…" = "Ouvrir un dossier…";
+"Show Workspace" = "Afficher l’espace de travail";
+"Hide Workspace" = "Masquer l’espace de travail";

@@ -814,3 +814,6 @@
 "Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet.";
 
 "Could not save snippets. Try again." = "Could not save snippets. Try again.";
+"Open Folder…" = "Open Folder…";
+"Show Workspace" = "Show Workspace";
+"Hide Workspace" = "Hide Workspace";

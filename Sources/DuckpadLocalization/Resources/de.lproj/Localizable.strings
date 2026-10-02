@@ -774,3 +774,6 @@
 "Enter a name and snippet text. Limits: 200 snippets, 256 bytes per name and 64 KB per snippet." = "Name und Inhalt eingeben. Grenzen: 200 Einträge, 256 Byte pro Name und 64 KB pro Inhalt.";
 
 "Could not save snippets. Try again." = "Speichern fehlgeschlagen. Bitte erneut versuchen.";
+"Open Folder…" = "Ordner öffnen…";
+"Show Workspace" = "Arbeitsbereich anzeigen";
+"Hide Workspace" = "Arbeitsbereich ausblenden";

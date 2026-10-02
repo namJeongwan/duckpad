@@ -46,7 +46,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     let commandPalettePanel = CommandPalettePanel()
     let symbolOutlinePanel = SymbolOutlinePanel()
     private let workspaceSidebar = WorkspaceSidebarView(frame: .zero)
-    private let workspaceContentSplit = NSSplitView(frame: .zero)
+    private let workspaceContentSplit = WorkspaceSplitView(frame: .zero)
+    private var workspaceSidebarWidth: CGFloat = 220
     private var highlightedSearch: (buffer: EditorBufferDescriptor, query: SearchQuery)?
     private var searchHighlightBuffer: EditorBufferDescriptor?
     private var searchUseCase: SearchWorkspaceUseCase?
@@ -290,6 +291,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         searchPanel.onCancel = { [weak self] in self?.cancelSearch() }
         searchPanel.onClose = { [weak self] in self?.closeSearchPanel() }
+        commandBar.onToggleWorkspace = { [weak self] in self?.performToggleWorkspaceSidebar() }
+        workspaceSidebar.onClose = { [weak self] in self?.performToggleWorkspaceSidebar() }
         workspaceSidebar.onAddRoot = { [weak self] in self?.performAddWorkspaceFolder(nil) }
         workspaceSidebar.onRemoveRoot = { [weak self] id in self?.routeRemoveWorkspaceRoot(id) }
         workspaceSidebar.onOpenFile = { [weak self] entry in self?.routeOpenWorkspaceEntry(entry) }
@@ -1187,6 +1190,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         updateAccessory?.refreshLocalization(catalog: catalog)
         markdownPreviewPanel?.refreshLocalization(catalog: catalog)
         workspaceSidebar.refreshLocalization(catalog: catalog)
+        commandBar.setWorkspaceVisible(workspaceSidebar.superview != nil, catalog: catalog)
         searchPanel.refreshLocalization(catalog: catalog)
         liveFileBanner.refreshLocalization(catalog: catalog)
         persistenceBanner.refreshLocalization(catalog: catalog)
@@ -1428,7 +1432,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             let url = await panels.chooseWorkspaceFolderURL(attachedTo: windowReference)
             guard let self, let url, self.workspaceBrowserCommandsAreActionable,
                   !Task.isCancelled else { return }
-            _ = await workspaceBrowserUseCase.addRoot(url)
+            let state = await workspaceBrowserUseCase.addRoot(url)
+            if case .ready = state, self.workspaceSidebar.superview == nil { self.performToggleWorkspaceSidebar() }
         }
     }
 
@@ -1440,12 +1445,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performToggleWorkspaceSidebar(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
         if workspaceSidebar.superview != nil {
+            if workspaceSidebar.frame.width > 0 { workspaceSidebarWidth = workspaceSidebar.frame.width }
             workspaceContentSplit.removeArrangedSubview(workspaceSidebar)
             workspaceSidebar.removeFromSuperview()
         } else {
             workspaceContentSplit.insertArrangedSubview(workspaceSidebar, at: 0)
-            workspaceContentSplit.setPosition(220, ofDividerAt: 0)
+            workspaceContentSplit.setPosition(workspaceSidebarWidth, ofDividerAt: 0)
         }
+        commandBar.setWorkspaceVisible(workspaceSidebar.superview != nil)
+        activeEditor.focus()
     }
 
     @objc public func performSaveFile(_ sender: Any? = nil) {
@@ -3082,9 +3090,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceContentSplit.translatesAutoresizingMaskIntoConstraints = false
         workspaceContentSplit.addArrangedSubview(editorGroupWorkspace)
         workspaceSidebar.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
-        let preferredSidebarWidth = workspaceSidebar.widthAnchor.constraint(equalToConstant: 220)
-        preferredSidebarWidth.priority = .defaultHigh
-        preferredSidebarWidth.isActive = true
         workspaceSidebar.widthAnchor.constraint(lessThanOrEqualToConstant: 380).isActive = true
         root.view.addSubview(workspaceContentSplit)
         root.view.addSubview(statusBar)
@@ -4714,6 +4719,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func updateLanguageTheme() {
         guard let appearance = window?.effectiveAppearance else { return }
+        appearance.performAsCurrentDrawingAppearance {
+            window?.backgroundColor = WorkspaceColors.chrome
+        }
         let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let highContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         let palette: EditorThemePalette = highContrast

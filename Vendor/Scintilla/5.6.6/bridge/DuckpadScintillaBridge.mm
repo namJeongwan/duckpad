@@ -330,13 +330,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         }
         [_scintilla message:SCI_SETCHANGEHISTORY wParam:SC_CHANGE_HISTORY_ENABLED | SC_CHANGE_HISTORY_MARKERS];
         [_scintilla message:SCI_MARKERDEFINE wParam:DPBookmarkMarker lParam:SC_MARK_BOOKMARK];
-        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEROPEN lParam:SC_MARK_BOXMINUS];
-        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDER lParam:SC_MARK_BOXPLUS];
-        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERSUB lParam:SC_MARK_VLINE];
-        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERTAIL lParam:SC_MARK_LCORNER];
-        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEREND lParam:SC_MARK_BOXPLUSCONNECTED];
-        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEROPENMID lParam:SC_MARK_BOXMINUSCONNECTED];
-        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERMIDTAIL lParam:SC_MARK_TCORNER];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEROPEN lParam:SC_MARK_ARROWDOWN];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDER lParam:SC_MARK_ARROW];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERSUB lParam:SC_MARK_EMPTY];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERTAIL lParam:SC_MARK_EMPTY];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEREND lParam:SC_MARK_ARROW];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDEROPENMID lParam:SC_MARK_ARROWDOWN];
+        [_scintilla message:SCI_MARKERDEFINE wParam:SC_MARKNUM_FOLDERMIDTAIL lParam:SC_MARK_EMPTY];
         [_scintilla message:SCI_SETINDENTATIONGUIDES wParam:SC_IV_LOOKBOTH];
         _highlightCurrentLine = YES;
         [self applyPalette:DPScintillaPaletteLight];
@@ -1815,11 +1815,12 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const BOOL dark = palette == DPScintillaPaletteDark || palette == DPScintillaPaletteHighContrastDark;
     const BOOL highContrast = palette == DPScintillaPaletteHighContrastLight || palette == DPScintillaPaletteHighContrastDark;
     const int foreground = dark ? 0xE8E8E8 : 0x202020;
-    const int background = dark ? 0x1E1E1E : 0xFFFFFF;
-    const int gutterBackground = dark ? 0x262626 : 0xF6F6F6;
-    const int gutterForeground = dark ? 0x8A8A8A : 0x747474;
+    // BGR counterparts of WorkspaceColors.editor; the gutter shares this surface.
+    const int background = dark ? 0x332C28 : 0xFAFAFA;
+    const int gutterBackground = background;
+    const int gutterForeground = highContrast ? (dark ? 0xBEBEBE : 0x585858) : (dark ? 0x8E8278 : 0x96908A);
     [_scintilla message:SCI_SETEDGECOLOUR wParam:dark ? 0x505050 : 0xD0D0D0];
-    const int caretLineBackground = dark ? 0x292929 : 0xF8F8F8;
+    const int caretLineBackground = dark ? 0x463C36 : 0xEDEDEE;
     const int comment = dark ? 0x7FD47F : 0x397A32;
     const int number = dark ? 0xD7A0F8 : 0x7C2F8E;
     const int keyword = dark ? 0xFFB36B : 0xA23B00;
@@ -1835,6 +1836,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     // fonts that fail the width check retain the normal shaping path.
     [_scintilla message:SCI_STYLESETCHECKMONOSPACED wParam:STYLE_DEFAULT lParam:1];
     [_scintilla message:SCI_STYLECLEARALL];
+    // Scintilla uses BGR. Keep indent guides quieter than text, with a stronger accessible palette.
+    const int indentGuide = highContrast ? (dark ? 0x91837A : 0xACA098) : (dark ? 0x524944 : 0xE2DCD8);
+    [_scintilla message:SCI_STYLESETFORE wParam:STYLE_INDENTGUIDE lParam:indentGuide];
+    [_scintilla message:SCI_STYLESETBACK wParam:STYLE_INDENTGUIDE lParam:background];
     // Search decorations belong to the document, while their appearance belongs to each pane.
     [_scintilla message:SCI_INDICSETSTYLE wParam:DPSearchIndicator lParam:INDIC_ROUNDBOX];
     [_scintilla message:SCI_INDICSETFORE wParam:DPSearchIndicator lParam:dark ? 0x86CB63 : 0x70D880];
@@ -1867,8 +1872,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_STYLESETBACK wParam:STYLE_BRACEBAD lParam:dark ? 0x302060 : 0xD8D8FF];
     [_scintilla message:SCI_STYLESETBOLD wParam:STYLE_BRACEBAD lParam:1];
     for (int marker = SC_MARKNUM_FOLDEREND; marker <= SC_MARKNUM_FOLDEROPEN; marker += 1) {
-        [_scintilla message:SCI_MARKERSETFORE wParam:marker lParam:dark ? 0xE8E8E8 : 0x303030];
-        [_scintilla message:SCI_MARKERSETBACK wParam:marker lParam:dark ? 0x505050 : 0xD8D8D8];
+        [_scintilla message:SCI_MARKERSETFORE wParam:marker lParam:gutterForeground];
+        [_scintilla message:SCI_MARKERSETBACK wParam:marker lParam:gutterForeground];
     }
     [_scintilla message:SCI_MARKERSETFORE wParam:DPBookmarkMarker lParam:dark ? 0x263238 : 0xFFFFFF];
     [_scintilla message:SCI_MARKERSETBACK wParam:DPBookmarkMarker lParam:dark ? 0x4AA3FF : 0x006EDC];
