@@ -1328,6 +1328,35 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     #expect(workspace.snapshot().tabs.count == 1)
 }
 
+@Test(arguments: [false, true]) @MainActor
+func failedRecoveryRetryKeepsItsFailureVisible(final: Bool) async {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter()
+    let store = RoutingRecoveryStore()
+    let recovery = SessionRecoveryUseCase(workspace: workspace, editor: editor, store: store, debounce: .seconds(60))
+    let presenter = RecoveryErrorPresenterSpy()
+    let controller = DuckpadWindowController(
+        workspace: workspace,
+        previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
+        editorAdapter: editor, editorView: editor.scrollView, errorPresenter: presenter,
+        recoveryUseCase: recovery, automaticallyStarts: false
+    )
+    defer { controller.close() }
+    controller.start()
+    await controller.waitForStartup()
+    await store.setCommitError(.unavailable("disk still unavailable"))
+    #expect(await controller.flushRecovery(final: final) == false)
+    #expect(presenter.failures.count == 1)
+    presenter.retry()
+    for _ in 0..<200 where presenter.failures.count < 2 {
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(presenter.failures.count == 2)
+    #expect(workspace.snapshot().tabs.count == 1)
+    #expect(editor.textView.isEditable)
+}
+
 @Suite(.serialized)
 struct FileLifecycleTests {
     @MainActor

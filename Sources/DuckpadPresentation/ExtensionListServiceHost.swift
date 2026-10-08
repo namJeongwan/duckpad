@@ -8,6 +8,9 @@ import DuckpadLocalization
 @MainActor
 public final class ExtensionListServiceHost {
     private let nativeHost: NativePluginServiceHost
+    private let sizes: PluginPanelSizeStore
+    private var pendingCommand: ExtensionCommandID?
+    private weak var pendingSplit: NSSplitView?
     private let storage: any ExtensionServiceStorage
     private let pasteboard: NSPasteboard
     private var changeCount: Int
@@ -26,10 +29,11 @@ public final class ExtensionListServiceHost {
     private var displayedCommand: ExtensionCommandID?
     private var restoreEditorFocus: (() -> Void)?
     private var preparePaste: (() -> ((String) -> Bool)?)?
-    public init(storage: any ExtensionServiceStorage, pasteboard: NSPasteboard = .general, nativeStorageRoot: URL? = nil, nativePackageRoot: URL? = nil, nativeVerifier: any NativePluginInstallationVerifying, prepareNativePackage: (@Sendable ([String: Data]) async throws -> Void)? = nil) {
-        nativeHost = NativePluginServiceHost(storageRoot: nativeStorageRoot ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Duckpad/PluginData"), packageRoot: nativePackageRoot, verifier: nativeVerifier, preparePackage: prepareNativePackage)
+    public init(storage: any ExtensionServiceStorage, pasteboard: NSPasteboard = .general, nativeStorageRoot: URL? = nil, nativePackageRoot: URL? = nil, nativeVerifier: any NativePluginInstallationVerifying, prepareNativePackage: (@Sendable ([String: Data]) async throws -> Void)? = nil, panelDefaults: UserDefaults = .standard) {
+        sizes = PluginPanelSizeStore(defaults: panelDefaults)
+        nativeHost = NativePluginServiceHost(storageRoot: nativeStorageRoot ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Duckpad/PluginData"), packageRoot: nativePackageRoot, verifier: nativeVerifier, sizes: sizes, preparePackage: prepareNativePackage)
         self.storage = storage; self.pasteboard = pasteboard; self.changeCount = pasteboard.changeCount
-        panel.onClose = { [weak self] in self?.dismissPresentation() }
+        panel.onClose = { [weak self] width in self?.dismissPresentation(width: width) }
         panel.onEvent = { [weak self] event, payload, query in self?.send(event, payload: payload, query: query) }
     }
     deinit { timer?.cancel() }
@@ -89,25 +93,38 @@ public final class ExtensionListServiceHost {
     }
 
     public func show(_ command: ExtensionCommandID, in split: NSSplitView, onClose: @escaping () -> Void = {}, onError: ((Error) -> Void)? = nil, readDocument: @escaping () -> String? = { nil }, preparePaste: @escaping () -> ((String) -> Bool)?) {
+        if (displayedCommand == command && panel.superview === split)
+            || nativeHost.isShowing(command, in: split)
+            || (pendingCommand == command && pendingSplit === split) {
+            close(in: split)
+            return
+        }
         if nativeHost.contains(command) {
             panel.close()
             presentationGeneration &+= 1
             let generation = presentationGeneration
+            pendingCommand = command; pendingSplit = split
             Task { @MainActor [weak self, weak split] in
                 guard let self, let split else { return }
+                defer {
+                    if self.presentationGeneration == generation { self.pendingCommand = nil; self.pendingSplit = nil }
+                }
                 do {
                     try await self.nativeHost.prepareInstallation(command: command)
                     guard self.presentationGeneration == generation, split.window != nil else { return }
                     try self.nativeHost.show(command, in: split, onClose: onClose, readDocument: readDocument, preparePaste: preparePaste)
-                } catch { onError?(error) }
+                } catch {
+                    if self.presentationGeneration == generation { onError?(error) }
+                }
             }
             return
         }
         nativeHost.close()
         guard let session = sessions[command] else { return }
+        panel.close()
         presentationGeneration &+= 1
         displayedCommand = command; self.preparePaste = preparePaste; restoreEditorFocus = onClose
-        panel.show(title: session.identity.command.title, in: split)
+        panel.show(title: session.identity.command.title, in: split, preferredWidth: sizes.width(for: command))
         session.send("query", query: panel.query)
     }
 
@@ -118,9 +135,19 @@ public final class ExtensionListServiceHost {
     public func refreshLocalization(catalog: LocalizationCatalog) { panel.refreshLocalization(catalog: catalog); nativeHost.refreshLocalization(catalog.language.rawValue) }
 
     public func close(in split: NSSplitView) {
-        presentationGeneration &+= 1
+        if pendingSplit === split {
+            presentationGeneration &+= 1
+            pendingCommand = nil; pendingSplit = nil
+        }
         nativeHost.close(in: split)
         if panel.superview === split { panel.close() }
+    }
+
+    public func closePresentedPanel(in split: NSSplitView) -> Bool {
+        guard panel.superview === split || nativeHost.closePresentedPanel(in: split)
+                || pendingSplit === split else { return false }
+        close(in: split)
+        return true
     }
 
     /// Route the application's Close menu action before it reaches document tabs.
@@ -149,7 +176,9 @@ public final class ExtensionListServiceHost {
         }
     }
 
-    private func dismissPresentation() {
+    private func dismissPresentation(width: CGFloat? = nil) {
+        if let displayedCommand { sizes.save(width ?? panel.frame.width, for: displayedCommand) }
+        pendingCommand = nil; pendingSplit = nil
         let restore = restoreEditorFocus
         presentationGeneration &+= 1; displayedCommand = nil; preparePaste = nil; restoreEditorFocus = nil
         restore?()

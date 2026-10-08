@@ -8,6 +8,7 @@ import DuckpadLocalization
     private let storageRoot: URL
     private let cacheRoot: URL
     private let verifier: any NativePluginInstallationVerifying
+    private let sizes: PluginPanelSizeStore
     private var activationIDs: [ExtensionCommandID: UUID] = [:]
     private let preparePackage: (@Sendable ([String: Data]) async throws -> Void)?
     private var installations: [ExtensionCommandID: Task<Void, Error>] = [:]
@@ -21,9 +22,10 @@ import DuckpadLocalization
     private var editorMinimum: NSLayoutConstraint?
     private var restoreFocus: (() -> Void)?
     private var language = L10n.catalog.language.rawValue
-    init(storageRoot: URL, packageRoot: URL? = nil, verifier: any NativePluginInstallationVerifying, preparePackage: (@Sendable ([String: Data]) async throws -> Void)? = nil) {
+    init(storageRoot: URL, packageRoot: URL? = nil, verifier: any NativePluginInstallationVerifying, sizes: PluginPanelSizeStore = .init(defaults: .standard), preparePackage: (@Sendable ([String: Data]) async throws -> Void)? = nil) {
         self.storageRoot = storageRoot
         self.verifier = verifier
+        self.sizes = sizes
         cacheRoot = packageRoot ?? storageRoot.deletingLastPathComponent().appendingPathComponent("NativePluginModules")
         self.preparePackage = preparePackage
     }
@@ -91,6 +93,9 @@ import DuckpadLocalization
         if let task = installations[id] { try await task.value }
     }
     func contains(_ id: ExtensionCommandID) -> Bool { registrations[id] != nil }
+    func isShowing(_ id: ExtensionCommandID, in split: NSSplitView) -> Bool {
+        displayed == id && panel?.superview === split
+    }
     func show(_ id: ExtensionCommandID, in split: NSSplitView, onClose: @escaping () -> Void, readDocument: @escaping () -> String? = { nil }, preparePaste: @escaping () -> ((String) -> Bool)?) throws {
         if let failure = failures[id] { throw failure }
         guard let entry = instances[id] else { throw CocoaError(.executableNotLoadable) }
@@ -112,20 +117,28 @@ import DuckpadLocalization
             editorMinimum?.isActive = true
         }
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.frame = NSRect(x: 0, y: 0, width: 340, height: split.bounds.height)
+        let width = min(sizes.width(for: id), max(300, split.bounds.width - 120 - split.dividerThickness))
+        view.frame = NSRect(x: 0, y: 0, width: width, height: split.bounds.height)
         split.addArrangedSubview(view)
         split.setHoldingPriority(.init(260), forSubviewAt: split.arrangedSubviews.count - 1)
         split.adjustSubviews()
-        split.setPosition(max(0, split.bounds.width - 340 - split.dividerThickness), ofDividerAt: split.arrangedSubviews.count - 2)
+        split.layoutSubtreeIfNeeded()
+        split.setPosition(max(0, split.bounds.width - width - split.dividerThickness), ofDividerAt: split.arrangedSubviews.count - 2)
         window?.makeFirstResponder(view)
     }
     func close(in split: NSSplitView) { if panel?.superview === split { close() } }
+    func closePresentedPanel(in split: NSSplitView) -> Bool {
+        guard panel?.superview === split else { return false }
+        close()
+        return true
+    }
     func closeFocusedPanel(in split: NSSplitView) -> Bool {
         guard let panel, PluginPanelFocus.ownsKeyboardFocus(panel, in: split) else { return false }
         close()
         return true
     }
     func close() {
+        if let displayed, let panel { sizes.save(panel.frame.width, for: displayed) }
         if let displayed { instances[displayed]?.detach() }
         if let panel {
             (panel.superview as? NSSplitView)?.removeArrangedSubview(panel)

@@ -22,6 +22,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         return controller
     }()
     private var appUpdater: SparkleUpdateController?
+    private let auxiliaryCloseKeys = AuxiliaryCloseKeyRouter()
     private var availableUpdateVersion: String?
     private let terminationCoordinator = ApplicationTerminationCoordinator()
     private var environment: [String: String] = [:]
@@ -56,6 +57,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        auxiliaryCloseKeys.start()
         installDevelopmentAppIcon()
         environment = ProcessInfo.processInfo.environment
         if environment["DUCKPAD_TERMINAL_REGISTRATION_SMOKE"] == "1" {

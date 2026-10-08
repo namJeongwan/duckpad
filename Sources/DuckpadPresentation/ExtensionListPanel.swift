@@ -30,7 +30,7 @@ final class ExtensionListPanel: NSView, NSTableViewDataSource, NSTableViewDelega
     private weak var dockWindow: NSWindow?
     private var previousMinimumSize: NSSize?
     private var editorMinimumWidth: NSLayoutConstraint?
-    var onClose: (() -> Void)?
+    var onClose: ((CGFloat) -> Void)?
     var onEvent: ((String, String, String) -> Void)?
     var query: String { search.stringValue }
     init() {
@@ -109,7 +109,7 @@ final class ExtensionListPanel: NSView, NSTableViewDataSource, NSTableViewDelega
         status.textColor = .secondaryLabelColor; status.lineBreakMode = .byTruncatingTail
     }
     @available(*, unavailable) required init?(coder: NSCoder) { nil }
-    func show(title: String, in split: NSSplitView) {
+    func show(title: String, in split: NSSplitView, preferredWidth: CGFloat = 340) {
         titleKey = title
         refreshLocalization()
         search.placeholderString = localized("Search clipboard history")
@@ -135,12 +135,14 @@ final class ExtensionListPanel: NSView, NSTableViewDataSource, NSTableViewDelega
                 editorMinimumWidth = editor.widthAnchor.constraint(greaterThanOrEqualToConstant: 120)
                 editorMinimumWidth?.isActive = true
             }
-            frame = NSRect(x: 0, y: 0, width: 340, height: split.bounds.height)
+            let width = min(preferredWidth, 600, max(300, split.bounds.width - 120 - split.dividerThickness))
+            frame = NSRect(x: 0, y: 0, width: width, height: split.bounds.height)
             split.addArrangedSubview(self)
             // Keep its width on window resize, but allow divider drags (priority 490).
             split.setHoldingPriority(NSLayoutConstraint.Priority(260), forSubviewAt: split.arrangedSubviews.count - 1)
             split.adjustSubviews()
-            split.setPosition(max(0, split.bounds.width - 340 - split.dividerThickness), ofDividerAt: split.arrangedSubviews.count - 2)
+            split.layoutSubtreeIfNeeded()
+            split.setPosition(max(0, split.bounds.width - width - split.dividerThickness), ofDividerAt: split.arrangedSubviews.count - 2)
         }
         window?.makeFirstResponder(search)
     }
@@ -168,7 +170,10 @@ final class ExtensionListPanel: NSView, NSTableViewDataSource, NSTableViewDelega
         if let split = superview as? NSSplitView { split.removeArrangedSubview(self) }
         removeFromSuperview()
     }
-    @objc func close() { previewID = nil; preview.string = ""; detach(); onClose?() }
+    @objc func close() {
+        let width = frame.width
+        previewID = nil; preview.string = ""; detach(); onClose?(width)
+    }
     func render(_ rows: [ExtensionListRow], retentionDays: Int = 7, error: String?) {
         rendering = true
         defer { rendering = false }
