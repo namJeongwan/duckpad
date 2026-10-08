@@ -59,16 +59,12 @@ public final class SessionRecoveryUseCase {
             let result = await workspace.start()
             if case .saved = result { scheduleAutosave() }
             return result
-        } catch let error as SessionStoreError {
+        } catch let error {
             onFailure?(error)
             // A corrupt recovery root must not make the editor writable with an
             // unreviewed partial session. The normal workspace start remains a
             // deliberate fallback only when no recovery exists.
             return .failed(PersistenceFailure(operation: .load, cause: error))
-        } catch {
-            let failure = SessionStoreError.corrupt(String(describing: error))
-            onFailure?(failure)
-            return .failed(PersistenceFailure(operation: .load, cause: failure))
         }
     }
 
@@ -117,13 +113,13 @@ public final class SessionRecoveryUseCase {
         defer { editor.setInputEnabled(workspace.snapshot().startup == .ready) }
         while true {
             let serial = changeSerial
-            let outcome = await commit()
+            let outcome = await commit(verifyingDurability: true)
             guard case .saved = outcome else { return outcome }
             if serial == changeSerial { return outcome }
         }
     }
 
-    private func commit(session candidate: ScratchSession? = nil) async -> RecoveryOutcome {
+    private func commit(session candidate: ScratchSession? = nil, verifyingDurability: Bool = false) async -> RecoveryOutcome {
         await acquireRecoveryOperation()
         defer { releaseRecoveryOperation() }
         // Ordinary flushes must take metadata after admission: an older write
@@ -135,14 +131,24 @@ public final class SessionRecoveryUseCase {
         do {
             let captures = try capture(session: session)
             let views = captures.mapValues(\.viewState)
-            if let durableState, durableState.serial == capturedSerial,
-               durableState.session == session, durableState.views == views {
-                return .saved(generation)
-            }
+            let isUnchanged = durableState.map {
+                $0.serial == capturedSerial && $0.session == session && $0.views == views
+            } ?? false
+            if isUnchanged && !verifyingDurability { return .saved(generation) }
             let buffers = try await Task.detached(priority: .utility) {
                 try captures.mapValues { try $0.materializedSnapshot() }
             }.value
             archive = RecoveryArchive(session: session, buffers: buffers)
+            if isUnchanged {
+                // Another instance may have advanced the store and pruned our
+                // archive since its last successful write. Check before quitting.
+                if let stored = try await store.loadLatest() {
+                    try validate(stored.archive)
+                    if stored.generation == generation, stored.archive == archive { return .saved(generation) }
+                    generation = max(generation, stored.generation)
+                }
+                self.durableState = nil
+            }
         }
         catch let error as SessionStoreError {
             onFailure?(error)
@@ -152,22 +158,9 @@ public final class SessionRecoveryUseCase {
             onFailure?(failure)
             return .failed(failure)
         }
-        guard generation.rawValue < UInt64.max else {
-            let failure = SessionStoreError.corrupt("recovery generation exhausted")
-            onFailure?(failure)
-            return .failed(failure)
-        }
-        let next = PersistenceGeneration(rawValue: generation.rawValue + 1)
         do {
-            let result = try await store.commit(archive, generation: next)
-            switch result {
-            case .committed:
-                generation = next
-                durableState = (capturedSerial, session, archive.buffers.mapValues(\.viewState))
-            case .superseded(let durable):
-                generation = max(generation, durable)
-                durableState = nil
-            }
+            generation = try await publish(archive)
+            durableState = (capturedSerial, session, archive.buffers.mapValues(\.viewState))
             for snapshot in archive.buffers.values {
                 editor.acknowledgeRecoverySnapshot(snapshot)
             }
@@ -178,6 +171,34 @@ public final class SessionRecoveryUseCase {
             if changeSerial != capturedSerial { scheduleAutosave() }
             return .failed(error)
         }
+    }
+
+    private func publish(_ archive: RecoveryArchive) async throws(SessionStoreError) -> PersistenceGeneration {
+        for attempt in 0..<2 {
+            guard generation.rawValue < UInt64.max else {
+                throw .corrupt("recovery generation exhausted")
+            }
+            let next = PersistenceGeneration(rawValue: generation.rawValue + 1)
+            do throws(SessionStoreError) {
+                switch try await store.commit(archive, generation: next) {
+                case .committed:
+                    return next
+                case .superseded(let durable):
+                    guard durable >= next else { throw SessionStoreError.corrupt("invalid recovery generation") }
+                    generation = durable
+                    durableState = nil
+                }
+            } catch let error {
+                // A different writer can publish our next generation first.
+                // Rebase only this collision, never a genuine validation failure.
+                guard attempt == 0, error == .corrupt("recovery generation collision"),
+                      let latest = try? await store.loadLatest(), latest.generation >= next else { throw error }
+                try validate(latest.archive)
+                generation = latest.generation
+                durableState = nil
+            }
+        }
+        throw .unavailable("recovery store changed while saving; retry")
     }
 
     public func waitForPendingAutosave() async {
@@ -261,7 +282,7 @@ public final class SessionRecoveryUseCase {
         }
     }
 
-    private func validate(_ archive: RecoveryArchive) throws {
+    private func validate(_ archive: RecoveryArchive) throws(SessionStoreError) {
         guard Set(archive.buffers.keys) == Set(archive.session.buffers.keys) else {
             throw SessionStoreError.corrupt("recovery buffer set mismatch")
         }

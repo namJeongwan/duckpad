@@ -359,7 +359,10 @@ func signedNativeClipboardInstallsDocksAndStopsWhenDisabled() async throws {
         transport: PresentationExtensionTransport(), workspace: workspace, editor: editor, allowsUserExtensions: true)
     let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: NSView(), extensionUseCase: service, automaticallyStarts: false)
     let nativeStore = ManagedNativePackageStore(root: root.appendingPathComponent("NativePluginModules"))
-    let host = ExtensionListServiceHost(storage: LocalExtensionServiceStorage(root: root.appendingPathComponent("PluginData")), nativeStorageRoot: root.appendingPathComponent("PluginData"), nativeVerifier: LocalNativePluginInstallationVerifier(), prepareNativePackage: { _ = try await nativeStore.install(files: $0) })
+    let defaultsName = "duckpad-native-panel-test-" + UUID().uuidString
+    let defaults = try #require(UserDefaults(suiteName: defaultsName))
+    defer { defaults.removePersistentDomain(forName: defaultsName) }
+    let host = ExtensionListServiceHost(storage: LocalExtensionServiceStorage(root: root.appendingPathComponent("PluginData")), nativeStorageRoot: root.appendingPathComponent("PluginData"), nativeVerifier: LocalNativePluginInstallationVerifier(), prepareNativePackage: { _ = try await nativeStore.install(files: $0) }, panelDefaults: defaults)
     controller.configureExtensionServices(host)
     defer { controller.close() }
     controller.start(); await controller.waitForStartup()
@@ -390,6 +393,8 @@ func signedNativeClipboardInstallsDocksAndStopsWhenDisabled() async throws {
     let panel = try #require(descendants(content).first { $0.accessibilityIdentifier() == "duckpad.plugin.list.sidebar" })
     #expect(String(reflecting: type(of: panel)).contains("DuckpadClipboardNative"))
     #expect(panel.superview is NSSplitView)
+    content.layoutSubtreeIfNeeded()
+    #expect(abs(panel.frame.width - 340) < 2)
     let window = try #require(controller.window)
     let tabIDs = workspace.snapshot().tabs.map(\.id)
     let closeKey = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
@@ -422,6 +427,39 @@ func signedNativeClipboardInstallsDocksAndStopsWhenDisabled() async throws {
     while panel.superview == nil, ContinuousClock.now < reopenDeadline { await Task.yield() }
     #expect(panel.superview is NSSplitView)
     // Copying or running native data through the WASM transport is never allowed.
+    let dock = try #require(panel.superview as? NSSplitView)
+    dock.setPosition(dock.bounds.width - 480 - dock.dividerThickness, ofDividerAt: dock.arrangedSubviews.count - 2)
+    content.layoutSubtreeIfNeeded()
+    #expect(abs(panel.frame.width - 480) < 2)
+    controller.performExtensionCommand(item)
+    #expect(panel.superview == nil) // Same command toggles the native UI off.
+    controller.performExtensionCommand(item)
+    let resizeDeadline = ContinuousClock.now + .seconds(2)
+    while panel.superview == nil, ContinuousClock.now < resizeDeadline { await Task.yield() }
+    content.layoutSubtreeIfNeeded()
+    #expect(abs(panel.frame.width - 480) < 2)
+    controller.performExtensionCommand(item) // Close the visible panel.
+    controller.performExtensionCommand(item) // Queue an open.
+    controller.performExtensionCommand(item) // Cancel before preparation completes.
+    for _ in 0..<10 { await Task.yield() }
+    #expect(panel.superview == nil)
+    controller.performExtensionCommand(item)
+    let transferDeadline = ContinuousClock.now + .seconds(2)
+    while panel.superview == nil, ContinuousClock.now < transferDeadline { await Task.yield() }
+    #expect(panel.superview === dock)
+    let otherWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 650), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+    otherWindow.isReleasedWhenClosed = false
+    let otherSplit = NSSplitView(frame: otherWindow.contentLayoutRect)
+    otherSplit.isVertical = true; otherSplit.addArrangedSubview(NSView(frame: otherSplit.bounds))
+    otherWindow.contentView = otherSplit
+    defer { host.close(in: otherSplit); otherWindow.close() }
+    host.show(nativeRegistration.command.id, in: otherSplit) { nil }
+    #expect(host.closePresentedPanel(in: dock))
+    let otherDeadline = ContinuousClock.now + .seconds(2)
+    while panel.superview !== otherSplit, ContinuousClock.now < otherDeadline { await Task.yield() }
+    #expect(panel.superview === otherSplit) // Closing A must not cancel B's pending open.
+    otherSplit.layoutSubtreeIfNeeded()
+    #expect(abs(panel.frame.width - 480) < 2)
     await #expect(throws: ExtensionFailure.self) { try await service.invokeService(package.manifest.contributes.commands[0].id, input: Data()) }
     try await service.setEnabled(package.manifest.id, enabled: false)
     #expect(panel.superview == nil)

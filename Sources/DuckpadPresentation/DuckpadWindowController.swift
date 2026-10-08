@@ -973,6 +973,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     @objc public func performCloseActiveTab(_ sender: Any? = nil) {
+        if AuxiliaryCloseKeyRouter.dismissModal(attachedTo: window) { return }
         if extensionServiceHost?.closeFocusedPanel(in: workspaceContentSplit) == true { return }
         if isMarkdownPreviewVisible {
             performCloseMarkdownPreview()
@@ -980,6 +981,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         guard let id = workspace.snapshot().tabs.first(where: \.isActive)?.id else { return }
         performClose(id)
+    }
+
+    func closeAuxiliaryPanel() -> Bool {
+        if extensionServiceHost?.closePresentedPanel(in: workspaceContentSplit) == true { return true }
+        guard isMarkdownPreviewVisible else { return false }
+        performCloseMarkdownPreview()
+        return true
     }
 
     @objc public func performCloseAllTabs(_ sender: Any? = nil) { performActiveCloseScope(.all) }
@@ -2774,10 +2782,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return true
         case .failed(let error):
             let failure = PersistenceFailure(operation: .save, cause: error)
-            errorPresenter.present(failure: failure) { [weak recoveryUseCase] in
+            errorPresenter.present(failure: failure) { [weak self] in
                 Task {
-                    if final { _ = await recoveryUseCase?.flushForTermination() }
-                    else { _ = await recoveryUseCase?.flush() }
+                    _ = await self?.flushRecovery(final: final)
                 }
             }
             return false

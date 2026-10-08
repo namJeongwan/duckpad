@@ -21,11 +21,12 @@ private actor ListStorageFake: ExtensionServiceStorage {
     var events: [String] = []
     var items = [("one", "hello")]
     var retentionDays: UInt32 = 7
+    var nativeCommands: [ExtensionServiceRegistration] = []
     let registration = ExtensionServiceRegistration(
         command: .init(id: .init(rawValue: "com.test.history.show"), title: "Clipboard History", operation: 1, inputScope: .service),
         extensionID: .init(rawValue: "com.test.history"), publisherFingerprint: String(repeating: "a", count: 64),
         packageDigest: String(repeating: "b", count: 64), capabilities: [.clipboardRead, .clipboardWrite, .pluginStorage, .uiList])
-    func serviceCommands() -> [ExtensionServiceRegistration] { enabled ? [registration] : [] }
+    func serviceCommands() -> [ExtensionServiceRegistration] { enabled ? [registration] + nativeCommands : [] }
     func validateServiceAccess(_ commandID: ExtensionCommandID, expectedDigest: String) async throws {
         if !enabled { throw ExtensionFailure.cancelled }
     }
@@ -75,6 +76,86 @@ private actor ListStorageFake: ExtensionServiceStorage {
         for _ in 0..<200 { if predicate() { return }; try? await Task.sleep(for: .milliseconds(10)) }
         Issue.record("List service did not reach expected state")
     }
+    @Test @MainActor func repeatedPluginCommandClosesAndReopeningRestoresResizedWidth() throws {
+        _ = NSApplication.shared
+        let clipboard = NSPasteboard.withUniqueName()
+        let suite = "duckpad-panel-width-test-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard, nativeVerifier: LocalNativePluginInstallationVerifier(), panelDefaults: defaults)
+        let invoker = ListInvokerFake(); host.synchronize(invoker)
+        let (window, split) = dock()
+        defer { host.close(in: split); host.unregister(invoker); window.close(); clipboard.clearContents() }
+        let command = invoker.registration.command.id
+        host.show(command, in: split) { nil }
+        split.setPosition(split.bounds.width - 480 - split.dividerThickness, ofDividerAt: 0)
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(abs(host.panel.frame.width - 480) < 2)
+        host.show(command, in: split) { nil }
+        #expect(host.panel.superview == nil)
+        host.show(command, in: split) { nil }
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(host.panel.superview === split)
+        #expect(abs(host.panel.frame.width - 480) < 2)
+        host.panel.close()
+        host.show(command, in: split) { nil }
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(abs(host.panel.frame.width - 480) < 2)
+        host.panel.close()
+        let nextHost = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard, nativeVerifier: LocalNativePluginInstallationVerifier(), panelDefaults: defaults)
+        nextHost.synchronize(invoker)
+        nextHost.show(command, in: split) { nil }
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(abs(nextHost.panel.frame.width - 480) < 2)
+        nextHost.close(in: split); nextHost.unregister(invoker)
+    }
+
+    @Test @MainActor func switchingPendingNativeToListDoesNotSwallowTheNextNativeCommand() async throws {
+        _ = NSApplication.shared
+        let clipboard = NSPasteboard.withUniqueName()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard, nativePackageRoot: root, nativeVerifier: LocalNativePluginInstallationVerifier())
+        let invoker = ListInvokerFake()
+        let native = ExtensionServiceRegistration(command: .init(id: .init(rawValue: "com.test.native.show"), title: "Test", operation: 1, inputScope: .service), extensionID: .init(rawValue: "com.test.native"), publisherFingerprint: String(repeating: "a", count: 64), packageDigest: String(repeating: "b", count: 64), capabilities: [.nativeCode], nativeFiles: ["module.dylib": Data()])
+        invoker.nativeCommands = [native]; host.synchronize(invoker)
+        let (window, split) = dock()
+        defer { host.close(in: split); host.unregister(invoker); window.close(); clipboard.clearContents() }
+        host.show(native.command.id, in: split, onError: { _ in Issue.record("Superseded native request reported an error") }) { nil }
+        host.show(invoker.registration.command.id, in: split) { nil }
+        #expect(host.panel.superview === split)
+        var errors = 0
+        host.show(native.command.id, in: split, onError: { _ in errors += 1 }) { nil }
+        await wait { errors == 1 }
+        #expect(host.panel.superview == nil)
+    }
+
+    @Test @MainActor func closeActionDismissesSheetBeforePluginOrDocument() async throws {
+        _ = NSApplication.shared
+        let clipboard = NSPasteboard.withUniqueName()
+        let host = ExtensionListServiceHost(storage: ListStorageFake(), pasteboard: clipboard, nativeVerifier: LocalNativePluginInstallationVerifier())
+        let invoker = ListInvokerFake(); host.synchronize(invoker)
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
+        controller.configureExtensionServices(host)
+        controller.start(); await controller.waitForStartup()
+        let window = try #require(controller.window)
+        let split = try #require(window.contentView?.subviews.compactMap { $0 as? NSSplitView }.first)
+        let sheet = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 250, height: 180), styleMask: [.titled], backing: .buffered, defer: false)
+        sheet.isReleasedWhenClosed = false
+        defer {
+            if sheet.sheetParent != nil { window.endSheet(sheet, returnCode: .cancel) }
+            sheet.orderOut(nil); host.unregister(invoker); controller.close(); clipboard.clearContents()
+        }
+        host.show(invoker.registration.command.id, in: split) { nil }
+        window.beginSheet(sheet, completionHandler: nil)
+        let before = workspace.snapshot().tabs
+        controller.performCloseActiveTab()
+        await Task.yield()
+        #expect(sheet.sheetParent == nil)
+        #expect(host.panel.superview === split)
+        #expect(workspace.snapshot().tabs == before)
+    }
+
     @Test @MainActor func closeMenuDismissesFocusedPluginButKeepsEditorCloseBehavior() async throws {
         _ = NSApplication.shared
         let clipboard = NSPasteboard.withUniqueName()
@@ -152,6 +233,7 @@ private actor ListStorageFake: ExtensionServiceStorage {
         invoker.blockSelection = true
         host.panel.onEvent?("select", "one", "")
         await wait { invoker.selectedStarted }
+        host.show(invoker.registration.command.id, in: split) { { secondPaste = $0; return true } }
         host.show(invoker.registration.command.id, in: split) { { secondPaste = $0; return true } }
         invoker.blockSelection = false
         await wait { invoker.events.filter { $0 == "query" }.count == 2 }
