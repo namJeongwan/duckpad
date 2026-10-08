@@ -134,6 +134,7 @@ struct LanguageHighlightingTests {
     }
 
     private static let samples: [String: String] = [
+        "plantuml": "@startuml\nactor \"고객\" as Customer\nCustomer -> Service: hello\nskinparam NoteBackgroundColor #FFF7DC\n@enduml\n",
         "text": "plain text 한글🦆",
         "csv": "name,count\nDuck,42\n",
         "c": "int n = 42; const char *s = \"한글\"; // comment\n",

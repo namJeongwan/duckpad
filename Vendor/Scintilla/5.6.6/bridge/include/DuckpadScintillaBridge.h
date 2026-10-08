@@ -234,6 +234,10 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
            braceMatching:(BOOL)braceMatching
         maximumStyleBytes:(NSUInteger)maximumStyleBytes;
 - (NSData *)contentPrefixUTF8WithMaximumLength:(NSUInteger)maximumLength;
+// Hexadecimal color previews are decorations; source bytes and styles are unchanged.
+@property(nonatomic, readonly) NSArray<NSValue *> *colorPreviewRanges;
+- (void)configureColorPreviewWithChangeLabel:(NSString *)changeLabel applyLabel:(NSString *)applyLabel;
+- (BOOL)replaceColorInUTF8Range:(NSRange)range withColor:(NSColor *)color expectedRevision:(uint64_t)revision;
 - (void)configureIndentationSize:(NSUInteger)size tabWidth:(NSUInteger)width;
 - (void)configureIndentationWithWidth:(NSUInteger)width useTabs:(BOOL)useTabs;
 - (void)configureGuidesWithIndentation:(BOOL)indentation virtualSpace:(BOOL)virtualSpace edgeVisible:(BOOL)edgeVisible edgeColumn:(NSInteger)edgeColumn;

@@ -167,7 +167,7 @@ public struct ExtensionRegistryState: Equatable, Sendable {
 @MainActor
 public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
     public var servicePolicyGeneration: UInt64 { policyGeneration }
-    public nonisolated static let apiVersion = SemanticVersion(major: 1, minor: 3, patch: 0)
+    public nonisolated static let apiVersion = SemanticVersion(major: 1, minor: 4, patch: 0)
 
     private let loader: any ExtensionPackageLoaderPort
     private let grants: any ExtensionGrantStorePort

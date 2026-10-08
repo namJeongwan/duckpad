@@ -91,10 +91,11 @@ import DuckpadLocalization
         if let task = installations[id] { try await task.value }
     }
     func contains(_ id: ExtensionCommandID) -> Bool { registrations[id] != nil }
-    func show(_ id: ExtensionCommandID, in split: NSSplitView, onClose: @escaping () -> Void, preparePaste: @escaping () -> ((String) -> Bool)?) throws {
+    func show(_ id: ExtensionCommandID, in split: NSSplitView, onClose: @escaping () -> Void, readDocument: @escaping () -> String? = { nil }, preparePaste: @escaping () -> ((String) -> Bool)?) throws {
         if let failure = failures[id] { throw failure }
         guard let entry = instances[id] else { throw CocoaError(.executableNotLoadable) }
         close()
+        entry.readDocument = readDocument
         let view = try entry.makeView()
         displayed = id; panel = view; window = split.window; restoreFocus = onClose
         entry.preparePaste = preparePaste; entry.onClose = { [weak self] in self?.close() }

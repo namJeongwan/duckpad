@@ -51,6 +51,11 @@ import Testing
     ).languageID.rawValue == "python")
     #expect(detector.detect(filename: "view.xml", contentPrefix: Data("<?xml version=\"1.0\"?><svg/>".utf8)).languageID.rawValue == "xml")
 
+    for name in ["diagram.puml", "diagram.plantuml", "diagram.pu", "diagram.wsd"] {
+        #expect(detector.detect(filename: name, contentPrefix: Data()).languageID.rawValue == "plantuml")
+    }
+    #expect(detector.detect(filename: "diagram", contentPrefix: Data("@startuml\n@enduml".utf8)).languageID.rawValue == "plantuml")
+
     let objc = detector.detect(filename: "sample.m", contentPrefix: Data("#import <AppKit/AppKit.h>".utf8))
     #expect(objc.languageID.rawValue == "objc")
     #expect(Set(objc.candidates.map(\.rawValue)) == Set(["objc", "matlab", "octave"]))

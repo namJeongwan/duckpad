@@ -1,8 +1,8 @@
-> Native plugins use [SDK v1](native-sdk.md) with host API 1.3.0. The WASM interfaces below remain supported.
+> Native plugins use [SDK v1](native-sdk.md) with host API 1.4.0. The WASM interfaces below remain supported.
 
 # Plugin API reference
 
-Status: development host API **1.3.0**. This reference describes executable code in this branch; it is not a public stability guarantee for unreleased APIs.
+Status: development host API **1.4.0**. This reference describes executable code in this branch; it is not a public stability guarantee for unreleased APIs.
 
 ## Authoritative definitions
 
@@ -15,7 +15,7 @@ Status: development host API **1.3.0**. This reference describes executable code
 
 ## Version numbers
 
-These are separate: plugin release version, manifest `schemaVersion` (1), host API semantic version (1.3.0 here), WASM ABI (`duckpad-wasm-1`), and list value protocol (2). `api.minimum` is inclusive; `api.maximumExclusive` is exclusive. The plugin ID stays fixed across updates. Command IDs must belong to the plugin's ID namespace. `operation` is the plugin's UInt32 dispatch identifier.
+These are separate: plugin release version, manifest `schemaVersion` (1), host API semantic version (1.4.0 here), WASM ABI (`duckpad-wasm-1`), and list value protocol (2). `api.minimum` is inclusive; `api.maximumExclusive` is exclusive. The plugin ID stays fixed across updates. Command IDs must belong to the plugin's ID namespace. `operation` is the plugin's UInt32 dispatch identifier.
 
 Only set an API range you have tested. When a public API becomes stable, incompatible changes must receive a compatible negotiation/migration path or a major API change. The development Clipboard service protocol has evolved; use matching host and plugin development revisions rather than assuming compatibility from the app version alone.
 

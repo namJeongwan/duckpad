@@ -621,11 +621,16 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard !terminationReviewInProgress else { return }
         guard let raw = sender.representedObject as? String else { return }
         let id = ExtensionCommandID(rawValue: raw)
-        if extensionUseCase?.serviceCommands().contains(where: { $0.command.id == id }) == true {
+        if let registration = extensionUseCase?.serviceCommands().first(where: { $0.command.id == id }) {
             extensionServiceHost?.show(id, in: workspaceContentSplit, onClose: { [weak self] in
                 guard let self, self.workspaceInteractionsAreActionable, self.window?.isKeyWindow == true else { return }
                 self.activeEditor.focus()
-            }, onError: { [weak self] error in self?.renderExtensionError(error) }) { [weak self] in
+            }, onError: { [weak self] error in self?.renderExtensionError(error) }, readDocument: { [weak self] in
+                guard let self, self.workspaceInteractionsAreActionable,
+                      self.extensionUseCase?.serviceCommands().contains(where: { $0.command.id == id && $0.packageDigest == registration.packageDigest && $0.capabilities.contains(.documentsRead) }) == true,
+                      let context = self.workspace.activeFileContext() else { return nil }
+                return NativeDocumentCapture.read(from: self.activeEditor, context: context)
+            }) { [weak self] in
                 guard let self, self.workspaceInteractionsAreActionable, self.window?.isKeyWindow == true,
                       let context = self.workspace.activeFileContext(),
                       let validateTarget = (self.activeEditor as? any DeferredPasteEditorPort)?.capturePasteTargetValidation() else { return nil }
