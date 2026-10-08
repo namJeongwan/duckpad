@@ -88,7 +88,7 @@ public final class ExtensionListServiceHost {
         }
     }
 
-    public func show(_ command: ExtensionCommandID, in split: NSSplitView, onClose: @escaping () -> Void = {}, onError: ((Error) -> Void)? = nil, preparePaste: @escaping () -> ((String) -> Bool)?) {
+    public func show(_ command: ExtensionCommandID, in split: NSSplitView, onClose: @escaping () -> Void = {}, onError: ((Error) -> Void)? = nil, readDocument: @escaping () -> String? = { nil }, preparePaste: @escaping () -> ((String) -> Bool)?) {
         if nativeHost.contains(command) {
             panel.close()
             presentationGeneration &+= 1
@@ -98,7 +98,7 @@ public final class ExtensionListServiceHost {
                 do {
                     try await self.nativeHost.prepareInstallation(command: command)
                     guard self.presentationGeneration == generation, split.window != nil else { return }
-                    try self.nativeHost.show(command, in: split, onClose: onClose, preparePaste: preparePaste)
+                    try self.nativeHost.show(command, in: split, onClose: onClose, readDocument: readDocument, preparePaste: preparePaste)
                 } catch { onError?(error) }
             }
             return

@@ -2,6 +2,7 @@
 
 #import "ScintillaView.h"
 #import "DPSearchOverviewView.h"
+#import "DPColorPreviewView.h"
 
 #include <limits>
 #include <algorithm>
@@ -14,6 +15,7 @@
 #include "Lexilla.h"
 #include "SciLexer.h"
 #include "DPScintillaLegacyStyleRoles.h"
+#include "DPPlantUMLLexer.h"
 
 @interface DPScintillaBinaryDocument (DuckpadAttachment)
 - (void)attachToScintillaView:(ScintillaView *)view;
@@ -177,6 +179,12 @@ NSString *DPScintillaResourcePath(NSString *name) {
 - (BOOL)publishPendingSmartCloser;
 - (void)finishPendingSmartIndentation;
 - (void)captureDirectInputPreflightState;
+- (BOOL)applyAggregateUserEditInRange:(NSRange)range
+                       selectionOwner:(DPScintillaEditorView *)selectionOwner
+                 resultingAnchorUTF8:(NSUInteger)anchor
+                  resultingCaretUTF8:(NSUInteger)caret
+                   preserveSelection:(BOOL)preserveSelection
+              replacementBuilder:(DPScintillaAggregateReplacementBuilder)replacementBuilder;
 - (void)clearDirectInputPreflightState;
 @end
 
@@ -199,6 +207,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 @implementation DPScintillaEditorView {
     ScintillaView *_scintilla;
     DPSearchOverviewView *_searchOverview;
+    DPColorPreviewView *_colorPreview;
     NSIndexSet *_searchMarkerOffsets;
     NSHashTable<DPScintillaEditorView *> *_searchMarkerPeers;
     BOOL _searchOverviewNeedsRefresh;
@@ -284,6 +293,30 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [self addSubview:_scintilla];
         _searchOverview = [[DPSearchOverviewView alloc] initWithFrame:NSZeroRect];
         __weak DPScintillaEditorView *weakSelf = self;
+        _colorPreview = [[DPColorPreviewView alloc] initWithFrame:NSZeroRect];
+        _colorPreview.scintilla = _scintilla;
+        _colorPreview.hidden = YES;
+        _colorPreview.shouldPreviewAt = ^BOOL(NSUInteger position) {
+            DPScintillaEditorView *owner = weakSelf;
+            if (!owner) return NO;
+            const int style = [owner->_scintilla message:SCI_GETSTYLEAT wParam:position];
+            for (const auto &entry : owner->_semanticStyleRoles)
+                if (entry.first == style && entry.second == 1) return NO;
+            return YES;
+        };
+        _colorPreview.onReplaceColor = ^BOOL(NSRange range, NSData *original, NSColor *color, uint64_t revision) {
+            DPScintillaEditorView *owner = weakSelf;
+            if (!owner || owner.revision != revision) return NO;
+            NSData *current = [owner utf8BytesInRange:range error:nil];
+            if (![current isEqualToData:original]) return NO;
+            return [owner replaceColorInUTF8Range:range withColor:color expectedRevision:revision];
+        };
+        [self addSubview:_colorPreview];
+        // Cocoa can scroll cached text without SCN_PAINTED. Sibling gutter
+        // controls must follow the clip viewport immediately, not the next paint.
+        [NSNotificationCenter.defaultCenter addObserver:self
+            selector:@selector(colorPreviewViewportChanged:)
+            name:NSViewBoundsDidChangeNotification object:_scintilla.scrollView.contentView];
         _searchOverview.onSelectMarker = ^(NSUInteger index) { [weakSelf navigateToSearchMarker:index]; };
         [self addSubview:_searchOverview];
         _searchMarkerOffsets = [NSIndexSet indexSet];
@@ -325,6 +358,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_SETMARGINMASKN wParam:3 lParam:0x01E00000];
         [_scintilla message:SCI_SETMARGINWIDTHN wParam:3 lParam:3];
         [_scintilla message:SCI_SETMARGINSENSITIVEN wParam:3 lParam:0];
+        [_scintilla message:SCI_SETMARGINTYPEN wParam:4 lParam:SC_MARGIN_SYMBOL];
+        [_scintilla message:SCI_SETMARGINMASKN wParam:4 lParam:0];
+        [_scintilla message:SCI_SETMARGINWIDTHN wParam:4 lParam:0];
         for (int marker = SC_MARKNUM_HISTORY_REVERTED_TO_ORIGIN;
              marker <= SC_MARKNUM_HISTORY_REVERTED_TO_MODIFIED; ++marker) {
             [_scintilla message:SCI_MARKERDEFINE wParam:marker lParam:SC_MARK_BAR];
@@ -350,6 +386,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)layout {
     [super layout];
+    [self refreshColorPreviews];
     NSScrollView *scroll = _scintilla.scrollView;
     NSRect track = [self convertRect:scroll.contentView.bounds fromView:scroll.contentView];
     NSScroller *scroller = scroll.verticalScroller;
@@ -369,9 +406,54 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _searchOverviewNeedsRefresh = YES;
 }
 
+- (BOOL)canEditPreviewColor {
+    if (!self.isInputEnabled) return NO;
+    for (DPScintillaEditorView *peer in _searchMarkerPeers)
+        if (peer.hasMarkedText) return NO;
+    return YES;
+}
+- (void)colorPreviewViewportChanged:(NSNotification *)notification {
+    [self refreshColorPreviews];
+}
+- (void)refreshColorPreviews {
+    const BOOL enabled = !_binaryDocument && !_languageStylingFallback && ![_lexerName isEqualToString:@"null"];
+    if ([_scintilla message:SCI_GETMARGINWIDTHN wParam:4] != (enabled ? 16 : 0)) {
+        [_scintilla message:SCI_SETMARGINWIDTHN wParam:4 lParam:enabled ? 16 : 0];
+    }
+    NSInteger x = 0;
+    for (int margin = 0; margin < 4; ++margin) x += [_scintilla message:SCI_GETMARGINWIDTHN wParam:margin];
+    NSView *ruler = _scintilla.scrollView.verticalRulerView;
+    _colorPreview.frame = [self convertRect:NSMakeRect(x, 0, 16, NSHeight(ruler.bounds)) fromView:ruler];
+    _colorPreview.hidden = !enabled;
+    [_colorPreview refreshWithRevision:_revision enabled:enabled editable:[self canEditPreviewColor]
+                             plantUML:[_lexerName isEqualToString:@"plantuml"]];
+}
+- (NSArray<NSValue *> *)colorPreviewRanges { [self refreshColorPreviews]; return _colorPreview.ranges; }
+- (void)configureColorPreviewWithChangeLabel:(NSString *)changeLabel applyLabel:(NSString *)applyLabel {
+    _colorPreview.changeColorLabel = changeLabel; _colorPreview.applyLabel = applyLabel;
+    [self refreshColorPreviews];
+}
+- (BOOL)replaceColorInUTF8Range:(NSRange)range withColor:(NSColor *)color expectedRevision:(uint64_t)revision {
+    DPScintillaEditorView *publisher = _documentPublisher ?: self;
+    if (_revision != revision || publisher.revision != revision || (!_publishesDocumentEdits && !_documentPublisher)
+        || ![self canEditPreviewColor] || range.length > 9) return NO;
+    NSData *original = [self utf8BytesInRange:range error:nil];
+    if (![DPColorPreviewView colorFromHex:original plantUML:[_lexerName isEqualToString:@"plantuml"]]) return NO;
+    NSData *replacement = [DPColorPreviewView hexFromColor:color preserving:original plantUML:[_lexerName isEqualToString:@"plantuml"]];
+    if ([replacement isEqualToData:original]) return YES;
+    [publisher beginGroupedUndo];
+    const BOOL result = [publisher applyAggregateUserEditInRange:range selectionOwner:self
+        resultingAnchorUTF8:self.anchorUTF8Position resultingCaretUTF8:self.caretUTF8Position
+        preserveSelection:YES
+        replacementBuilder:^NSData *(NSData *deleted) { return [deleted isEqualToData:original] ? replacement : nil; }];
+    [publisher endGroupedUndo];
+    [self refreshColorPreviews];
+    return result;
+}
 - (NSArray<NSNumber *> *)searchOverviewPositions { return _searchOverview.positions; }
 
 - (void)resetSearchOverviewDocument {
+    [_colorPreview closeChooser];
     [_searchMarkerPeers removeObject:self];
     _searchMarkerPeers = [NSHashTable weakObjectsHashTable];
     [_searchMarkerPeers addObject:self];
@@ -450,6 +532,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
     [self cancelPendingSmartIndentation];
     DPScintillaEditorView *publisher = _documentPublisher;
     if (publisher != nil && publisher->_directInputInitiator == self) {
@@ -461,8 +544,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)invalidate {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
     [_searchMarkerPeers removeObject:self];
     [_searchOverview removeFromSuperview];
+    [_colorPreview closeChooser];
+    [_colorPreview removeFromSuperview];
     [self cancelPendingSmartIndentation];
     DPScintillaEditorView *publisher = _documentPublisher;
     if (publisher != nil && publisher->_directInputInitiator == self) {
@@ -1669,7 +1755,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 + (BOOL)supportsLexerNamed:(NSString *)lexerName {
     if (lexerName.length == 0) return NO;
-    Scintilla::ILexer5 *lexer = CreateLexer(lexerName.UTF8String);
+    Scintilla::ILexer5 *lexer = [lexerName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : CreateLexer(lexerName.UTF8String);
     if (lexer == nullptr) return NO;
     lexer->Release();
     return YES;
@@ -1687,7 +1773,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const BOOL overBudget = _binaryDocument || self.documentByteLength > maximumStyleBytes;
     const BOOL nextBraceMatchingEnabled = braceMatching && !overBudget;
     NSString *effectiveName = overBudget ? @"null" : lexerName;
-    Scintilla::ILexer5 *lexer = CreateLexer(effectiveName.UTF8String);
+    Scintilla::ILexer5 *lexer = [effectiveName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : CreateLexer(effectiveName.UTF8String);
     if (lexer == nullptr) return NO;
     [self cancelPendingSmartIndentation];
     _pendingSmartCaretPosition = -1;
@@ -1733,6 +1819,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         }
     }
     [_scintilla message:SCI_SETILEXER wParam:0 lParam:reinterpret_cast<sptr_t>(lexer)];
+    [_colorPreview closeChooser];
     _lexerName = [effectiveName copy];
     if ([_lexerName isEqualToString:@"markdown"]) {
         [_scintilla message:SCI_SETPROPERTY
@@ -1860,6 +1947,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SETMARGINBACKN wParam:1 lParam:gutterBackground];
     [_scintilla message:SCI_SETMARGINBACKN wParam:2 lParam:gutterBackground];
     [_scintilla message:SCI_SETMARGINBACKN wParam:3 lParam:gutterBackground];
+    [_scintilla message:SCI_SETMARGINBACKN wParam:4 lParam:gutterBackground];
     // Scintilla colour values are 0xBBGGRR: modified lines use blue in both palettes.
     const int modifiedColour = dark ? 0xF4B564 : 0xD57E24;
     const int changeColors[] = { dark ? 0xE8B574 : 0xB57838, dark ? 0x87BC72 : 0x528A36,
@@ -1916,8 +2004,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     }
     [_scintilla message:SCI_SETCARETFORE wParam:highContrast ? (dark ? 0xFFFFFF : 0x000000) : foreground];
     [_scintilla message:SCI_SETCARETLINEVISIBLE wParam:_highlightCurrentLine lParam:0];
-    [_scintilla message:SCI_SETCARETLINEBACK wParam:0 lParam:caretLineBackground];
-    [_scintilla message:SCI_SETCARETLINEBACKALPHA wParam:highContrast ? 42 : 24 lParam:0];
+    [_scintilla message:SCI_SETCARETLINEBACK wParam:caretLineBackground lParam:0];
+    [_scintilla message:SCI_SETCARETLINEBACKALPHA wParam:SC_ALPHA_NOALPHA lParam:0];
     [_scintilla message:SCI_SETSELBACK wParam:1 lParam:dark ? 0x704020 : 0xFFD8B0];
     [_scintilla setNeedsDisplay:YES];
 }
@@ -2237,6 +2325,16 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                  resultingAnchorUTF8:(NSUInteger)anchor
                   resultingCaretUTF8:(NSUInteger)caret
               replacementBuilder:(DPScintillaAggregateReplacementBuilder)replacementBuilder {
+    return [self applyAggregateUserEditInRange:range selectionOwner:selectionOwner
+        resultingAnchorUTF8:anchor resultingCaretUTF8:caret preserveSelection:NO replacementBuilder:replacementBuilder];
+}
+
+- (BOOL)applyAggregateUserEditInRange:(NSRange)range
+                       selectionOwner:(DPScintillaEditorView *)selectionOwner
+                 resultingAnchorUTF8:(NSUInteger)anchor
+                  resultingCaretUTF8:(NSUInteger)caret
+                   preserveSelection:(BOOL)preserveSelection
+              replacementBuilder:(DPScintillaAggregateReplacementBuilder)replacementBuilder {
     if (replacementBuilder == nil || _scintilla == nil || selectionOwner == nil
         || selectionOwner->_scintilla == nil || !selectionOwner.isInputEnabled
         || selectionOwner.hasMarkedText || ![self preflightUserMutation]) {
@@ -2281,6 +2379,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const NSUInteger resultingLength = retainedLength + replacement.length;
     if (anchor > resultingLength || caret > resultingLength) return NO;
 
+    const NSInteger viewportLine = [selectionOwner->_scintilla message:SCI_GETFIRSTVISIBLELINE];
+    const NSInteger viewportX = [selectionOwner->_scintilla message:SCI_GETXOFFSET];
     const uint64_t baseRevision = _revision;
     if (baseRevision == UINT64_MAX) return NO;
     if (_publishesDocumentEdits && self.onWillModifyDocument) {
@@ -2306,10 +2406,15 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                 : (NSInteger)self.documentByteLength;
             [_scintilla message:SCI_COLOURISE wParam:(uptr_t)lineStart lParam:nextLineStart];
         }
-        [selectionOwner->_scintilla message:SCI_SETSEL
-                                     wParam:(uptr_t)anchor
-                                     lParam:(sptr_t)caret];
-        [selectionOwner->_scintilla message:SCI_SCROLLCARET];
+        if (!preserveSelection) {
+            [selectionOwner->_scintilla message:SCI_SETSEL wParam:(uptr_t)anchor lParam:(sptr_t)caret];
+            [selectionOwner->_scintilla message:SCI_SCROLLCARET];
+        } else {
+            // Native ReplaceTarget adjusts all selection positions without discarding
+            // rectangular/line mode, virtual columns, or secondary carets.
+            [selectionOwner->_scintilla message:SCI_SETFIRSTVISIBLELINE wParam:viewportLine];
+            [selectionOwner->_scintilla message:SCI_SETXOFFSET wParam:viewportX];
+        }
     } @finally {
         _suppressEdit = wasSuppressingEdit;
     }
@@ -2872,6 +2977,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         return;
     }
     if (notification->nmhdr.code == SCN_PAINTED) {
+        [self refreshColorPreviews];
         // Idle wrapping can finish after layout/SC_UPDATE_CONTENT. Check the
         // O(1) display count; scrolling alone must not remap every match.
         if (_searchMarkerOffsets.count > 0 && !_binaryDocument) {
@@ -2903,6 +3009,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
             }
         }
         ++_statusContentGeneration;
+        [_colorPreview closeChooser];
         [self clearSearchHighlights];
     }
     if (!_suppressEdit

@@ -10,6 +10,7 @@ import DuckpadNativeABI
     private var instance: UnsafeMutableRawPointer?
     var preparePaste: (() -> ((String) -> Bool)?)?
     var onClose: (() -> Void)?
+    var readDocument: (() -> String?)?
     private var nextToken: UInt64 = 0
     private var paste: (UInt64, (String) -> Bool)?
     init(_ registration: ExtensionServiceRegistration, root: URL, installation: any VerifiedNativePluginInstallation, language: String) throws {
@@ -51,6 +52,23 @@ import DuckpadNativeABI
                 Unmanaged<NativePluginInstance>.fromOpaque(UnsafeMutableRawPointer(bitPattern: address)!).takeUnretainedValue().onClose?()
             }
         }
+        api.read_document = { context, bytes, capacity in
+            guard let context, capacity <= 512 * 1024 else { return -1 }
+            let address = UInt(bitPattern: context)
+            return MainActor.assumeIsolated {
+                let owner = Unmanaged<NativePluginInstance>.fromOpaque(UnsafeMutableRawPointer(bitPattern: address)!).takeUnretainedValue()
+                guard owner.registration.capabilities.contains(.documentsRead),
+                      let text = owner.readDocument?(), text.utf8.count <= 512 * 1024 else { return -1 }
+                let data = Array(text.utf8)
+                if let bytes {
+                    guard capacity >= data.count else { return -1 }
+                    data.withUnsafeBufferPointer { source in
+                        if let base = source.baseAddress { bytes.update(from: base, count: source.count) }
+                    }
+                }
+                return Int64(data.count)
+            }
+        }
         let config = try JSONSerialization.data(withJSONObject: ["language": language, "resourceDirectory": image.directory.path,
             "storageDirectory": storage.path, "commandID": registration.command.id.rawValue])
         instance = config.withUnsafeBytes { bytes in image.create(&api, bytes.bindMemory(to: UInt8.self).baseAddress, bytes.count) }
@@ -61,7 +79,7 @@ import DuckpadNativeABI
         return Unmanaged<NSView>.fromOpaque(pointer).takeUnretainedValue()
     }
     func setLanguage(_ language: String) { language.withCString { image.language(instance, $0) } }
-    func detach() { paste = nil; preparePaste = nil; onClose = nil }
+    func detach() { paste = nil; preparePaste = nil; onClose = nil; readDocument = nil }
     func stop() {
         detach()
         guard let instance else { return }

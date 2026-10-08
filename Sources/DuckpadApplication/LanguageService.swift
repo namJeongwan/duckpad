@@ -73,7 +73,7 @@ public struct LanguageDetector: Sendable {
     }
 
     /// Deterministic precedence: manual > exact special filename > shebang >
-    /// XML root > longest extension > plain text. Ties use stable LanguageID.
+    /// XML root > longest extension > PlantUML opening directive > plain text. Ties use stable LanguageID.
     public func detect(
         filename: String?,
         contentPrefix: Data,
@@ -139,6 +139,12 @@ public struct LanguageDetector: Sendable {
                     reason: candidates.count > 1 ? "ambiguous extension resolved deterministically" : "extension",
                     candidates: candidates.map(\.id).sorted()
                 )
+            }
+        }
+        if let plantUML = registry[LanguageID(rawValue: "plantuml")] {
+            let opening = prefix.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines).first ?? ""
+            if plantUML.contentSignatures.contains(where: { opening == $0 || opening.hasPrefix($0 + " ") }) {
+                return .init(languageID: plantUML.id, confidence: .content, reason: "PlantUML opening directive")
             }
         }
         return .init(languageID: .plainText, confidence: .fallback, reason: "plain-text fallback")

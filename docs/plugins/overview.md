@@ -1,6 +1,6 @@
 # Duckpad plugin development
 
-This is the developer entry point for the current source tree. Host API **1.3.0** and the native SDK are **unreleased development APIs**. An app's version (for example a local 0.5.0 test build) does not identify its host API version. Check `ExtensionWorkspaceUseCase.apiVersion` in the matching source revision.
+This is the developer entry point for the current source tree. Host API **1.4.0** and the native SDK are **unreleased development APIs**. An app's version (for example a local 0.5.0 test build) does not identify its host API version. Check `ExtensionWorkspaceUseCase.apiVersion` in the matching source revision.
 
 - [Native plugin SDK](native-sdk.md): C ABI, Swift wrapper, plugin-owned UI/resources, lifecycle, and native Clipboard reference.
 - [Developer guide](developer-guide.md): package layout, first build, signing, installation, testing, and catalog submission.

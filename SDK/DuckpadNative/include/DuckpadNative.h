@@ -15,6 +15,9 @@ typedef struct DuckpadHostV1 {
     uint64_t (*prepare_insert)(void *context);
     int32_t (*insert_text)(void *context, uint64_t token, const uint8_t *utf8, size_t length);
     void (*close_panel)(void *context);
+    // Host API 1.4: optional tail. Query UTF-8 size with NULL/0, then copy.
+    // Returns -1 when detached/unavailable/over 512 KiB. No document mutation.
+    int64_t (*read_document)(void *context, uint8_t *utf8, size_t capacity);
 } DuckpadHostV1;
 
 // Required exports. create copies the host table and config JSON before returning.

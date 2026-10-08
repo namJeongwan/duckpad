@@ -50,6 +50,8 @@ let package = Package(
                 "bridge/DuckpadScintillaBridge.mm",
                 "bridge/DPScintillaBinaryDocument.mm",
                 "bridge/DPSearchOverviewView.mm",
+                "bridge/DPPlantUMLLexer.cxx",
+                "bridge/DPColorPreviewView.mm",
                 "cocoa/InfoBar.mm",
                 "cocoa/PlatCocoa.mm",
                 "cocoa/ScintillaCocoa.mm",
@@ -72,6 +74,7 @@ let package = Package(
                 .headerSearchPath("include"),
                 .headerSearchPath("src"),
                 .headerSearchPath("cocoa"),
+                .headerSearchPath("../../Lexilla/5.5.3/lexlib"),
                 .define("NDEBUG", .when(configuration: .release)),
             ],
             linkerSettings: [

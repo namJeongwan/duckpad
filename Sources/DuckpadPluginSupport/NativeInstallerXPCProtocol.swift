@@ -4,6 +4,8 @@ import Security
 @objc public protocol DuckpadNativeInstallerProtocol {
     func install(_ signedFiles: Data, withReply reply: @escaping (String?, String?) -> Void)
     func installTerminalCommand(withReply reply: @escaping (String?) -> Void)
+    /// Only PNG/SVG PlantUML input and runtime paths, never arbitrary commands.
+    func renderPlantUML(_ request: Data, withReply reply: @escaping (Data?, String?) -> Void)
 }
 
 public enum NativeInstallerXPC {

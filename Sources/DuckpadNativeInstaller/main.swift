@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import XPC
 import DuckpadInfrastructure
 import DuckpadPluginSupport
 
@@ -11,9 +12,35 @@ private final class Reply: @unchecked Sendable {
 private final class Installer: NSObject, DuckpadNativeInstallerProtocol {
     let store: ManagedNativePackageStore
     let terminalCommand: TerminalCommandInstaller
+    let plantUML: PlantUMLRuntime
+    let renderWork = PlantUMLWork()
     init(root: URL, home: URL, app: URL) {
         store = ManagedNativePackageStore(root: root)
         terminalCommand = TerminalCommandInstaller(home: home, app: app)
+        plantUML = PlantUMLRuntime(root: home.appendingPathComponent("Library/Application Support/Duckpad/PlantUMLRuntime")) { active in
+            // Replies end their automatic transaction. Retain the helper while its reusable JVM is idle.
+            if active { xpc_transaction_begin() } else { xpc_transaction_end() }
+        }
+    }
+    init(copying other: Installer) {
+        store = other.store; terminalCommand = other.terminalCommand; plantUML = other.plantUML
+    }
+    func renderPlantUML(_ request: Data, withReply reply: @escaping (Data?, String?) -> Void) {
+        guard request.count <= 1024 * 1024 else { reply(nil, "invalidInput"); return }
+        let response = PlantUMLReply(reply)
+        let runtime = plantUML
+        guard renderWork.start({
+            do {
+                try Task.checkCancellation()
+                let input = try JSONDecoder().decode(PlantUMLRequest.self, from: request)
+                response.send(try await runtime.perform(input), nil)
+            } catch let error as PlantUMLFailure {
+                let data = try? JSONSerialization.data(withJSONObject: ["code": error.code, "detail": error.detail])
+                response.send(nil, data.flatMap { String(data: $0, encoding: .utf8) } ?? "renderFailed")
+            } catch {
+                response.send(nil, "renderFailed")
+            }
+        }) else { reply(nil, "busy"); return }
     }
     func installTerminalCommand(withReply reply: @escaping (String?) -> Void) {
         do { try terminalCommand.install(); reply(nil) }
@@ -49,7 +76,11 @@ private final class Listener: NSObject, NSXPCListenerDelegate {
         guard connection.effectiveUserIdentifier == geteuid() else { return false }
         connection.setCodeSigningRequirement(requirement)
         connection.exportedInterface = NSXPCInterface(with: DuckpadNativeInstallerProtocol.self)
-        connection.exportedObject = installer
+        let session = Installer(copying: installer)
+        connection.exportedObject = session
+        let work = session.renderWork
+        connection.invalidationHandler = { work.cancel() }
+        connection.interruptionHandler = { work.cancel() }
         connection.resume()
         return true
     }

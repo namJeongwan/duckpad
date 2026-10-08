@@ -181,6 +181,9 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         primaryHost.setAccessibilityLabel(catalog.text("Primary editor pane"))
         internalSecondaryHost.setAccessibilityLabel(catalog.text("Secondary editor pane"))
         secondaryGroupHost.setAccessibilityLabel(catalog.text("Secondary editor group"))
+        for view in Array(bufferViews.values) + Array(secondaryBufferViews.values) + groupPeerViews.values.flatMap({ $0 }) {
+            view.configureColorPreview(withChangeLabel: catalog.text("Change color"), applyLabel: catalog.text("Apply"))
+        }
     }
 
     public func recordSavePoint(for bufferID: BufferID, revision: UInt64) {
@@ -913,6 +916,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
 
     private func applyDisplayPreferences(to view: DPScintillaEditorView) {
         let settings = displayPreferences
+        view.configureColorPreview(withChangeLabel: L10n.text("Change color"), applyLabel: L10n.text("Apply"))
         view.didCopySelection = { [weak self, weak view] pasteboard in
             guard let self, self.displayPreferences.copyWithFormatting, let view,
                   let presentation = view.copyPresentation(withMaximumBytes: UInt(RichClipboardWriter.maximumTextBytes)) else { return }
@@ -1398,7 +1402,8 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         scope: ExtensionCommandContribution.InputScope,
         maximumBytes: Int
     ) throws(ExtensionFailure) -> ExtensionEditorCapture {
-        guard openingPreview == nil, maximumBytes >= 0, activeBuffer == expectedBuffer,
+        guard !isInvalidated, binaryDocuments[expectedBuffer.bufferID] == nil,
+              openingPreview == nil, maximumBytes >= 0, activeBuffer == expectedBuffer,
               pendingTextLoads[expectedBuffer.bufferID] == nil,
               let editorView = activeScintillaView,
               editorView.revision == expectedBuffer.revision else { throw .staleContext }
