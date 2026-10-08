@@ -43,7 +43,7 @@ struct AuxiliaryCloseKeyRouterTests {
         #expect(dialog.isVisible)
         #expect(router.handle(try key(dialog, repeatKey: true)))
         #expect(dialog.isVisible)
-        #expect(!router.handle(try key(dialog, modifiers: .command)))
+        #expect(!router.handle(try key(dialog, modifiers: [.command, .option])))
         #expect(dialog.isVisible)
         #expect(router.handle(try key(dialog)))
         #expect(!dialog.isVisible)
@@ -69,6 +69,25 @@ struct AuxiliaryCloseKeyRouterTests {
         defer { timer.invalidate() }
         #expect(alert.runModal() == .cancel)
         #expect(!alert.window.isVisible)
+    }
+
+    @Test func commandWRepeatStaysConsumedUntilTheNextPress() throws {
+        _ = NSApplication.shared
+        let dialog = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
+                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let editor = EditorWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 250),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        dialog.isReleasedWhenClosed = false
+        editor.isReleasedWhenClosed = false
+        defer { dialog.close(); editor.close() }
+        let router = AuxiliaryCloseKeyRouter()
+        dialog.makeKeyAndOrderFront(nil)
+        #expect(router.handle(try key(dialog, modifiers: .command)))
+        #expect(router.handle(try key(editor, modifiers: .command, repeatKey: true)))
+        #expect(router.handle(try key(editor, modifiers: [], repeatKey: true)))
+        // A new press resets state even if focus changes hid the previous key-up.
+        #expect(!router.handle(try key(editor, modifiers: .command)))
+        #expect(!router.handle(try key(editor, modifiers: .command, repeatKey: true)))
     }
 
     @Test func controlWLeavesEditorWindowAloneWithoutAnAuxiliaryPanel() throws {
