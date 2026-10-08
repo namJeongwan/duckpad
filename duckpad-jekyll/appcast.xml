@@ -3,71 +3,65 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.10.0</title>
-            <pubDate>Thu, 08 Oct 2026 10:41:22 +0900</pubDate>
-            <sparkle:version>52</sparkle:version>
-            <sparkle:shortVersionString>0.10.0</sparkle:shortVersionString>
+            <title>0.10.1</title>
+            <pubDate>Thu, 08 Oct 2026 16:06:48 +0900</pubDate>
+            <sparkle:version>53</sparkle:version>
+            <sparkle:shortVersionString>0.10.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.10.0
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.10.1
 
-Duckpad now supports the separately installed PlantUML plugin, plus native
-PlantUML syntax colors and clickable hexadecimal color previews in the editor.
+This patch fixes plugin panel controls and session-save failures when another
+Duckpad instance has advanced the recovery store.
 
-- Highlight `.puml`, `.plantuml`, `.pu` and `.wsd` files, with structural detection
-  for unrecognized files beginning with a supported PlantUML directive.
-- Show hexadecimal color chips in the gutter of supported styled documents.
-  Click a chip and apply a color as one undo operation. Chips follow scrolling;
-  read-only files retain the preview and IME composition disables color edits.
-- Provide bounded current-document reads through native host API 1.4.0.
-- Render PlantUML locally using a sandboxed JVM, reused until ten idle minutes.
-  Runtime setup and offline paths are exposed by the separately installed plugin.
-- Correct current-line background painting so the configured theme color fills
-  both text and line remainder without a black translucent overlay.
+- Press a plugin's opening shortcut again to close its panel. Repeating the
+  command while a native panel is still opening cancels that presentation.
+- Restore each plugin command's last dock width, including when opened in
+  another editor window. Native panels finish layout before restoring the divider.
+- Control-W cancels the active modal or sheet, then closes an active auxiliary
+  window or the editor's plugin/preview panel. It does not close the document
+  underneath. Command-W also dismisses an attached modal before a document.
+- Retry valid recovery-generation collisions and verify the current session's
+  durable archive before quitting. Persistent storage errors remain visible
+  after Retry and continue to prevent an unsafe exit.
 
-App and helpers: **0.10.0 (52)**. Requires **macOS 13 or later**. The release build
-contains Apple Silicon and Intel binaries. Existing documents, sessions and
-workspace preferences remain compatible. Existing native ABI 1 plugins retain
-compatibility; PlantUML 0.1.0 needs host API 1.4.0 and cannot load on older hosts.
+App and helpers: **0.10.1 (53)**. Requires **macOS 13 or later**. Universal binaries
+support Apple Silicon and Intel. Existing documents, sessions, native plugin ABI
+and settings remain compatible. Plugins remain separate downloads; this release
+does not install or enable them.
 
 ## Installation
 
-Download `Duckpad-0.10.0-universal.dmg` and drag Duckpad into Applications, or
-extract `Duckpad-0.10.0-universal.zip`. Verify against `SHA256SUMS.txt`.
-PlantUML is distributed separately from
-[duckpad-plugin-plantuml](https://github.com/namJeongwan/duckpad-plugin-plantuml)
-and listed in the [plugin catalog](https://github.com/namJeongwan/duckpad-plugins).
-No Java or PlantUML JAR is embedded in Duckpad or the plugin archive.
-
-The default build is ad-hoc signed, without Developer ID signing or Apple
-notarization. In-app update availability requires publication of the signed
-Sparkle feed after the release archive is uploaded.
+Download `Duckpad-0.10.1-universal.dmg` and drag Duckpad into Applications, or
+extract `Duckpad-0.10.1-universal.zip`. Verify the files against `SHA256SUMS.txt`.
+The signed Sparkle feed is published after the release archive is uploaded.
 
 ## Validation and limitations
 
-Regression coverage checks syntax roles, color-chip scrolling and bounded color
-edits, undo/recovery, shared-pane IME guards, native ABI authorization, and current
-line background pixels. Runtime smoke tests check warm rendering, idle shutdown,
-cancellation, path changes, invalid inputs and process-group cleanup. Plugin
-localization catalogs contain matching keys in all eight translations.
+Focused regression checks cover plugin command toggles, panel width restoration,
+pending presentation cancellation, multiple editor windows, modal-first closing,
+recovery collisions, termination durability and persistent retry failures.
 
-Highlighting is structural rather than complete PlantUML grammar validation.
-Preview rendering supports one complete diagram up to 512 KiB, a 90-second limit,
-a 512 MiB Java heap and 32 MiB output. Diagram types needing external Graphviz
-remain outside the first plugin release. Physical Intel hardware and macOS 13
-have not been tested. Physical-platform coverage remains limited to the available Apple Silicon machine.
+Recovery commits remain last-writer-wins: separate running instances are not a
+collaborative editing session and their independent edits are not merged. Genuine
+corruption and storage failures still require recovery or a successful retry.
+Dock height follows the editor window; plugin width is remembered per command.
 
-## Validation
+The default build is ad-hoc signed, without Developer ID signing or Apple
+notarization. Physical Intel hardware, macOS 13, live Korean IME and interactive
+system picker behavior were not tested for this patch.
 
-- 29 focused editor, bounded document-read, language and native-plugin activation tests passed.
-- Host localization validated 733 strings and four plural entries in all eight languages; the plugin has 39 matching keys per locale.
-- Native plugin ABI, compact UI at 300/560-point widths in all eight languages, Control-W with English/Korean input and teardown checks passed.
-- The supplied large Korean sequence rendered to PNG and SVG. Warm PNG rendering reused the JVM (about 0.26 seconds versus 0.88 seconds cold on the test machine). Idle reset/expiry, restart, path changes, invalid inputs, cancellation, entropy/private-file isolation and process-group cleanup checks passed.
-- Universal host/plugin builds, app/helper versions, resources, entitlements, Mach-O signatures, Ed25519 plugin inventory and archive checks passed during release preparation.
-- Host smoke checks passed Finder/Open With, security-scoped recovery/save, window layout and sandboxed XPC isolation. Optional automated native save-panel interaction was skipped.
+## Release checks
 
-Physical Intel hardware and macOS 13 execution were not tested. Default binaries are ad-hoc signed and not Apple notarized. PNG/SVG export and local rendering require the separately installed compatible plugin and verified Java/JAR runtime.
+- 97 focused Swift tests passed, including isolated application-modal cancellation.
+- Regression tests failed before the native width and Korean Control-W fixes and passed afterward.
+- Localization validation passed for 733 strings and four plural entries in all eight languages.
+- App and both helper versions are 0.10.1 (53), each with arm64 and x86_64 binaries.
+- App bundle resources, entitlements, hardened-runtime ad-hoc signatures and isolated Finder/Open With, security-scoped recovery/save, window-layout and XPC smoke checks passed.
+- Automated interactive native save-panel checks were skipped. Physical Intel hardware and macOS 13 were not exercised.
+
+Source: merged main commit `f06874cba776f3c676ad0dc53d1895422df97f51` ([PR #64](https://github.com/namJeongwan/duckpad/pull/64)).
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.10.0/Duckpad-0.10.0-universal.zip" length="26991365" type="application/octet-stream" sparkle:edSignature="UxKJoAIpfvwzx8KZMlLUu8/E60+4uZJLqvrEiY1GFxUldejYgoKSzYbJAP3QcQq33DlG4L1XLQIaPUtlzBIFDA=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.10.1/Duckpad-0.10.1-universal.zip" length="27015809" type="application/octet-stream" sparkle:edSignature="1f+GyixaQuaIBff5Ziwdj3rbabZGK9adgJ5R2bVD65zVskvk1o7J9B6YfmFKIQjiw7VIkTMcaJGFfSw3nPm8AA=="/>
         </item>
     </channel>
 </rss>
