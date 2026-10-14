@@ -60,9 +60,22 @@ if [[ "$ARCHITECTURE" == "universal" ]]; then
         swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --product DuckpadApp
         swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --product DuckpadPluginRuntime
         swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --product DuckpadNativeInstaller
+        # SwiftPM's Xcode build system shares one products path between arches.
+        # Preserve each completed build before the next architecture replaces it.
+        ARCH_BIN_PATH="$(swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --show-bin-path)"
+        ARCH_SNAPSHOT="$STAGING_ROOT/$BUILD_ARCH"
+        mkdir -p "$ARCH_SNAPSHOT"
+        for PRODUCT in DuckpadApp DuckpadPluginRuntime DuckpadNativeInstaller; do
+            [[ "$(lipo -archs "$ARCH_BIN_PATH/$PRODUCT")" == "$BUILD_ARCH" ]]
+            install -m 0755 "$ARCH_BIN_PATH/$PRODUCT" "$ARCH_SNAPSHOT/$PRODUCT"
+        done
+        for RESOURCE_BUNDLE in "$ARCH_BIN_PATH"/*.bundle; do
+            [[ -d "$RESOURCE_BUNDLE" ]] || continue
+            ditto "$RESOURCE_BUNDLE" "$ARCH_SNAPSHOT/$(basename "$RESOURCE_BUNDLE")"
+        done
     done
-    ARM_BIN_PATH="$(swift build --package-path "$REPOSITORY_ROOT" -c release --arch arm64 --show-bin-path)"
-    INTEL_BIN_PATH="$(swift build --package-path "$REPOSITORY_ROOT" -c release --arch x86_64 --show-bin-path)"
+    ARM_BIN_PATH="$STAGING_ROOT/arm64"
+    INTEL_BIN_PATH="$STAGING_ROOT/x86_64"
     lipo -create "$ARM_BIN_PATH/DuckpadApp" "$INTEL_BIN_PATH/DuckpadApp" -output "$APP/Contents/MacOS/Duckpad"
     lipo -create "$ARM_BIN_PATH/DuckpadPluginRuntime" "$INTEL_BIN_PATH/DuckpadPluginRuntime" -output "$XPC/Contents/MacOS/DuckpadPluginRuntime"
     lipo -create "$ARM_BIN_PATH/DuckpadNativeInstaller" "$INTEL_BIN_PATH/DuckpadNativeInstaller" -output "$INSTALLER/Contents/MacOS/DuckpadNativeInstaller"
