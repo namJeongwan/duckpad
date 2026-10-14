@@ -77,18 +77,20 @@ void ScintillaBase::Finalise() {
 	popup.Destroy();
 }
 
-void ScintillaBase::InsertCharacter(std::string_view sv, CharacterSource charSource) {
+void ScintillaBase::InsertCharacter(std::string_view sv, CharacterSource charSource, bool deferLayout) {
 	const bool acActive = ac.Active();
+	// Completion popups may query character geometry during the callback.
+	deferLayout = deferLayout && !acActive;
 	const bool isFillUp = acActive && ac.IsFillUpChar(sv[0]);
 	if (!isFillUp) {
-		Editor::InsertCharacter(sv, charSource);
+		Editor::InsertCharacter(sv, charSource, deferLayout);
 	}
 	if (acActive && ac.Active()) { // if it was and still is active
 		AutoCompleteCharacterAdded(sv[0]);
 		// For fill ups add the character after the autocompletion has
 		// triggered so containers see the key so can display a calltip.
 		if (isFillUp) {
-			Editor::InsertCharacter(sv, charSource);
+			Editor::InsertCharacter(sv, charSource, deferLayout);
 		}
 	}
 }

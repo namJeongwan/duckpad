@@ -321,3 +321,52 @@ Observer cleanup follows editor invalidation/deallocation. A regression test
 checks scrolling away/back without a forced paint or decoration query.
 
 - Fix current-line background configuration: pass the palette color in the Scintilla color parameter and use an opaque base-layer fill, avoiding black over-text alpha tinting. Native bitmap regressions check both text and EOL remainder while moving the caret.
+
+### Long-line editing latency
+
+Duckpad maintains exact non-ASCII-byte and tab counts in `CellBuffer.h/.cxx`
+through the same insert/delete paths used by typing, Undo/Redo, and reload.
+`Document.cxx` uses these facts for constant-time ASCII UTF-16/character counts,
+relative positions, and tab-free columns. Unicode, tabs, and DBCS continue to use
+the original coordinate algorithms; adding/removing their bytes updates the
+fast-path eligibility immediately.
+
+`Document.cxx` also scans brace candidates in bounded blocks using `memchr`,
+preserving both search directions, style eligibility, explicit start positions,
+and DBCS trail-byte checks. The bridge refreshes brace highlighting for content
+and selection updates, not scroll-only notifications. `CellBuffer.cxx` skips
+unchanged style blocks while retaining exact first/last changed offsets.
+
+`Editor.cxx` styles long lines before the caret's immediate wrap, preventing a
+second full layout with different syntax styles during paint. Cocoa multi-character
+input defers intermediate wrapping/caret display until the last character through
+`Editor` and `ScintillaBase`; individual edits, character notifications, overtype,
+multiple selections, and Undo remain intact. Active autocompletion and whitespace
+sticky caret mode retain per-character layout.
+
+`EditView.cxx` compares unchanged layout text/styles in bounded memcpy/memcmp
+blocks, and directly computes graphic-ASCII advances when every used style has
+measured monospaced, visible, non-italic metrics and no special representation
+or bidirectional layout is active. Syntax colors and word-wrap style boundaries
+are preserved. Unsupported fonts/text use the original shaping path.
+`PositionCache.h/.cxx` retains 4 KiB of capacity when allocating a long line and
+avoids Unicode boundary decoding while wrapping proven graphic ASCII. This
+eliminates per-keystroke reallocation of multi-megabyte layout arrays.
+
+These are hand-maintained upstream patches, not generated interface files.
+There is no tracked Scintilla import script in this checkout; reacquisition must
+preserve/reapply these changes with the existing patches above. Regression tests
+are in `LongLineEditingTests.swift` and `TextInputIndexTests.swift`. The opt-in
+release benchmark is `DuckpadPerformanceBenchmark --long-line <fixture.json>`;
+it reads the source into an isolated memory document and never saves it. It
+checks a 50 ms maximum, including the first input, at six positions (including
+the longest string). It covers insertion/backspace, continuous typing, selection
+edits, and Undo/Redo with
+JSON highlighting, folding, wrapping, Cocoa input queries, status reads, drawing,
+and exact document restoration. Drawing includes `CATransaction.flush()` so
+deferred layer drawing is charged to the input event. Set
+`DUCKPAD_LONG_LINE_FIRST_POSITION=middle` (or `end`, `quarter`, `three-quarters`,
+`long-string`) in a separate process to check cold input at another position.
+This measures application rendering completion, not hardware key-to-photon time.
+This budget applies to the measured fixture and machine,
+not an unmeasured promise for every document size, font, or Unicode workload.

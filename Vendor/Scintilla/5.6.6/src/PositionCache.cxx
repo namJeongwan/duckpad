@@ -71,7 +71,11 @@ LineLayout::LineLayout(Sci::Line lineNumber_, int maxLineLength_) :
 
 void LineLayout::Resize(int maxLineLength_) {
 	if (maxLineLength_ > maxLineLength) {
-		const size_t lineAllocation = maxLineLength_ + 1;
+		// Retain a small editing allowance instead of reallocating all long-line
+		// character/style/position arrays for every inserted byte.
+		if (maxLineLength_ > 4096 && maxLineLength_ < 0x7fffffff - 4096)
+			maxLineLength_ += 4096;
+		const size_t lineAllocation = static_cast<size_t>(maxLineLength_) + 1;
 		chars = std::make_unique<char[]>(lineAllocation);
 		styles = std::make_unique<unsigned char []>(lineAllocation);
 		// Extra position allocated as sometimes the Windows
@@ -309,7 +313,7 @@ void LineLayout::WrapLine(const Document *pdoc, Sci::Position posLineStart, Wrap
 	// Document wants document positions but simpler to work in line positions
 	// so take care of adding and subtracting line start in a lambda.
 	auto CharacterBoundary = [=](Sci::Position i, int moveDir) noexcept -> Sci::Position {
-		return pdoc->NextPosition(i + posLineStart, moveDir) - posLineStart;
+		return graphicASCII ? i + moveDir : pdoc->NextPosition(i + posLineStart, moveDir) - posLineStart;
 	};
 	lines = 0;
 	// Calculate line start positions based upon width.
@@ -324,7 +328,7 @@ void LineLayout::WrapLine(const Document *pdoc, Sci::Position posLineStart, Wrap
 			// backtrack to find lastGoodBreak
 			Sci::Position lastGoodBreak = p;
 			// Try moving to start of last character
-			if (p > 0) {
+			if (p > 0 && !graphicASCII) {
 				lastGoodBreak = pdoc->MovePositionOutsideChar(p + posLineStart, -1) - posLineStart;
 			}
 			bool foundBreak = false;
@@ -346,7 +350,7 @@ void LineLayout::WrapLine(const Document *pdoc, Sci::Position posLineStart, Wrap
 				}
 			}
 			if (!foundBreak) {
-				if (CpUtf8 == pdoc->dbcsCodePage) {
+				if (!graphicASCII && CpUtf8 == pdoc->dbcsCodePage) {
 					// Go back before a base character, commonly a letter as modifiers are after the letter they modify
 					const Sci::Position afterWrap = CharacterBoundary(lastGoodBreak, 1);
 					std::string_view svWithoutLast(&chars[lastLineStart], afterWrap - lastLineStart);

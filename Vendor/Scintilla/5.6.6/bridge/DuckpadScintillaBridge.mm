@@ -2992,7 +2992,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     }
     if (notification->nmhdr.code == SCN_UPDATEUI) {
         if (notification->updated & SC_UPDATE_CONTENT) _searchOverviewNeedsRefresh = YES;
-        [self updateBraceHighlight];
+        // Scrolling/wrapping alone cannot change the matching pair. In
+        // particular, do not rescan a long line during each redraw phase.
+        if (notification->updated & (SC_UPDATE_CONTENT | SC_UPDATE_SELECTION)) {
+            [self updateBraceHighlight];
+        }
         [self scheduleFoldRecoveryProgress];
         if (self.onStatusChange && (notification->updated & (SC_UPDATE_CONTENT | SC_UPDATE_SELECTION))) {
             self.onStatusChange();

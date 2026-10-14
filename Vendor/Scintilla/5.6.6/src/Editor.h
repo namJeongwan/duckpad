@@ -443,7 +443,7 @@ protected:	// ScintillaBase subclass needs access to much of Editor
 	Sci::Position RealizeVirtualSpace(Sci::Position position, Sci::Position virtualSpace);
 	SelectionPosition RealizeVirtualSpace(const SelectionPosition &position);
 	void AddChar(char ch);
-	virtual void InsertCharacter(std::string_view sv, Scintilla::CharacterSource charSource);
+	virtual void InsertCharacter(std::string_view sv, Scintilla::CharacterSource charSource, bool deferLayout = false);
 	void ClearSelectionRange(SelectionRange &range);
 	void ClearBeforeTentativeStart();
 	void InsertPaste(std::string_view text);

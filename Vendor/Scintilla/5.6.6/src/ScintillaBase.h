@@ -61,7 +61,7 @@ protected:
 	void Initialise() override {}
 	void Finalise() override;
 
-	void InsertCharacter(std::string_view sv, Scintilla::CharacterSource charSource) override;
+	void InsertCharacter(std::string_view sv, Scintilla::CharacterSource charSource, bool deferLayout = false) override;
 	void Command(int cmdId);
 	void CancelModes() override;
 	int KeyCommand(Scintilla::Message iMessage) override;

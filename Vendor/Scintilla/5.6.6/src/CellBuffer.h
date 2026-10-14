@@ -103,6 +103,8 @@ private:
 	SplitVector<char> style;
 	bool readOnly;
 	bool utf8Substance;
+	Sci::Position nonASCIIBytes = 0;
+	Sci::Position tabBytes = 0;
 	Scintilla::LineEndType utf8LineEnds;
 
 	bool collectingUndo;
@@ -174,6 +176,8 @@ public:
 	void SetReadOnly(bool set) noexcept;
 	bool IsLarge() const noexcept;
 	bool HasStyles() const noexcept;
+	bool IsAllASCII() const noexcept { return nonASCIIBytes == 0; }
+	bool HasTabs() const noexcept { return tabBytes != 0; }
 
 	/// The save point is a marker in the undo stack where the container has stated that
 	/// the buffer was saved. Undo and redo can move over the save point.

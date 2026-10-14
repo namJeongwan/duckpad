@@ -1054,6 +1054,11 @@ Sci_Position SCI_METHOD Document::GetRelativePosition(Sci_Position positionStart
 }
 
 Sci::Position Document::GetRelativePositionUTF16(Sci::Position positionStart, Sci::Position characterOffset) const noexcept {
+	if (dbcsCodePage == CpUtf8 && cb.IsAllASCII()) {
+		if (characterOffset < -positionStart || characterOffset > LengthNoExcept() - positionStart)
+			return Sci::invalidPosition;
+		return positionStart + characterOffset;
+	}
 	Sci::Position pos = positionStart;
 	if (dbcsCodePage) {
 		const int increment = (characterOffset > 0) ? 1 : -1;
@@ -1802,6 +1807,8 @@ Sci::Position Document::GetColumn(Sci::Position pos) const noexcept {
 	Sci::Position column = 0;
 	const Sci::Line line = SciLineFromPosition(pos);
 	if ((line >= 0) && (line < LinesTotal())) {
+		if (cb.IsAllASCII() && !cb.HasTabs())
+			return std::max<Sci::Position>(0, std::min(pos, LineEnd(line)) - cb.LineStart(line));
 		const Sci::Position length = LengthNoExcept();
 		for (Sci::Position i = cb.LineStart(line); i < pos;) {
 			const char ch = cb.CharAt(i);
@@ -1827,6 +1834,8 @@ Sci::Position Document::GetColumn(Sci::Position pos) const noexcept {
 }
 
 Sci::Position Document::CountCharacters(Sci::Position startPos, Sci::Position endPos) const noexcept {
+	if (dbcsCodePage == CpUtf8 && cb.IsAllASCII())
+		return std::max<Sci::Position>(0, endPos - startPos);
 	startPos = MovePositionOutsideChar(startPos, 1, false);
 	endPos = MovePositionOutsideChar(endPos, -1, false);
 	Sci::Position count = 0;
@@ -1839,6 +1848,8 @@ Sci::Position Document::CountCharacters(Sci::Position startPos, Sci::Position en
 }
 
 Sci::Position Document::CountUTF16(Sci::Position startPos, Sci::Position endPos) const noexcept {
+	if (dbcsCodePage == CpUtf8 && cb.IsAllASCII())
+		return std::max<Sci::Position>(0, endPos - startPos);
 	startPos = MovePositionOutsideChar(startPos, 1, false);
 	endPos = MovePositionOutsideChar(endPos, -1, false);
 	Sci::Position count = 0;
@@ -3049,17 +3060,46 @@ Sci::Position Document::BraceMatch(Sci::Position position, Sci::Position /*maxRe
 		maxSafeChar = std::max<unsigned char>(DBCSMinTrailByte(), 1) - 1;
 	}
 
-	while ((position >= 0) && (position < LengthNoExcept())) {
-		const unsigned char chAtPos = CharAt(position);
-		if (AnyOf(chAtPos, chBrace, chSeek)) {
-			if (((position > GetEndStyled()) || (StyleIndexAt(position) == styBrace)) &&
-				(chAtPos <= maxSafeChar || position == MovePositionOutsideChar(position, direction, false))) {
-				depth += (chAtPos == chBrace) ? 1 : -1;
-				if (depth == 0)
-					return position;
+	// A matching outer brace may be megabytes away. Read contiguous blocks
+	// instead of querying the gap buffer's length and byte for every character.
+	const Sci::Position length = LengthNoExcept();
+	const Sci::Position endStyled = GetEndStyled();
+	std::array<char, 4096> bytes;
+	std::array<unsigned short, 4096> candidates;
+	while ((position >= 0) && (position < length)) {
+		const Sci::Position count = std::min<Sci::Position>(bytes.size(), direction > 0 ? length - position : position + 1);
+		const Sci::Position start = direction > 0 ? position : position - count + 1;
+		cb.GetCharRange(bytes.data(), start, count);
+		// Search each byte value with the platform's vectorized memchr. Retain
+		// candidate offsets so backwards matching uses the same bounded search.
+		const char *const limit = bytes.data() + count;
+		auto next = [limit](const char *from, unsigned char ch) {
+			const char *found = static_cast<const char *>(std::memchr(from, ch, limit - from));
+			return found ? found : limit;
+		};
+		const char *brace = next(bytes.data(), chBrace);
+		const char *seek = next(bytes.data(), chSeek);
+		int candidateCount = 0;
+		while (brace != limit || seek != limit) {
+			const char *found = std::min(brace, seek);
+			candidates[candidateCount++] = static_cast<unsigned short>(found - bytes.data());
+			if (found == brace) brace = next(found + 1, chBrace);
+			else seek = next(found + 1, chSeek);
+		}
+		for (int index = direction > 0 ? 0 : candidateCount - 1; index >= 0 && index < candidateCount; index += direction) {
+			const Sci::Position i = candidates[index];
+			const unsigned char chAtPos = bytes[i];
+			if (AnyOf(chAtPos, chBrace, chSeek)) {
+				const Sci::Position candidate = start + i;
+				if (((candidate > endStyled) || (StyleIndexAt(candidate) == styBrace)) &&
+					(chAtPos <= maxSafeChar || candidate == MovePositionOutsideChar(candidate, direction, false))) {
+					depth += (chAtPos == chBrace) ? 1 : -1;
+					if (depth == 0)
+						return candidate;
+				}
 			}
 		}
-		position += direction;
+		position += direction * count;
 	}
 	return -1;
 }
