@@ -71,7 +71,18 @@ inline int UTF8Classify(std::string_view sv) noexcept {
 
 // Similar to UTF8Classify but returns a length of 1 for invalid bytes
 // instead of setting the invalid flag
-int UTF8DrawBytes(const char *s, size_t len) noexcept;
+inline int UTF8DrawBytes(const char *s, size_t len) noexcept {
+	// The common ASCII, two-byte and ordinary three-byte cases stay in the
+	// layout loop. Keep upstream classification for exceptional lead bytes,
+	// including overlongs, surrogates and Unicode non-characters.
+	const auto *us = reinterpret_cast<const unsigned char *>(s);
+	if (us[0] < 0x80) return 1;
+	if (us[0] >= 0xc2 && us[0] <= 0xdf && len >= 2 && UTF8IsTrailByte(us[1])) return 2;
+	if (us[0] >= 0xe1 && us[0] <= 0xee && us[0] != 0xed && len >= 3 &&
+		UTF8IsTrailByte(us[1]) && UTF8IsTrailByte(us[2])) return 3;
+	const int status = UTF8Classify(s, len);
+	return (status & UTF8MaskInvalid) ? 1 : (status & UTF8MaskWidth);
+}
 
 // Line separator is U+2028 \xe2\x80\xa8
 // Paragraph separator is U+2029 \xe2\x80\xa9

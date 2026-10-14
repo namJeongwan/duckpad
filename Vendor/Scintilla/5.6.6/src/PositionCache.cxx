@@ -310,10 +310,22 @@ int LineLayout::LastStyle() const noexcept {
 }
 
 void LineLayout::WrapLine(const Document *pdoc, Sci::Position posLineStart, Wrap wrapState, XYPOSITION wrapWidth) {
-	// Document wants document positions but simpler to work in line positions
-	// so take care of adding and subtracting line start in a lambda.
-	auto CharacterBoundary = [=](Sci::Position i, int moveDir) noexcept -> Sci::Position {
-		return graphicASCII ? i + moveDir : pdoc->NextPosition(i + posLineStart, moveDir) - posLineStart;
+	// Layout already owns the exact line bytes. Resolve UTF-8 boundaries locally
+	// instead of repeatedly crossing the document's gap buffer while wrapping.
+	auto ScalarStart = [this](Sci::Position i) noexcept {
+		if (i >= numCharsInLine || !UTF8IsTrailByte(chars[i])) return i;
+		Sci::Position start = i;
+		while (start > 0 && i - start < 3 && UTF8IsTrailByte(chars[start])) --start;
+		const int width = UTF8DrawBytes(&chars[start], numCharsInLine - start);
+		return start + width > i ? start : i;
+	};
+	auto CharacterBoundary = [this, pdoc, posLineStart, ScalarStart](Sci::Position i, int moveDir) noexcept -> Sci::Position {
+		if (singleByteCharacters) return i + moveDir;
+		if (pdoc->dbcsCodePage == CpUtf8) {
+			if (moveDir < 0) return i > 0 ? ScalarStart(i - 1) : 0;
+			return i < numCharsInLine ? i + UTF8DrawBytes(&chars[i], numCharsInLine - i) : i;
+		}
+		return pdoc->NextPosition(i + posLineStart, moveDir) - posLineStart;
 	};
 	lines = 0;
 	// Calculate line start positions based upon width.
@@ -328,8 +340,9 @@ void LineLayout::WrapLine(const Document *pdoc, Sci::Position posLineStart, Wrap
 			// backtrack to find lastGoodBreak
 			Sci::Position lastGoodBreak = p;
 			// Try moving to start of last character
-			if (p > 0 && !graphicASCII) {
-				lastGoodBreak = pdoc->MovePositionOutsideChar(p + posLineStart, -1) - posLineStart;
+			if (p > 0 && !singleByteCharacters) {
+				lastGoodBreak = pdoc->dbcsCodePage == CpUtf8 ? ScalarStart(p) :
+					pdoc->MovePositionOutsideChar(p + posLineStart, -1) - posLineStart;
 			}
 			bool foundBreak = false;
 			if (wrapState != Wrap::Char) {
@@ -350,7 +363,7 @@ void LineLayout::WrapLine(const Document *pdoc, Sci::Position posLineStart, Wrap
 				}
 			}
 			if (!foundBreak) {
-				if (!graphicASCII && CpUtf8 == pdoc->dbcsCodePage) {
+				if (!singleByteCharacters && CpUtf8 == pdoc->dbcsCodePage) {
 					// Go back before a base character, commonly a letter as modifiers are after the letter they modify
 					const Sci::Position afterWrap = CharacterBoundary(lastGoodBreak, 1);
 					std::string_view svWithoutLast(&chars[lastLineStart], afterWrap - lastLineStart);
@@ -636,6 +649,14 @@ constexpr unsigned int KeyFromString(std::string_view charBytes) noexcept {
 	return k;
 }
 
+// KeyFromString packs big-endian and ignores leading NUL bytes. Use the key's
+// canonical leading byte so alternate spellings of the same key share a bucket.
+constexpr unsigned char LeadingKeyByte(unsigned int key) noexcept {
+	if (key > 0xffff) key >>= 16;
+	if (key > 0xff) key >>= 8;
+	return static_cast<unsigned char>(key);
+}
+
 constexpr unsigned int representationKeyCrLf = KeyFromString("\r\n");
 
 const char *const repsC0[] = {
@@ -682,6 +703,7 @@ void SpecialRepresentations::SetRepresentation(std::string_view charBytes, std::
 			// New entry so increment for first byte
 			const unsigned char ucStart = charBytes.empty() ? 0 : charBytes[0];
 			startByteHasReprs[ucStart]++;
+			if (key > 0xff) ++startByteHasMultibyteReprs[LeadingKeyByte(key)];
 			if (key > maxKey) {
 				maxKey = key;
 			}
@@ -725,6 +747,7 @@ void SpecialRepresentations::ClearRepresentation(std::string_view charBytes) {
 			mapReprs.erase(it);
 			const unsigned char ucStart = charBytes.empty() ? 0 : charBytes[0];
 			startByteHasReprs[ucStart]--;
+			if (key > 0xff) --startByteHasMultibyteReprs[LeadingKeyByte(key)];
 			if (key == maxKey && startByteHasReprs[ucStart] == 0) {
 				maxKey = mapReprs.empty() ? 0 : mapReprs.crbegin()->first;
 			}
@@ -737,7 +760,9 @@ void SpecialRepresentations::ClearRepresentation(std::string_view charBytes) {
 
 const Representation *SpecialRepresentations::GetRepresentation(std::string_view charBytes) const {
 	const unsigned int key = KeyFromString(charBytes);
-	if (key > maxKey) {
+	// Invalid-byte representations exist for every high byte by default. They
+	// cannot match a valid multi-byte scalar; avoid a tree lookup for each one.
+	if (key > maxKey || (key > 0xff && !startByteHasMultibyteReprs[LeadingKeyByte(key)])) {
 		return nullptr;
 	}
 	const MapRepresentation::const_iterator it = mapReprs.find(key);
@@ -761,6 +786,7 @@ void SpecialRepresentations::Clear() {
 	mapReprs.clear();
 	constexpr unsigned short none = 0;
 	std::fill(startByteHasReprs, std::end(startByteHasReprs), none);
+	std::fill(startByteHasMultibyteReprs, std::end(startByteHasMultibyteReprs), 0U);
 	maxKey = 0;
 	crlf = false;
 }
@@ -822,6 +848,25 @@ BreakFinder::BreakFinder(const LineLayout *ll_, const Selection *psel, Range lin
 	pdoc(pdoc_),
 	encodingFamily(pdoc_->CodePageFamily()),
 	preprs(preprs_) {
+	if (breakFor == BreakFor::Text && encodingFamily == EncodingFamily::unicode &&
+		lineRange.end - lineRange.start > 4096) {
+		// A uniform style removes both per-scalar trail-byte style checks and
+		// style-boundary tests from the long text run. Check complete words,
+		// without reading past this range or assuming alignment.
+		const unsigned char style = ll->styles[lineRange.start];
+		const uint64_t repeated = style * UINT64_C(0x0101010101010101);
+		Sci::Position offset = lineRange.start;
+		uniformStyle = true;
+		while (offset + static_cast<Sci::Position>(sizeof(uint64_t)) <= lineRange.end) {
+			uint64_t word;
+			std::memcpy(&word, ll->styles.get() + offset, sizeof(word));
+			if (word != repeated) { uniformStyle = false; break; }
+			offset += sizeof(word);
+		}
+		while (uniformStyle && offset < lineRange.end) {
+			uniformStyle = ll->styles[offset++] == style;
+		}
+	}
 
 	// Search for first visible break
 	// First find the first visible character
@@ -879,6 +924,20 @@ TextSegment BreakFinder::Next() {
 	if (subBreak < 0) {
 		const int prev = nextBreak;
 		const Representation *repr = nullptr;
+		if (uniformStyle) {
+			// Most UTF-8 text has neither style changes nor representations.
+			// Decode exactly as the ordinary loop, stopping before any possible
+			// representation or explicit selection/edge boundary. The ordinary
+			// loop handles those exceptional cases with its original semantics.
+			const int end = std::min(saeNext, static_cast<int>(lineRange.end));
+			while (nextBreak < end) {
+				const char *chars = &ll->chars[nextBreak];
+				const unsigned char ch = chars[0];
+				const int width = UTF8DrawBytes(chars, lineRange.end - nextBreak);
+				if (width == 1 ? preprs->MayContain(ch) : preprs->MayContainMultibyte(ch)) break;
+				nextBreak += width;
+			}
+		}
 		while (nextBreak < lineRange.end) {
 			int charWidth = 1;
 			const char * const chars = &ll->chars[nextBreak];
@@ -912,7 +971,9 @@ TextSegment BreakFinder::Next() {
 				if (ch == '\r' && preprs->ContainsCrLf() && chars[1] == '\n') {
 					charWidth = 2;
 				}
-				repr = preprs->GetRepresentation(std::string_view(chars, charWidth));
+				if (charWidth == 1 || preprs->MayContainMultibyte(ch)) {
+					repr = preprs->GetRepresentation(std::string_view(chars, charWidth));
+				}
 			}
 			if (((nextBreak > 0) && (ll->styles[nextBreak] != ll->styles[nextBreak - 1])) ||
 					repr ||

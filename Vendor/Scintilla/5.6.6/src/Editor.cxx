@@ -2855,6 +2855,11 @@ void Editor::NotifyModified(Document *, DocModification mh, void *) {
 		}
 		if (FlagSet(mh.modificationType, ModificationFlags::ChangeStyle)) {
 			view.llc.Invalidate(LineLayout::ValidLevel::checkTextAndStyle);
+            // Styles may arrive after layout (container or asynchronous lexing).
+            // Style boundaries and font metrics can change the wrap points.
+            if (Wrapping())
+                NeedWrapping(pdoc->SciLineFromPosition(mh.position),
+                    pdoc->SciLineFromPosition(mh.position + mh.length) + 1);
 		}
 	} else {
 		if (FlagSet(undoSelectionHistoryOption, UndoSelectionHistoryOption::Enabled) &&

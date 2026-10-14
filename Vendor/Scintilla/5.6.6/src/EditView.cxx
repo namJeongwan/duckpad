@@ -12,6 +12,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cmath>
+#include <limits>
 
 #include <stdexcept>
 #include <utility>
@@ -233,10 +234,16 @@ void EditView::ClearAllTabstops() noexcept {
 }
 
 XYPOSITION EditView::NextTabstopPos(Sci::Line line, XYPOSITION x, XYPOSITION tabWidth) const noexcept {
-	const int next = GetNextTabstop(line, static_cast<int>(x + tabWidthMinimumPixels));
-	if (next > 0)
-		return static_cast<XYPOSITION>(next);
-	return (static_cast<int>((x + tabWidthMinimumPixels) / tabWidth) + 1) * tabWidth;
+	const XYPOSITION minimumX = x + tabWidthMinimumPixels;
+	if (ldTabstops && minimumX <= std::numeric_limits<int>::max()) {
+		const int next = GetNextTabstop(line, static_cast<int>(
+			std::max(minimumX, static_cast<XYPOSITION>(std::numeric_limits<int>::min()))));
+		if (next > 0)
+			return static_cast<XYPOSITION>(next);
+	}
+	// Keep the tab number in floating point: tiny advances and distant custom
+	// stops can exceed an int even while the pixel position is representable.
+	return (std::trunc(minimumX / tabWidth) + 1) * tabWidth;
 }
 
 bool EditView::ClearTabstops(Sci::Line line) noexcept {
@@ -385,6 +392,8 @@ void LayoutSegments(IPositionCache *pCache,
 			pCache->MeasureWidths(surface, vstyle, styleSegment, true, text, positionsRepr.data(), multiThreaded);
 			const XYPOSITION representationWidth = positionsRepr[text.length() - 1];
 			std::fill(positions, positions + ts.length, representationWidth);
+		} else {
+			std::fill(positions, positions + ts.length, 0.0);
 		}
 	}
 }
@@ -487,9 +496,14 @@ void EditView::LayoutLine(const EditModel &model, Surface *surface, const ViewSt
 
 		// ASCII with measured monospaced metrics does not need one shaping
 		// segment per syntax token. Preserve styles for paint and word wrapping.
-		ll->graphicASCII = std::all_of(ll->chars.get(), ll->chars.get() + numCharsInLine,
+		const bool graphicASCII = std::all_of(ll->chars.get(), ll->chars.get() + numCharsInLine,
 			[](unsigned char ch) { return ch >= 32 && ch < 127; });
-		bool directWidths = ll->graphicASCII && numCharsInLine > 4096 && !model.BidirectionalEnabled();
+		ll->singleByteCharacters = graphicASCII ||
+			std::all_of(ll->chars.get(), ll->chars.get() + numCharsInLine,
+				[](unsigned char ch) { return (ch >= 32 && ch < 127) || ch == '\t'; });
+		bool directWidths = ll->singleByteCharacters && numCharsInLine > 4096 && !model.BidirectionalEnabled() &&
+			(graphicASCII || (vstyle.tabDrawMode != TabDrawMode::ControlChar &&
+				model.reprs->RepresentationFromCharacter("\t")));
 		if (directWidths) {
 			for (unsigned char ch = 32; ch < 127; ++ch) {
 				if (model.reprs->MayContain(ch)) { directWidths = false; break; }
@@ -501,12 +515,69 @@ void EditView::LayoutLine(const EditModel &model, Surface *surface, const ViewSt
 				const Style &st = vstyle.styles[style];
 				widths[style] = (st.monospaceASCII && st.visible && !st.italic) ? st.monospaceCharacterWidth : -1;
 			}
+			const XYPOSITION commonWidth = widths[ll->styles[0]];
+			// On this grid, all intermediate sums/products below 2^36 pixels
+			// are exact doubles. Computing a run from its origin therefore gives
+			// exactly the same positions as repeated addition, without a serial
+			// floating-point dependency or per-byte style/tab branching.
+			constexpr XYPOSITION grid = 65536;
+			bool uniformWidths = commonWidth > 0 && vstyle.tabWidth > 0 && tabWidthMinimumPixels >= 0 &&
+				std::floor(commonWidth * grid) == commonWidth * grid &&
+				std::floor(vstyle.tabWidth * grid) == vstyle.tabWidth * grid &&
+				numCharsInLine * std::max(commonWidth, vstyle.tabWidth + tabWidthMinimumPixels) + 0x1p31 < 0x1p36;
+			std::array<unsigned char, 8> otherWidths{};
+			size_t otherCount = 0;
+			if (uniformWidths) {
+				for (size_t style = 0; style < widths.size(); ++style) {
+					if (widths[style] != commonWidth) {
+						if (otherCount == otherWidths.size()) { uniformWidths = false; break; }
+						otherWidths[otherCount++] = static_cast<unsigned char>(style);
+					}
+				}
+				for (size_t i = 0; uniformWidths && i < otherCount; ++i) {
+					uniformWidths = !std::memchr(ll->styles.get(), otherWidths[i], numCharsInLine);
+				}
+			}
 			XYPOSITION x = 0;
-			for (int i = 0; i < numCharsInLine; ++i) {
-				const XYPOSITION advance = widths[ll->styles[i]];
-				if (advance < 0) { directWidths = false; break; }
-				x += advance;
-				ll->positions[i + 1] = x;
+			const XYPOSITION tabColumns = uniformWidths ? vstyle.tabWidth / commonWidth : 0;
+			const bool columnTabs = uniformWidths && !graphicASCII && !ldTabstops &&
+				tabWidthMinimumPixels >= 0 && tabWidthMinimumPixels <= commonWidth / 2 &&
+				tabColumns >= 1 && tabColumns <= 256 && std::floor(tabColumns) == tabColumns &&
+				commonWidth * tabColumns == vstyle.tabWidth &&
+				(numCharsInLine + 1.0) * vstyle.tabWidth < 0x1p30;
+			const unsigned int columns = columnTabs ? static_cast<unsigned int>(tabColumns) : 0;
+			if (columnTabs && (columns & (columns - 1)) == 0) {
+				// With at most half a cell of minimum padding, the ordinary pixel
+				// tab calculation lands on this same next column. Keep the column
+				// integral, avoiding division and a floating-point dependency chain.
+				uint64_t column = 0;
+				const uint64_t tabMask = columns - 1;
+				for (int i = 0; i < numCharsInLine; ++i) {
+					column = ll->chars[i] == '\t' ? (column + columns) & ~tabMask : column + 1;
+					ll->positions[i + 1] = column * commonWidth;
+				}
+			} else if (uniformWidths) {
+				for (int start = 0; start < numCharsInLine;) {
+					const char *tab = graphicASCII ? nullptr : static_cast<const char *>(
+						std::memchr(ll->chars.get() + start, '\t', numCharsInLine - start));
+					const int end = tab ? static_cast<int>(tab - ll->chars.get()) : numCharsInLine;
+					for (int i = start; i < end; ++i) {
+						ll->positions[i + 1] = x + (i - start + 1) * commonWidth;
+					}
+					x += (end - start) * commonWidth;
+					start = end;
+					if (tab) {
+						x = NextTabstopPos(line, x, vstyle.tabWidth);
+						ll->positions[++start] = x;
+					}
+				}
+			} else {
+				for (int i = 0; i < numCharsInLine; ++i) {
+					const XYPOSITION advance = widths[ll->styles[i]];
+					if (advance < 0) { directWidths = false; break; }
+					x = ll->chars[i] == '\t' ? NextTabstopPos(line, x, vstyle.tabWidth) : x + advance;
+					ll->positions[i + 1] = x;
+				}
 			}
 		}
 		if (!directWidths) {
@@ -516,7 +587,8 @@ void EditView::LayoutLine(const EditModel &model, Surface *surface, const ViewSt
 				segments.push_back(bfLayout.Next());
 			}
 
-			ll->ClearPositions();
+			// Each segment writes its whole range, including invisible text.
+			// Avoid zeroing the full long-line position array before overwriting it.
 
 			if (!segments.empty()) {
 

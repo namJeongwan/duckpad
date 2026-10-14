@@ -71,17 +71,58 @@ enum LongLineBenchmark {
             values.sorted()[min(values.count - 1, Int(ceil(Double(values.count) * fraction)) - 1)]
         }
         var failed = false
+        func settleStyling() async throws {
+            var maximumStall = 0.0
+            let start = ContinuousClock.now
+            while view.asynchronousWorkPending {
+                guard start.duration(to: .now) < .seconds(15) else {
+                    throw Failure.invariant("Background styling did not finish")
+                }
+                let yielding = ContinuousClock.now
+                try await Task.sleep(for: .milliseconds(2))
+                maximumStall = max(maximumStall, FormattingBenchmark.milliseconds(yielding.duration(to: .now)) - 2)
+            }
+            let drawing = ContinuousClock.now
+            finishInput()
+            maximumStall = max(maximumStall, FormattingBenchmark.milliseconds(drawing.duration(to: .now)))
+            failed = failed || maximumStall > 50
+            print("LONG_LINE_STYLE_SETTLED elapsed_ms=\(FormattingBenchmark.milliseconds(start.duration(to: .now))) max_main_stall_ms=\(maximumStall) pass=\(maximumStall <= 50)")
+        }
+        // Exercise the fully highlighted document by default. A separate pending
+        // run covers typing immediately while the initial syntax job is active.
+        let styleState = ProcessInfo.processInfo.environment["DUCKPAD_LONG_LINE_STYLE_STATE"]
+        if styleState == "recoloured" { _ = view.collapseAllFolds() }
+        if styleState != "pending" {
+            try await settleStyling()
+        }
+        if styleState == "recoloured" {
+            _ = view.expandAllFolds()
+            finishInput()
+        }
         func report(_ label: String, _ operation: String, _ values: [Double]) {
             let maximum = values.max()!
             print("LONG_LINE position=\(label) operation=\(operation) samples=\(values.count) p50_ms=\(percentile(values, 0.5)) p95_ms=\(percentile(values, 0.95)) max_ms=\(maximum) budget_ms=50 pass=\(maximum <= 50)")
             failed = failed || maximum > 50
         }
-        func measure(_ action: () -> Void) -> Double {
+        func traceSlow(_ operation: String, position: String, start: ContinuousClock.Instant,
+                       edited: ContinuousClock.Instant, displayed: ContinuousClock.Instant,
+                       cpuStart: UInt64, phases: [Double]) -> Double {
+            let elapsed = FormattingBenchmark.milliseconds(start.duration(to: displayed))
+            if elapsed > 40 {
+                let cpu = Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - cpuStart) / 1_000_000
+                print("LONG_LINE_SLOW position=\(position) operation=\(operation) wall_ms=\(elapsed) thread_cpu_ms=\(cpu) input_ms=\(FormattingBenchmark.milliseconds(start.duration(to: edited))) selected_substring_rect_status_draw_ms=\(phases)")
+            }
+            return elapsed
+        }
+        func measure(_ operation: String, position: String, _ action: () -> Void) -> Double {
+            let cpuStart = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
             let start = ContinuousClock.now
             _ = input.selectedRange()
             action()
-            finishInput()
-            return FormattingBenchmark.milliseconds(start.duration(to: .now))
+            let edited = ContinuousClock.now
+            let phases = finishInput()
+            return traceSlow(operation, position: position, start: start, edited: edited,
+                             displayed: .now, cpuStart: cpuStart, phases: phases)
         }
         // Include the longest JSON string, where restarting at a structural
         // token needs to cross substantially more text than at an arbitrary byte.
@@ -110,29 +151,31 @@ enum LongLineBenchmark {
             while offset < original.count && original[offset] & 0xC0 == 0x80 { offset += 1 }
             view.setPrimarySelectionUTF8Range(.init(location: offset, length: 0))
             finishInput()
-            var insertion: [Double] = [], deletion: [Double] = []
+            var insertion: [Double] = [], deletion: [Double] = [], idle: [Double] = []
             for _ in 0..<(quick ? 8 : 40) {
                 view.beginGroupedUndo()
+                let cpuStart = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
                 let start = ContinuousClock.now
                 _ = input.selectedRange()
                 input.insertText("a", replacementRange: .init(location: NSNotFound, length: 0))
                 let insertedAt = ContinuousClock.now
                 let phases = finishInput()
                 let displayedAt = ContinuousClock.now
-                insertion.append(FormattingBenchmark.milliseconds(start.duration(to: displayedAt)))
+                insertion.append(traceSlow("insert", position: label, start: start, edited: insertedAt,
+                                           displayed: displayedAt, cpuStart: cpuStart, phases: phases))
                 if insertion.count == 1 {
                     print("LONG_LINE_FIRST position=\(label) input_ms=\(FormattingBenchmark.milliseconds(start.duration(to: insertedAt))) selected_substring_rect_status_draw_ms=\(phases)")
                 }
                 view.endGroupedUndo()
                 view.beginGroupedUndo()
-                let deleting = ContinuousClock.now
-                _ = input.selectedRange()
-                window.firstResponder?.doCommand(by: #selector(NSResponder.deleteBackward(_:)))
-                finishInput()
-                deletion.append(FormattingBenchmark.milliseconds(deleting.duration(to: .now)))
+                deletion.append(measure("backspace", position: label) {
+                    window.firstResponder?.doCommand(by: #selector(NSResponder.deleteBackward(_:)))
+                })
                 view.endGroupedUndo()
                 // Process pending layout/idle work between key events.
-                await Task.yield()
+                let yielding = ContinuousClock.now
+                try await Task.sleep(for: .milliseconds(1))
+                idle.append(max(0, FormattingBenchmark.milliseconds(yielding.duration(to: .now)) - 1))
             }
             guard view.contentUTF8 == original else { throw Failure.invariant("edit bytes at \(label)") }
             view.undo() // Undo deletion: restores the inserted character.
@@ -143,17 +186,17 @@ enum LongLineBenchmark {
             guard view.contentUTF8 == original else { throw Failure.invariant("insert undo at \(label)") }
             view.redo(); view.redo()
             guard view.contentUTF8 == original else { throw Failure.invariant("redo at \(label)") }
-            for (operation, values) in [("insert", insertion), ("backspace", deletion)] {
+            for (operation, values) in [("insert", insertion), ("backspace", deletion), ("idle-turn", idle)] {
                 report(label, operation, values)
             }
             var burst: [Double] = [], eraseBurst: [Double] = []
             for _ in 0..<(quick ? 4 : 16) {
-                burst.append(measure {
+                burst.append(measure("burst-insert", position: label) {
                     input.insertText("a", replacementRange: .init(location: NSNotFound, length: 0))
                 })
             }
             for _ in 0..<(quick ? 4 : 16) {
-                eraseBurst.append(measure {
+                eraseBurst.append(measure("burst-backspace", position: label) {
                     window.firstResponder?.doCommand(by: #selector(NSResponder.deleteBackward(_:)))
                 })
             }
@@ -170,7 +213,7 @@ enum LongLineBenchmark {
                 view.setPrimarySelectionUTF8Range(.init(location: offset, length: end - offset))
                 finishInput()
                 view.beginGroupedUndo()
-                replace.append(measure {
+                replace.append(measure("replace", position: label) {
                     input.insertText(replacement, replacementRange: .init(location: NSNotFound, length: 0))
                 })
                 view.endGroupedUndo()
@@ -183,17 +226,18 @@ enum LongLineBenchmark {
                     expected.replaceSubrange(offset..<end, with: replacement.utf8)
                 }
                 guard view.contentUTF8 == expected else { throw Failure.invariant("replacement at \(label)") }
-                undo.append(measure { view.undo() })
+                undo.append(measure("undo", position: label) { view.undo() })
                 guard view.contentUTF8 == original else { throw Failure.invariant("replacement undo at \(label)") }
-                redo.append(measure { view.redo() })
+                redo.append(measure("redo", position: label) { view.redo() })
                 guard view.contentUTF8 == expected else { throw Failure.invariant("replacement redo at \(label)") }
-                undo.append(measure { view.undo() })
+                undo.append(measure("undo", position: label) { view.undo() })
                 guard view.contentUTF8 == original else { throw Failure.invariant("restored bytes at \(label)") }
             }
             report(label, "replace", replace)
             report(label, "undo", undo)
             report(label, "redo", redo)
         }
+        try await settleStyling()
         print("LONG_LINE bytes=\(original.count) lines=\(view.lineCount) wrap=true lexer=\(lexer) undo_redo_exact=true")
         if failed { throw Failure.invariant("50 ms maximum budget exceeded") }
     }

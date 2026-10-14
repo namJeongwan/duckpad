@@ -46,9 +46,30 @@ struct FoldingEditorAdapterTests {
         #expect(secondary.hasEditorFocus)
     }
 
+    @Test @MainActor
+    func expandAllCancelsPendingAsynchronousCollapseThroughController() async throws {
+        let text = "int main() {\n/*" + String(repeating: "a", count: 1_100_000) + "*/\n}\n"
+        let fixture = try await makeRealFoldingControllerFixture(split: false, text: text)
+        defer { fixture.controller.close(); fixture.adapter.invalidate() }
+        let view = try #require(fixture.adapter.activeScintillaView)
+        #expect(view.asynchronousStylingPending)
+        fixture.controller.performCollapseAllFolds(nil)
+        #expect(fixture.adapter.hasCollapsedFolds)
+        fixture.controller.performExpandAllFolds(nil)
+        #expect(!fixture.adapter.hasCollapsedFolds)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(15))
+        while view.asynchronousStylingPending && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(!view.asynchronousStylingPending)
+        #expect(view.isFoldExpanded(atLine: 0))
+        #expect(!fixture.adapter.hasCollapsedFolds)
+    }
+
     @MainActor
     private func makeRealFoldingControllerFixture(
-        split: Bool
+        split: Bool,
+        text: String = "int main() {\n  return 0;\n}\n"
     ) async throws -> (
         workspace: ScratchWorkspaceUseCase,
         binding: EditorBindingUseCase,
@@ -64,7 +85,7 @@ struct FoldingEditorAdapterTests {
         adapter.install(EditorTextSnapshot(
             bufferID: buffer.bufferID,
             revision: buffer.revision,
-            text: "int main() {\n  return 0;\n}\n"
+            text: text
         ))
         adapter.display(buffer)
         #expect(adapter.applyLanguage(cppFoldConfiguration))

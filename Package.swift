@@ -39,6 +39,7 @@ let package = Package(
                 .headerSearchPath("lexlib"),
                 .headerSearchPath("scintilla/include"),
                 .define("LEXILLA_NO_EXPORT"),
+                .unsafeFlags(["-O3"], .when(configuration: .release)),
                 .define("NDEBUG", .when(configuration: .release)),
             ]
         ),
@@ -51,6 +52,7 @@ let package = Package(
                 "bridge/DPScintillaBinaryDocument.mm",
                 "bridge/DPSearchOverviewView.mm",
                 "bridge/DPPlantUMLLexer.cxx",
+                "bridge/DPAsyncLexer.mm",
                 "bridge/DPColorPreviewView.mm",
                 "cocoa/InfoBar.mm",
                 "cocoa/PlatCocoa.mm",
@@ -75,6 +77,7 @@ let package = Package(
                 .headerSearchPath("src"),
                 .headerSearchPath("cocoa"),
                 .headerSearchPath("../../Lexilla/5.5.3/lexlib"),
+                .unsafeFlags(["-O3"], .when(configuration: .release)),
                 .define("NDEBUG", .when(configuration: .release)),
             ],
             linkerSettings: [

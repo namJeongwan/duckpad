@@ -36,6 +36,7 @@
 #include "CellBuffer.h"
 #include "UndoHistory.h"
 #include "UniConversion.h"
+#include "UTF8PositionIndex.h"
 
 namespace Scintilla::Internal {
 
@@ -346,6 +347,17 @@ CellBuffer::CellBuffer(bool hasStyles_, bool largeDocument_) :
 }
 
 CellBuffer::~CellBuffer() noexcept = default;
+
+const UTF8PositionIndex *CellBuffer::CharacterIndex(int tabWidth) const noexcept {
+	if (Length() < 65536) return nullptr;
+	if (!characterIndex || (tabWidth > 0 && characterIndex->TabWidth() != tabWidth)) {
+		try {
+			characterIndex = std::make_unique<UTF8PositionIndex>(AllView(), tabWidth > 0 ? tabWidth : 4);
+		} catch (...) { return nullptr; }
+	}
+	characterIndex->SetView(AllView());
+	return characterIndex.get();
+}
 
 char CellBuffer::CharAt(Sci::Position position) const noexcept {
 	return substance.ValueAt(position);
@@ -874,6 +886,10 @@ void CellBuffer::BasicInsertString(Sci::Position position, const char *s, Sci::P
 	}
 
 	substance.InsertFromArray(position, s, 0, insertLength);
+	if (characterIndex) {
+		try { characterIndex->Replace(position, 0, insertLength, AllView()); }
+		catch (...) { characterIndex.reset(); }
+	}
 	// Maintain exact byte facts through the common path, including Undo/Redo.
 	// ASCII coordinate queries then need no scan, even on multi-megabyte lines.
 	for (Sci::Position i = 0; i < insertLength; ++i) {
@@ -1120,6 +1136,10 @@ void CellBuffer::BasicDeleteChars(Sci::Position position, Sci::Position deleteLe
 		}
 	}
 	substance.DeleteRange(position, deleteLength);
+	if (characterIndex) {
+		try { characterIndex->Replace(position, deleteLength, 0, AllView()); }
+		catch (...) { characterIndex.reset(); }
+	}
 	if (lineRecalculateStart >= 0) {
 		RecalculateIndexLineStarts(lineRecalculateStart, lineRecalculateStart);
 	}

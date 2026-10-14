@@ -52,6 +52,7 @@
 #include "Document.h"
 #include "RESearch.h"
 #include "UniConversion.h"
+#include "UTF8PositionIndex.h"
 #include "ElapsedPeriod.h"
 
 using namespace Scintilla;
@@ -1059,6 +1060,16 @@ Sci::Position Document::GetRelativePositionUTF16(Sci::Position positionStart, Sc
 			return Sci::invalidPosition;
 		return positionStart + characterOffset;
 	}
+	if (dbcsCodePage == CpUtf8 && positionStart >= 0 && positionStart <= LengthNoExcept() &&
+		MovePositionOutsideChar(positionStart, 1, false) == positionStart &&
+		(cb.HasCharacterIndex() || characterOffset >= 32768 || characterOffset <= -32768)) {
+		if (const auto *index = cb.CharacterIndex()) {
+			const auto start = index->AtByte(positionStart).utf16;
+			const auto total = index->AtByte(LengthNoExcept()).utf16;
+			if (characterOffset < -start || characterOffset > total - start) return Sci::invalidPosition;
+			return index->AtUTF16(start + characterOffset);
+		}
+	}
 	Sci::Position pos = positionStart;
 	if (dbcsCodePage) {
 		const int increment = (characterOffset > 0) ? 1 : -1;
@@ -1804,11 +1815,21 @@ Sci::Position Document::GetLineIndentPosition(Sci::Line line) const noexcept {
 }
 
 Sci::Position Document::GetColumn(Sci::Position pos) const noexcept {
+	if (dbcsCodePage == CpUtf8 && cb.HasTabs() && tabInChars > 0 && pos >= 0 && pos <= LengthNoExcept() &&
+		(cb.HasCharacterIndex() || pos - LineStart(SciLineFromPosition(pos)) >= 65536) &&
+		MovePositionOutsideChar(pos, -1, false) == pos) {
+		if (const auto *index = cb.CharacterIndex(tabInChars)) {
+			const Sci::Line line = SciLineFromPosition(pos);
+			return index->Column(LineStart(line), std::min(pos, LineEnd(line)));
+		}
+	}
 	Sci::Position column = 0;
 	const Sci::Line line = SciLineFromPosition(pos);
 	if ((line >= 0) && (line < LinesTotal())) {
 		if (cb.IsAllASCII() && !cb.HasTabs())
 			return std::max<Sci::Position>(0, std::min(pos, LineEnd(line)) - cb.LineStart(line));
+		if (dbcsCodePage == CpUtf8 && !cb.HasTabs() && MovePositionOutsideChar(pos, -1, false) == pos)
+			return CountCharacters(cb.LineStart(line), std::min(pos, LineEnd(line)));
 		const Sci::Position length = LengthNoExcept();
 		for (Sci::Position i = cb.LineStart(line); i < pos;) {
 			const char ch = cb.CharAt(i);
@@ -1838,6 +1859,11 @@ Sci::Position Document::CountCharacters(Sci::Position startPos, Sci::Position en
 		return std::max<Sci::Position>(0, endPos - startPos);
 	startPos = MovePositionOutsideChar(startPos, 1, false);
 	endPos = MovePositionOutsideChar(endPos, -1, false);
+	if (dbcsCodePage == CpUtf8 && startPos >= 0 && endPos <= LengthNoExcept() && startPos <= endPos &&
+		(cb.HasCharacterIndex() || endPos - startPos >= 65536)) {
+		if (const auto *index = cb.CharacterIndex())
+			return index->AtByte(endPos).characters - index->AtByte(startPos).characters;
+	}
 	Sci::Position count = 0;
 	Sci::Position i = startPos;
 	while (i < endPos) {
@@ -1852,6 +1878,11 @@ Sci::Position Document::CountUTF16(Sci::Position startPos, Sci::Position endPos)
 		return std::max<Sci::Position>(0, endPos - startPos);
 	startPos = MovePositionOutsideChar(startPos, 1, false);
 	endPos = MovePositionOutsideChar(endPos, -1, false);
+	if (dbcsCodePage == CpUtf8 && startPos >= 0 && endPos <= LengthNoExcept() && startPos <= endPos &&
+		(cb.HasCharacterIndex() || endPos - startPos >= 65536)) {
+		if (const auto *index = cb.CharacterIndex())
+			return index->AtByte(endPos).utf16 - index->AtByte(startPos).utf16;
+	}
 	Sci::Position count = 0;
 	Sci::Position i = startPos;
 	while (i < endPos) {
