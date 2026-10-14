@@ -124,6 +124,10 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, readonly) NSUInteger languageConfigurationCount;
 @property(nonatomic, readonly) NSUInteger commentCommandInspectedByteCount;
 @property(nonatomic, readonly) NSUInteger synchronouslyStyledByteCount;
+/// True while a large-document syntax snapshot is queued, computed or applied.
+@property(nonatomic, readonly) BOOL asynchronousStylingPending;
+/// Also includes deferred fold commands; used by responsiveness instrumentation.
+@property(nonatomic, readonly) BOOL asynchronousWorkPending;
 @property(nonatomic, readonly) NSUInteger configuredTabWidth;
 @property(nonatomic, readonly) BOOL configuredUseTabs;
 @property(nonatomic, readonly) BOOL configuredFoldingEnabled;

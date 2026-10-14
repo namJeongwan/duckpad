@@ -27,6 +27,7 @@ public:
 
 class UndoHistory;
 class ChangeHistory;
+class UTF8PositionIndex;
 
 /**
  * The line vector contains information about each of the lines in a cell buffer.
@@ -105,6 +106,7 @@ private:
 	bool utf8Substance;
 	Sci::Position nonASCIIBytes = 0;
 	Sci::Position tabBytes = 0;
+	mutable std::unique_ptr<UTF8PositionIndex> characterIndex;
 	Scintilla::LineEndType utf8LineEnds;
 
 	bool collectingUndo;
@@ -143,6 +145,8 @@ public:
 	const char *RangePointer(Sci::Position position, Sci::Position rangeLength) noexcept;
 	Sci::Position GapPosition() const noexcept;
 	SplitView AllView() const noexcept;
+	bool HasCharacterIndex() const noexcept { return characterIndex != nullptr; }
+	const UTF8PositionIndex *CharacterIndex(int tabWidth = 0) const noexcept;
 
 	Sci::Position Length() const noexcept;
 	void Allocate(Sci::Position newSize);

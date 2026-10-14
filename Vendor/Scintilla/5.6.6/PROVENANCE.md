@@ -370,3 +370,82 @@ deferred layer drawing is charged to the input event. Set
 This measures application rendering completion, not hardware key-to-photon time.
 This budget applies to the measured fixture and machine,
 not an unmeasured promise for every document size, font, or Unicode workload.
+
+
+## Long-line performance gate follow-up
+
+- `CellBuffer.{h,cxx}`, `Document.cxx`, and the new Duckpad-owned
+  `src/UTF8PositionIndex.h` add sparse UTF-8/UTF-16/scalar/tab-column checkpoints.
+  The index reads the two gap-buffer segments and repairs only the edited span
+  plus scalar-boundary neighbours; tab alignment is propagated across the next
+  unchanged tab. Short-range queries retain the upstream path. Byte edits,
+  malformed UTF-8, Undo/Redo, tab widths and gap relocation are regression-tested.
+- `PositionCache.{h,cxx}` resolves UTF-8 wrapping boundaries from already cached line
+  bytes, preserving malformed-byte and combined-character behaviour. ASCII tab
+  bytes share the single-byte boundary path.
+  `EditView.cxx` extends measured monospaced ASCII layout to ordinary tabs using
+  the existing tab-stop calculation. Control-character tabs, custom ASCII
+  representations, invisible/italic styles and bidirectional layouts retain
+  the upstream shaping path.
+- `SpecialRepresentations` tracks multi-byte entries by the canonical leading
+  byte of their packed key. Ordinary Unicode scalars skip the representation
+  map when no matching multi-byte entry can exist, even though default invalid
+  single-byte representations exist. Set/replace/clear, default line separators,
+  custom Unicode entries and leading-NUL key aliases retain their lookup results.
+- `Editor.cxx` invalidates wrapping when style changes arrive after layout.
+  `bridge/DPAsyncLexer.{h,mm}` wraps CPP, CSS and XML lexers when a requested
+  span or its boundary physical lines reach 1 MiB. An isolated worker document computes the original lexer
+  result; the main thread accepts it only for matching configuration and exact
+  current bytes. Fold/line-state application yields in roughly 2 ms slices and
+  rechecks exact bytes/configuration between slices. At most one job runs per
+  lexer, newer edits coalesce, and closing
+  the document cancels result application. Highlighting is eventually consistent;
+  input does not wait for a whole-line lexer pass. JSON retains its incremental
+  lexer cache. Ordinary short incremental multiline requests stay synchronous
+  until a large request (including full recolouring) activates the worker; the
+  worker then remains active until the document drops below 1 MiB or unsupported
+  private/substyle operations require a full synchronous state rebuild.
+- The bridge retries pending fold restoration after asynchronous styles and
+  levels arrive, refreshes brace/colour overlays, and exposes pending-state
+  instrumentation to the benchmark. Pending Collapse All is replayed after
+  current fold levels arrive and cancelled by Expand All or document replacement.
+  Deferred Collapse All also yields between slices, preserving native header flags,
+  top-level visibility ranges and caret behaviour. The work-pending instrument
+  includes both styling and deferred folding; synchronous fallback wakes waiters.
+  Public editing and Undo data are unchanged.
+- `UniConversion.{h,cxx}` inlines common valid UTF-8 widths while retaining the
+  original classifier for exceptional/malformed sequences. A million deterministic
+  random sequences are compared with the upstream classifier. `EditView.cxx`
+  avoids zeroing the full positions array before layout overwrites every segment;
+  invisible segments explicitly fill their positions with zero.
+- Release C++ targets in `Package.swift` use `-O3` instead of the build backend's
+  size optimization, keeping ordinary floating-point semantics. Debug is unchanged.
+
+The local acquisition script `scripts/vendor_scintilla_5_6_6.sh` was inspected:
+its upstream copy step does not reproduce repository-owned patches and refuses
+an existing destination. Re-importing upstream requires reapplying these changes.
+That untracked user-owned script was not modified or added to this change.
+
+### Additional layout headroom
+
+`EditView.cxx` computes runs of equal measured ASCII advances from their origin
+when metrics lie on an exact binary grid and the conservative total stays within
+exact double precision. Unused differently sized styles are checked against the
+actual style bytes; unsupported metrics or actual style differences retain the
+scalar calculation. Ordinary power-of-two tabs use integral columns only when
+minimum padding, pixel range and tab metrics prove equivalence. Custom stops
+retain `NextTabstopPos`. No fast-math flags are enabled.
+
+`PositionCache.{h,cxx}` scans uniform-style UTF-8 layout runs without redundant
+per-scalar style checks, stopping before possible representations or explicit
+boundaries. Nonuniform styles and exceptional characters retain the original
+segment logic. `tests/native/PerformanceWidths.mm` compares every position bit
+and wrap boundary against the scalar path across 160 metric/style/tab cases (320 layouts),
+and compares segmentation against the original loop for Unicode, malformed
+bytes, representations and edge boundaries.
+
+The same extreme-metric tests exposed upstream integer overflow in
+`NextTabstopPos` when tiny advances followed distant custom stops. Tab numbers
+now use floating-point truncation and custom-stop lookup bounds its integer
+conversion. Ordinary coordinates remain unchanged; the previously undefined
+out-of-range calculation no longer overflows.

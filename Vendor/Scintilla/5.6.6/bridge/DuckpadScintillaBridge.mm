@@ -16,6 +16,8 @@
 #include "SciLexer.h"
 #include "DPScintillaLegacyStyleRoles.h"
 #include "DPPlantUMLLexer.h"
+#include "DPAsyncLexer.h"
+#include <chrono>
 
 @interface DPScintillaBinaryDocument (DuckpadAttachment)
 - (void)attachToScintillaView:(ScintillaView *)view;
@@ -277,6 +279,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     BOOL _pendingSmartIndentationApplyingReplacement;
     BOOL _foldRecoveryProgressPending;
     BOOL _foldRecoveryProgressScheduled;
+    BOOL _collapseAllFoldsAfterStyling;
+    NSUInteger _collapseAllFoldsGeneration;
     NSUInteger _focusEventGeneration;
     uint64_t _statusContentGeneration;
     uint64_t _selectedCountGeneration;
@@ -317,6 +321,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [NSNotificationCenter.defaultCenter addObserver:self
             selector:@selector(colorPreviewViewportChanged:)
             name:NSViewBoundsDidChangeNotification object:_scintilla.scrollView.contentView];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(asynchronousStylingCompleted:)
+            name:DPAsyncLexerDidStyleNotification object:nil];
         _searchOverview.onSelectMarker = ^(NSUInteger index) { [weakSelf navigateToSearchMarker:index]; };
         [self addSubview:_searchOverview];
         _searchMarkerOffsets = [NSIndexSet indexSet];
@@ -564,6 +570,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     self.onFoldRecoveryProgress = nil;
     self.onSmartIndentationStateChange = nil;
     _foldRecoveryProgressPending = NO;
+    _collapseAllFoldsAfterStyling = NO;
     _documentPublisher = nil;
     _pendingSmartCaretPosition = -1;
     _pendingSmartInsertionEnd = -1;
@@ -582,6 +589,23 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (BOOL)languageStylingFallback { return _languageStylingFallback; }
 - (NSUInteger)languageConfigurationCount { return _languageConfigurationCount; }
 - (NSUInteger)commentCommandInspectedByteCount { return _commentCommandInspectedByteCount; }
+- (void)asynchronousStylingCompleted:(NSNotification *)notification {
+    if ([notification.object pointerValue] != reinterpret_cast<void *>([_scintilla message:SCI_GETDOCPOINTER])) return;
+    if (_collapseAllFoldsAfterStyling) {
+        [self continueCollapseAllFoldsAtLine:0 insideFold:NO generation:++_collapseAllFoldsGeneration];
+    }
+    [self scheduleFoldRecoveryProgress];
+    [self updateBraceHighlight];
+    [self refreshColorPreviews];
+}
+- (BOOL)asynchronousWorkPending {
+    return _collapseAllFoldsAfterStyling || self.asynchronousStylingPending;
+}
+- (BOOL)asynchronousStylingPending {
+    if (![_lexerName isEqualToString:@"cpp"] && ![_lexerName isEqualToString:@"css"]
+        && ![_lexerName isEqualToString:@"xml"]) return NO;
+    return [_scintilla message:SCI_PRIVATELEXERCALL wParam:DPAsyncLexerPendingOperation lParam:0] != 0;
+}
 - (NSUInteger)synchronouslyStyledByteCount { return _synchronouslyStyledByteCount; }
 - (BOOL)additionalSelectionTyping { return [_scintilla message:SCI_GETADDITIONALSELECTIONTYPING] != 0; }
 - (void)setAdditionalSelectionTyping:(BOOL)enabled { [_scintilla message:SCI_SETADDITIONALSELECTIONTYPING wParam:enabled]; }
@@ -644,6 +668,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         return [self fail:DPScintillaErrorInvalidUTF8 description:@"Content is not valid UTF-8" error:error];
     }
     [self cancelPendingSmartIndentation];
+    _collapseAllFoldsAfterStyling = NO;
     const BOOL interruptedTextLoad = _loadingText;
     // An incomplete preview has no user edits and must never become an undo target.
     if (interruptedTextLoad) preservingUndo = NO;
@@ -768,6 +793,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     _braceMatchingEnabled = NO;
     _foldingEnabled = NO;
     _foldRecoveryProgressPending = NO;
+    _collapseAllFoldsAfterStyling = NO;
     [self updateModificationEventMask];
     [_scintilla message:SCI_SETWRAPMODE wParam:SC_WRAP_NONE];
     [_scintilla message:SCI_SETLAYOUTCACHE wParam:SC_CACHE_PAGE];
@@ -1257,6 +1283,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)shareDocumentWithView:(DPScintillaEditorView *)source {
     if (source == nil || source == self) return;
+    _collapseAllFoldsAfterStyling = NO;
     [_searchMarkerPeers removeObject:self];
     _searchMarkerPeers = source->_searchMarkerPeers;
     [_searchMarkerPeers addObject:self];
@@ -1818,7 +1845,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
             _semanticStyleRoles.emplace_back(style, role);
         }
     }
-    [_scintilla message:SCI_SETILEXER wParam:0 lParam:reinterpret_cast<sptr_t>(lexer)];
+    _collapseAllFoldsAfterStyling = NO;
+    [_scintilla message:SCI_SETILEXER wParam:0 lParam:reinterpret_cast<sptr_t>(DPWrapAsyncLexer(lexer))];
     [_colorPreview closeChooser];
     _lexerName = [effectiveName copy];
     if ([_lexerName isEqualToString:@"markdown"]) {
@@ -2061,7 +2089,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (BOOL)hasContractedFolds {
-    return _foldingEnabled && [_scintilla message:SCI_CONTRACTEDFOLDNEXT wParam:0] >= 0;
+    return _foldingEnabled && (_collapseAllFoldsAfterStyling
+        || [_scintilla message:SCI_CONTRACTEDFOLDNEXT wParam:0] >= 0);
 }
 
 - (BOOL)canCollapseCurrentFold {
@@ -2076,6 +2105,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (BOOL)setFoldHeader:(NSInteger)header expanded:(BOOL)expanded publishChange:(BOOL)publishChange {
     if (!_foldingEnabled || header < 0) return NO;
+    if (publishChange) _collapseAllFoldsAfterStyling = NO;
     const BOOL wasExpanded = [_scintilla message:SCI_GETFOLDEXPANDED wParam:(uptr_t)header] != 0;
     if (wasExpanded == expanded) return NO;
     [_scintilla message:SCI_FOLDLINE
@@ -2104,8 +2134,66 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     return [self setFoldHeader:[self currentFoldHeader] expanded:YES publishChange:YES];
 }
 
+- (void)continueCollapseAllFoldsAtLine:(NSInteger)line insideFold:(BOOL)insideFold generation:(NSUInteger)generation {
+    if (!_collapseAllFoldsAfterStyling || generation != _collapseAllFoldsGeneration
+        || !_scintilla || self.asynchronousStylingPending) return;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
+    const NSInteger lineCount = [_scintilla message:SCI_GETLINECOUNT];
+    NSInteger hideStart = -1;
+    while (line < lineCount) {
+        const NSInteger level = [_scintilla message:SCI_GETFOLDLEVEL wParam:line];
+        const NSInteger number = level & SC_FOLDLEVELNUMBERMASK;
+        const BOOL whitespace = (level & SC_FOLDLEVELWHITEFLAG) != 0;
+        const BOOL subordinate = whitespace || number > SC_FOLDLEVELBASE;
+        BOOL hide = insideFold && subordinate;
+        if (!subordinate) insideFold = NO;
+        // Match GetLastChild's trailing-whitespace adjustment on an outdent.
+        if (hide && whitespace && ([_scintilla message:SCI_GETFOLDLEVEL wParam:line + 1]
+            & SC_FOLDLEVELNUMBERMASK) < SC_FOLDLEVELBASE) {
+            hide = NO;
+            insideFold = NO;
+        }
+        if (hide && hideStart < 0) hideStart = line;
+        if (!hide && hideStart >= 0) {
+            [_scintilla message:SCI_HIDELINES wParam:hideStart lParam:line - 1];
+            hideStart = -1;
+        }
+        if (level & SC_FOLDLEVELHEADERFLAG) {
+            // FoldAll marks every header, including childless EOF headers, but
+            // hides descendants only beneath base-level headers. Do not invoke
+            // FoldLine's subtree walk or caret movement for each nested header.
+            [_scintilla message:SCI_SETFOLDEXPANDED wParam:line lParam:0];
+            if (number == SC_FOLDLEVELBASE) insideFold = YES;
+        }
+        ++line;
+        if (line % 64 == 0 && std::chrono::steady_clock::now() >= deadline) break;
+    }
+    if (hideStart >= 0) [_scintilla message:SCI_HIDELINES wParam:hideStart lParam:line - 1];
+    if (line < lineCount) {
+        __weak DPScintillaEditorView *weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+            [weakSelf continueCollapseAllFoldsAtLine:line insideFold:insideFold generation:generation];
+        });
+    } else {
+        _collapseAllFoldsAfterStyling = NO;
+        _searchOverviewNeedsRefresh = YES;
+        [self refreshSearchOverview];
+        if (self.onFoldStateChange) self.onFoldStateChange();
+    }
+}
+
 - (BOOL)collapseAllFolds {
     if (!_foldingEnabled) return NO;
+    if ((NSUInteger)[_scintilla message:SCI_GETENDSTYLED] < self.documentByteLength) {
+        [_scintilla message:SCI_COLOURISE wParam:0 lParam:-1];
+    }
+    if (self.asynchronousStylingPending || _collapseAllFoldsAfterStyling) {
+        _collapseAllFoldsAfterStyling = YES;
+        const NSUInteger generation = ++_collapseAllFoldsGeneration;
+        if (!self.asynchronousStylingPending) [self continueCollapseAllFoldsAtLine:0 insideFold:NO generation:generation];
+        if (self.onFoldStateChange) self.onFoldStateChange();
+        return YES;
+    }
     NSArray<NSNumber *> *before = [self contractedFoldHeaderLinesWithMaximumCount:NSUIntegerMax];
     [_scintilla message:SCI_FOLDALL wParam:SC_FOLDACTION_CONTRACT_EVERY_LEVEL];
     _searchOverviewNeedsRefresh = YES;
@@ -2117,7 +2205,12 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (BOOL)expandAllFolds {
-    if (!self.hasContractedFolds) return NO;
+    const BOOL cancelledPendingCollapse = _collapseAllFoldsAfterStyling;
+    _collapseAllFoldsAfterStyling = NO;
+    if (!self.hasContractedFolds) {
+        if (cancelledPendingCollapse && self.onFoldStateChange) self.onFoldStateChange();
+        return cancelledPendingCollapse;
+    }
     [_scintilla message:SCI_FOLDALL wParam:SC_FOLDACTION_EXPAND];
     _searchOverviewNeedsRefresh = YES;
     [self refreshSearchOverview];
@@ -2149,7 +2242,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [seen addObject:canonical];
         const NSInteger line = candidate;
         const NSInteger lineEnd = [_scintilla message:SCI_GETLINEENDPOSITION wParam:(uptr_t)line];
-        if (lineEnd > endStyled) {
+        if (self.asynchronousStylingPending || lineEnd > endStyled) {
             [pending addObject:canonical];
             continue;
         }

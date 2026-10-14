@@ -63,7 +63,7 @@ public:
 	int xHighlightGuide = 0;
 	bool highlightColumn = false;
 	bool containsCaret = false;
-	bool graphicASCII = false;
+	bool singleByteCharacters = false;
 	unsigned char bracePreviousStyles[2]{};
 	int edgeColumn = 0;
 	std::unique_ptr<char[]> chars;
@@ -191,6 +191,7 @@ void Hexits(char *hexits, int ch) noexcept;
 class SpecialRepresentations {
 	MapRepresentation mapReprs;
 	unsigned short startByteHasReprs[0x100] {};
+	unsigned int startByteHasMultibyteReprs[0x100] {};
 	unsigned int maxKey = 0;
 	bool crlf = false;
 public:
@@ -205,6 +206,9 @@ public:
 	}
 	bool MayContain(unsigned char ch) const noexcept {
 		return startByteHasReprs[ch] != 0;
+	}
+	bool MayContainMultibyte(unsigned char ch) const noexcept {
+		return startByteHasMultibyteReprs[ch] != 0;
 	}
 	void Clear();
 	void SetDefaultRepresentations(int dbcsCodePage);
@@ -234,6 +238,7 @@ class BreakFinder {
 	const Document *pdoc;
 	const EncodingFamily encodingFamily;
 	const SpecialRepresentations *preprs;
+	bool uniformStyle = false;
 	void Insert(Sci::Position val);
 public:
 	// If a whole run is longer than lengthStartSubdivision then subdivide
