@@ -442,9 +442,18 @@ const char *CellBuffer::InsertString(Sci::Position position, const char *s, Sci:
 namespace {
 
 ChangedRange CopyBytes(char *p, const char *styles, Sci::Position length, Sci::Position offset) noexcept {
-	for (Sci::Position start = 0; start < length; start++) {
+	// Find exact changed bounds, skipping equal blocks with vectorized memcmp.
+	// Restoring styles after Undo often leaves megabytes unchanged.
+	constexpr Sci::Position block = 4096;
+	Sci::Position prefix = 0;
+	while (prefix + block <= length && std::memcmp(p + prefix, styles + prefix, block) == 0)
+		prefix += block;
+	for (Sci::Position start = prefix; start < length; start++) {
 		if (p[start] != styles[start]) {
-			for (Sci::Position end = length - 1; end >= 0; end--) {
+			Sci::Position suffix = length;
+			while (suffix - block > start && std::memcmp(p + suffix - block, styles + suffix - block, block) == 0)
+				suffix -= block;
+			for (Sci::Position end = suffix - 1; end >= start; end--) {
 				if (p[end] != styles[end]) {
 					memcpy(p+start, styles+start, end-start+1);
 					return { start + offset, end + offset };
@@ -865,6 +874,12 @@ void CellBuffer::BasicInsertString(Sci::Position position, const char *s, Sci::P
 	}
 
 	substance.InsertFromArray(position, s, 0, insertLength);
+	// Maintain exact byte facts through the common path, including Undo/Redo.
+	// ASCII coordinate queries then need no scan, even on multi-megabyte lines.
+	for (Sci::Position i = 0; i < insertLength; ++i) {
+		nonASCIIBytes += static_cast<unsigned char>(s[i]) >= 0x80;
+		tabBytes += s[i] == '\t';
+	}
 	if (hasStyles) {
 		style.InsertValue(position, insertLength, 0);
 	}
@@ -1015,6 +1030,8 @@ void CellBuffer::BasicDeleteChars(Sci::Position position, Sci::Position deleteLe
 	Sci::Line lineRecalculateStart = Sci::invalidPosition;
 
 	if ((position == 0) && (deleteLength == substance.Length())) {
+		nonASCIIBytes = 0;
+		tabBytes = 0;
 		// If whole buffer is being deleted, faster to reinitialise lines data
 		// than to delete each line.
 		plv->Init();
@@ -1068,6 +1085,8 @@ void CellBuffer::BasicDeleteChars(Sci::Position position, Sci::Position deleteLe
 
 		unsigned char ch = chNext;
 		for (Sci::Position i = 0; i < deleteLength; i++) {
+			nonASCIIBytes -= ch >= 0x80;
+			tabBytes -= ch == '\t';
 			chNext = substance.ValueAt(position + i + 1);
 			if (ch == '\r') {
 				if (chNext != '\n') {

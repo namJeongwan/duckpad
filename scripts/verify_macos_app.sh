@@ -18,24 +18,37 @@ test -f "$APP/Contents/Resources/Duckpad.icns"
 for ENGINE in Scintilla Lexilla WAMR Sparkle; do
     test -s "$APP/Contents/Resources/ThirdPartyLicenses/$ENGINE.txt"
 done
-test -f "$APP/Contents/Resources/Duckpad_DuckpadInfrastructure.bundle/Languages.json"
-test -d "$APP/Contents/Resources/Duckpad_DuckpadEditorAdapter.bundle/ScintillaCursors"
-test -d "$APP/Contents/Resources/Duckpad_DuckpadInfrastructure.bundle/BundledExtensions"
-test -f "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MaterialIconTheme/LICENSE"
-test -f "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MaterialIconTheme/PROVENANCE.md"
-test -f "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MaterialIconTheme/dist/material-icons.json"
-test -f "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MaterialIconTheme/icons/file.svg"
+# SwiftPM may emit flat bundles or macOS bundles with Contents/Resources.
+resource_root() {
+    local BUNDLE="$APP/Contents/Resources/Duckpad_$1.bundle"
+    if [[ -d "$BUNDLE/Contents/Resources" ]]; then
+        printf '%s\n' "$BUNDLE/Contents/Resources"
+    else
+        printf '%s\n' "$BUNDLE"
+    fi
+}
+INFRASTRUCTURE_RESOURCES="$(resource_root DuckpadInfrastructure)"
+EDITOR_RESOURCES="$(resource_root DuckpadEditorAdapter)"
+PRESENTATION_RESOURCES="$(resource_root DuckpadPresentation)"
+LOCALIZATION_RESOURCES="$(resource_root DuckpadLocalization)"
+test -f "$INFRASTRUCTURE_RESOURCES/Languages.json"
+test -d "$EDITOR_RESOURCES/ScintillaCursors"
+test -d "$INFRASTRUCTURE_RESOURCES/BundledExtensions"
+test -f "$PRESENTATION_RESOURCES/MaterialIconTheme/LICENSE"
+test -f "$PRESENTATION_RESOURCES/MaterialIconTheme/PROVENANCE.md"
+test -f "$PRESENTATION_RESOURCES/MaterialIconTheme/dist/material-icons.json"
+test -f "$PRESENTATION_RESOURCES/MaterialIconTheme/icons/file.svg"
 for ASSET in preview.js highlight.css katex.css THIRD_PARTY_NOTICES.txt fonts/KaTeX_Main-Regular.woff2; do
-    test -s "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/MarkdownPreview/$ASSET"
+    test -s "$PRESENTATION_RESOURCES/MarkdownPreview/$ASSET"
 done
 for ASSET in pin.svg unpin.svg eye.svg LICENSES; do
-    test -s "$APP/Contents/Resources/Duckpad_DuckpadPresentation.bundle/ZedIcons/$ASSET"
+    test -s "$PRESENTATION_RESOURCES/ZedIcons/$ASSET"
 done
 
 for LOCALE in en ko ja zh-Hans pt-BR it fr de; do
     # SwiftPM normalizes resource directory names to lowercase.
     LOCALE_DIRECTORY="$(printf '%s' "$LOCALE" | tr '[:upper:]' '[:lower:]')"
-    LOCALIZATION="$APP/Contents/Resources/Duckpad_DuckpadLocalization.bundle/$LOCALE_DIRECTORY.lproj"
+    LOCALIZATION="$LOCALIZATION_RESOURCES/$LOCALE_DIRECTORY.lproj"
     test -s "$LOCALIZATION/Localizable.strings"
     test -s "$LOCALIZATION/Localizable.stringsdict"
     plutil -lint "$LOCALIZATION/Localizable.strings" "$LOCALIZATION/Localizable.stringsdict" >/dev/null

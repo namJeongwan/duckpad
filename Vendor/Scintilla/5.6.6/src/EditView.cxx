@@ -416,17 +416,25 @@ void EditView::LayoutLine(const EditModel &model, Surface *surface, const ViewSt
 		if (lineLength == ll->numCharsInLine) {
 			// See if chars, styles, indicators, are all the same
 			bool allSame = true;
-			// Check base line layout
-			char chPrevious = 0;
-			for (Sci::Position numCharsInLine = 0; numCharsInLine < lineLength; numCharsInLine++) {
-				const Sci::Position charInDoc = numCharsInLine + posLineStart;
-				const char chDoc = model.pdoc->CharAt(charInDoc);
-				const int styleByte = model.pdoc->StyleIndexAt(charInDoc);
-				allSame = allSame &&
-					(ll->styles[numCharsInLine] == styleByte);
-				allSame = allSame &&
-					(ll->chars[numCharsInLine] == CaseForce(vstyle.styles[styleByte].caseForce, chDoc, chPrevious));
-				chPrevious = chDoc;
+			if (!vstyle.someStylesForceCase) {
+				std::array<unsigned char, 4096> scratch;
+				for (Sci::Position offset = 0; allSame && offset < lineLength;) {
+					const Sci::Position count = std::min<Sci::Position>(scratch.size(), lineLength - offset);
+					model.pdoc->GetCharRange(reinterpret_cast<char *>(scratch.data()), posLineStart + offset, count);
+					allSame = std::memcmp(scratch.data(), ll->chars.get() + offset, count) == 0;
+					model.pdoc->GetStyleRange(scratch.data(), posLineStart + offset, count);
+					allSame = allSame && std::memcmp(scratch.data(), ll->styles.get() + offset, count) == 0;
+					offset += count;
+				}
+			} else {
+				char chPrevious = 0;
+				for (Sci::Position offset = 0; allSame && offset < lineLength; ++offset) {
+					const char chDoc = model.pdoc->CharAt(posLineStart + offset);
+					const int styleByte = model.pdoc->StyleIndexAt(posLineStart + offset);
+					allSame = ll->styles[offset] == styleByte &&
+						ll->chars[offset] == CaseForce(vstyle.styles[styleByte].caseForce, chDoc, chPrevious);
+					chPrevious = chDoc;
+				}
 			}
 			const int styleByteLast = (posLineEnd > posLineStart) ? model.pdoc->StyleIndexAt(posLineEnd - 1) : 0;
 			allSame = allSame && (ll->styles[lineLength] == styleByteLast);	// For eolFilled
@@ -477,58 +485,85 @@ void EditView::LayoutLine(const EditModel &model, Surface *surface, const ViewSt
 		ll->positions[0] = 0;
 		bool lastSegItalics = false;
 
-		std::vector<TextSegment> segments;
-		BreakFinder bfLayout(ll, nullptr, Range(0, numCharsInLine), posLineStart, 0, BreakFinder::BreakFor::Text, model.pdoc, model.reprs.get(), nullptr);
-		while (bfLayout.More()) {
-			segments.push_back(bfLayout.Next());
-		}
-
-		ll->ClearPositions();
-
-		if (!segments.empty()) {
-
-			const size_t threadsForLength = std::max(1, numCharsInLine / bytesPerLayoutThread);
-			size_t threads = std::min<size_t>({ segments.size(), threadsForLength, maxLayoutThreads });
-			if (!surface->SupportsFeature(Supports::ThreadSafeMeasureWidths) || callerMultiThreaded) {
-				threads = 1;
-			}
-
-			std::atomic<uint32_t> nextIndex = 0;
-
-			const bool textUnicode = CpUtf8 == model.pdoc->dbcsCodePage;
-			const bool multiThreadedContext = (threads > 1) || callerMultiThreaded;
-			IPositionCache *pCache = posCache.get();
-
-			// If only 1 thread needed then use the main thread, else spin up multiple
-			RunThreads(threads, [pCache, surface, &vstyle, ll, &segments, &nextIndex, textUnicode, multiThreadedContext]() {
-				LayoutSegments(pCache, surface, vstyle, ll, segments, nextIndex, textUnicode, multiThreadedContext);
-				});
-		}
-
-		// Accumulate absolute positions from relative positions within segments and expand tabs
-		XYPOSITION xPosition = 0.0;
-		size_t iByte = 0;
-		ll->positions[iByte++] = xPosition;
-		for (const TextSegment &ts : segments) {
-			if (vstyle.styles[ll->styles[ts.start]].visible &&
-				ts.representation &&
-				ll->chars[ts.start] == '\t' && vstyle.tabDrawMode != TabDrawMode::ControlChar) {
-				// Simple visible tab, go to next tab stop
-				const XYPOSITION startTab = ll->positions[ts.start];
-				const XYPOSITION nextTab = NextTabstopPos(line, startTab, vstyle.tabWidth);
-				xPosition += nextTab - startTab;
-			}
-			const XYPOSITION xBeginSegment = xPosition;
-			for (int i = 0; i < ts.length; i++) {
-				xPosition = ll->positions[iByte] + xBeginSegment;
-				ll->positions[iByte++] = xPosition;
+		// ASCII with measured monospaced metrics does not need one shaping
+		// segment per syntax token. Preserve styles for paint and word wrapping.
+		ll->graphicASCII = std::all_of(ll->chars.get(), ll->chars.get() + numCharsInLine,
+			[](unsigned char ch) { return ch >= 32 && ch < 127; });
+		bool directWidths = ll->graphicASCII && numCharsInLine > 4096 && !model.BidirectionalEnabled();
+		if (directWidths) {
+			for (unsigned char ch = 32; ch < 127; ++ch) {
+				if (model.reprs->MayContain(ch)) { directWidths = false; break; }
 			}
 		}
+		std::array<XYPOSITION, 256> widths{};
+		if (directWidths) {
+			for (size_t style = 0; style < widths.size(); ++style) {
+				const Style &st = vstyle.styles[style];
+				widths[style] = (st.monospaceASCII && st.visible && !st.italic) ? st.monospaceCharacterWidth : -1;
+			}
+			XYPOSITION x = 0;
+			for (int i = 0; i < numCharsInLine; ++i) {
+				const XYPOSITION advance = widths[ll->styles[i]];
+				if (advance < 0) { directWidths = false; break; }
+				x += advance;
+				ll->positions[i + 1] = x;
+			}
+		}
+		if (!directWidths) {
+			std::vector<TextSegment> segments;
+			BreakFinder bfLayout(ll, nullptr, Range(0, numCharsInLine), posLineStart, 0, BreakFinder::BreakFor::Text, model.pdoc, model.reprs.get(), nullptr);
+			while (bfLayout.More()) {
+				segments.push_back(bfLayout.Next());
+			}
 
-		if (!segments.empty()) {
-			// Not quite the same as before which would effectively ignore trailing invisible segments
-			const TextSegment &ts = segments.back();
-			lastSegItalics = (!ts.representation) && ((ll->chars[ts.end() - 1] != ' ') && vstyle.styles[ll->styles[ts.start]].italic);
+			ll->ClearPositions();
+
+			if (!segments.empty()) {
+
+				const size_t threadsForLength = std::max(1, numCharsInLine / bytesPerLayoutThread);
+				size_t threads = std::min<size_t>({ segments.size(), threadsForLength, maxLayoutThreads });
+				if (!surface->SupportsFeature(Supports::ThreadSafeMeasureWidths) || callerMultiThreaded) {
+					threads = 1;
+				}
+
+				std::atomic<uint32_t> nextIndex = 0;
+
+				const bool textUnicode = CpUtf8 == model.pdoc->dbcsCodePage;
+				const bool multiThreadedContext = (threads > 1) || callerMultiThreaded;
+				IPositionCache *pCache = posCache.get();
+
+				// If only 1 thread needed then use the main thread, else spin up multiple
+				RunThreads(threads, [pCache, surface, &vstyle, ll, &segments, &nextIndex, textUnicode, multiThreadedContext]() {
+					LayoutSegments(pCache, surface, vstyle, ll, segments, nextIndex, textUnicode, multiThreadedContext);
+					});
+			}
+
+			// Accumulate absolute positions from relative positions within segments and expand tabs
+			XYPOSITION xPosition = 0.0;
+			size_t iByte = 0;
+			ll->positions[iByte++] = xPosition;
+			for (const TextSegment &ts : segments) {
+				if (vstyle.styles[ll->styles[ts.start]].visible &&
+					ts.representation &&
+					ll->chars[ts.start] == '\t' && vstyle.tabDrawMode != TabDrawMode::ControlChar) {
+					// Simple visible tab, go to next tab stop
+					const XYPOSITION startTab = ll->positions[ts.start];
+					const XYPOSITION nextTab = NextTabstopPos(line, startTab, vstyle.tabWidth);
+					xPosition += nextTab - startTab;
+				}
+				const XYPOSITION xBeginSegment = xPosition;
+				for (int i = 0; i < ts.length; i++) {
+					xPosition = ll->positions[iByte] + xBeginSegment;
+					ll->positions[iByte++] = xPosition;
+				}
+			}
+
+			if (!segments.empty()) {
+				// Not quite the same as before which would effectively ignore trailing invisible segments
+				const TextSegment &ts = segments.back();
+				lastSegItalics = (!ts.representation) && ((ll->chars[ts.end() - 1] != ' ') && vstyle.styles[ll->styles[ts.start]].italic);
+			}
+
 		}
 
 		// Small hack to make lines that end with italics not cut off the edge of the last character

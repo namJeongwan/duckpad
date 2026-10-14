@@ -63,6 +63,7 @@ public:
 	int xHighlightGuide = 0;
 	bool highlightColumn = false;
 	bool containsCaret = false;
+	bool graphicASCII = false;
 	unsigned char bracePreviousStyles[2]{};
 	int edgeColumn = 0;
 	std::unique_ptr<char[]> chars;

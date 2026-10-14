@@ -2336,7 +2336,8 @@ ptrdiff_t ScintillaCocoa::InsertText(NSString *input, CharacterSource charSource
 		while (sv.length()) {
 			const unsigned char leadByte = sv[0];
 			const unsigned int bytesInCharacter = UTF8BytesOfLead[leadByte];
-			InsertCharacter(sv.substr(0, bytesInCharacter), charSource);
+			const bool deferLayout = caretSticky != CaretSticky::WhiteSpace && sv.length() > bytesInCharacter;
+			InsertCharacter(sv.substr(0, bytesInCharacter), charSource, deferLayout);
 			sv.remove_prefix(bytesInCharacter);
 		}
 		return encoded.length();

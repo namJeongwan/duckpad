@@ -1521,6 +1521,11 @@ void Editor::NeedWrapping(Sci::Line docLineStart, Sci::Line docLineEnd) {
 }
 
 bool Editor::WrapOneLine(Surface *surface, Sci::Line lineToWrap) {
+	// Typing into a long line otherwise lays it out with stale styles, then
+	// repeats the whole layout when the pending paint runs the lexer.
+	const Range lineRange = pdoc->LineRange(lineToWrap);
+	if (lineRange.Length() >= 65536)
+		pdoc->EnsureStyledTo(lineRange.end);
 	std::shared_ptr<LineLayout> ll = view.RetrieveLineLayout(lineToWrap, *this);
 	int linesWrapped = 1;
 	if (ll) {
@@ -2084,7 +2089,7 @@ void Editor::FilterSelections() {
 }
 
 // InsertCharacter inserts a character encoded in document code page.
-void Editor::InsertCharacter(std::string_view sv, CharacterSource charSource) {
+void Editor::InsertCharacter(std::string_view sv, CharacterSource charSource, bool deferLayout) {
 	if (sv.empty()) {
 		return;
 	}
@@ -2125,7 +2130,7 @@ void Editor::InsertCharacter(std::string_view sv, CharacterSource charSource) {
 				}
 				currentSel->ClearVirtualSpace();
 				// If in wrap mode rewrap current line so EnsureCaretVisible has accurate information
-				if (Wrapping()) {
+				if (Wrapping() && !deferLayout) {
 					AutoSurface surface(this);
 					if (surface) {
 						if (WrapOneLine(surface, pdoc->SciLineFromPosition(positionInsert))) {
@@ -2142,13 +2147,15 @@ void Editor::InsertCharacter(std::string_view sv, CharacterSource charSource) {
 		SetVerticalScrollPos();
 		Redraw();
 	}
-	// If in wrap mode rewrap current line so EnsureCaretVisible has accurate information
-	EnsureCaretVisible();
-	// Avoid blinking during rapid typing:
-	ShowCaretAtCurrentPosition();
-	if ((caretSticky == CaretSticky::Off) ||
-		((caretSticky == CaretSticky::WhiteSpace) && !IsAllSpacesOrTabs(sv))) {
-		SetLastXChosen();
+	if (!deferLayout) {
+		// A Cocoa text-input event may contain several characters. Preserve
+		// edits and notifications for each, but position the view only once.
+		EnsureCaretVisible();
+		ShowCaretAtCurrentPosition();
+		if ((caretSticky == CaretSticky::Off) ||
+			((caretSticky == CaretSticky::WhiteSpace) && !IsAllSpacesOrTabs(sv))) {
+			SetLastXChosen();
+		}
 	}
 
 	int ch = static_cast<unsigned char>(sv[0]);

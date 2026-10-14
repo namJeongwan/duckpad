@@ -31,6 +31,7 @@
 #include "LexerModule.h"
 #include "OptionSet.h"
 #include "DefaultLexer.h"
+#include "JSONLongLineCache.h"
 
 using namespace Scintilla;
 using namespace Lexilla;
@@ -135,6 +136,7 @@ struct OptionSetJSON : public OptionSet<OptionsJSON> {
 
 class LexerJSON : public DefaultLexer {
 	OptionsJSON options;
+	JSONLongLineCache longLineCache;
 	OptionSetJSON optSetJSON;
 	EscapeSequence escapeSeq;
 	WordList keywordsJSON;
@@ -231,6 +233,7 @@ class LexerJSON : public DefaultLexer {
 	}
 	Sci_Position SCI_METHOD PropertySet(const char *key, const char *val) override {
 		if (optSetJSON.PropertySet(&options, key, val)) {
+			longLineCache.Clear();
 			return 0;
 		}
 		return -1;
@@ -251,6 +254,7 @@ class LexerJSON : public DefaultLexer {
 		Sci_Position firstModification = -1;
 		if (wordListN) {
 			if (wordListN->Set(wl)) {
+				longLineCache.Clear();
 				firstModification = 0;
 			}
 		}
@@ -279,10 +283,43 @@ void SCI_METHOD LexerJSON::Lex(Sci_PositionU startPos,
 							   Sci_Position length,
 							   int initStyle,
 							   IDocument *pAccess) {
+	const Sci_PositionU end = startPos + length;
+	const Sci_PositionU restart = longLineCache.Prepare(pAccess, startPos, length);
+	if (longLineCache.restored) return;
+	if (restart != startPos) {
+		startPos = restart;
+		length = end - restart;
+		initStyle = SCE_JSON_DEFAULT;
+	}
 	LexAccessor styler(pAccess);
 	StyleContext context(startPos, length, initStyle, styler);
 	int stringStyleBefore = SCE_JSON_STRING;
+	bool reusedSuffix = false;
+	bool hadError = false;
+	Sci_Position structuralEnd = end;
+	const bool completeLongLine = end == static_cast<Sci_PositionU>(pAccess->Length()) &&
+		end >= 65536 && pAccess->LineFromPosition(end) == 0;
 	while (context.More()) {
+		hadError = hadError || context.state == SCE_JSON_ERROR;
+		// Both old and new lexical states have just consumed the same structural
+		// operator in a verified unchanged suffix. Subsequent lexing is identical.
+		if (context.currentPos >= longLineCache.reuseAfter && (context.state == SCE_JSON_OPERATOR || context.state == SCE_JSON_ERROR) &&
+			styler.StyleAt(context.currentPos - 1) == context.state) {
+			reusedSuffix = true;
+			break;
+		}
+		// An error state in this lexer lasts until the next physical line end.
+		// The rest of a single-line document can therefore be styled in one run.
+		if (completeLongLine && context.state == SCE_JSON_ERROR) {
+			structuralEnd = context.currentPos;
+			if (longLineCache.reuseAfter < end && styler.StyleAt(longLineCache.reuseAfter) == SCE_JSON_ERROR) {
+				context.currentPos = std::max(context.currentPos, longLineCache.reuseAfter);
+				reusedSuffix = true;
+			} else {
+				context.currentPos = end;
+			}
+			break;
+		}
 		switch (context.state) {
 			case SCE_JSON_BLOCKCOMMENT:
 				if (context.Match("*/")) {
@@ -459,6 +496,8 @@ void SCI_METHOD LexerJSON::Lex(Sci_PositionU startPos,
 		context.Forward();
 	}
 	context.Complete();
+	if (reusedSuffix) pAccess->StartStyling(end);
+	longLineCache.Complete(pAccess, context.currentPos, reusedSuffix, hadError, structuralEnd);
 }
 
 void SCI_METHOD LexerJSON::Fold(Sci_PositionU startPos,
@@ -466,6 +505,18 @@ void SCI_METHOD LexerJSON::Fold(Sci_PositionU startPos,
 								int,
 								IDocument *pAccess) {
 	if (!options.fold) {
+		return;
+	}
+	if (const std::string *text = longLineCache.FullText(pAccess, startPos, length)) {
+		// Folding a physical line needs only its structural braces. Avoid virtual
+		// character/style/line queries for every byte in a minified document.
+		const int nextLevel = SC_FOLDLEVELBASE + longLineCache.FoldBalance(pAccess);
+		const bool visible = text->size() > 1 && std::any_of(text->begin(), text->end() - 1,
+			[](char ch) { return !isspacechar(ch); });
+		int level = SC_FOLDLEVELBASE | (static_cast<unsigned int>(nextLevel) << 16);
+		if (!visible && options.foldCompact) level |= SC_FOLDLEVELWHITEFLAG;
+		else if (nextLevel > SC_FOLDLEVELBASE) level |= SC_FOLDLEVELHEADERFLAG;
+		if (level != pAccess->GetLevel(0)) pAccess->SetLevel(0, level);
 		return;
 	}
 	LexAccessor styler(pAccess);
