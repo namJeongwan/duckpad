@@ -3,36 +3,41 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.10.3</title>
-            <pubDate>Wed, 14 Oct 2026 09:58:50 +0900</pubDate>
-            <sparkle:version>55</sparkle:version>
-            <sparkle:shortVersionString>0.10.3</sparkle:shortVersionString>
+            <title>0.10.4</title>
+            <pubDate>Wed, 14 Oct 2026 13:46:47 +0900</pubDate>
+            <sparkle:version>56</sparkle:version>
+            <sparkle:shortVersionString>0.10.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.10.3
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.10.4
 
-This patch improves editing latency in very long lines, including large minified JSON files.
+This patch improves large-file editing across JSON, JavaScript, CSS, XML, Unicode text and tab-heavy documents.
 
-- Faster ASCII cursor coordinates, line layout, wrapping and brace matching reduce work shared by all document types.
-- Long single-line JSON reuses verified unchanged syntax and folding results, including recovery after temporarily invalid input.
-- Native multi-character input avoids repeating full line layout for every character while preserving editing notifications and Undo/Redo.
+- Incremental UTF-8, UTF-16 and tab-column indexes reduce repeated coordinate scans after edits.
+- Faster measured character advances, tab layout, wrapping and Unicode segmentation preserve existing text geometry and rendering.
+- Large JavaScript, CSS and XML syntax requests run on verified worker snapshots. Fold updates and deferred Collapse All yield between short batches so editing can continue.
+- An extreme-metric tab calculation no longer overflows its integer range.
 
-App and helpers: **0.10.3 (55)**. Requires **macOS 13 or later**. Universal binaries support Apple Silicon and Intel. Existing documents, sessions, settings and the native plugin ABI remain compatible.
+App and helpers: **0.10.4 (56)**. Requires **macOS 13 or later**. Universal binaries support Apple Silicon and Intel. Documents, sessions, settings, Undo/Redo and the native plugin ABI remain compatible. Large-file syntax highlighting is eventually consistent while background work completes.
 
 ## Installation
 
-Download `Duckpad-0.10.3-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.10.3-universal.zip`. Verify the downloads against `SHA256SUMS.txt`. The signed Sparkle update feed is published after the release archive is uploaded.
+Download `Duckpad-0.10.4-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.10.4-universal.zip`. Verify the downloads against `SHA256SUMS.txt`. The signed Sparkle update feed is published after the release archive is uploaded.
 
 ## Validation and limitations
 
-The 9,184,692-byte single-line ASCII JSON reference fixture completed four separate Release benchmark runs, rotating the first editing position. All 3,072 measured operations stayed below 50 ms; the highest latency was 42.7 ms. Measurements include native text-input queries, status calculation, synchronous drawing and layer flush. They cover insertion, deletion, bursts, selection replacement, 256-character input and byte-exact Undo/Redo. This is a fixture-specific measurement on the development Apple Silicon Mac, not a guarantee for every document or machine.
+On the development Apple M4 Pro, a full Release run of 14 approximately 9.18 MB fixtures passed all 10,752 input events with a 42.70 ms maximum. First committed input took at most approximately 41.79 ms, including native input queries, status, drawing and layer flush. File loading precedes these measurements. The originally reported JSON reached a 39.49 ms maximum.
 
-192 focused editor tests passed. Another 204 differential checks matched the unmodified engine for syntax/folding, layout and brace matching. Full-suite compilation is blocked by an existing Swift concurrency error in `MenuPresentationSpy.swift`; the targeted editor suites compile and pass.
+Additional pending-style, recolouring/folding and cold-position runs brought the final accepted groups to 33 runs and 15,312 input events; their largest gate, including main-loop stalls, was 46.68 ms. Earlier failed runs remain in the [performance evidence](https://github.com/namJeongwan/duckpad/blob/v0.10.4/docs/wiki/long-line-performance-gates.json). These are fixture-specific measurements, not a hard real-time guarantee for arbitrary files, machines or external load.
 
-JSON caching applies to complete single physical lines between 64 KiB and 32 MiB and uses additional memory proportional to document size. Other syntax lexers and very long Unicode or tab-containing lines can still exceed 50 ms. Shared engine improvements do not replace their full-line syntax analysis or Unicode shaping. These remaining cases are tracked in the [long-line performance audit](https://github.com/namJeongwan/duckpad/blob/v0.10.3/docs/wiki/long-line-performance-audit.md).
+Native correctness tests passed approximately 2.83 million checks, including exact coordinates, Unicode and malformed bytes, representations, lexer results, tab boundaries and Undo/Redo. ASan/UBSan passed with the eight changed native implementation units instrumented, and all 144 baseline geometry cases matched. The 330 focused editor adapter tests passed serially. Whole-package Swift test compilation remains blocked by an existing concurrency error in `MenuPresentationSpy.swift`.
 
-The default build is ad-hoc signed, without Developer ID signing or Apple notarization. Physical Intel hardware, macOS 13 and live Korean IME were not tested for this patch. Interactive system picker smoke checks are skipped unless explicitly enabled.
+The default build is ad-hoc signed, without Developer ID signing or Apple notarization. Physical Intel hardware, macOS 13 and live Korean IME were not tested for this patch. Interactive system-picker smoke checks are skipped unless explicitly enabled.
+
+## Release package verification
+
+Built from merged commit `57c5b43d6f277c57e7bfab410f13a779624b1986` ([PR #71](https://github.com/namJeongwan/duckpad/pull/71)). The app and both helpers report 0.10.4 (56) and contain arm64 and x86_64 slices. Bundle/resources/entitlements/signatures verification and isolated file-opening, bookmark recovery/save, window-layout and sandboxed XPC smoke tests passed. Interactive save-panel automation was skipped. DMG and ZIP integrity passed before publication; the published asset checksums were verified immediately after publication.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.10.3/Duckpad-0.10.3-universal.zip" length="26518793" type="application/octet-stream" sparkle:edSignature="RpAM0p5HDH6aB9ntK7AWzUQdAZiuxWpn67TA1HAHYvN8duFDg1QbZgl3ajvbI0A6fYLepBow2YoD40D1SrGdBw=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.10.4/Duckpad-0.10.4-universal.zip" length="27172746" type="application/octet-stream" sparkle:edSignature="vsUsguizaoNJC6yfBLzACDhcHAduxhdemCAcxErUY3w/fw7Cp+GN/VidrzH0wgicpGIdG2aDMn3KEldiFiRMDQ=="/>
         </item>
     </channel>
 </rss>
