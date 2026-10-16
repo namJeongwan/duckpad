@@ -3,41 +3,49 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.10.4</title>
-            <pubDate>Wed, 14 Oct 2026 13:46:47 +0900</pubDate>
-            <sparkle:version>56</sparkle:version>
-            <sparkle:shortVersionString>0.10.4</sparkle:shortVersionString>
+            <title>0.11.0</title>
+            <pubDate>Fri, 16 Oct 2026 15:46:16 +0900</pubDate>
+            <sparkle:version>57</sparkle:version>
+            <sparkle:shortVersionString>0.11.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.10.4
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.11.0
 
-This patch improves large-file editing across JSON, JavaScript, CSS, XML, Unicode text and tab-heavy documents.
+Navigate code without installing a language server.
 
-- Incremental UTF-8, UTF-16 and tab-column indexes reduce repeated coordinate scans after edits.
-- Faster measured character advances, tab layout, wrapping and Unicode segmentation preserve existing text geometry and rendering.
-- Large JavaScript, CSS and XML syntax requests run on verified worker snapshots. Fold updates and deferred Collapse All yield between short batches so editing can continue.
-- An extreme-metric tab calculation no longer overflows its integer range.
+- Hold Command over an identifier to underline an available declaration candidate and show a link cursor. Command-click or F12 opens the declaration; ambiguous matches show a searchable list with file, line and code context.
+- Shift-F12 finds reference candidates in the current document, compatible open buffers and registered workspace roots. Unsaved buffers take precedence over disk contents. Comments, string literals and recognized declarations are excluded.
+- Control-minus and Control-Shift-minus navigate backward and forward. Jumps expand folded targets and place the destination near the top fifth of the active pane, including wrapped lines.
+- Common declarations are supported in Swift, JavaScript/TypeScript, Python, Rust, Go, C/C++, Java, C# and Protocol Buffers. Protobuf RPC request/response types navigate to their message declarations.
+- Hover and click share completed lookup results. Editing another tab, reloading the source or changing its language invalidates stale results.
+- Localization now resolves both flat SwiftPM resource bundles and macOS bundles containing `Contents/Resources`.
 
-App and helpers: **0.10.4 (56)**. Requires **macOS 13 or later**. Universal binaries support Apple Silicon and Intel. Documents, sessions, settings, Undo/Redo and the native plugin ABI remain compatible. Large-file syntax highlighting is eventually consistent while background work completes.
+App and helpers: **0.11.0 (57)**. Requires **macOS 13 or later**. Universal binaries support Apple Silicon and Intel. Document formats, sessions, settings, Undo/Redo and the native plugin ABI remain compatible.
 
 ## Installation
 
-Download `Duckpad-0.10.4-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.10.4-universal.zip`. Verify the downloads against `SHA256SUMS.txt`. The signed Sparkle update feed is published after the release archive is uploaded.
+Download `Duckpad-0.11.0-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.11.0-universal.zip`. Verify the downloads against `SHA256SUMS.txt`. The signed Sparkle update feed is published after the release archive is uploaded.
 
-## Validation and limitations
+## Scope and limits
 
-On the development Apple M4 Pro, a full Release run of 14 approximately 9.18 MB fixtures passed all 10,752 input events with a 42.70 ms maximum. First committed input took at most approximately 41.79 ms, including native input queries, status, drawing and layer flush. File loading precedes these measurements. The originally reported JSON reached a 39.49 ms maximum.
+Built-in navigation is syntax/name based. Reference candidates can include unrelated symbols with the same name; receiver types, imports, overloads and semantic bindings require a future language-server provider. Project lookup uses registered workspace roots and UTF-8 files. Other encodings can participate through an already-open buffer.
 
-Additional pending-style, recolouring/folding and cold-position runs brought the final accepted groups to 33 runs and 15,312 input events; their largest gate, including main-loop stalls, was 46.68 ms. Earlier failed runs remain in the [performance evidence](https://github.com/namJeongwan/duckpad/blob/v0.10.4/docs/wiki/long-line-performance-gates.json). These are fixture-specific measurements, not a hard real-time guarantee for arbitrary files, machines or external load.
+Analysis is bounded to 4 MiB and 200,000 tokens per source. Open-buffer lookup is limited to 16 MiB; project lookup stops at 256 directories, 512 files, 10,000 entries, 32 MiB, 200 results or a cooperative three-second deadline. Partial results are labelled. A filesystem read already in progress may exceed the deadline. Larger documents remain editable; built-in navigation is unavailable for them.
 
-Native correctness tests passed approximately 2.83 million checks, including exact coordinates, Unicode and malformed bytes, representations, lexer results, tab boundaries and Undo/Redo. ASan/UBSan passed with the eight changed native implementation units instrumented, and all 144 baseline geometry cases matched. The 330 focused editor adapter tests passed serially. Whole-package Swift test compilation remains blocked by an existing concurrency error in `MenuPresentationSpy.swift`.
+## Validation
 
-The default build is ad-hoc signed, without Developer ID signing or Apple notarization. Physical Intel hardware, macOS 13 and live Korean IME were not tested for this patch. Interactive system-picker smoke checks are skipped unless explicitly enabled.
+All 1,193 Swift tests passed: 461 presentation, 346 editor adapter, 208 application, 161 infrastructure, 14 domain and 3 app tests. Presentation tests ran in isolated serial helper processes with completion counts verified because Xcode’s SwiftPM helper can exit its main event loop before finishing a combined AppKit run. The previous test-helper concurrency compilation error is fixed.
 
-## Release package verification
+All eight candidate-panel localizations were rendered and inspected; catalog, layout, accessibility and fallback checks passed. Navigation tests cover unsaved buffers, Protobuf RPC types, hover/click reuse, stale content and language rejection, partial results, folding, wrapping and history.
 
-Built from merged commit `57c5b43d6f277c57e7bfab410f13a779624b1986` ([PR #71](https://github.com/namJeongwan/duckpad/pull/71)). The app and both helpers report 0.10.4 (56) and contain arm64 and x86_64 slices. Bundle/resources/entitlements/signatures verification and isolated file-opening, bookmark recovery/save, window-layout and sandboxed XPC smoke tests passed. Interactive save-panel automation was skipped. DMG and ZIP integrity passed before publication; the published asset checksums were verified immediately after publication.
+A full Release input matrix covered 14 approximately 9.18 MB fixtures (JSON, JavaScript, CSS, XML, plain/Unicode/tab-heavy text, logs and multiline sources). The final accepted fixture runs passed all 10,752 editing events with a 43.19 ms maximum; first-input cycles (input handling plus native queries, status, drawing and layer flush) reached at most 27.06 ms. Loading precedes these measurements. Initial emoji, combining-character and original-JSON stress runs exceeded 50 ms (147.11, 63.85 and 67.15 ms); clean 0.10.4 comparison runs and unchanged 0.11.0 rechecks passed. The spikes did not reproduce, and their cause is not established. All measurements, including failures, are retained in the validation evidence; these fixture-specific results are not a hard real-time guarantee for arbitrary workloads or system load.
+
+[Validation evidence](https://github.com/namJeongwan/duckpad/blob/v0.11.0/docs/features/declaration-navigation-validation.json).
+
+The default build is ad-hoc signed, without Developer ID signing or Apple notarization. Physical Intel hardware, macOS 13 and live Korean IME are not exercised on the development Apple Silicon machine. Automated native tests cover IME cancellation, Unicode input, selection and Undo/Redo.
+
+Packaged Universal validation passed for the app and both helpers (0.11.0, build 57, arm64+x86_64), resource integrity, entitlements and signatures. Finder/Open With, native save-access renewal, save after relaunch, window resizing and sandboxed XPC isolation smoke tests passed. All eight locales loaded from the packaged app.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.10.4/Duckpad-0.10.4-universal.zip" length="27172746" type="application/octet-stream" sparkle:edSignature="vsUsguizaoNJC6yfBLzACDhcHAduxhdemCAcxErUY3w/fw7Cp+GN/VidrzH0wgicpGIdG2aDMn3KEldiFiRMDQ=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.11.0/Duckpad-0.11.0-universal.zip" length="27602504" type="application/octet-stream" sparkle:edSignature="erujieJcr2rtqUa0ARPhLYAhleQAfXe+yNuutdVYeQZ2oxskrhbIRGd7A+V1OliPfcC1oWIzscWQmNJwGbPLCw=="/>
         </item>
     </channel>
 </rss>
