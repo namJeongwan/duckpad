@@ -820,3 +820,25 @@
 
 "Change color" = "색상 변경";
 "Apply" = "적용";
+
+/* Built-in declaration navigation */
+"Go to Declaration" = "선언으로 이동";
+"Navigate Back" = "이전 위치로 이동";
+"Navigate Forward" = "다음 위치로 이동";
+"Search declaration candidates" = "선언 후보 검색";
+"Declaration candidates" = "선언 후보";
+"Choose a declaration candidate" = "선언 후보를 선택하세요";
+"Some files could not be searched. Showing available candidates." = "일부 파일을 검색하지 못했습니다. 찾은 후보를 표시합니다.";
+"Declaration navigation is unavailable for this document." = "이 문서에서는 선언 탐색을 사용할 수 없습니다.";
+"No declaration found." = "선언을 찾지 못했습니다.";
+"Some files could not be searched. No declaration found." = "일부 파일을 검색하지 못했고 선언을 찾지 못했습니다.";
+"The document changed. Try navigation again." = "문서가 변경되었습니다. 다시 탐색하세요.";
+
+/* Built-in reference candidates */
+"Find Reference Candidates" = "사용처 후보 찾기";
+"Search reference candidates" = "사용처 후보 검색";
+"Reference candidates" = "사용처 후보";
+"Name matches only. Choose a reference candidate." = "이름이 일치하는 후보입니다. 이동할 항목을 선택하세요.";
+"Name matches only. Some files could not be searched." = "이름이 일치하는 후보입니다. 일부 파일을 검색하지 못했습니다.";
+"No reference candidates found." = "사용처 후보를 찾지 못했습니다.";
+"Some files could not be searched. No reference candidates found." = "일부 파일을 검색하지 못했습니다. 사용처 후보가 없습니다.";

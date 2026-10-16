@@ -889,6 +889,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             workspaceBrowserUseCase: workspaceBrowserUseCase,
             languageUseCase: languageUseCase,
             documentIntelligenceUseCase: documentIntelligenceUseCase,
+            declarationProjectSearch: WorkspaceDeclarationSearch(store: workspaceRootStore),
             extensionUseCase: extensionUseCase,
             formattingUseCase: formattingUseCase,
             framePersistence: WindowFramePersistence(

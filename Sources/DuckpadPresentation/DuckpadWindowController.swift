@@ -54,6 +54,20 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let folderSearchUseCase: FolderSearchUseCase?
     private var languageUseCase: LanguageWorkspaceUseCase?
     private let documentIntelligenceUseCase: DocumentIntelligenceUseCase?
+    private let declarationProjectSearch: (any DeclarationProjectSearching)?
+    private lazy var declarationNavigation = DeclarationNavigationController(
+        workspace: workspace, editor: activeEditor as? any DeclarationNavigationEditorPort,
+        project: declarationProjectSearch, anchor: statusBar,
+        roots: { [weak self] in self?.workspaceBrowserUseCase?.roots ?? [] },
+        actionable: { [weak self] in self?.workspaceInteractionsAreActionable == true },
+        open: { [weak self] url in
+            guard let self else { return false }
+            switch await self.openDocumentURL(url) {
+            case .opened, .activatedExisting: return true
+            case .failed: return false
+            }
+        }
+    )
     private var snippetPanel: SnippetPanel?
     public var onSnippetsChanged: (([TextSnippet], [TextSnippet]) async -> Bool)?
     private var formattingUseCase: DocumentFormattingUseCase?
@@ -164,6 +178,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceBrowserUseCase: WorkspaceBrowserUseCase? = nil,
         languageUseCase: LanguageWorkspaceUseCase? = nil,
         documentIntelligenceUseCase: DocumentIntelligenceUseCase? = nil,
+        declarationProjectSearch: (any DeclarationProjectSearching)? = nil,
         extensionUseCase: ExtensionWorkspaceUseCase? = nil,
         formattingUseCase: DocumentFormattingUseCase? = nil,
         approvedWindowClose: (@MainActor (NSWindow) -> Void)? = nil,
@@ -222,6 +237,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.workspaceBrowserUseCase = workspaceBrowserUseCase
         self.languageUseCase = languageUseCase
         self.documentIntelligenceUseCase = documentIntelligenceUseCase
+        self.declarationProjectSearch = declarationProjectSearch
         self.extensionUseCase = extensionUseCase
         self.formattingUseCase = formattingUseCase
         tabCloseCoordinator = TabCloseCoordinator(workspace: workspace)
@@ -309,6 +325,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspace.onChange = { [weak self] change in self?.handle(change) }
         workspaceBrowserUseCase?.onStateChange = { [weak self] state in self?.renderWorkspaceBrowser(state) }
         languageUseCase?.onStateChange = { [weak self] state in self?.renderLanguageState(state) }
+        (activeEditor as? any DeclarationNavigationEditorPort)?.onDeclarationRequested = { [weak self] offset in
+            self?.declarationNavigation.goToDeclaration(at: offset)
+        }
+        (activeEditor as? any DeclarationNavigationEditorPort)?.onDeclarationHoverRequested = { [weak self] capture, offset, index in
+            guard let self else { return false }
+            return await self.declarationNavigation.resolveHover(capture, at: offset, index: index)
+        }
         symbolOutlinePanel.onActivate = { [weak self] symbol in
             guard let self, let outline = self.currentDocumentOutline,
                   self.documentIntelligenceUseCase?.reveal(symbol, in: outline) == true else {
@@ -389,6 +412,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func tearDownWindow() {
         guard !hasTornDownWindow else { return }
         hasTornDownWindow = true
+        declarationNavigation.cancel()
+        (activeEditor as? any DeclarationNavigationEditorPort)?.onDeclarationRequested = nil
+        (activeEditor as? any DeclarationNavigationEditorPort)?.onDeclarationHoverRequested = nil
         markdownImageDropTask?.cancel()
         markdownPreview.close()
         extensionServiceHost?.close(in: workspaceContentSplit)
@@ -1200,6 +1226,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        declarationNavigation.cancel()
         updateAccessory?.refreshLocalization(catalog: catalog)
         markdownPreviewPanel?.refreshLocalization(catalog: catalog)
         workspaceSidebar.refreshLocalization(catalog: catalog)
@@ -1312,6 +1339,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
         }
     }
+
+    @objc public func performGoToDeclaration(_ sender: Any? = nil) { declarationNavigation.goToDeclaration() }
+    @objc public func performFindReferences(_ sender: Any? = nil) { declarationNavigation.findReferences() }
+    @objc public func performNavigationBack(_ sender: Any? = nil) { declarationNavigation.moveHistory(back: true) }
+    @objc public func performNavigationForward(_ sender: Any? = nil) { declarationNavigation.moveHistory(back: false) }
 
     @objc public func performShowDocumentSymbols(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable,
@@ -2042,6 +2074,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performFindPrevious(_:)),
              #selector(performFindInFolder(_:)):
             return !terminationReviewInProgress
+        case #selector(performGoToDeclaration(_:)), #selector(performFindReferences(_:)):
+            return declarationNavigation.isAvailable
+        case #selector(performNavigationBack(_:)):
+            return workspaceInteractionsAreActionable && declarationNavigation.canGoBack
+        case #selector(performNavigationForward(_:)):
+            return workspaceInteractionsAreActionable && declarationNavigation.canGoForward
         case #selector(performGoToLine(_:)),
              #selector(performGoToOffset(_:)):
             return actionableNavigationEditor?.navigationPosition != nil
@@ -3672,6 +3710,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             routeSelectedEditorGroups(change.snapshot, layout: currentLayout)
         }
         editorBinding.render(change)
+        declarationNavigation.workspaceChanged(change)
         if searchHighlightBuffer != change.snapshot.activeBuffer {
             searchHighlightBuffer = change.snapshot.activeBuffer
             clearSearchHighlights()

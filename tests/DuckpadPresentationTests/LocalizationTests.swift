@@ -57,14 +57,20 @@ struct LocalizationTests {
         #expect(LocalizationCatalog(language: .german, preferredLanguages: ["ko"]).language == .german)
     }
 
-    @Test func missingTranslationUsesEnglishRatherThanAKey() throws {
+    @Test(arguments: [false, true])
+    func missingTranslationUsesEnglishRatherThanAKey(nested: Bool) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".bundle")
         defer { try? FileManager.default.removeItem(at: directory) }
+        let resourceURL = nested ? directory.appendingPathComponent("Contents/Resources") : directory
         for locale in ["en", "ko"] {
-            try FileManager.default.createDirectory(at: directory.appendingPathComponent(locale + ".lproj"), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: resourceURL.appendingPathComponent(locale + ".lproj"), withIntermediateDirectories: true)
         }
-        try Data("\"fallback.test\" = \"English fallback\";".utf8).write(to: directory.appendingPathComponent("en.lproj/Localizable.strings"))
-        try Data("\"another.key\" = \"다른 문구\";".utf8).write(to: directory.appendingPathComponent("ko.lproj/Localizable.strings"))
+        if nested {
+            let info: [String: String] = ["CFBundleIdentifier": "test.localization." + UUID().uuidString, "CFBundlePackageType": "BNDL"]
+            try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: directory.appendingPathComponent("Contents/Info.plist"))
+        }
+        try Data("\"fallback.test\" = \"English fallback\";".utf8).write(to: resourceURL.appendingPathComponent("en.lproj/Localizable.strings"))
+        try Data("\"another.key\" = \"다른 문구\";".utf8).write(to: resourceURL.appendingPathComponent("ko.lproj/Localizable.strings"))
         let catalog = LocalizationCatalog(language: .korean, preferredLanguages: [], resources: try #require(Bundle(url: directory)))
         #expect(catalog.text("fallback.test") == "English fallback")
         #expect(catalog.text("another.key") == "다른 문구")
@@ -163,6 +169,50 @@ struct LocalizationTests {
                 let data = try #require(bitmap.representation(using: .png, properties: [:]))
                 try data.write(to: destination.appendingPathComponent("\(language.rawValue)-\(name).png"))
             }
+        }
+    }
+
+
+    @Test(arguments: AppLanguage.allCases.filter { $0 != .system })
+    func navigationCandidatesRenderInEveryLanguage(language: AppLanguage) throws {
+        let original = L10n.catalog.language
+        L10n.configure(language: language)
+        defer { L10n.configure(language: original) }
+        let host = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 700, height: 450), styleMask: [.titled], backing: .buffered, defer: false)
+        host.isReleasedWhenClosed = false
+        defer { host.close() }
+        let anchor = try #require(host.contentView)
+        host.orderFront(nil)
+        let panel = DeclarationCandidatePanel()
+        defer { panel.dismiss() }
+        panel.present(rows: [.init(name: "ClientMessage", detail: "/workspace/a/very/long/project/path/fyro-grpc-protocol-interface/ignite_session.proto:88", preview: "rpc Session(stream ClientMessage) returns (stream ServerMessage) {}")], complete: false, anchor: anchor, kind: .references)
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let search = try #require(NSApp.windows.compactMap(\.contentView).flatMap(descendants).compactMap { $0 as? NSSearchField }.first { $0.accessibilityIdentifier() == "duckpad.declarations.search" && $0.placeholderString == L10n.text("Search reference candidates") })
+        let content = try #require(search.superview)
+        content.layoutSubtreeIfNeeded()
+        #expect(search.placeholderString == L10n.text("Search reference candidates"))
+        #expect(search.accessibilityLabel() == search.placeholderString)
+        let status = try #require(descendants(content).compactMap { $0 as? NSTextField }.first { $0.stringValue == L10n.text("Name matches only. Some files could not be searched.") })
+        #expect(status.frame.width > 0 && status.frame.height > 0)
+        #expect(content.bounds.contains(status.convert(status.bounds, to: content)))
+        #expect(status.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: status.frame.width, height: 1000)).height <= status.frame.height + 1)
+        let table = try #require(descendants(content).compactMap { $0 as? NSTableView }.first)
+        #expect(table.accessibilityLabel() == L10n.text("Reference candidates"))
+        let cell = try #require(table.view(atColumn: 0, row: 0, makeIfNecessary: true) as? NSTableCellView)
+        cell.layoutSubtreeIfNeeded()
+        let row = try #require(cell.subviews.first as? NSStackView)
+        row.layoutSubtreeIfNeeded()
+        #expect(row.arrangedSubviews.count == 3)
+        for label in row.arrangedSubviews {
+            #expect(label.frame.height > 0)
+            #expect(label.alignmentRect(forFrame: label.frame).width <= row.bounds.width + 1)
+        }
+        if let directory = ProcessInfo.processInfo.environment["DUCKPAD_LOCALIZATION_SNAPSHOTS"] {
+            let destination = URL(fileURLWithPath: directory, isDirectory: true)
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+            try #require(bitmap.representation(using: .png, properties: [:])).write(to: destination.appendingPathComponent("\(language.rawValue)-navigation.png"))
         }
     }
 

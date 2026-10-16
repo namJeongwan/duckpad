@@ -820,3 +820,25 @@
 
 "Change color" = "Change color";
 "Apply" = "Apply";
+
+/* Built-in declaration navigation */
+"Go to Declaration" = "Go to Declaration";
+"Navigate Back" = "Navigate Back";
+"Navigate Forward" = "Navigate Forward";
+"Search declaration candidates" = "Search declaration candidates";
+"Declaration candidates" = "Declaration candidates";
+"Choose a declaration candidate" = "Choose a declaration candidate";
+"Some files could not be searched. Showing available candidates." = "Some files could not be searched. Showing available candidates.";
+"Declaration navigation is unavailable for this document." = "Declaration navigation is unavailable for this document.";
+"No declaration found." = "No declaration found.";
+"Some files could not be searched. No declaration found." = "Some files could not be searched. No declaration found.";
+"The document changed. Try navigation again." = "The document changed. Try navigation again.";
+
+/* Built-in reference candidates */
+"Find Reference Candidates" = "Find Reference Candidates";
+"Search reference candidates" = "Search reference candidates";
+"Reference candidates" = "Reference candidates";
+"Name matches only. Choose a reference candidate." = "Name matches only. Choose a reference candidate.";
+"Name matches only. Some files could not be searched." = "Name matches only. Some files could not be searched.";
+"No reference candidates found." = "No reference candidates found.";
+"Some files could not be searched. No reference candidates found." = "Some files could not be searched. No reference candidates found.";

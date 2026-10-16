@@ -19,8 +19,11 @@ public struct LocalizationCatalog: Sendable {
             : language.rawValue
         self.language = AppLanguage(rawValue: resolved) ?? .english
         locale = Locale(identifier: self.language.rawValue)
-        english = Bundle(url: resources.bundleURL.appendingPathComponent("en.lproj")) ?? resources
-        bundle = Bundle(url: resources.bundleURL.appendingPathComponent(self.language.rawValue.lowercased() + ".lproj")) ?? english
+        let resourceURL = resources.resourceURL ?? resources.bundleURL
+        english = Bundle(url: resourceURL.appendingPathComponent("en.lproj")) ?? resources
+        bundle = Bundle(url: resourceURL.appendingPathComponent(self.language.rawValue + ".lproj"))
+            ?? Bundle(url: resourceURL.appendingPathComponent(self.language.rawValue.lowercased() + ".lproj"))
+            ?? english
     }
 
     public func text(_ key: String, arguments: [CVarArg] = []) -> String {

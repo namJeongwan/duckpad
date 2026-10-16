@@ -17,7 +17,8 @@ final class MenuPresentationSpy: NSMenu {
         presentedItem = item
         presentedLocation = location
         presentedView = view
-        MainActor.assumeIsolated { onPresent?() }
+        let callback = onPresent
+        MainActor.assumeIsolated { callback?() }
         return false
     }
 }
