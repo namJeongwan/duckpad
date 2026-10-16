@@ -449,3 +449,27 @@ The same extreme-metric tests exposed upstream integer overflow in
 now use floating-point truncation and custom-stop lookup bounds its integer
 conversion. Ordinary coordinates remain unchanged; the previously undefined
 out-of-range calculation no longer overflows.
+
+## Built-in declaration navigation
+
+The hand-maintained Cocoa content view offers an optional delegate hook before
+mouse selection. The Duckpad bridge consumes an unmodified Command-click only
+when a declaration callback is installed and direct text input is available;
+IME composition and other mouse gestures retain existing behavior. It reports
+the clicked UTF-8 offset without changing document contents or the prior caret.
+The adapter routes the callback to the active pane. No lexer or input-layout
+work is added to ordinary keystrokes.
+
+Command-hover uses optional pointer/modifier delegate hooks and a separate
+Scintilla underline indicator (9), with a pointing-hand cursor override. Modifier
+changes also work with a stationary pointer or an unfocused split pane. Exit,
+scroll, window resignation, edits and IME composition clear the decoration.
+The bridge rejects stale hover responses and exposes its content generation for
+same-revision reload invalidation. These hand-maintained Cocoa/bridge changes do
+not alter text, selection, Undo or the search indicator (8).
+
+Declaration navigation has a dedicated reveal operation that expands enclosing
+folds and places the target at approximately one fifth of the pane height.
+It uses rendered display rows (including soft wraps), preserves horizontal
+caret visibility and respects the existing beginning/end scroll bounds. Generic
+search selection and ordinary caret scrolling retain their existing behavior.

@@ -780,3 +780,25 @@
 
 "Change color" = "Farbe ändern";
 "Apply" = "Anwenden";
+
+/* Built-in declaration navigation */
+"Go to Declaration" = "Zur Deklaration";
+"Navigate Back" = "Zurück navigieren";
+"Navigate Forward" = "Vorwärts navigieren";
+"Search declaration candidates" = "Deklarationskandidaten suchen";
+"Declaration candidates" = "Deklarationskandidaten";
+"Choose a declaration candidate" = "Deklarationskandidaten auswählen";
+"Some files could not be searched. Showing available candidates." = "Einige Dateien konnten nicht durchsucht werden. Verfügbare Kandidaten werden angezeigt.";
+"Declaration navigation is unavailable for this document." = "Deklarationsnavigation ist für dieses Dokument nicht verfügbar.";
+"No declaration found." = "Keine Deklaration gefunden.";
+"Some files could not be searched. No declaration found." = "Einige Dateien konnten nicht durchsucht werden. Keine Deklaration gefunden.";
+"The document changed. Try navigation again." = "Das Dokument wurde geändert. Bitte erneut navigieren.";
+
+/* Built-in reference candidates */
+"Find Reference Candidates" = "Referenzkandidaten suchen";
+"Search reference candidates" = "Referenzkandidaten filtern";
+"Reference candidates" = "Referenzkandidaten";
+"Name matches only. Choose a reference candidate." = "Nur Namensübereinstimmungen. Wählen Sie einen Referenzkandidaten.";
+"Name matches only. Some files could not be searched." = "Nur Namensübereinstimmungen. Einige Dateien konnten nicht durchsucht werden.";
+"No reference candidates found." = "Keine Referenzkandidaten gefunden.";
+"Some files could not be searched. No reference candidates found." = "Einige Dateien konnten nicht durchsucht werden. Keine Referenzkandidaten gefunden.";

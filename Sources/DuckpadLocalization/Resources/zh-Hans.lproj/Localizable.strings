@@ -780,3 +780,25 @@
 
 "Change color" = "更改颜色";
 "Apply" = "应用";
+
+/* Built-in declaration navigation */
+"Go to Declaration" = "转到声明";
+"Navigate Back" = "后退";
+"Navigate Forward" = "前进";
+"Search declaration candidates" = "搜索声明候选项";
+"Declaration candidates" = "声明候选项";
+"Choose a declaration candidate" = "请选择声明候选项";
+"Some files could not be searched. Showing available candidates." = "部分文件无法搜索。正在显示找到的候选项。";
+"Declaration navigation is unavailable for this document." = "此文档不支持声明导航。";
+"No declaration found." = "未找到声明。";
+"Some files could not be searched. No declaration found." = "部分文件无法搜索，未找到声明。";
+"The document changed. Try navigation again." = "文档已更改。请重新导航。";
+
+/* Built-in reference candidates */
+"Find Reference Candidates" = "查找引用候选项";
+"Search reference candidates" = "搜索引用候选项";
+"Reference candidates" = "引用候选项";
+"Name matches only. Choose a reference candidate." = "仅按名称匹配。请选择引用候选项。";
+"Name matches only. Some files could not be searched." = "仅按名称匹配。部分文件无法搜索。";
+"No reference candidates found." = "未找到引用候选项。";
+"Some files could not be searched. No reference candidates found." = "部分文件无法搜索。未找到引用候选项。";

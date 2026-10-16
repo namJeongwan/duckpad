@@ -223,6 +223,9 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	ScintillaView *__weak mOwner;
 	NSCursor *mCurrentCursor;
 	NSTrackingArea *trackingArea;
+    id declarationModifierMonitor;
+    BOOL hasDeclarationPointer;
+    NSPoint declarationPointer;
 
 	// Set when we are in composition mode and partial input is displayed.
 	NSRange mMarkedTextRange;
@@ -302,6 +305,63 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 /**
  * Called by the backend if a new cursor must be set for the view.
  */
+- (void) clearDeclarationPointer {
+    hasDeclarationPointer = NO;
+    id delegate = mOwner.delegate;
+    if ([delegate respondsToSelector:@selector(scintillaClearDeclarationHover)])
+        [delegate scintillaClearDeclarationHover];
+}
+
+- (void) updateDeclarationPointer: (NSEvent *) event {
+    hasDeclarationPointer = YES;
+    declarationPointer = event.locationInWindow;
+    [self updateDeclarationModifiers:event.modifierFlags];
+}
+
+- (void) updateDeclarationModifiers: (NSEventModifierFlags) modifiers {
+    id delegate = mOwner.delegate;
+    if (hasDeclarationPointer && self.window.isKeyWindow
+        && [delegate respondsToSelector:@selector(scintillaDeclarationHoverAt:modifiers:)])
+        [delegate scintillaDeclarationHoverAt:declarationPointer modifiers:modifiers];
+}
+
+- (void) declarationWindowResigned: (NSNotification *) notification {
+    [self clearDeclarationPointer];
+}
+
+- (void) flagsChanged: (NSEvent *) event {
+    [self updateDeclarationModifiers:event.modifierFlags];
+    [super flagsChanged:event];
+}
+
+- (void) viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    [self clearDeclarationPointer];
+    if (declarationModifierMonitor) { [NSEvent removeMonitor:declarationModifierMonitor]; declarationModifierMonitor = nil; }
+    [NSNotificationCenter.defaultCenter removeObserver:self name:NSWindowDidResignKeyNotification object:nil];
+    if (self.window) {
+        __weak SCIContentView *weakSelf = self;
+        declarationModifierMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged handler:^NSEvent *(NSEvent *event) {
+            [weakSelf updateDeclarationModifiers:event.modifierFlags];
+            return event;
+        }];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(declarationWindowResigned:)
+            name:NSWindowDidResignKeyNotification object:self.window];
+    }
+}
+
+- (void) dealloc {
+    if (declarationModifierMonitor) [NSEvent removeMonitor:declarationModifierMonitor];
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
+- (void) setDeclarationLinkCursor: (BOOL) enabled {
+    if (_declarationLinkCursor == enabled) return;
+    _declarationLinkCursor = enabled;
+    [self.window invalidateCursorRectsForView:self];
+    [(enabled ? NSCursor.pointingHandCursor : mCurrentCursor) set];
+}
+
 - (void) setCursor: (int) cursor {
 	Window::Cursor eCursor = (Window::Cursor)cursor;
 	mCurrentCursor = cursorFromEnum(eCursor);
@@ -321,7 +381,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 	// We only have one cursor rect: our bounds.
 	const NSRect visibleBounds = mOwner.backend->GetBounds();
-	[self addCursorRect: visibleBounds cursor: mCurrentCursor];
+	[self addCursorRect: visibleBounds cursor: self.declarationLinkCursor ? NSCursor.pointingHandCursor : mCurrentCursor];
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -782,12 +842,16 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 //--------------------------------------------------------------------------------------------------
 
 - (void) mouseDown: (NSEvent *) theEvent {
+    id<ScintillaNotificationProtocol> delegate = mOwner.delegate;
+    if ([(id)delegate respondsToSelector:@selector(scintillaHandleMouseDown:)]
+        && [delegate scintillaHandleMouseDown:theEvent]) return;
 	mOwner.backend->MouseDown(theEvent);
 }
 
 //--------------------------------------------------------------------------------------------------
 
 - (void) mouseDragged: (NSEvent *) theEvent {
+    [self clearDeclarationPointer];
 	mOwner.backend->MouseMove(theEvent);
 }
 
@@ -801,17 +865,20 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 - (void) mouseMoved: (NSEvent *) theEvent {
 	mOwner.backend->MouseMove(theEvent);
+    [self updateDeclarationPointer:theEvent];
 }
 
 //--------------------------------------------------------------------------------------------------
 
 - (void) mouseEntered: (NSEvent *) theEvent {
 	mOwner.backend->MouseEntered(theEvent);
+    [self updateDeclarationPointer:theEvent];
 }
 
 //--------------------------------------------------------------------------------------------------
 
 - (void) mouseExited: (NSEvent *) theEvent {
+    [self clearDeclarationPointer];
 	mOwner.backend->MouseExited(theEvent);
 }
 
@@ -824,6 +891,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * Pinch gestures and key commands can also be used for magnification.
  */
 - (void) scrollWheel: (NSEvent *) theEvent {
+    [self clearDeclarationPointer];
 #ifdef SCROLL_WHEEL_MAGNIFICATION
 	if (([theEvent modifierFlags] & NSEventModifierFlagCommand) != 0) {
 		mOwner.backend->MouseWheel(theEvent);

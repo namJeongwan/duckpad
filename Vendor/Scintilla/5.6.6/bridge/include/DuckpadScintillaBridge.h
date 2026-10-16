@@ -66,6 +66,13 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, copy, nullable) void (^onEdit)(DPScintillaEdit *edit);
 @property(nonatomic, copy, nullable) void (^onError)(NSError *error);
 @property(nonatomic, copy, nullable) void (^onFocus)(void);
+@property(nonatomic, copy, nullable) void (^onDeclarationRequested)(NSUInteger utf8Position);
+/// NSNotFound cancels pending hover analysis.
+@property(nonatomic, copy, nullable) void (^onDeclarationHovered)(NSUInteger utf8Position);
+@property(nonatomic, readonly) NSRange declarationHoverRange;
+@property(nonatomic, readonly) uint64_t declarationContentGeneration;
+- (BOOL)showDeclarationHoverRange:(NSRange)range expectedRevision:(uint64_t)revision expectedPosition:(NSUInteger)position;
+- (void)clearDeclarationHover;
 @property(nonatomic, copy, nullable) void (^onStatusChange)(void);
 @property(nonatomic, copy, nullable) void (^onFoldStateChange)(void);
 @property(nonatomic, copy, nullable) void (^onFoldRecoveryProgress)(void);
@@ -191,6 +198,7 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, readonly, copy) NSArray<NSNumber *> *searchOverviewPositions;
 - (BOOL)isSearchHighlightedAtUTF8Position:(NSUInteger)position NS_SWIFT_NAME(isSearchHighlighted(atUTF8Position:));
 - (void)setPrimarySelectionUTF8Range:(NSRange)range;
+- (void)revealDeclarationInUTF8Range:(NSRange)range NS_SWIFT_NAME(revealDeclaration(in:));
 - (void)restoreCaretUTF8Position:(NSUInteger)caret
                   anchorPosition:(NSUInteger)anchor
                 firstVisibleLine:(NSUInteger)firstVisibleLine

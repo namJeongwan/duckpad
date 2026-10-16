@@ -48,6 +48,9 @@ typedef NS_ENUM(NSInteger, SCITextInputSource) {
 @protocol ScintillaNotificationProtocol
 - (void) notification: (SCNotification *) notification;
 @optional
+- (BOOL) scintillaHandleMouseDown: (NSEvent *) event;
+- (void) scintillaDeclarationHoverAt: (NSPoint) point modifiers: (NSEventModifierFlags) modifiers;
+- (void) scintillaClearDeclarationHover;
 - (void) scintillaWillInsertTextFromSource: (SCITextInputSource) source;
 - (BOOL) scintillaHandleDirectSelectionText: (NSString *) text;
 - (void) scintillaDidInsertText;
@@ -81,6 +84,7 @@ typedef NS_ENUM(NSInteger, SCITextInputSource) {
 
 - (void) setCursor: (int) cursor; // Needed by ScintillaCocoa
 
+@property(nonatomic) BOOL declarationLinkCursor;
 @end
 
 /**

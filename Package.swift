@@ -276,6 +276,7 @@ let package = Package(
                 "DuckpadInfrastructure",
                 "DuckpadPluginSupport",
                 "DuckpadWAMRBridge",
+                "DuckpadPluginRuntimeCore",
                 .product(name: "Testing", package: "swift-testing"),
             ]
         ),

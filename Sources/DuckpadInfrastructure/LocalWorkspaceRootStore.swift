@@ -243,6 +243,11 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
     }
 
     public func readFile(_ entry: WorkspaceBrowserEntry) async throws(WorkspaceBrowserFailure) -> WorkspaceFileRead {
+        try await readFile(entry, maximumBytes: nil)
+    }
+
+    /// Bounded reads for on-demand source navigation; preserves root/symlink checks.
+    public func readFile(_ entry: WorkspaceBrowserEntry, maximumBytes: UInt64?) async throws(WorkspaceBrowserFailure) -> WorkspaceFileRead {
         try loadIfNeeded()
         guard entry.kind == .file,
               Self.isValidRelativePath(entry.relativePath),
@@ -255,7 +260,8 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
             try Self.readFileBlocking(
                 entry,
                 access: access,
-                beforeOpeningEntry: beforeOpeningEntry
+                beforeOpeningEntry: beforeOpeningEntry,
+                maximumBytes: maximumBytes
             )
         }
         return try await Self.value(of: operation)
@@ -344,7 +350,8 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
     private static func readFileBlocking(
         _ entry: WorkspaceBrowserEntry,
         access: RootAccess,
-        beforeOpeningEntry: (@Sendable (String) -> Void)?
+        beforeOpeningEntry: (@Sendable (String) -> Void)?,
+        maximumBytes: UInt64? = nil
     ) throws -> WorkspaceFileRead {
         let components = entry.relativePath.split(separator: "/").map(String.init)
         guard let name = components.last else { throw WorkspaceBrowserFailure.invalidPath(entry.relativePath) }
@@ -361,9 +368,12 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
         }
         guard before.st_size >= 0 else { throw WorkspaceBrowserFailure.invalidPath(entry.relativePath) }
         let observedSize = UInt64(before.st_size)
+        if let maximumBytes, observedSize > maximumBytes {
+            throw WorkspaceBrowserFailure.fileTooLarge(actual: observedSize, limit: maximumBytes)
+        }
         let analysisLimit = UInt64(BinaryFileContent.analysisByteCount + 4)
-        var readLimit = analysisLimit
-        var classified = false
+        var readLimit = maximumBytes ?? analysisLimit
+        var classified = maximumBytes != nil
         var isBinary = false
         var data = Data()
         data.reserveCapacity(Int(min(observedSize, analysisLimit)))
@@ -387,7 +397,7 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
                 if extra < 0, errno == EINTR { continue }
                 if extra < 0 { throw mapErrno(path: entry.relativePath) }
                 if !isBinary {
-                    throw WorkspaceBrowserFailure.fileTooLarge(actual: readLimit + 1, limit: maximumOpenFileBytes)
+                    throw WorkspaceBrowserFailure.fileTooLarge(actual: readLimit + 1, limit: maximumBytes ?? maximumOpenFileBytes)
                 }
                 throw WorkspaceBrowserFailure.io("\(entry.relativePath): file changed while reading")
             }

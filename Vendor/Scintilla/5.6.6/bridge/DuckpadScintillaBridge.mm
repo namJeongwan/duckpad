@@ -28,6 +28,7 @@
 NSErrorDomain const DPScintillaErrorDomain = @"app.duckpad.scintilla";
 static NSURL *DPScintillaResourceDirectory;
 static constexpr int DPSearchIndicator = 8;
+static constexpr int DPDeclarationIndicator = 9;
 static constexpr int DPBookmarkMarker = 20;
 static constexpr int DPBookmarkMask = 1 << DPBookmarkMarker;
 static constexpr NSInteger DPSmartIndentScanLimit = 4096;
@@ -218,6 +219,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     uint64_t _revision;
     BOOL _suppressEdit;
     BOOL _requestedInputEnabled;
+    NSUInteger _declarationHoverPosition;
+    NSRange _declarationHoverRange;
     BOOL _binaryDocument;
     BOOL _loadingText;
     NSUInteger _loadingTextTotal;
@@ -385,6 +388,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [self applyPalette:DPScintillaPaletteLight];
         [self configureTextLayoutWithLeftPadding:0 rightPadding:8 lineSpacing:4];
         _requestedInputEnabled = YES;
+        _declarationHoverPosition = NSNotFound;
+        _declarationHoverRange = NSMakeRange(NSNotFound, 0);
         self.accessibilityIdentifier = @"duckpad.editor.scintilla";
     }
     return self;
@@ -419,6 +424,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     return YES;
 }
 - (void)colorPreviewViewportChanged:(NSNotification *)notification {
+    [self clearDeclarationHover];
     [self refreshColorPreviews];
 }
 - (void)refreshColorPreviews {
@@ -459,6 +465,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (NSArray<NSNumber *> *)searchOverviewPositions { return _searchOverview.positions; }
 
 - (void)resetSearchOverviewDocument {
+    [self clearDeclarationHover];
     [_colorPreview closeChooser];
     [_searchMarkerPeers removeObject:self];
     _searchMarkerPeers = [NSHashTable weakObjectsHashTable];
@@ -550,6 +557,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)invalidate {
+    [self clearDeclarationHover];
+    self.onDeclarationHovered = nil;
+    self.onDeclarationRequested = nil;
     [NSNotificationCenter.defaultCenter removeObserver:self];
     [_searchMarkerPeers removeObject:self];
     [_searchOverview removeFromSuperview];
@@ -1051,6 +1061,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (BOOL)isInputEnabled { return [_scintilla isEditable]; }
 - (void)setInputEnabled:(BOOL)value {
+    if (!value) [self clearDeclarationHover];
     _requestedInputEnabled = value;
     [_scintilla setEditable:value && !_binaryDocument && !_loadingText && _revision != UINT64_MAX];
 }
@@ -1283,6 +1294,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)shareDocumentWithView:(DPScintillaEditorView *)source {
     if (source == nil || source == self) return;
+    [self clearDeclarationHover];
     _collapseAllFoldsAfterStyling = NO;
     [_searchMarkerPeers removeObject:self];
     _searchMarkerPeers = source->_searchMarkerPeers;
@@ -1313,6 +1325,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)synchronizeRevision:(uint64_t)revision {
+    if (_revision != revision) [self clearDeclarationHover];
     _revision = revision;
     if (_documentPublisher != nil) _loadingText = _documentPublisher->_loadingText;
     [_scintilla setEditable:_requestedInputEnabled && !_binaryDocument && !_loadingText && revision != UINT64_MAX];
@@ -1398,6 +1411,20 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_SCROLLCARET];
 }
 
+- (void)revealDeclarationInUTF8Range:(NSRange)range {
+    const NSUInteger length = self.documentByteLength;
+    if (!_scintilla || _binaryDocument || range.location > length || range.length > length - range.location) return;
+    const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:range.location];
+    [_scintilla message:SCI_ENSUREVISIBLE wParam:line];
+    [self setPrimarySelectionUTF8Range:range];
+    // Use display rows, so folded regions and wrapped logical lines count as rendered.
+    const NSInteger lineHeight = MAX(1, [_scintilla message:SCI_TEXTHEIGHT wParam:0]);
+    const NSInteger targetRow = [_scintilla message:SCI_GETFIRSTVISIBLELINE]
+        + [_scintilla message:SCI_POINTYFROMPOSITION wParam:0 lParam:range.location] / lineHeight;
+    const NSInteger contextRows = [_scintilla message:SCI_LINESONSCREEN] / 5;
+    [_scintilla message:SCI_SETFIRSTVISIBLELINE wParam:MAX(0, targetRow - contextRows)];
+}
+
 - (void)restoreCaretUTF8Position:(NSUInteger)caret
                   anchorPosition:(NSUInteger)anchor
                 firstVisibleLine:(NSUInteger)firstVisibleLine
@@ -1443,6 +1470,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)scintillaWillInsertTextFromSource:(SCITextInputSource)source {
+    [self clearDeclarationHover];
     _textInputSourceKnown = YES;
     _directInputInsertion = source == SCITextInputSourceDirect || source == SCITextInputSourceDirectNewline;
     if (source == SCITextInputSourceDirectNewline) {
@@ -1571,12 +1599,88 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
             == DPScintillaSelectionShapeStream;
 }
 
+- (NSRange)declarationHoverRange { return _declarationHoverRange; }
+- (uint64_t)declarationContentGeneration {
+    return _documentPublisher ? _documentPublisher->_statusContentGeneration : _statusContentGeneration;
+}
+
+- (void)clearDeclarationHoverDecoration {
+    if (_declarationHoverRange.length) {
+        const sptr_t previous = [_scintilla message:SCI_GETINDICATORCURRENT];
+        [_scintilla message:SCI_SETINDICATORCURRENT wParam:DPDeclarationIndicator];
+        [_scintilla message:SCI_INDICATORCLEARRANGE wParam:_declarationHoverRange.location lParam:_declarationHoverRange.length];
+        [_scintilla message:SCI_SETINDICATORCURRENT wParam:previous];
+    }
+    _declarationHoverRange = NSMakeRange(NSNotFound, 0);
+    [_scintilla content].declarationLinkCursor = NO;
+}
+
+- (void)clearDeclarationHover {
+    const BOOL pending = _declarationHoverPosition != NSNotFound;
+    _declarationHoverPosition = NSNotFound;
+    [self clearDeclarationHoverDecoration];
+    if (pending && self.onDeclarationHovered) self.onDeclarationHovered(NSNotFound);
+}
+
+- (void)scintillaClearDeclarationHover { [self clearDeclarationHover]; }
+
+- (void)scintillaDeclarationHoverAt:(NSPoint)location modifiers:(NSEventModifierFlags)modifiers {
+    const NSEventModifierFlags relevant = modifiers & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift);
+    if (relevant != NSEventModifierFlagCommand || !self.onDeclarationHovered || !_requestedInputEnabled
+        || _binaryDocument || _loadingText || [[_scintilla content] hasMarkedText] || !self.window.isKeyWindow) {
+        [self clearDeclarationHover]; return;
+    }
+    const NSPoint point = [_scintilla.scrollView convertPoint:location fromView:nil];
+    const sptr_t position = (point.x < 0 || point.y < 0) ? -1 : [_scintilla message:SCI_CHARPOSITIONFROMPOINTCLOSE
+        wParam:static_cast<uptr_t>(point.x) lParam:static_cast<sptr_t>(point.y)];
+    if (position < 0) { [self clearDeclarationHover]; return; }
+    if (_declarationHoverPosition == static_cast<NSUInteger>(position)) return;
+    _declarationHoverPosition = position;
+    if (_declarationHoverRange.length && NSLocationInRange(position, _declarationHoverRange)) return;
+    [self clearDeclarationHoverDecoration];
+    self.onDeclarationHovered(position);
+}
+
+- (BOOL)showDeclarationHoverRange:(NSRange)range expectedRevision:(uint64_t)revision expectedPosition:(NSUInteger)position {
+    if (!_scintilla || !_requestedInputEnabled || _binaryDocument || _loadingText || !self.window.isKeyWindow
+        || [[_scintilla content] hasMarkedText] || _revision != revision || _declarationHoverPosition != position
+        || !range.length || range.length > 256 || range.location > self.documentByteLength
+        || range.length > self.documentByteLength - range.location || !NSLocationInRange(position, range)) return NO;
+    [self clearDeclarationHoverDecoration];
+    const sptr_t previous = [_scintilla message:SCI_GETINDICATORCURRENT];
+    [_scintilla message:SCI_SETINDICATORCURRENT wParam:DPDeclarationIndicator];
+    [_scintilla message:SCI_INDICATORFILLRANGE wParam:range.location lParam:range.length];
+    [_scintilla message:SCI_SETINDICATORCURRENT wParam:previous];
+    _declarationHoverRange = range;
+    [_scintilla content].declarationLinkCursor = YES;
+    return YES;
+}
+
+- (BOOL)scintillaHandleMouseDown:(NSEvent *)event {
+    [self clearDeclarationHover];
+    const NSEventModifierFlags modifiers = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+    if ((modifiers & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift)) != NSEventModifierFlagCommand
+        || event.clickCount != 1 || self.onDeclarationRequested == nil
+        || !_requestedInputEnabled || _binaryDocument || [[_scintilla content] hasMarkedText]) return NO;
+    // Match the viewport coordinates used by firstRectForCharacterRange.
+    NSPoint point = [_scintilla.scrollView convertPoint:event.locationInWindow fromView:nil];
+    if (point.x < 0 || point.y < 0) return NO;
+    const sptr_t position = [_scintilla message:SCI_POSITIONFROMPOINTCLOSE
+                                       wParam:static_cast<uptr_t>(point.x)
+                                       lParam:static_cast<sptr_t>(point.y)];
+    if (position < 0) return NO;
+    [self focusEditor];
+    self.onDeclarationRequested(static_cast<NSUInteger>(position));
+    return YES;
+}
+
 - (void)clearDirectInputPreflightState {
     _directInputByteLengthKnown = NO;
     _directInputByteLength = 0;
     _directInputSelectionEligible = NO;
 }
 - (void)setMarkedText:(NSString *)text selectedRange:(NSRange)selectedRange replacementRange:(NSRange)replacementRange {
+    [self clearDeclarationHover];
     if (![self preflightUserMutation]) return;
     [[_scintilla content] setMarkedText:text selectedRange:selectedRange replacementRange:replacementRange];
 }
@@ -1962,6 +2066,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_STYLESETFORE wParam:STYLE_INDENTGUIDE lParam:indentGuide];
     [_scintilla message:SCI_STYLESETBACK wParam:STYLE_INDENTGUIDE lParam:background];
     // Search decorations belong to the document, while their appearance belongs to each pane.
+    [_scintilla message:SCI_INDICSETSTYLE wParam:DPDeclarationIndicator lParam:INDIC_PLAIN];
+    [_scintilla message:SCI_INDICSETFORE wParam:DPDeclarationIndicator lParam:dark ? 0xFFBC80 : 0xD56B00];
+    [_scintilla message:SCI_INDICSETUNDER wParam:DPDeclarationIndicator lParam:0];
     [_scintilla message:SCI_INDICSETSTYLE wParam:DPSearchIndicator lParam:INDIC_ROUNDBOX];
     [_scintilla message:SCI_INDICSETFORE wParam:DPSearchIndicator lParam:dark ? 0x86CB63 : 0x70D880];
     [_scintilla message:SCI_INDICSETALPHA wParam:DPSearchIndicator lParam:highContrast ? 160 : 110];
@@ -3023,6 +3130,12 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)notification:(SCNotification *)notification {
+    if (notification->nmhdr.code == SCN_MODIFIED
+        && (notification->modificationType & (SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE | SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT))) {
+        // Only the publisher receives text notifications for a shared document.
+        // Clear before mutation while indicator ranges still use the old offsets.
+        for (DPScintillaEditorView *peer in _searchMarkerPeers) [peer clearDeclarationHover];
+    }
     if (_binaryDocument && notification->nmhdr.code == SCN_MODIFIED) {
         if (notification->modificationType & SC_MOD_BEFOREINSERT) {
             const NSUInteger length = [_scintilla message:SCI_GETSELECTIONSERIALIZED];

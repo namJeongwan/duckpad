@@ -7,7 +7,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, ProgressiveTextEditorPort, FileOpeningPreviewEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, EditorCopyExportPort, BookmarkEditorPort, SplitEditorPort, DocumentIntelligenceEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, ProgressiveTextEditorPort, FileOpeningPreviewEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, EditorCopyExportPort, BookmarkEditorPort, SplitEditorPort, DeclarationNavigationEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     var snippetSession: SnippetSession?
     var snippetBuffer: BufferID?
     var snippetKeyMonitor: Any?
@@ -103,6 +103,9 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     private var displayedGroupViews: [EditorGroupID: DPScintillaEditorView] = [:]
     private var bufferOwners: [BufferID: EditorGroupID] = [:]
     private var pendingGroupRecoveryViewStates: [BufferID: [ObjectIdentifier: EditorViewState]] = [:]
+    public var onDeclarationRequested: ((Int) -> Void)?
+    public var onDeclarationHoverRequested: ((DocumentIntelligenceCapture, Int, DeclarationIndex) async -> Bool)?
+    private let declarationHover = DeclarationHoverController()
     private var documentIntelligenceContextIDs: [ObjectIdentifier: DocumentIntelligenceContextID] = [:]
     private var navigationContextIDs: [ObjectIdentifier: EditorNavigationContextID] = [:]
     private var pendingFoldRecoveryByView: [ObjectIdentifier: FoldRecoveryState] = [:]
@@ -787,6 +790,9 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         onEdit = nil
         onFoldStateChange = nil
         onEditorStatusChange = nil
+        onDeclarationRequested = nil
+        onDeclarationHoverRequested = nil
+        declarationHover.cancel()
         onEditorGroupFocus = nil
     }
 
@@ -1266,6 +1272,34 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
         )
     }
 
+    public func declarationLanguage(for buffer: EditorBufferDescriptor) -> String? {
+        languageConfigurations[buffer.bufferID]?.languageID.rawValue
+    }
+
+    public func clearDeclarationHover() { declarationHover.cancel() }
+
+    public func declarationContent(for buffer: EditorBufferDescriptor, maximumBytes: Int) -> Data? {
+        guard maximumBytes >= 0, binaryDocuments[buffer.bufferID] == nil,
+              let view = bufferViews[buffer.bufferID], view.revision == buffer.revision,
+              view.documentByteLength <= maximumBytes else { return nil }
+        return view.contentUTF8
+    }
+
+    public func declarationContextIsCurrent(_ capture: DocumentIntelligenceCapture) -> Bool {
+        guard activeBuffer == capture.buffer, let view = activeScintillaView else { return false }
+        return documentIntelligenceContextIDs[ObjectIdentifier(view)] == capture.contextID
+            && view.caretUTF8Position == capture.caretUTF8 && !view.hasMarkedText()
+            && declarationLanguage(for: capture.buffer) == capture.languageID.rawValue
+            && view.documentByteLength == capture.utf8.count
+            && view.contentUTF8 == capture.utf8
+    }
+
+    public func revealDeclaration(_ range: SearchUTF8Range) {
+        guard range.location >= 0, range.length >= 0 else { return }
+        activeScintillaView?.revealDeclaration(in: NSRange(location: range.location, length: range.length))
+        if let bufferID = activeBuffer?.bufferID { storeViewState(bufferID: bufferID) }
+    }
+
     public func cancelCompletion() {
         bufferViews.values.forEach { $0.cancelCompletion() }
         secondaryBufferViews.values.forEach { $0.cancelCompletion() }
@@ -1300,6 +1334,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
             editorView.apply(nativePalette(themePalette))
         }
         languageConfigurations[bufferID] = configuration
+        declarationHover.cancel()
         if editorViews.allSatisfy(\.configuredFoldingEnabled) {
             editorViews.forEach { retryPendingFoldRecovery(in: $0) }
         } else {
@@ -2091,6 +2126,27 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     private func attachViewCallbacks(_ editorView: DPScintillaEditorView, bufferID: BufferID) {
+        editorView.onDeclarationHovered = { [weak self, weak editorView] position in
+            guard let self, let editorView, self.isLive(editorView, for: bufferID) else { return }
+            let language = self.languageConfigurations[bufferID]?.languageID.rawValue
+            var resolve: (@MainActor (Data, DeclarationIndex, Int) async -> Bool)?
+            if let handler = self.onDeclarationHoverRequested {
+                resolve = { [weak self, weak editorView] (data: Data, index: DeclarationIndex, offset: Int) async -> Bool in
+                    guard let self, let editorView, let language, self.isLive(editorView, for: bufferID),
+                          let context = self.documentIntelligenceContextIDs[ObjectIdentifier(editorView)] else { return false }
+                    let capture = DocumentIntelligenceCapture(buffer: .init(bufferID: bufferID, revision: editorView.revision), utf8: data,
+                        caretUTF8: Int(clamping: editorView.caretUTF8Position), languageID: .init(rawValue: language), contextID: context)
+                    return await handler(capture, offset, index)
+                }
+            }
+            self.declarationHover.hover(position, in: editorView,
+                                        language: language, resolve: resolve)
+        }
+        editorView.onDeclarationRequested = { [weak self, weak editorView] position in
+            guard let self, let editorView, self.isLive(editorView, for: bufferID),
+                  self.activeScintillaView === editorView else { return }
+            self.onDeclarationRequested?(Int(clamping: position))
+        }
         editorView.onError = { [weak self] error in
             self?.receiveBridgeError(error, bufferID: bufferID)
         }

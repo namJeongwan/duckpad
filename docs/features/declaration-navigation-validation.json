@@ -1,0 +1,549 @@
+{
+  "date": "2026-10-16",
+  "platform": "Apple Silicon, macOS 27.0.1",
+  "tests": {
+    "presentation": 461,
+    "editor_adapter": 346,
+    "application": 208,
+    "infrastructure": 161,
+    "domain": 14,
+    "app": 3
+  },
+  "presentation_validation": "Fresh serial helper processes; expected method count and passing terminal summary verified for every process.",
+  "presentation_groups": [
+    {
+      "group": "DuckpadPresentationTests.AppKitHostedTests",
+      "expected": 92,
+      "completed": 92,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.AuxiliaryCloseKeyRouterTests",
+      "expected": 5,
+      "completed": 5,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.BinaryStatusLanguageRefreshTests",
+      "expected": 1,
+      "completed": 1,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.ChromeLanguageRefreshTests",
+      "expected": 1,
+      "completed": 1,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.ClipboardPanelTests",
+      "expected": 2,
+      "completed": 2,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.DocumentStatusBarTests",
+      "expected": 1,
+      "completed": 1,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.DuckpadAppInfoTests",
+      "expected": 12,
+      "completed": 12,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.EditorGroupCommandTests",
+      "expected": 30,
+      "completed": 30,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.EditorGroupWorkspaceViewTests",
+      "expected": 18,
+      "completed": 18,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.EditorWindowTests",
+      "expected": 1,
+      "completed": 1,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.ExtensionCatalogViewTests",
+      "expected": 3,
+      "completed": 3,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.ExtensionListServiceTests",
+      "expected": 9,
+      "completed": 9,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.FileLifecycleTests",
+      "expected": 34,
+      "completed": 34,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.FindClipboardRoutingTests",
+      "expected": 1,
+      "completed": 1,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.FoldingPresentationTests",
+      "expected": 4,
+      "completed": 4,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.ListCellAlignmentTests",
+      "expected": 3,
+      "completed": 3,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.LocalizationTests",
+      "expected": 9,
+      "completed": 9,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.MarkdownClipboardTests",
+      "expected": 3,
+      "completed": 3,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.MarkdownImageDropTests",
+      "expected": 3,
+      "completed": 3,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.MarkdownPreviewTests",
+      "expected": 9,
+      "completed": 9,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.MarkdownResourceSafetyTests",
+      "expected": 2,
+      "completed": 2,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.NativeDocumentReadTests",
+      "expected": 1,
+      "completed": 1,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.NativePluginActivationTests",
+      "expected": 3,
+      "completed": 3,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.PackagedResourcesTests",
+      "expected": 3,
+      "completed": 3,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.PanelLanguageRefreshTests",
+      "expected": 7,
+      "completed": 7,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.PluginPanelSizeStoreTests",
+      "expected": 1,
+      "completed": 1,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.SearchPanelViewTests",
+      "expected": 8,
+      "completed": 8,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.SettingsCloseRoutingTests",
+      "expected": 1,
+      "completed": 1,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.SettingsLanguageRefreshTests",
+      "expected": 3,
+      "completed": 3,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.WindowCommandBarViewTests",
+      "expected": 12,
+      "completed": 12,
+      "passed": true,
+      "exit": 0
+    },
+    {
+      "group": "DuckpadPresentationTests.WindowFramePersistenceTests",
+      "expected": 6,
+      "completed": 6,
+      "passed": true,
+      "exit": 0
+    }
+  ],
+  "presentation_top_level_methods": {
+    "expected": 173,
+    "completed": 173,
+    "passed": true
+  },
+  "performance": {
+    "runs": [
+      {
+        "label": "duckpad-0.11.0-performance",
+        "report": {
+          "platform": "macOS-27.0.1-arm64-arm-64bit",
+          "machine": "arm64",
+          "budget_ms": 50,
+          "quick": false,
+          "style_state": "settled",
+          "results": [
+            {
+              "fixture": "json",
+              "lexer": "json",
+              "bytes": 9184681,
+              "sha256": "aa66aab7f6990e5d75e3f0453d657b2f317950430a4edf8fa6b8bf351ade3487",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 29.277625,
+              "style_main_stall_ms": 0.633959,
+              "passed": true,
+              "log": "json-end.log"
+            },
+            {
+              "fixture": "javascript",
+              "lexer": "cpp",
+              "bytes": 9184680,
+              "sha256": "75d8854221166717eb64740b97efcfa5136907d7a79412b53ef693bdd8a6b92d",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 33.386833,
+              "style_main_stall_ms": 33.386833,
+              "passed": true,
+              "log": "javascript-end.log"
+            },
+            {
+              "fixture": "css",
+              "lexer": "css",
+              "bytes": 9184656,
+              "sha256": "13f6da3c4c0a885540b26b39850df3bcaa7fa67d4510ba685986b07bc0ea6fa9",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 35.724708,
+              "style_main_stall_ms": 35.724708,
+              "passed": true,
+              "log": "css-end.log"
+            },
+            {
+              "fixture": "xml",
+              "lexer": "xml",
+              "bytes": 9184661,
+              "sha256": "2b947deb39599d74a04de4161a46564d148b8102786396fa91367531c15710a9",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 32.359625,
+              "style_main_stall_ms": 32.359625,
+              "passed": true,
+              "log": "xml-end.log"
+            },
+            {
+              "fixture": "plain",
+              "lexer": "null",
+              "bytes": 9184656,
+              "sha256": "607ead11516a5791ba756328075ff6932cd6dd733794833f59f777c1750ece21",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 24.313167,
+              "style_main_stall_ms": 0.629333,
+              "passed": true,
+              "log": "plain-end.log"
+            },
+            {
+              "fixture": "korean",
+              "lexer": "null",
+              "bytes": 9184680,
+              "sha256": "1768f95403292ab450ff036607c0155602b40b0f484acd5e043b22c83f150605",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 24.386458,
+              "style_main_stall_ms": 12.321042,
+              "passed": true,
+              "log": "korean-end.log"
+            },
+            {
+              "fixture": "tabs",
+              "lexer": "null",
+              "bytes": 9184676,
+              "sha256": "acd0486153b9b0a207c24f5481e7cd4f588ab96a06af0034ea213637e2cc03bc",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 27.211209,
+              "style_main_stall_ms": 0.561208,
+              "passed": true,
+              "log": "tabs-end.log"
+            },
+            {
+              "fixture": "emoji",
+              "lexer": "null",
+              "bytes": 9184675,
+              "sha256": "4fce2696a190c2f9524b1502ec11c978d56b74b2f835919714b5a3da59ae2349",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 147.105375,
+              "style_main_stall_ms": 11.669833,
+              "passed": false,
+              "log": "emoji-end.log"
+            },
+            {
+              "fixture": "combining",
+              "lexer": "null",
+              "bytes": 9184692,
+              "sha256": "16a50709d062fa976de520ff8c23e5841b91c6fdc2fa1043172571be5431bef8",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 63.849417,
+              "style_main_stall_ms": 20.169083,
+              "passed": false,
+              "log": "combining-end.log"
+            },
+            {
+              "fixture": "log",
+              "lexer": "null",
+              "bytes": 9184680,
+              "sha256": "6853ac2a9b9af8f02fab7bb8d522b146bbb540ed24de883663b2b29507f8f458",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 42.537666,
+              "style_main_stall_ms": 0.72725,
+              "passed": true,
+              "log": "log-end.log"
+            },
+            {
+              "fixture": "multiline-javascript",
+              "lexer": "cpp",
+              "bytes": 9184682,
+              "sha256": "7d6f759682061f1d66a2f61308389991b19b06622859037c7d921ff439c9fe5a",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 37.8135,
+              "style_main_stall_ms": 12.01025,
+              "passed": true,
+              "log": "multiline-javascript-end.log"
+            },
+            {
+              "fixture": "multiline-css",
+              "lexer": "css",
+              "bytes": 9184680,
+              "sha256": "cf9ac08f1d8c54686a0f95c06849c0c59404df978049c6939be982a4e78ae6fe",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 43.186666,
+              "style_main_stall_ms": 16.959334,
+              "passed": true,
+              "log": "multiline-css-end.log"
+            },
+            {
+              "fixture": "multiline-xml",
+              "lexer": "xml",
+              "bytes": 9184628,
+              "sha256": "5d81f41857e06a04a09af3b87ca855a007d4168dcc4552a96abec335f0309967",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 27.601167,
+              "style_main_stall_ms": 11.036708,
+              "passed": true,
+              "log": "multiline-xml-end.log"
+            },
+            {
+              "fixture": "provided-json",
+              "lexer": "json",
+              "bytes": 9184752,
+              "sha256": "fcef12340548b4bea254ad9de950b9a594d8f42d23aa1ddcad6ee8f9488aaa60",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 67.150875,
+              "style_main_stall_ms": 0.614209,
+              "passed": false,
+              "log": "provided-json-end.log"
+            }
+          ]
+        }
+      },
+      {
+        "label": "duckpad-0.10.4-comparison",
+        "report": {
+          "platform": "macOS-27.0.1-arm64-arm-64bit",
+          "machine": "arm64",
+          "budget_ms": 50,
+          "quick": false,
+          "style_state": "settled",
+          "results": [
+            {
+              "fixture": "emoji",
+              "lexer": "null",
+              "bytes": 9184675,
+              "sha256": "4fce2696a190c2f9524b1502ec11c978d56b74b2f835919714b5a3da59ae2349",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 35.644833,
+              "style_main_stall_ms": 11.771292,
+              "passed": true,
+              "log": "emoji-end.log"
+            },
+            {
+              "fixture": "provided-json",
+              "lexer": "json",
+              "bytes": 9184752,
+              "sha256": "fcef12340548b4bea254ad9de950b9a594d8f42d23aa1ddcad6ee8f9488aaa60",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 31.452042,
+              "style_main_stall_ms": 0.680375,
+              "passed": true,
+              "log": "provided-json-end.log"
+            }
+          ]
+        }
+      },
+      {
+        "label": "duckpad-0.11.0-comparison",
+        "report": {
+          "platform": "macOS-27.0.1-arm64-arm-64bit",
+          "machine": "arm64",
+          "budget_ms": 50,
+          "quick": false,
+          "style_state": "settled",
+          "results": [
+            {
+              "fixture": "emoji",
+              "lexer": "null",
+              "bytes": 9184675,
+              "sha256": "4fce2696a190c2f9524b1502ec11c978d56b74b2f835919714b5a3da59ae2349",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 40.603292,
+              "style_main_stall_ms": 10.450666,
+              "passed": true,
+              "log": "emoji-end.log"
+            },
+            {
+              "fixture": "provided-json",
+              "lexer": "json",
+              "bytes": 9184752,
+              "sha256": "fcef12340548b4bea254ad9de950b9a594d8f42d23aa1ddcad6ee8f9488aaa60",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 31.710458,
+              "style_main_stall_ms": 0.5085,
+              "passed": true,
+              "log": "provided-json-end.log"
+            }
+          ]
+        }
+      },
+      {
+        "label": "duckpad-0.10.4-combining",
+        "report": {
+          "platform": "macOS-27.0.1-arm64-arm-64bit",
+          "machine": "arm64",
+          "budget_ms": 50,
+          "quick": false,
+          "style_state": "settled",
+          "results": [
+            {
+              "fixture": "combining",
+              "lexer": "null",
+              "bytes": 9184692,
+              "sha256": "16a50709d062fa976de520ff8c23e5841b91c6fdc2fa1043172571be5431bef8",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 27.812667,
+              "style_main_stall_ms": 13.1945,
+              "passed": true,
+              "log": "combining-end.log"
+            }
+          ]
+        }
+      },
+      {
+        "label": "duckpad-0.11.0-combining",
+        "report": {
+          "platform": "macOS-27.0.1-arm64-arm-64bit",
+          "machine": "arm64",
+          "budget_ms": 50,
+          "quick": false,
+          "style_state": "settled",
+          "results": [
+            {
+              "fixture": "combining",
+              "lexer": "null",
+              "bytes": 9184692,
+              "sha256": "16a50709d062fa976de520ff8c23e5841b91c6fdc2fa1043172571be5431bef8",
+              "first_position": "end",
+              "events": 768,
+              "max_ms": 23.855625,
+              "style_main_stall_ms": 19.371666,
+              "passed": true,
+              "log": "combining-end.log"
+            }
+          ]
+        }
+      }
+    ],
+    "baseline_commit": "baa75de9676efc55b4ffea1f71a4bf98edca90bb",
+    "accepted_fixture_count": 14,
+    "accepted_events": 10752,
+    "accepted_max_ms": 43.186666,
+    "accepted_first_input_max_ms": 27.05825,
+    "interpretation": "Initial emoji, combining-character and provided-JSON stress runs exceeded 50 ms. All three passed unchanged-candidate rechecks after clean 0.10.4 baseline comparisons. The spikes did not reproduce; their cause is not established. All results are retained; measurements are not a hard real-time guarantee.",
+    "accepted_first_input_handler_max_ms": 22.16725,
+    "first_input_measurement": "Input handling plus selected-range, substring, character-rectangle, status and draw/layer-flush phases; excludes file loading."
+  }
+}

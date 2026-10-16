@@ -780,3 +780,25 @@
 
 "Change color" = "色を変更";
 "Apply" = "適用";
+
+/* Built-in declaration navigation */
+"Go to Declaration" = "宣言へ移動";
+"Navigate Back" = "前の位置に戻る";
+"Navigate Forward" = "次の位置に進む";
+"Search declaration candidates" = "宣言候補を検索";
+"Declaration candidates" = "宣言候補";
+"Choose a declaration candidate" = "宣言候補を選択してください";
+"Some files could not be searched. Showing available candidates." = "一部のファイルを検索できませんでした。見つかった候補を表示します。";
+"Declaration navigation is unavailable for this document." = "この文書では宣言を検索できません。";
+"No declaration found." = "宣言が見つかりませんでした。";
+"Some files could not be searched. No declaration found." = "一部のファイルを検索できず、宣言が見つかりませんでした。";
+"The document changed. Try navigation again." = "文書が変更されました。もう一度検索してください。";
+
+/* Built-in reference candidates */
+"Find Reference Candidates" = "参照候補を検索";
+"Search reference candidates" = "参照候補を絞り込む";
+"Reference candidates" = "参照候補";
+"Name matches only. Choose a reference candidate." = "名前が一致する候補です。移動先を選択してください。";
+"Name matches only. Some files could not be searched." = "名前が一致する候補です。一部のファイルを検索できませんでした。";
+"No reference candidates found." = "参照候補が見つかりません。";
+"Some files could not be searched. No reference candidates found." = "一部のファイルを検索できませんでした。参照候補はありません。";
