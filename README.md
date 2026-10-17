@@ -8,7 +8,7 @@ Duckpad is a text and code editor for macOS, inspired by [Notepad++](https://git
 
 It brings familiar text editing to the Mac with native menus, multiple document tabs, split editor groups, syntax highlighting, search and replace, and document comparison.
 
-![Duckpad showing multiple document tabs and duck ASCII art](docs/assets/duckpad-screenshot.png)
+![Duckpad showing multiline document tabs, Rust code, and integrated terminal sessions](docs/assets/duckpad-screenshot.png)
 
 [Website](https://namjeongwan.github.io/duckpad/) · [한국어](https://namjeongwan.github.io/duckpad/ko/)
 
