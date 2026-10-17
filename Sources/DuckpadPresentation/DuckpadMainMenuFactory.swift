@@ -169,6 +169,7 @@ public enum DuckpadMainMenuFactory {
             to: viewMenu
         )
         add("Workspace", #selector(DuckpadWindowController.performToggleWorkspaceSidebar(_:)), "b", target, to: viewMenu)
+        add("Terminal", #selector(DuckpadWindowController.performToggleTerminal(_:)), "`", target, modifiers: [.control], to: viewMenu)
         viewMenu.addItem(.separator())
         add(
             "Function List…",

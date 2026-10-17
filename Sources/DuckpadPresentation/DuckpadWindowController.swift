@@ -47,6 +47,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     let symbolOutlinePanel = SymbolOutlinePanel()
     private let workspaceSidebar = WorkspaceSidebarView(frame: .zero)
     private let workspaceContentSplit = WorkspaceSplitView(frame: .zero)
+    let terminalWorkspaceSplit = TerminalWorkspaceSplitView(frame: .zero)
+    public var terminalSurfaceFactory: ((ShellLaunchConfiguration) -> TerminalSurfaceView?)?
+    let terminalSessions = TerminalSessionStore()
+    private(set) var terminalPanel: TerminalPanelView?
+    var isTerminalVisible: Bool { terminalPanel?.superview === terminalWorkspaceSplit }
     private var workspaceSidebarWidth: CGFloat = 220
     private var highlightedSearch: (buffer: EditorBufferDescriptor, query: SearchQuery)?
     private var searchHighlightBuffer: EditorBufferDescriptor?
@@ -80,6 +85,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let framePersistence: WindowFramePersistence?
     private var hasPreparedWindowFrame = false
     public var onExtensionCommandsChanged: (() -> Void)?
+    public var onNewTerminalWindowRequested: (() -> Void)?
     public var onNewWindowRequested: (() -> Void)?
     public var onSettingsRequested: (() -> Void)?
     public var onThemeRequested: ((AppAppearanceMode) -> Void)?
@@ -413,6 +419,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard !hasTornDownWindow else { return }
         hasTornDownWindow = true
         declarationNavigation.cancel()
+        terminalPanel?.shutdown()
+        terminalPanel?.onNewSession = nil
+        terminalPanel?.onHide = nil
+        if let terminalPanel { terminalWorkspaceSplit.hide(terminalPanel) }
+        terminalPanel = nil
+        terminalSessions.removeAll()
         (activeEditor as? any DeclarationNavigationEditorPort)?.onDeclarationRequested = nil
         (activeEditor as? any DeclarationNavigationEditorPort)?.onDeclarationHoverRequested = nil
         markdownImageDropTask?.cancel()
@@ -1000,6 +1012,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performCloseActiveTab(_ sender: Any? = nil) {
         if AuxiliaryCloseKeyRouter.dismissModal(attachedTo: window) { return }
+        if let terminalPanel, PluginPanelFocus.ownsKeyboardFocus(terminalPanel, in: terminalWorkspaceSplit) {
+            terminalPanel.handle(.closeSurface)
+            return
+        }
         if extensionServiceHost?.closeFocusedPanel(in: workspaceContentSplit) == true { return }
         if isMarkdownPreviewVisible {
             performCloseMarkdownPreview()
@@ -1010,10 +1026,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     func closeAuxiliaryPanel() -> Bool {
+        if let terminalPanel, PluginPanelFocus.ownsKeyboardFocus(terminalPanel, in: terminalWorkspaceSplit) {
+            hideTerminal()
+            return true
+        }
         if extensionServiceHost?.closePresentedPanel(in: workspaceContentSplit) == true { return true }
-        guard isMarkdownPreviewVisible else { return false }
-        performCloseMarkdownPreview()
-        return true
+        if isMarkdownPreviewVisible { performCloseMarkdownPreview(); return true }
+        if isTerminalVisible { hideTerminal(); return true }
+        return false
     }
 
     @objc public func performCloseAllTabs(_ sender: Any? = nil) { performActiveCloseScope(.all) }
@@ -1198,6 +1218,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         fileUseCase?.conventionsUseCase?.settingsDidChange(settings)
         formattingUseCase?.settings = settings.formatting
         searchPanel.applyPreferences(settings)
+        terminalPanel?.applyPreferences(settings)
         commandBar.setBarVisible(settings.menuBarVisible)
         statusBar.isHidden = !settings.statusBarVisible
         statusBarHeightConstraint?.constant = settings.statusBarVisible ? 24 : 0
@@ -1230,6 +1251,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         updateAccessory?.refreshLocalization(catalog: catalog)
         markdownPreviewPanel?.refreshLocalization(catalog: catalog)
         workspaceSidebar.refreshLocalization(catalog: catalog)
+        terminalPanel?.refreshLocalization(catalog: catalog)
         commandBar.setWorkspaceVisible(workspaceSidebar.superview != nil, catalog: catalog)
         searchPanel.refreshLocalization(catalog: catalog)
         liveFileBanner.refreshLocalization(catalog: catalog)
@@ -1485,6 +1507,60 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performRemoveWorkspaceFolder(_ sender: Any? = nil) {
         guard let rootID = workspaceSidebar.selectedRootID else { return }
         routeRemoveWorkspaceRoot(rootID)
+    }
+
+    @objc public func performToggleTerminal(_ sender: Any? = nil) {
+        guard !hasTornDownWindow, !terminationReviewInProgress, window?.attachedSheet == nil else { return }
+        if isTerminalVisible { hideTerminal(); return }
+        if terminalPanel == nil {
+            let panel = TerminalPanelView(sessions: terminalSessions, surfaceFactory: terminalSurfaceFactory)
+            panel.onNewSession = { [weak self] in self?.createTerminalSession() }
+            panel.onHide = { [weak self] in self?.hideTerminal() }
+            panel.onWindowAction = { [weak self] action in
+                guard let self else { return }
+                switch action {
+                case .newWindow: self.onNewTerminalWindowRequested?()
+                case .closeWindow: self.window?.performClose(nil)
+                case .closeAllWindows:
+                    for window in NSApp.windows where window is EditorWindow { window.performClose(nil) }
+                default: break
+                }
+            }
+            terminalPanel = panel
+            panel.applyPreferences(appPreferences)
+            createTerminalSession()
+        }
+        guard let terminalPanel else { return }
+        window?.contentView?.layoutSubtreeIfNeeded()
+        terminalWorkspaceSplit.show(terminalPanel)
+        statusBar.setTerminalVisible(true)
+        terminalPanel.focus()
+    }
+
+    private func createTerminalSession() {
+        guard !hasTornDownWindow, !terminationReviewInProgress, window?.attachedSheet == nil else { return }
+        let directory: URL
+        if let current = terminalPanel?.currentWorkingDirectory {
+            directory = current
+        } else if let path = workspace.activeFileContext()?.binding?.canonicalPath {
+            directory = URL(fileURLWithPath: path).deletingLastPathComponent()
+        } else if let root = workspaceBrowserUseCase?.roots.first {
+            directory = URL(fileURLWithPath: root.canonicalPath, isDirectory: true)
+        } else {
+            directory = getpwuid(getuid()).map { URL(fileURLWithPath: String(cString: $0.pointee.pw_dir), isDirectory: true) }
+                ?? FileManager.default.homeDirectoryForCurrentUser
+        }
+        terminalSessions.create(configuration: .init(workingDirectory: directory))
+        terminalPanel?.reload()
+        terminalPanel?.focus()
+    }
+
+    private func hideTerminal() {
+        guard let terminalPanel, isTerminalVisible else { return }
+        let restoreFocus = PluginPanelFocus.ownsKeyboardFocus(terminalPanel, in: terminalWorkspaceSplit)
+        terminalWorkspaceSplit.hide(terminalPanel)
+        statusBar.setTerminalVisible(false)
+        if restoreFocus { activeEditor.focus() }
     }
 
     @objc public func performToggleWorkspaceSidebar(_ sender: Any? = nil) {
@@ -1985,6 +2061,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return (actionableEditorCommands as? any EditorCopyExportPort)?.canCopyAsImage ?? false
         }
         if let command = editorCommand(for: menuItem.action) {
+            if let surface = window?.firstResponder as? TerminalSurfaceView { return surface.canPerform(command) }
             if let focusedTextEditing { return focusedTextEditing.canPerform(command) }
             return actionableEditorCommands?.canPerform(command) ?? false
         }
@@ -2065,6 +2142,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 && workspaceBrowserUseCase.roots.count < WorkspaceRoot.maximumRootCount
         case #selector(performRemoveWorkspaceFolder(_:)):
             return workspaceBrowserCommandsAreActionable && workspaceSidebar.selectedRootID != nil
+        case #selector(performToggleTerminal(_:)):
+            menuItem.state = isTerminalVisible ? .on : .off
+            return !hasTornDownWindow && !terminationReviewInProgress && window?.attachedSheet == nil
         case #selector(performToggleWorkspaceSidebar(_:)):
             menuItem.state = workspaceSidebar.superview == nil ? .off : .on
             return !terminationReviewInProgress
@@ -2213,7 +2293,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private var editorCommandsAreActionable: Bool {
-        guard focusedTextEditing == nil, window?.attachedSheet == nil,
+        guard focusedTextEditing == nil, !(window?.firstResponder is TerminalSurfaceView), window?.attachedSheet == nil,
               editingCommandWindow() == nil || editingCommandWindow() === window else { return false }
         let snapshot = workspace.snapshot()
         return snapshot.startup == .ready
@@ -2254,6 +2334,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func performEditorCommand(_ command: EditorCommand) {
+        if let surface = window?.firstResponder as? TerminalSurfaceView { surface.perform(command); return }
         if let focusedTextEditing {
             focusedTextEditing.perform(command)
             return
@@ -2838,6 +2919,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     func beginTerminationReviewAdmission() -> Bool {
         guard !terminationReviewInProgress else { return false }
+        guard terminalPanel?.confirmWindowClose() != false else { return false }
         terminationReviewInProgress = true
         fileUseCase?.suspendLiveReload()
         documentIntelligenceTask?.cancel()
@@ -3141,7 +3223,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceContentSplit.addArrangedSubview(editorGroupWorkspace)
         workspaceSidebar.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
         workspaceSidebar.widthAnchor.constraint(lessThanOrEqualToConstant: 380).isActive = true
-        root.view.addSubview(workspaceContentSplit)
+        terminalWorkspaceSplit.addArrangedSubview(workspaceContentSplit)
+        root.view.addSubview(terminalWorkspaceSplit)
         root.view.addSubview(statusBar)
         statusBar.setAccessibilityIdentifier("duckpad.status.bar")
         configureStatusButton(
@@ -3169,6 +3252,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             accessibilityIdentifier: "duckpad.file-format.status"
         )
         statusBar.install(language: languageStatus, encoding: fileFormatStatus)
+        statusBar.terminalButton.target = self
+        statusBar.terminalButton.action = #selector(performToggleTerminal(_:))
         statusBar.positionButton.target = self
         statusBar.positionButton.action = #selector(performGoToLine(_:))
         statusBar.lineEndingButton.target = self
@@ -3183,13 +3268,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             commandBar.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             commandBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             commandBar.topAnchor.constraint(equalTo: persistenceBanner.bottomAnchor),
-            workspaceContentSplit.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
-            workspaceContentSplit.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            terminalWorkspaceSplit.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            terminalWorkspaceSplit.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             liveFileBanner.topAnchor.constraint(equalTo: commandBar.bottomAnchor),
             liveFileBanner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             liveFileBanner.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            workspaceContentSplit.topAnchor.constraint(equalTo: liveFileBanner.bottomAnchor),
-            workspaceContentSplit.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            terminalWorkspaceSplit.topAnchor.constraint(equalTo: liveFileBanner.bottomAnchor),
+            terminalWorkspaceSplit.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             statusBar.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             statusBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             statusBar.bottomAnchor.constraint(equalTo: root.view.bottomAnchor),

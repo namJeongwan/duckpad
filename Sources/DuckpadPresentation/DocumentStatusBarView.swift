@@ -2,9 +2,10 @@ import DuckpadLocalization
 import AppKit
 import DuckpadApplication
 
-/// The familiar Notepad status order, kept outside the editor's scrolling area.
+/// Panel controls on the left, compact document information on the right.
 @MainActor
 final class DocumentStatusBarView: NSView {
+    let terminalButton = StatusBarButton(title: "", target: nil, action: nil)
     let lengthLabel = NSTextField(labelWithString: L10n.text("Length: 0   Lines: 1"))
     let positionButton = StatusBarButton(title: L10n.text("Ln: 1   Col: 1   Sel: 0 | 0"), target: nil, action: nil)
     let lineEndingButton = StatusBarButton(title: "Unix (LF)", target: nil, action: nil)
@@ -13,6 +14,8 @@ final class DocumentStatusBarView: NSView {
     private var statistics: EditorStatusSnapshot?
     private var binarySummary: String?
     private var loadingProgress: FileLoadingProgress?
+    private var terminalVisible = false
+    private var catalog = L10n.catalog
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -21,6 +24,12 @@ final class DocumentStatusBarView: NSView {
         setAccessibilityIdentifier("duckpad.status.bar")
         setAccessibilityRole(.group)
         setAccessibilityLabel(L10n.text("Document status"))
+        terminalButton.isBordered = false
+        terminalButton.imagePosition = .imageOnly
+        terminalButton.imageScaling = .scaleProportionallyDown
+        terminalButton.setAccessibilityIdentifier("duckpad.status.terminal")
+        addSubview(terminalButton)
+        setTerminalVisible(false)
         lengthLabel.lineBreakMode = .byTruncatingTail
         lengthLabel.setAccessibilityIdentifier("duckpad.status.length")
         positionButton.setAccessibilityIdentifier("duckpad.status.position")
@@ -31,6 +40,8 @@ final class DocumentStatusBarView: NSView {
     required init?(coder: NSCoder) { nil }
 
     func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
+        setTerminalVisible(terminalVisible)
         setAccessibilityLabel(catalog.text("Document status"))
         positionButton.toolTip = catalog.text("Go to line and column")
         modeButton.toolTip = catalog.text("Toggle insert / overwrite mode")
@@ -42,6 +53,16 @@ final class DocumentStatusBarView: NSView {
             positionButton.title = catalog.text("Ln: 1   Col: 1   Sel: 0 | 0")
         }
         needsLayout = true
+    }
+
+    func setTerminalVisible(_ visible: Bool) {
+        terminalVisible = visible
+        let label = catalog.text(visible ? "Hide Terminal" : "Show Terminal")
+        terminalButton.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: label)
+        terminalButton.setAccessibilityLabel(label)
+        terminalButton.toolTip = label + " (⌃`)"
+        terminalButton.state = visible ? .on : .off
+        terminalButton.contentTintColor = visible ? .controlAccentColor : .secondaryLabelColor
     }
 
     func install(language: NSButton, encoding: NSButton) {
@@ -95,10 +116,17 @@ final class DocumentStatusBarView: NSView {
 
     override func layout() {
         super.layout()
-        let fractions: [CGFloat] = [0.31, 0.19, 0.23, 0.13, 0.10, 0.04]
-        var x: CGFloat = 0
-        for (field, fraction) in zip(fields, fractions) {
-            let width = bounds.width * fraction
+        terminalButton.frame = NSRect(x: 4, y: (bounds.height - 20) / 2,
+                                      width: min(28, max(0, bounds.width - 8)), height: 20)
+        // Bounded widths avoid turning the language picker into a huge target
+        // on wide windows. Keep the mode readable while compressing narrow bars.
+        let preferredWidths: [CGFloat] = [110, 210, 250, 130, 115]
+        let available = max(0, bounds.width - 40)
+        let modeWidth = min(40, available)
+        let scale = min(1, max(0, available - modeWidth) / preferredWidths.reduce(0, +))
+        let widths = preferredWidths.map { $0 * scale } + [modeWidth]
+        var x = bounds.width - 4 - widths.reduce(0, +)
+        for (field, width) in zip(fields, widths) {
             field.frame = NSRect(x: x + 5, y: (bounds.height - 18) / 2, width: max(0, width - 10), height: 18)
             x += width
         }

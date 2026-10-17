@@ -8,6 +8,12 @@ fi
 APP="$1"
 XPC="$APP/Contents/XPCServices/DuckpadPluginRuntime.xpc"
 INSTALLER="$APP/Contents/XPCServices/DuckpadNativeInstaller.xpc"
+TERMINAL="$APP/Contents/XPCServices/DuckpadTerminalHost.xpc"
+test -x "$TERMINAL/Contents/MacOS/DuckpadTerminalHost"
+[[ "$(plutil -extract CFBundleIdentifier raw "$TERMINAL/Contents/Info.plist")" == "com.namjeongwan.duckpad.terminal-host" ]]
+for KEY in CFBundleShortVersionString CFBundleVersion; do
+    [[ "$(plutil -extract "$KEY" raw "$APP/Contents/Info.plist")" == "$(plutil -extract "$KEY" raw "$TERMINAL/Contents/Info.plist")" ]]
+done
 test -x "$INSTALLER/Contents/MacOS/DuckpadNativeInstaller"
 [[ "$(plutil -extract CFBundleIdentifier raw "$INSTALLER/Contents/Info.plist")" == "com.namjeongwan.duckpad.native-installer" ]]
 
@@ -15,9 +21,12 @@ test -x "$APP/Contents/MacOS/Duckpad"
 test -x "$XPC/Contents/MacOS/DuckpadPluginRuntime"
 test ! -e "$APP/Contents/MacOS/DuckpadPluginHost"
 test -f "$APP/Contents/Resources/Duckpad.icns"
-for ENGINE in Scintilla Lexilla WAMR Sparkle; do
+for ENGINE in Scintilla Lexilla WAMR Sparkle Ghostty; do
     test -s "$APP/Contents/Resources/ThirdPartyLicenses/$ENGINE.txt"
 done
+# The statically linked gettext libintl notice must accompany the engine.
+LIBINTL_NOTICES=("$APP"/Contents/Resources/ThirdPartyLicenses/GhosttyDependencies/*/gettext-runtime/intl/COPYING.LIB)
+test -s "${LIBINTL_NOTICES[0]}"
 # SwiftPM may emit flat bundles or macOS bundles with Contents/Resources.
 resource_root() {
     local BUNDLE="$APP/Contents/Resources/Duckpad_$1.bundle"
@@ -54,9 +63,14 @@ for LOCALE in en ko ja zh-Hans pt-BR it fr de; do
     plutil -lint "$LOCALIZATION/Localizable.strings" "$LOCALIZATION/Localizable.stringsdict" >/dev/null
 done
 
+test -d "$APP/Contents/Resources/ghostty"
+test -d "$APP/Contents/Resources/terminfo"
+test -f "$(resource_root DuckpadTerminalAdapter)/terminal.conf"
+
 APP_ARCHES="$(lipo -archs "$APP/Contents/MacOS/Duckpad")"
 XPC_ARCHES="$(lipo -archs "$XPC/Contents/MacOS/DuckpadPluginRuntime")"
 [[ "$APP_ARCHES" == "$XPC_ARCHES" ]]
+[[ "$APP_ARCHES" == "$(lipo -archs "$TERMINAL/Contents/MacOS/DuckpadTerminalHost")" ]]
 [[ "$APP_ARCHES" == "arm64" || "$APP_ARCHES" == "x86_64" || "$APP_ARCHES" == "x86_64 arm64" || "$APP_ARCHES" == "arm64 x86_64" ]]
 
 [[ "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" == "com.namjeongwan.duckpad" ]]
@@ -89,6 +103,13 @@ APP_TEAM="$(sed -n 's/^TeamIdentifier=//p' "$TEMP_ROOT/app-signature.txt")"
 XPC_TEAM="$(sed -n 's/^TeamIdentifier=//p' "$TEMP_ROOT/xpc-signature.txt")"
 [[ "$APP_TEAM" == "$XPC_TEAM" ]]
 
+codesign -d --entitlements :- "$TERMINAL" > "$TEMP_ROOT/terminal-entitlements.txt" 2>/dev/null
+if grep -q "com.apple.security.app-sandbox" "$TEMP_ROOT/terminal-entitlements.txt"; then
+    echo "Terminal host must run outside App Sandbox" >&2; exit 1
+fi
+codesign -dv --verbose=4 "$TERMINAL" 2> "$TEMP_ROOT/terminal-signature.txt"
+grep -Eq "flags=.*runtime" "$TEMP_ROOT/terminal-signature.txt"
+[[ "$APP_TEAM" == "$(sed -n 's/^TeamIdentifier=//p' "$TEMP_ROOT/terminal-signature.txt")" ]]
 codesign -d --entitlements :- "$INSTALLER" > "$TEMP_ROOT/installer-entitlements.txt" 2>/dev/null
 if grep -q "com.apple.security.app-sandbox" "$TEMP_ROOT/installer-entitlements.txt"; then
     echo "Native installer must run outside App Sandbox" >&2; exit 1

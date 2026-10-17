@@ -23,6 +23,8 @@ struct DocumentStatusBarTests {
             let fields: [NSView] = [language, bar.lengthLabel, bar.positionButton, bar.lineEndingButton, encoding, bar.modeButton]
             #expect(fields.map(\.frame.minX) == fields.map(\.frame.minX).sorted())
             #expect(fields.allSatisfy { bar.bounds.contains($0.frame) })
+            #expect(language.frame.width <= 100)
+            #expect(language.frame.minX > bar.terminalButton.frame.maxX)
             #expect(bar.lengthLabel.stringValue == "Length: 27   Lines: 1")
             #expect(bar.positionButton.title == "Ln: 1   Col: 10   Sel: 0 | 0")
             #expect(bar.lineEndingButton.title == "Unix (LF)")
@@ -32,7 +34,7 @@ struct DocumentStatusBarTests {
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0,
                 clickCount: 0, pressure: 0
             ))
-            for button in [language, bar.positionButton, bar.lineEndingButton, encoding, bar.modeButton] {
+            for button in [bar.terminalButton, language, bar.positionButton, bar.lineEndingButton, encoding, bar.modeButton] {
                 button.mouseExited(with: event)
                 let resting = button.layer?.backgroundColor
                 button.mouseEntered(with: event)

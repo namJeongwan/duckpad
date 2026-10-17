@@ -842,3 +842,41 @@
 "Name matches only. Some files could not be searched." = "이름이 일치하는 후보입니다. 일부 파일을 검색하지 못했습니다.";
 "No reference candidates found." = "사용처 후보를 찾지 못했습니다.";
 "Some files could not be searched. No reference candidates found." = "일부 파일을 검색하지 못했습니다. 사용처 후보가 없습니다.";
+
+/* Terminal session foundation */
+"Terminal" = "터미널";
+"Terminal sessions" = "터미널 세션";
+"New Terminal Session" = "새 터미널 세션";
+"Close Terminal Session" = "터미널 세션 닫기";
+"Hide Terminal" = "터미널 숨기기";
+"Session %1$@" = "세션 %1$@";
+"No terminal sessions" = "터미널 세션 없음";
+"Shell not connected" = "셸 연결 안 됨";
+"Create a session to prepare its shell and working folder." = "세션을 만들어 셸과 작업 폴더를 준비하세요.";
+"This session is prepared. Command execution is not available yet." = "세션이 준비되었습니다. 명령 실행은 아직 지원하지 않습니다.";
+"Shell: %1$@" = "셸: %1$@";
+"Working folder: %1$@" = "작업 폴더: %1$@";
+"Working Folder" = "작업 폴더";
+"Show Terminal" = "터미널 표시";
+"Unable to start terminal." = "터미널을 시작할 수 없습니다.";
+"Close this terminal session?" = "이 터미널 세션을 닫을까요?";
+"Running commands in this session will be stopped." = "이 세션에서 실행 중인 명령이 종료됩니다.";
+"Close terminal sessions?" = "터미널 세션을 닫을까요?";
+"Running commands in these sessions will be stopped." = "이 세션들에서 실행 중인 명령이 종료됩니다.";
+"Terminal session ended. Press any key to close." = "터미널 세션이 종료되었습니다. 아무 키나 누르면 닫힙니다.";
+
+/* Terminal shortcuts */
+"Terminal Search" = "터미널 검색";
+"Paste into terminal?" = "터미널에 붙여넣겠습니까?";
+"This text may execute commands in the shell." = "이 텍스트를 붙여넣으면 셸에서 명령이 실행될 수 있습니다.";
+"Terminal Inspector" = "터미널 검사기";
+"Split Terminal Right" = "터미널 오른쪽 분할";
+"Split Terminal Down" = "터미널 아래로 분할";
+"Equalize Terminal Splits" = "터미널 분할 크기 맞춤";
+"Toggle Terminal Split Zoom" = "터미널 분할 확대 전환";
+
+"Clear Search" = "검색어 지우기";
+
+"Don’t ask again for terminal sessions" = "터미널 세션을 닫을 때 다시 묻지 않음";
+"Confirm Closing Terminal Sessions" = "터미널 세션 닫기 확인";
+"Press ⌘T to start a terminal session." = "⌘T를 눌러 터미널 세션을 시작하세요.";

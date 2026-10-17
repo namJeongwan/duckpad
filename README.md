@@ -51,6 +51,8 @@ swift run DuckpadApp
 
 ## Build
 
+The integrated terminal builds Ghostty from pinned source. Xcode's Metal toolchain is required (`xcodebuild -downloadComponent MetalToolchain`); the first build also downloads a verified Zig toolchain. Before running SwiftPM commands directly, run `scripts/build_ghostty.sh --architecture native` once. App packaging performs this step automatically.
+
 Create a universal `.app` for Apple Silicon and Intel Macs:
 
 ```sh
