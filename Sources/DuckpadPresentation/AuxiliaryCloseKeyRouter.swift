@@ -31,6 +31,12 @@ public final class AuxiliaryCloseKeyRouter {
             if event.isARepeat, event.keyCode == consumedCloseKey { return true }
             if !event.isARepeat { consumedCloseKey = nil }
         }
+        if let window = (event.window ?? NSApp.keyWindow) as? EditorWindow,
+           window.attachedSheet == nil, NSApp.modalWindow == nil, window.terminalFirstResponder != nil {
+            // Route Ghostty bindings before menu equivalents; leave unbound shell keys
+            // (notably Control-W) untouched instead of dismissing the docked panel.
+            return window.routeTerminalShortcut(event)
+        }
         let characters = event.charactersIgnoringModifiers?.lowercased()
         let koreanControlW = event.keyCode == 13 && (characters == "ㅈ" || characters == "\u{17}")
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])

@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$REPOSITORY_ROOT/build/Duckpad.app"
 IDENTITY="-"
-SHORT_VERSION="0.11.0"
-BUILD_VERSION="57"
+SHORT_VERSION="0.12.0"
+BUILD_VERSION="58"
 NOTARY_PROFILE=""
 ARCHITECTURE="universal"
 
@@ -48,24 +48,29 @@ if [[ -n "$NOTARY_PROFILE" && "$IDENTITY" == "-" ]]; then
     exit 64
 fi
 
+"$SCRIPT_DIR/build_ghostty.sh" --architecture "$ARCHITECTURE"
+
 STAGING_ROOT="$(mktemp -d "$OUTPUT_PARENT/.duckpad-package.XXXXXX")"
 trap 'rm -rf "$STAGING_ROOT"' EXIT
 APP="$STAGING_ROOT/Duckpad.app"
 XPC="$APP/Contents/XPCServices/DuckpadPluginRuntime.xpc"
 INSTALLER="$APP/Contents/XPCServices/DuckpadNativeInstaller.xpc"
+TERMINAL="$APP/Contents/XPCServices/DuckpadTerminalHost.xpc"
+mkdir -p "$TERMINAL/Contents/MacOS"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$XPC/Contents/MacOS" "$INSTALLER/Contents/MacOS"
 if [[ "$ARCHITECTURE" == "universal" ]]; then
     for BUILD_ARCH in arm64 x86_64; do
         swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --product DuckpadApp
         swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --product DuckpadPluginRuntime
+        swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --product DuckpadTerminalHost
         swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --product DuckpadNativeInstaller
         # SwiftPM's Xcode build system shares one products path between arches.
         # Preserve each completed build before the next architecture replaces it.
         ARCH_BIN_PATH="$(swift build --package-path "$REPOSITORY_ROOT" -c release --arch "$BUILD_ARCH" --show-bin-path)"
         ARCH_SNAPSHOT="$STAGING_ROOT/$BUILD_ARCH"
         mkdir -p "$ARCH_SNAPSHOT"
-        for PRODUCT in DuckpadApp DuckpadPluginRuntime DuckpadNativeInstaller; do
+        for PRODUCT in DuckpadApp DuckpadPluginRuntime DuckpadNativeInstaller DuckpadTerminalHost; do
             [[ "$(lipo -archs "$ARCH_BIN_PATH/$PRODUCT")" == "$BUILD_ARCH" ]]
             install -m 0755 "$ARCH_BIN_PATH/$PRODUCT" "$ARCH_SNAPSHOT/$PRODUCT"
         done
@@ -79,29 +84,40 @@ if [[ "$ARCHITECTURE" == "universal" ]]; then
     lipo -create "$ARM_BIN_PATH/DuckpadApp" "$INTEL_BIN_PATH/DuckpadApp" -output "$APP/Contents/MacOS/Duckpad"
     lipo -create "$ARM_BIN_PATH/DuckpadPluginRuntime" "$INTEL_BIN_PATH/DuckpadPluginRuntime" -output "$XPC/Contents/MacOS/DuckpadPluginRuntime"
     lipo -create "$ARM_BIN_PATH/DuckpadNativeInstaller" "$INTEL_BIN_PATH/DuckpadNativeInstaller" -output "$INSTALLER/Contents/MacOS/DuckpadNativeInstaller"
+    lipo -create "$ARM_BIN_PATH/DuckpadTerminalHost" "$INTEL_BIN_PATH/DuckpadTerminalHost" -output "$TERMINAL/Contents/MacOS/DuckpadTerminalHost"
+    chmod 0755 "$TERMINAL/Contents/MacOS/DuckpadTerminalHost"
     chmod 0755 "$INSTALLER/Contents/MacOS/DuckpadNativeInstaller"
     chmod 0755 "$APP/Contents/MacOS/Duckpad" "$XPC/Contents/MacOS/DuckpadPluginRuntime"
     BIN_PATH="$ARM_BIN_PATH"
 else
     swift build --package-path "$REPOSITORY_ROOT" -c release --product DuckpadApp
     swift build --package-path "$REPOSITORY_ROOT" -c release --product DuckpadPluginRuntime
+    swift build --package-path "$REPOSITORY_ROOT" -c release --product DuckpadTerminalHost
     swift build --package-path "$REPOSITORY_ROOT" -c release --product DuckpadNativeInstaller
     BIN_PATH="$(swift build --package-path "$REPOSITORY_ROOT" -c release --show-bin-path)"
     install -m 0755 "$BIN_PATH/DuckpadApp" "$APP/Contents/MacOS/Duckpad"
+    install -m 0755 "$BIN_PATH/DuckpadTerminalHost" "$TERMINAL/Contents/MacOS/DuckpadTerminalHost"
     install -m 0755 "$BIN_PATH/DuckpadNativeInstaller" "$INSTALLER/Contents/MacOS/DuckpadNativeInstaller"
     install -m 0755 "$BIN_PATH/DuckpadPluginRuntime" "$XPC/Contents/MacOS/DuckpadPluginRuntime"
 fi
+install -m 0644 "$REPOSITORY_ROOT/Packaging/TerminalHost-Info.plist" "$TERMINAL/Contents/Info.plist"
 install -m 0644 "$REPOSITORY_ROOT/Packaging/Info.plist" "$APP/Contents/Info.plist"
 install -m 0644 "$REPOSITORY_ROOT/Packaging/PluginRuntime-Info.plist" "$XPC/Contents/Info.plist"
 install -m 0644 "$REPOSITORY_ROOT/Packaging/NativeInstaller-Info.plist" "$INSTALLER/Contents/Info.plist"
 install -m 0644 "$REPOSITORY_ROOT/Sources/DuckpadApp/Resources/Duckpad.icns" "$APP/Contents/Resources/Duckpad.icns"
 
+ditto "$REPOSITORY_ROOT/.build/ghostty-source/zig-out/share/ghostty" "$APP/Contents/Resources/ghostty"
+ditto "$REPOSITORY_ROOT/.build/ghostty-source/zig-out/share/terminfo" "$APP/Contents/Resources/terminfo"
+
 # Binary distributions retain the notices required by the bundled engines.
 mkdir -p "$APP/Contents/Resources/ThirdPartyLicenses"
+install -m 0644 "$REPOSITORY_ROOT/Vendor/Ghostty/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/Ghostty.txt"
 install -m 0644 "$REPOSITORY_ROOT/Vendor/Scintilla/5.6.6/License.txt" "$APP/Contents/Resources/ThirdPartyLicenses/Scintilla.txt"
 install -m 0644 "$REPOSITORY_ROOT/Vendor/Lexilla/5.5.3/License.txt" "$APP/Contents/Resources/ThirdPartyLicenses/Lexilla.txt"
 install -m 0644 "$REPOSITORY_ROOT/Vendor/WAMR/2.4.5/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/WAMR.txt"
 install -m 0644 "$REPOSITORY_ROOT/.build/checkouts/Sparkle/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/Sparkle.txt"
+
+python3 "$REPOSITORY_ROOT/scripts/collect_ghostty_licenses.py" "$REPOSITORY_ROOT/.build/ghostty-source" "$APP/Contents/Resources/ThirdPartyLicenses/GhosttyDependencies"
 
 # SwiftPM links the binary framework; the standalone bundle must embed it,
 # including its symlinks and out-of-sandbox installer service.
@@ -112,7 +128,7 @@ ditto "$SPARKLE_SOURCE" "$SPARKLE"
 # Duckpad already has outgoing network access, so Sparkle's downloader XPC is unused.
 rm -rf "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
 
-for RESOURCE_BUNDLE in Duckpad_DuckpadApp.bundle Duckpad_DuckpadEditorAdapter.bundle Duckpad_DuckpadInfrastructure.bundle Duckpad_DuckpadPresentation.bundle Duckpad_DuckpadLocalization.bundle; do
+for RESOURCE_BUNDLE in Duckpad_DuckpadTerminalAdapter.bundle Duckpad_DuckpadApp.bundle Duckpad_DuckpadEditorAdapter.bundle Duckpad_DuckpadInfrastructure.bundle Duckpad_DuckpadPresentation.bundle Duckpad_DuckpadLocalization.bundle; do
     if [[ ! -d "$BIN_PATH/$RESOURCE_BUNDLE" ]]; then
         echo "Missing SwiftPM resource bundle: $RESOURCE_BUNDLE" >&2
         exit 66
@@ -126,7 +142,9 @@ done
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$XPC/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT_VERSION" "$INSTALLER/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$INSTALLER/Contents/Info.plist"
-plutil -lint "$APP/Contents/Info.plist" "$XPC/Contents/Info.plist" "$INSTALLER/Contents/Info.plist" >/dev/null
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT_VERSION" "$TERMINAL/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$TERMINAL/Contents/Info.plist"
+plutil -lint "$TERMINAL/Contents/Info.plist" "$APP/Contents/Info.plist" "$XPC/Contents/Info.plist" "$INSTALLER/Contents/Info.plist" >/dev/null
 
 SIGNING_FLAGS=(--force --sign "$IDENTITY" --options runtime)
 if [[ "$IDENTITY" != "-" ]]; then SIGNING_FLAGS+=(--timestamp); fi
@@ -136,6 +154,7 @@ codesign "${SIGNING_FLAGS[@]}" "$SPARKLE/Versions/B/Updater.app"
 codesign "${SIGNING_FLAGS[@]}" "$SPARKLE"
 codesign "${SIGNING_FLAGS[@]}" --entitlements "$REPOSITORY_ROOT/Packaging/PluginRuntime.entitlements" "$XPC"
 codesign "${SIGNING_FLAGS[@]}" "$INSTALLER"
+codesign "${SIGNING_FLAGS[@]}" "$TERMINAL"
 codesign "${SIGNING_FLAGS[@]}" --entitlements "$REPOSITORY_ROOT/Packaging/Duckpad.entitlements" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 

@@ -802,3 +802,41 @@
 "Name matches only. Some files could not be searched." = "Apenas nomes correspondentes. Não foi possível pesquisar alguns arquivos.";
 "No reference candidates found." = "Nenhuma referência candidata encontrada.";
 "Some files could not be searched. No reference candidates found." = "Não foi possível pesquisar alguns arquivos. Nenhuma referência candidata encontrada.";
+
+/* Terminal session foundation */
+"Terminal" = "Terminal";
+"Terminal sessions" = "Sessões do terminal";
+"New Terminal Session" = "Nova sessão do terminal";
+"Close Terminal Session" = "Fechar sessão do terminal";
+"Hide Terminal" = "Ocultar terminal";
+"Session %1$@" = "Sessão %1$@";
+"No terminal sessions" = "Nenhuma sessão do terminal";
+"Shell not connected" = "Shell não conectado";
+"Create a session to prepare its shell and working folder." = "Crie uma sessão para preparar o shell e a pasta de trabalho.";
+"This session is prepared. Command execution is not available yet." = "Esta sessão está preparada. A execução de comandos ainda não está disponível.";
+"Shell: %1$@" = "Shell: %1$@";
+"Working folder: %1$@" = "Pasta de trabalho: %1$@";
+"Working Folder" = "Pasta de trabalho";
+"Show Terminal" = "Mostrar terminal";
+"Unable to start terminal." = "Não foi possível iniciar o terminal.";
+"Close this terminal session?" = "Fechar esta sessão do terminal?";
+"Running commands in this session will be stopped." = "Os comandos em execução nesta sessão serão interrompidos.";
+"Close terminal sessions?" = "Fechar as sessões do terminal?";
+"Running commands in these sessions will be stopped." = "Os comandos em execução nestas sessões serão interrompidos.";
+"Terminal session ended. Press any key to close." = "Sessão do terminal encerrada. Pressione qualquer tecla para fechar.";
+
+/* Terminal shortcuts */
+"Terminal Search" = "Pesquisar no terminal";
+"Paste into terminal?" = "Colar no terminal?";
+"This text may execute commands in the shell." = "Este texto pode executar comandos no shell.";
+"Terminal Inspector" = "Inspetor do terminal";
+"Split Terminal Right" = "Dividir terminal à direita";
+"Split Terminal Down" = "Dividir terminal abaixo";
+"Equalize Terminal Splits" = "Igualar divisões do terminal";
+"Toggle Terminal Split Zoom" = "Alternar zoom da divisão do terminal";
+
+"Clear Search" = "Limpar pesquisa";
+
+"Don’t ask again for terminal sessions" = "Não perguntar novamente ao fechar sessões do terminal";
+"Confirm Closing Terminal Sessions" = "Confirmar fechamento de sessões do terminal";
+"Press ⌘T to start a terminal session." = "Pressione ⌘T para iniciar uma sessão do terminal.";

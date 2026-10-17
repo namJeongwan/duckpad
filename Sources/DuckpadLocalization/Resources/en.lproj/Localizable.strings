@@ -842,3 +842,41 @@
 "Name matches only. Some files could not be searched." = "Name matches only. Some files could not be searched.";
 "No reference candidates found." = "No reference candidates found.";
 "Some files could not be searched. No reference candidates found." = "Some files could not be searched. No reference candidates found.";
+
+/* Terminal session foundation */
+"Terminal" = "Terminal";
+"Terminal sessions" = "Terminal sessions";
+"New Terminal Session" = "New Terminal Session";
+"Close Terminal Session" = "Close Terminal Session";
+"Hide Terminal" = "Hide Terminal";
+"Session %1$@" = "Session %1$@";
+"No terminal sessions" = "No terminal sessions";
+"Shell not connected" = "Shell not connected";
+"Create a session to prepare its shell and working folder." = "Create a session to prepare its shell and working folder.";
+"This session is prepared. Command execution is not available yet." = "This session is prepared. Command execution is not available yet.";
+"Shell: %1$@" = "Shell: %1$@";
+"Working folder: %1$@" = "Working folder: %1$@";
+"Working Folder" = "Working Folder";
+"Show Terminal" = "Show Terminal";
+"Unable to start terminal." = "Unable to start terminal.";
+"Close this terminal session?" = "Close this terminal session?";
+"Running commands in this session will be stopped." = "Running commands in this session will be stopped.";
+"Close terminal sessions?" = "Close terminal sessions?";
+"Running commands in these sessions will be stopped." = "Running commands in these sessions will be stopped.";
+"Terminal session ended. Press any key to close." = "Terminal session ended. Press any key to close.";
+
+/* Terminal shortcuts */
+"Terminal Search" = "Terminal Search";
+"Paste into terminal?" = "Paste into terminal?";
+"This text may execute commands in the shell." = "This text may execute commands in the shell.";
+"Terminal Inspector" = "Terminal Inspector";
+"Split Terminal Right" = "Split Terminal Right";
+"Split Terminal Down" = "Split Terminal Down";
+"Equalize Terminal Splits" = "Equalize Terminal Splits";
+"Toggle Terminal Split Zoom" = "Toggle Terminal Split Zoom";
+
+"Clear Search" = "Clear Search";
+
+"Don’t ask again for terminal sessions" = "Don’t ask again for terminal sessions";
+"Confirm Closing Terminal Sessions" = "Confirm Closing Terminal Sessions";
+"Press ⌘T to start a terminal session." = "Press ⌘T to start a terminal session.";

@@ -68,3 +68,6 @@ Secrets.xcconfig
 *.mobileprovision
 
 /scripts/markdown-preview/node_modules/
+
+# Generated from pinned Ghostty source by scripts/build_ghostty.sh
+/Vendor/Ghostty/GhosttyKit.xcframework/

@@ -802,3 +802,41 @@
 "Name matches only. Some files could not be searched." = "名前が一致する候補です。一部のファイルを検索できませんでした。";
 "No reference candidates found." = "参照候補が見つかりません。";
 "Some files could not be searched. No reference candidates found." = "一部のファイルを検索できませんでした。参照候補はありません。";
+
+/* Terminal session foundation */
+"Terminal" = "ターミナル";
+"Terminal sessions" = "ターミナルセッション";
+"New Terminal Session" = "新しいターミナルセッション";
+"Close Terminal Session" = "ターミナルセッションを閉じる";
+"Hide Terminal" = "ターミナルを隠す";
+"Session %1$@" = "セッション %1$@";
+"No terminal sessions" = "ターミナルセッションがありません";
+"Shell not connected" = "シェル未接続";
+"Create a session to prepare its shell and working folder." = "セッションを作成して、シェルと作業フォルダを準備してください。";
+"This session is prepared. Command execution is not available yet." = "セッションの準備ができました。コマンドの実行にはまだ対応していません。";
+"Shell: %1$@" = "シェル: %1$@";
+"Working folder: %1$@" = "作業フォルダ: %1$@";
+"Working Folder" = "作業フォルダ";
+"Show Terminal" = "ターミナルを表示";
+"Unable to start terminal." = "ターミナルを開始できません。";
+"Close this terminal session?" = "このターミナルセッションを閉じますか？";
+"Running commands in this session will be stopped." = "このセッションで実行中のコマンドが停止します。";
+"Close terminal sessions?" = "ターミナルセッションを閉じますか？";
+"Running commands in these sessions will be stopped." = "これらのセッションで実行中のコマンドが停止します。";
+"Terminal session ended. Press any key to close." = "ターミナルセッションが終了しました。いずれかのキーを押すと閉じます。";
+
+/* Terminal shortcuts */
+"Terminal Search" = "ターミナル検索";
+"Paste into terminal?" = "ターミナルに貼り付けますか？";
+"This text may execute commands in the shell." = "このテキストはシェルでコマンドを実行する可能性があります。";
+"Terminal Inspector" = "ターミナルインスペクタ";
+"Split Terminal Right" = "ターミナルを右に分割";
+"Split Terminal Down" = "ターミナルを下に分割";
+"Equalize Terminal Splits" = "ターミナル分割を均等にする";
+"Toggle Terminal Split Zoom" = "ターミナル分割の拡大を切り替え";
+
+"Clear Search" = "検索をクリア";
+
+"Don’t ask again for terminal sessions" = "ターミナルセッションを閉じるときに再確認しない";
+"Confirm Closing Terminal Sessions" = "ターミナルセッションを閉じる前に確認";
+"Press ⌘T to start a terminal session." = "⌘Tを押してターミナルセッションを開始します。";

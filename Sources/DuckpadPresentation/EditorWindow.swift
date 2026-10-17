@@ -6,6 +6,44 @@ import AppKit
 final class EditorWindow: NSWindow {
     private var appliedFrameCursor = false
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if routeTerminalShortcut(event) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    func routeTerminalShortcut(_ event: NSEvent) -> Bool {
+        guard attachedSheet == nil, NSApp.modalWindow == nil else { return false }
+        if let controller = windowController as? DuckpadWindowController,
+           let panel = controller.terminalPanel,
+           PluginPanelFocus.ownsKeyboardFocus(panel, in: controller.terminalWorkspaceSplit),
+           panel.handleEmptySessionShortcut(event) { return true }
+        guard let terminal = terminalFirstResponder else { return false }
+        // Standard macOS app bindings are supplied by Ghostty's menus, not its core keymap.
+        let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if flags == .command, key == "h" { NSApp.hide(nil); return true }
+        if flags == [.command, .option], key == "h" { NSApp.hideOtherApplications(nil); return true }
+        if flags == .command, key == "m" { miniaturize(nil); return true }
+        return terminal.handleTerminalKeyEquivalent(event)
+    }
+
+    var terminalFirstResponder: TerminalSurfaceView? {
+        var view = firstResponder as? NSView
+        if let editor = firstResponder as? NSTextView, editor.isFieldEditor {
+            view = editor.delegate as? NSView
+        }
+        while let current = view {
+            if let terminal = current as? TerminalSurfaceView { return terminal }
+            view = current.superview
+        }
+        if let controller = windowController as? DuckpadWindowController,
+           let panel = controller.terminalPanel,
+           PluginPanelFocus.ownsKeyboardFocus(panel, in: controller.terminalWorkspaceSplit) {
+            return panel.selectedSurface
+        }
+        return nil
+    }
+
     override func sendEvent(_ event: NSEvent) {
         super.sendEvent(event)
         if event.type == .mouseMoved || event.type == .cursorUpdate {

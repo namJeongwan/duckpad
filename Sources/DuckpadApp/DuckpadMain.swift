@@ -3,6 +3,7 @@ import Darwin
 import DuckpadApplication
 import DuckpadDomain
 import DuckpadEditorAdapter
+import DuckpadTerminalAdapter
 import DuckpadInfrastructure
 import DuckpadPresentation
 import DuckpadLocalization
@@ -22,6 +23,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         return controller
     }()
     private var appUpdater: SparkleUpdateController?
+    private lazy var terminalRuntime = GhosttyRuntime()
     private let auxiliaryCloseKeys = AuxiliaryCloseKeyRouter()
     private var availableUpdateVersion: String?
     private let terminationCoordinator = ApplicationTerminationCoordinator()
@@ -898,6 +900,9 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 fallbackKey: recoveryBase.standardizedFileURL.path + ".last-window"
             )
         )
+        controller.terminalSurfaceFactory = { [weak self] configuration in
+            self?.terminalRuntime.makeSurface(configuration: configuration)
+        }
         return WindowRuntime(
             controller: controller,
             workspace: workspace,
@@ -946,6 +951,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         windowEditors[identifier] = runtime.editor
         windowRecoveryRoots[identifier] = recoveryRoot.standardizedFileURL
         controller.onNewWindowRequested = { [weak self] in self?.createAdditionalWindow() }
+        controller.onNewTerminalWindowRequested = { [weak self] in self?.createAdditionalWindow(terminal: true) }
         controller.onMarkdownImageDropPreferenceChanged = { [weak self] action in
             guard let self, self.terminationCoordinator.permitsApplicationCommands else { return false }
             var settings = self.settingsUseCase.state.settings
@@ -996,7 +1002,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         installMainMenu(target: controller)
     }
 
-    private func createAdditionalWindow() {
+    private func createAdditionalWindow(terminal: Bool = false) {
         guard windowControllers.count < 32 else {
             NSSound.beep()
             return
@@ -1006,6 +1012,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         let runtime = makeWindowRuntime(recoveryRoot: recoveryRoot)
         register(runtime, recoveryRoot: recoveryRoot)
         runtime.controller.showAndFocus()
+        if terminal { runtime.controller.performToggleTerminal() }
     }
 
     private var additionalRecoveryContainer: URL {

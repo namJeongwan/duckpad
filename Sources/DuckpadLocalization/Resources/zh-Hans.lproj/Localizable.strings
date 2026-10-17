@@ -802,3 +802,41 @@
 "Name matches only. Some files could not be searched." = "仅按名称匹配。部分文件无法搜索。";
 "No reference candidates found." = "未找到引用候选项。";
 "Some files could not be searched. No reference candidates found." = "部分文件无法搜索。未找到引用候选项。";
+
+/* Terminal session foundation */
+"Terminal" = "终端";
+"Terminal sessions" = "终端会话";
+"New Terminal Session" = "新建终端会话";
+"Close Terminal Session" = "关闭终端会话";
+"Hide Terminal" = "隐藏终端";
+"Session %1$@" = "会话 %1$@";
+"No terminal sessions" = "没有终端会话";
+"Shell not connected" = "Shell 未连接";
+"Create a session to prepare its shell and working folder." = "创建会话以准备 Shell 和工作文件夹。";
+"This session is prepared. Command execution is not available yet." = "会话已准备就绪。暂不支持执行命令。";
+"Shell: %1$@" = "Shell：%1$@";
+"Working folder: %1$@" = "工作文件夹：%1$@";
+"Working Folder" = "工作文件夹";
+"Show Terminal" = "显示终端";
+"Unable to start terminal." = "无法启动终端。";
+"Close this terminal session?" = "关闭此终端会话？";
+"Running commands in this session will be stopped." = "此会话中正在运行的命令将被停止。";
+"Close terminal sessions?" = "关闭终端会话？";
+"Running commands in these sessions will be stopped." = "这些会话中正在运行的命令将被停止。";
+"Terminal session ended. Press any key to close." = "终端会话已结束。按任意键关闭。";
+
+/* Terminal shortcuts */
+"Terminal Search" = "终端搜索";
+"Paste into terminal?" = "粘贴到终端？";
+"This text may execute commands in the shell." = "此文本可能在 Shell 中执行命令。";
+"Terminal Inspector" = "终端检查器";
+"Split Terminal Right" = "向右拆分终端";
+"Split Terminal Down" = "向下拆分终端";
+"Equalize Terminal Splits" = "均衡终端分区";
+"Toggle Terminal Split Zoom" = "切换终端分区缩放";
+
+"Clear Search" = "清除搜索";
+
+"Don’t ask again for terminal sessions" = "关闭终端会话时不再询问";
+"Confirm Closing Terminal Sessions" = "关闭终端会话前确认";
+"Press ⌘T to start a terminal session." = "按 ⌘T 启动终端会话。";

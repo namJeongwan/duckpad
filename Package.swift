@@ -16,6 +16,7 @@ let package = Package(
         .executable(name: "DuckpadPluginHost", targets: ["DuckpadPluginHost"]),
         .executable(name: "DuckpadPluginRuntime", targets: ["DuckpadPluginRuntime"]),
         .executable(name: "DuckpadNativeInstaller", targets: ["DuckpadNativeInstaller"]),
+        .executable(name: "DuckpadTerminalHost", targets: ["DuckpadTerminalHost"]),
         .executable(name: "DuckpadPerformanceBenchmark", targets: ["DuckpadPerformanceBenchmark"]),
     ],
     dependencies: [
@@ -23,6 +24,18 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
     ],
     targets: [
+        .binaryTarget(name: "GhosttyKit", path: "Vendor/Ghostty/GhosttyKit.xcframework"),
+        .target(name: "DuckpadTerminalBridge", publicHeadersPath: "include"),
+        .target(
+            name: "DuckpadTerminalAdapter",
+            dependencies: ["GhosttyKit", "DuckpadPresentation", "DuckpadApplication", "DuckpadLocalization", "DuckpadPluginSupport"],
+            resources: [.copy("Resources/terminal.conf")],
+            linkerSettings: [
+                .linkedLibrary("c++"), .linkedFramework("Metal"), .linkedFramework("QuartzCore"),
+                .linkedFramework("CoreText"), .linkedFramework("Carbon"), .linkedFramework("IOSurface"),
+            ]
+        ),
+        .executableTarget(name: "DuckpadTerminalHost", dependencies: ["DuckpadPluginSupport", "DuckpadTerminalBridge"]),
         .target(name: "DuckpadArchiveBridge", publicHeadersPath: "include", linkerSettings: [.linkedLibrary("z")]),
         .target(name: "DuckpadNativeABI", path: "SDK/DuckpadNative", exclude: ["Swift", "overview.md"], sources: ["empty.c"], publicHeadersPath: "include"),
         .target(
@@ -211,6 +224,7 @@ let package = Package(
                 "DuckpadInfrastructure",
                 "DuckpadPresentation",
                 "DuckpadEditorAdapter",
+                "DuckpadTerminalAdapter",
                 "DuckpadLocalization",
             ],
             resources: [
