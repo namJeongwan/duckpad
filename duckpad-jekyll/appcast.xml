@@ -3,43 +3,46 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.12.0</title>
-            <pubDate>Sat, 17 Oct 2026 10:45:12 +0900</pubDate>
-            <sparkle:version>58</sparkle:version>
-            <sparkle:shortVersionString>0.12.0</sparkle:shortVersionString>
+            <title>0.12.1</title>
+            <pubDate>Sun, 18 Oct 2026 20:54:30 +0900</pubDate>
+            <sparkle:version>59</sparkle:version>
+            <sparkle:shortVersionString>0.12.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.12.0
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.12.1
 
-Run a terminal alongside your documents, with Ghostty embedded in Duckpad.
+Duckpad adds usage statistics to help prioritize editor and plugin improvements.
 
-- Open the terminal from the status bar or View menu. The bundled Ghostty 1.3.1 engine renders real login-shell sessions; a separate Ghostty installation is not required.
-- Create independent session tabs with Command-T. Tabs follow the editor’s multiline tab layout, and the previous eight-session limit is removed.
-- Split right with Command-D or down with Command-Shift-D, navigate panes, equalize sizes and toggle split zoom. Each session supports up to sixteen panes. Terminal layout undo is separate from document undo and retains closed panes for five seconds.
-- Terminal focus uses Ghostty’s macOS default bindings for supported terminal actions. Editor focus restores Duckpad’s editor shortcuts. Terminal search, command filtering and the engine inspector are available.
-- Right-click a session tab to close tabs to its left or right, close other tabs, or close all tabs. Close confirmation includes a persistent “Don’t ask again” option; the context menu can turn confirmation back on. The trailing add/hide header buttons are removed.
-- Screen changes synchronize the render layer’s backing scale and framebuffer dimensions. Font zoom and window resizing update the shell’s terminal dimensions through Ghostty’s IO thread. First-time split creation keeps both panes visible.
+- Statistics are enabled by default. A one-time, nonmodal notice links to Privacy settings, where sharing can be turned off at any time. An existing explicit opt-out stays off.
+- Reports cover first observed runs, version changes, daily activity, editing languages, feature and plugin usage, and operation outcomes. First-run and version-change markers are saved only after successful delivery, so interrupted or rejected transmissions remain eligible on the next launch.
+- Document contents, file names and paths, searches, terminal commands, raw errors, and persistent device identifiers are excluded. Private plugin IDs and unrecognized languages are grouped as `other`.
+- Counters are aggregated in memory and sent in bounded background batches. Disabling sharing cancels transmission and clears pending statistics and the local transmission log. Failed delivery does not interrupt editing or delay app termination.
+- Privacy settings and the first-run notice are localized in all eight supported languages. The transmission log lets you inspect the five most recent batches in the current session.
 
-App and helpers: **0.12.0 (58)**. Requires **macOS 13 or later**. Universal binaries support Apple Silicon and Intel. Existing document formats, recovery, settings and native plugin ABI remain compatible.
+App and helpers: **0.12.1 (59)**. Requires **macOS 13 or later**. Universal binaries support Apple Silicon and Intel. Existing document formats, recovery, settings and native plugin ABI remain compatible.
 
 ## Installation
 
-Download `Duckpad-0.12.0-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.12.0-universal.zip`. Verify the downloads against `SHA256SUMS.txt`. The signed Sparkle update feed is published after the release archive is uploaded.
+Download `Duckpad-0.12.1-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.12.1-universal.zip`. Verify downloads against `SHA256SUMS.txt`. The signed Sparkle update feed is published after the release archive is uploaded.
 
-## Scope and limits
+## Privacy and measurement limits
 
-The editor retains its App Sandbox. An authenticated, unsandboxed terminal XPC helper starts `/bin/zsh -l` and owns each process lifetime; shell commands can access files with your user account’s permissions. The engine initializes only when a terminal is first requested.
+Statistics are sent through Cloudflare to Duckpad's self-hosted statistics server. The ingestion proxy strips connection-IP, cookie and location headers before forwarding events to the analytics application; network providers still process connection IP addresses. Cloudflare account-level logging and retention settings have not been verified.
 
-Terminal processes are not restored after quitting the app. Custom shell selection and full terminal accessibility are not implemented. Terminal mouse forwarding currently supports the left button and scrolling; right/middle-button TUI gestures are not supported. Terminal appearance defaults to a dark palette. Duckpad’s terminal configuration is separate from the standalone Ghostty app’s configuration. OSC clipboard access is disabled; explicit copy/paste remains available.
+First observed runs are not DMG download or installation counts. Existing installations are first observed when they run a version with statistics enabled. Offline use, short sessions, opt-outs and retries can produce missing or duplicate counts. No persistent user identifier is sent, and the analytics dashboard's unique-user counts must not be treated as reliable user totals. Disabling sharing does not delete statistics already received by the server.
 
-The default build is ad-hoc signed, without Developer ID signing or Apple notarization. Physical Intel hardware, macOS 13 and live Korean IME have not been exercised. The original external-to-Retina scale problem was reproduced, but final external-display round trips remain unverified because only the built-in Retina display was connected for the final preview checks.
+The default build is ad-hoc signed, without Developer ID signing or Apple notarization. Physical Intel hardware, macOS 13, server reboot/backup restoration and the full test suite have not been exercised for this release.
 
 ## Validation
 
-All 34 focused Swift tests pass. Terminal tests cover session creation and removal, tab wrapping, close routing, bulk-close cancellation and undo, confirmation persistence, command filtering and first-split geometry. Native Apple Silicon preview checks cover shell execution, font zoom, window resizing, first splits and close UI. PTY integration checks cover exec failure, UTF-8, working directory, resizing, Ctrl-C and process exit. All eight localization catalogs pass key and format validation; new close UI was inspected in English.
+The final focused checks pass 11 statistics and UI tests plus 30 existing settings compatibility tests, along with the Apple Silicon Release build. Earlier feature-hook validation passed 91 focused tests covering settings, plugins, formatting and editor operations. All eight localization catalogs pass key and format checks; privacy settings and the narrow first-run notice were checked in light/dark layouts and inspected in captured windows for every supported language.
 
-The universal app and all three helpers pass architecture, version, resource, dependency-license and signature checks. Isolated packaged-app checks pass Finder/Open With, bookmark recovery and saving after relaunch, native save-access renewal, window resizing and sandboxed XPC isolation. A continuously writing shell closes successfully within the five-second shutdown budget (0.4 seconds in the release validation run).
+Independent code review and re-review resolved lifecycle-delivery and login-email rate-limit findings. Isolated proxy tests cover registration blocking, per-IP and global sign-in limits, ingestion header stripping and login continuation. The deployed server passed public health, blocked-registration and Debug-event ingestion checks.
+
+## Packaged release checks
+
+The app and all three helpers were verified as 0.12.1 (59), with both arm64 and x86_64 slices. Resource, license, sandbox/XPC and signature checks passed. Isolated Apple Silicon smoke checks passed Finder/Open With, bookmark recovery, native save-access renewal, saving after relaunch, window resizing and XPC isolation. The DMG passed `hdiutil verify`; the ZIP passed `unzip -tq`. The build source tree matches release commit `2188cb1dc8a4c9e7fe7cc1b3af8b963f6b37cc2c`.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.12.0/Duckpad-0.12.0-universal.zip" length="43035818" type="application/octet-stream" sparkle:edSignature="aKmIsr3AaMGNek9+xCVRHkkGP92+dMmG4ycgNYv78LAZ1v//KBJ/LrwbYvW8buKFI0O6GYofK0OQ/3h6df36Bw=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.12.1/Duckpad-0.12.1-universal.zip" length="43336707" type="application/octet-stream" sparkle:edSignature="ENZv5lxqaVdUWoo3tdNWlJyFDyvNrjj1sdj2ukQ/8EkBFz8ZHOK/okuklVajLO9ChDnHKhlcawuqlnDk1g5qDA=="/>
         </item>
     </channel>
 </rss>
