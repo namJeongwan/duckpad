@@ -892,3 +892,6 @@
 "Usage statistics are on to help improve Duckpad. Document contents, names, and paths are excluded. You can turn sharing off in Privacy Settings." = "Duckpad 개선을 위한 사용 통계가 켜져 있습니다. 문서 내용·이름·경로는 제외합니다. 개인정보 보호 설정에서 공유를 끌 수 있습니다.";
 "Privacy Settings" = "개인정보 보호 설정";
 "Dismiss" = "닫기";
+
+"Ln: %1$@   Col: %2$@" = "줄: %1$@   열: %2$@";
+"More document information" = "문서 정보 더 보기";

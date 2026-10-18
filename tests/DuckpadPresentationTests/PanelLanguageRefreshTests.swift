@@ -145,7 +145,7 @@ struct PanelLanguageRefreshTests {
             let item = submenu.addItem(withTitle: title, action: #selector(NSResponder.cancelOperation(_:)), keyEquivalent: "")
             item.target = target
         }
-        let panel = CommandPalettePanel()
+        let panel = CommandPaletteView()
         panel.refreshLocalization(catalog: english)
         panel.apply(menu: menu)
         panel.setQuery("Save")

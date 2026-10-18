@@ -1,8 +1,69 @@
 import AppKit
 import DuckpadApplication
 import DuckpadInfrastructure
+import DuckpadLocalization
 import Testing
 @testable import DuckpadPresentation
+
+@Test @MainActor func applicationCommandsUseProductNameInPalettePath() throws {
+    _ = NSApplication.shared
+    let controller = DuckpadWindowController(workspace: ScratchWorkspaceUseCase(store: InMemorySessionStore()),
+        previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
+        automaticallyStarts: false)
+    defer { controller.close() }
+    let menu = DuckpadMainMenuFactory.make(target: controller)
+    let settings = try #require(CommandPaletteRegistry.commands(in: menu).first {
+        $0.item.action == #selector(DuckpadWindowController.performShowSettings(_:))
+    })
+    #expect(settings.path == "Duckpad")
+}
+
+@Test @MainActor func paletteRetainsDocumentContextThroughSearchAndMenuRefresh() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+    let editor = TextViewEditorAdapter()
+    let controller = DuckpadWindowController(workspace: workspace,
+        previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
+        editorAdapter: editor, editorView: editor.scrollView, automaticallyStarts: false)
+    controller.start()
+    await controller.waitForStartup()
+    controller.showWindow(nil)
+    defer { controller.close() }
+    controller.editingCommandWindow = { [weak controller] in controller?.window }
+    let buffer = try #require(workspace.snapshot().activeBuffer)
+    editor.install(.init(bufferID: buffer.bufferID, revision: buffer.revision, text: "zero\none"))
+    editor.textView.setSelectedRange(NSRange(location: 5, length: 3))
+    editor.focus()
+    let palette = controller.commandPalettePanel
+    let menu = NSMenu()
+    for (title, action) in [("Bookmark", #selector(DuckpadWindowController.performToggleBookmark(_:))),
+                            ("Copy", #selector(DuckpadWindowController.performCopy(_:)))] {
+        let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+        item.target = controller
+    }
+    let selectAll = menu.addItem(withTitle: "Native Select All", action: #selector(NSTextView.selectAll(_:)), keyEquivalent: "")
+    palette.present(menu: menu, excludingAction: nil, relativeTo: controller.commandBar)
+    let input = try #require(controller.window?.firstResponder as? NSTextView)
+    #expect(input !== editor.textView)
+    #expect(palette.commands.first { $0.item === selectAll }?.target === editor.textView)
+    let newCommand = menu.addItem(withTitle: "New Select All", action: #selector(NSTextView.selectAll(_:)), keyEquivalent: "")
+    palette.refreshIfPresented(menu: menu, excludingAction: nil)
+    palette.refreshLocalization(catalog: .init(language: .english))
+    #expect(palette.commands.allSatisfy { $0.isEnabled })
+    #expect(palette.commands.first { $0.item === selectAll }?.target === editor.textView)
+    #expect(palette.commands.first { $0.item === newCommand }?.target === editor.textView)
+    // Normal menu validation still belongs to the search input, whose selection is empty.
+    #expect(!controller.validateMenuItem(menu.items[1]))
+    palette.setQuery("Bookmark")
+    palette.activateSelectedResult()
+    #expect(editor.hasBookmarks)
+    #expect(controller.window?.firstResponder === editor.textView)
+    #expect(editor.textView.string == "zero\none")
+    palette.present(menu: menu, excludingAction: nil, relativeTo: controller.commandBar)
+    palette.setQuery("Native Select All")
+    palette.activateSelectedResult()
+    #expect(editor.textView.selectedRange() == NSRange(location: 0, length: 8))
+}
 
 @MainActor
 private final class CommandPaletteTestTarget: NSObject, NSMenuItemValidation {
@@ -102,7 +163,7 @@ private func paletteMenu(
 @Test @MainActor func commandPaletteSearchRanksTitleBeforeMenuPathAndPreservesOriginalItem() throws {
     _ = NSApplication.shared
     let target = CommandPaletteTestTarget()
-    let panel = CommandPalettePanel()
+    let panel = CommandPaletteView()
     panel.apply(
         menu: paletteMenu(target: target),
         excludingAction: #selector(CommandPaletteTestTarget.performPalette(_:))
@@ -133,7 +194,7 @@ private func paletteMenu(
 @Test @MainActor func commandPaletteNeverExecutesACommandThatMenuValidationDisabled() {
     _ = NSApplication.shared
     let target = CommandPaletteTestTarget()
-    let panel = CommandPalettePanel()
+    let panel = CommandPaletteView()
     panel.apply(menu: paletteMenu(target: target))
     panel.setQuery("Disabled Command")
     var executions = 0
@@ -148,7 +209,7 @@ private func paletteMenu(
 @Test @MainActor func activationRevalidatesTheCapturedTargetImmediatelyBeforeDispatch() {
     _ = NSApplication.shared
     let target = CommandPaletteTestTarget()
-    let panel = CommandPalettePanel()
+    let panel = CommandPaletteView()
     panel.apply(menu: paletteMenu(target: target))
     panel.setQuery("Save All")
     #expect(panel.filteredCommands.first?.isEnabled == true)
@@ -208,10 +269,10 @@ private func paletteMenu(
     #expect(!controller.commandPalettePanel.isPresented)
 }
 
-@Test @MainActor func hostedPaletteClosesWithItsHostWindowAndHonorsReduceMotionPolicy() {
+@Test @MainActor func hostedPaletteClosesWithItsHostWindow() {
     _ = NSApplication.shared
     let target = CommandPaletteTestTarget()
-    let panel = CommandPalettePanel()
+    let panel = CommandPaletteView()
     let anchor = NSButton(title: "Commands", target: nil, action: nil)
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 300, height: 160),
@@ -231,6 +292,4 @@ private func paletteMenu(
     }
 
     #expect(!panel.isPresented)
-    #expect(CommandPalettePresentationPolicy.popoverAnimates(reduceMotion: false))
-    #expect(!CommandPalettePresentationPolicy.popoverAnimates(reduceMotion: true))
 }

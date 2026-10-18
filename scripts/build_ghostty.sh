@@ -34,7 +34,11 @@ xcrun -sdk macosx metal --version >/dev/null || {
 # Zig 0.15.2 cannot resolve arm64 symbols in the latest arm64e-only SDK stubs.
 # Clone the SDK locally and use Zig's shipped compatible libSystem stub. The
 # installed SDK and compiler remain unchanged.
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
+# xcrun may return a versioned alias pointing to MacOSX.sdk. Resolve only
+# the root before copying, retaining relative links inside the private SDK.
+SDK="$(cd "$(xcrun --sdk macosx --show-sdk-path)" && pwd -P)"
+# Older builds copied that alias into a self-referential destination link.
+if [[ -L "$TOOLCHAIN/MacOSX.sdk" ]]; then rm "$TOOLCHAIN/MacOSX.sdk"; fi
 if [[ ! -d "$TOOLCHAIN/MacOSX.sdk" ]]; then cp -cR "$SDK" "$TOOLCHAIN/MacOSX.sdk"; fi
 chmod u+w "$TOOLCHAIN/MacOSX.sdk/usr/lib/libSystem.tbd"
 cp "$TOOLCHAIN/zig-$ZIG_ARCH-macos-0.15.2/lib/libc/darwin/libSystem.tbd" "$TOOLCHAIN/MacOSX.sdk/usr/lib/libSystem.tbd"

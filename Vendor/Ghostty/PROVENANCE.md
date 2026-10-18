@@ -11,7 +11,10 @@ Build adjustments are applied to the ignored source checkout by the script:
 exclude the unused VT shared library and iOS variants from the install step;
 use Zig's bundled libSystem stub in a private SDK copy for recent macOS SDKs;
 repack Zig archives through extracted object files for Apple's newer libtool,
-which otherwise discards unaligned archive members. Installed SDKs are not modified. Sentry crash reporting is disabled in this embedding.
+which otherwise discards unaligned archive members. The SDK root is resolved
+before copying versioned aliases, and stale destination symlinks from earlier
+builds are removed. Installed SDKs are not modified. Sentry crash reporting is
+disabled in this embedding.
 
 `scripts/patch_ghostty_host_pty.py` adapts `src/termio/Exec.zig` for a host-owned
 macOS PTY. `DUCKPAD_HOST_PTY_FD` is provided by the Swift surface configuration.

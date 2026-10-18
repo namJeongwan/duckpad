@@ -6,6 +6,26 @@ final class StatusBarButton: NSButton {
     private var isHovered = false
     private var isPressed = false
 
+    private var textPadding: CGFloat {
+        imagePosition == .noImage && alignment == .left ? 8 : 0
+    }
+
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        size.width += textPadding * 2
+        return size
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard textPadding > 0, let cell else {
+            super.draw(dirtyRect)
+            return
+        }
+        // Keep the full hover/click area while giving text breathing room
+        // inside it. Icon-only controls retain their native centering.
+        cell.draw(withFrame: bounds.insetBy(dx: min(textPadding, bounds.width / 2), dy: 0), in: self)
+    }
+
     override var isEnabled: Bool {
         didSet {
             updateBackground()

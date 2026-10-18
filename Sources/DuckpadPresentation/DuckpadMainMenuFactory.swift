@@ -19,9 +19,9 @@ public enum DuckpadMainMenuFactory {
         settings: AppSettings = .defaults
     ) -> NSMenu {
         let mainMenu = NSMenu()
-        let appItem = NSMenuItem()
+        let appItem = NSMenuItem(title: "Duckpad", action: nil, keyEquivalent: "")
         mainMenu.addItem(appItem)
-        let appMenu = NSMenu()
+        let appMenu = NSMenu(title: "Duckpad")
         let settingsTarget: AnyObject = applicationTarget ?? target
         add(
             "Preferences…",
