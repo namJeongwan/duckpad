@@ -7,6 +7,7 @@ import DuckpadLocalization
 /// a second clipboard observer or a competing copy of plugin state.
 @MainActor
 public final class ExtensionListServiceHost {
+    public var onUsageMetric: ((UsageMetric) -> Void)?
     private let nativeHost: NativePluginServiceHost
     private let sizes: PluginPanelSizeStore
     private var pendingCommand: ExtensionCommandID?
@@ -113,7 +114,13 @@ public final class ExtensionListServiceHost {
                     try await self.nativeHost.prepareInstallation(command: command)
                     guard self.presentationGeneration == generation, split.window != nil else { return }
                     try self.nativeHost.show(command, in: split, onClose: onClose, readDocument: readDocument, preparePaste: preparePaste)
+                    if let id = self.allowed[command]?.extensionID {
+                        self.onUsageMetric?(.init(.pluginPanel, dimension: id.rawValue, outcome: .success))
+                    }
                 } catch {
+                    if let id = self.allowed[command]?.extensionID {
+                        self.onUsageMetric?(.init(.pluginPanel, dimension: id.rawValue, outcome: .failed))
+                    }
                     if self.presentationGeneration == generation { onError?(error) }
                 }
             }
@@ -125,6 +132,7 @@ public final class ExtensionListServiceHost {
         presentationGeneration &+= 1
         displayedCommand = command; self.preparePaste = preparePaste; restoreEditorFocus = onClose
         panel.show(title: session.identity.command.title, in: split, preferredWidth: sizes.width(for: command))
+        onUsageMetric?(.init(.pluginPanel, dimension: session.identity.extensionID.rawValue, outcome: .success))
         session.send("query", query: panel.query)
     }
 

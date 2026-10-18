@@ -197,6 +197,7 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
     private var commandIndex: [ExtensionCommandID: ExtensionID] = [:]
 
     public var onStateChange: ((ExtensionRegistryState) -> Void)?
+    public var onUsageMetric: ((UsageMetric) -> Void)?
 
     public init(loader: any ExtensionPackageLoaderPort, grants: any ExtensionGrantStorePort, transport: any PluginHostTransport, workspace: ScratchWorkspaceUseCase, editor: any ExtensionEditorPort, limits: ExtensionHostLimits = ExtensionHostLimits(), allowsUserExtensions: Bool = false, nativeActivationSession: NativeExtensionActivationSession = NativeExtensionActivationSession(), automaticallyAuthorizesEnabledPackages: Bool = false) {
         self.loader = loader; self.grants = grants; self.transport = transport
@@ -515,6 +516,13 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
         let generation = invocationGeneration
         guard limits.isValid else { throw .limitExceeded("invalid host limits") }
         guard let (package, command) = command(commandID), command.inputScope != .service else { throw .unknownCommand(commandID) }
+        let started = ProcessInfo.processInfo.systemUptime
+        var succeeded = false
+        defer {
+            onUsageMetric?(.init(.pluginInvoke, dimension: package.manifest.id.rawValue,
+                outcome: succeeded ? .success : (Task.isCancelled ? .cancelled : .failed),
+                duration: ProcessInfo.processInfo.systemUptime - started))
+        }
         if policyAuthorityRequiresRestart, package.trustSource != .bundled { throw policyRestartFailure }
         guard enabled.contains(package.manifest.id) else { throw .disabled(package.manifest.id) }
         guard !revokedPublisherFingerprints.contains(package.publisherFingerprint) else { throw .untrustedPublisher }
@@ -555,7 +563,7 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
         }
         if !result.edits.isEmpty { try require(.documentsWrite, scope: requiredScope, package: package) }
         try validate(result: result, context: context, capture: capture)
-        guard !result.edits.isEmpty else { publish(status: result.status); return result }
+        guard !result.edits.isEmpty else { publish(status: result.status); succeeded = true; return result }
         guard let reservation = await workspace.reserveEditorBatch(
             bufferID: context.bufferID, expectedRevision: context.revision, editCount: result.edits.count
         ) else { throw .staleContext }
@@ -582,6 +590,7 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
         }
         reservationOutstanding = false
         publish(status: result.status)
+        succeeded = true
         return result
     }
 

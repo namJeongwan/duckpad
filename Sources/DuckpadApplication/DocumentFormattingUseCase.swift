@@ -21,6 +21,7 @@ public final class DocumentFormattingUseCase {
     // One key only; never retain document contents or an unbounded cache.
     private var successfulFormat: SuccessfulFormat?
     public var settings = FormattingSettings()
+    public var onUsageMetric: ((UsageMetric) -> Void)?
     public private(set) var isFormatting = false
 
     public init(workspace: ScratchWorkspaceUseCase, editor: any FormattingEditorPort, formatter: any DocumentFormatting) {
@@ -65,6 +66,12 @@ public final class DocumentFormattingUseCase {
         let language = workspace.activeLanguageContext()
         isFormatting = true
         defer { isFormatting = false }
+        let started = ProcessInfo.processInfo.systemUptime
+        var succeeded = false
+        defer {
+            onUsageMetric?(.init(.format, outcome: succeeded ? .success : (Task.isCancelled ? .cancelled : .failed),
+                duration: ProcessInfo.processInfo.systemUptime - started))
+        }
         var result = try await formatter.format(.init(text: snapshot.text, parser: parser, settings: requestedSettings))
         guard result.utf8.count <= 4 * Self.maximumInputBytes else { throw FormattingFailure.tooLarge }
         // WebKit may return NSString-backed storage. Convert once before the
@@ -80,7 +87,7 @@ public final class DocumentFormattingUseCase {
         try Task.checkCancellation()
         guard workspace.activeFileContext() == context, workspace.activeLanguageContext() == language,
               editor.isReadyForFormatting(context.buffer) else { throw FormattingFailure.staleDocument }
-        guard !edits.isEmpty else { successfulFormat = key; return context }
+        guard !edits.isEmpty else { successfulFormat = key; succeeded = true; return context }
         guard let reservation = await workspace.reserveEditorBatch(bufferID: context.buffer.bufferID,
             expectedRevision: snapshot.revision, editCount: edits.count) else { throw FormattingFailure.staleDocument }
         defer { workspace.cancelEditorBatch(reservation) }
@@ -95,6 +102,7 @@ public final class DocumentFormattingUseCase {
         }
         successfulFormat = SuccessfulFormat(buffer: updated.buffer, parser: parser, settings: requestedSettings,
             boundLineEnding: updated.binding?.lineEnding)
+        succeeded = true
         return updated
     }
 }

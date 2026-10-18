@@ -840,3 +840,15 @@
 "Don’t ask again for terminal sessions" = "Beim Schließen von Terminalsitzungen nicht erneut fragen";
 "Confirm Closing Terminal Sessions" = "Schließen von Terminalsitzungen bestätigen";
 "Press ⌘T to start a terminal session." = "Drücke ⌘T, um eine Terminalsitzung zu starten.";
+
+/* Usage statistics */
+"Privacy" = "Datenschutz";
+"Share usage statistics" = "Nutzungsstatistiken teilen";
+"Share first-run and version-change counts, app and macOS versions, editing languages, feature and plugin counts, and operation results to improve Duckpad. No document contents, names, paths, searches, terminal commands, or persistent device IDs. On by default; you can turn it off at any time to clear pending statistics. Sent via Cloudflare to Duckpad’s statistics server; network providers process connection IP addresses." = "Zur Verbesserung von Duckpad werden Erststarts, Versionswechsel, App- und macOS-Versionen, bearbeitete Sprachen, Funktions- und Plugin-Nutzungen sowie Vorgangsergebnisse geteilt. Keine Dokumentinhalte, Namen, Pfade, Suchtexte, Terminalbefehle oder dauerhaften Geräte-IDs. Standardmäßig aktiv; jederzeit abschaltbar, wobei ausstehende Statistiken gelöscht werden. Die Übertragung erfolgt über Cloudflare an Duckpads Statistikserver; Netzwerkanbieter verarbeiten Verbindungs-IP-Adressen.";
+"View statistics transmission log" = "Übertragungsprotokoll anzeigen";
+"Statistics transmission log" = "Statistik-Übertragungsprotokoll";
+"Statistics transmission is unavailable in this build." = "In diesem Build ist die Übertragung von Statistiken nicht verfügbar.";
+"No transmission attempts in this session. Statistics are sent in batches while sharing is enabled. This view shows the five most recent batches; reopen it to refresh." = "In dieser Sitzung gab es noch keine Übertragungsversuche. Bei aktivierter Freigabe werden Statistiken gesammelt übertragen. Diese Ansicht zeigt die letzten fünf Pakete. Zum Aktualisieren erneut öffnen.";
+"Usage statistics are on to help improve Duckpad. Document contents, names, and paths are excluded. You can turn sharing off in Privacy Settings." = "Nutzungsstatistiken sind zur Verbesserung von Duckpad aktiviert. Dokumentinhalte, Namen und Pfade sind ausgeschlossen. Die Freigabe lässt sich in den Datenschutzeinstellungen deaktivieren.";
+"Privacy Settings" = "Datenschutzeinstellungen";
+"Dismiss" = "Schließen";

@@ -840,3 +840,15 @@
 "Don’t ask again for terminal sessions" = "Non chiedere più quando chiudi le sessioni del terminale";
 "Confirm Closing Terminal Sessions" = "Conferma chiusura delle sessioni del terminale";
 "Press ⌘T to start a terminal session." = "Premi ⌘T per avviare una sessione del terminale.";
+
+/* Usage statistics */
+"Privacy" = "Privacy";
+"Share usage statistics" = "Condividi statistiche di utilizzo";
+"Share first-run and version-change counts, app and macOS versions, editing languages, feature and plugin counts, and operation results to improve Duckpad. No document contents, names, paths, searches, terminal commands, or persistent device IDs. On by default; you can turn it off at any time to clear pending statistics. Sent via Cloudflare to Duckpad’s statistics server; network providers process connection IP addresses." = "Per migliorare Duckpad, condividi primi avvii, cambi di versione, versioni dell’app e di macOS, linguaggi modificati, utilizzi di funzioni e plugin ed esiti delle operazioni. Sono esclusi contenuti, nomi, percorsi, ricerche, comandi del terminale e ID permanenti del dispositivo. Attivo per impostazione predefinita; disattivalo in qualsiasi momento per cancellare le statistiche in attesa. Invio tramite Cloudflare al server di statistiche di Duckpad; i fornitori di rete elaborano gli indirizzi IP delle connessioni.";
+"View statistics transmission log" = "Mostra registro di invio delle statistiche";
+"Statistics transmission log" = "Registro di invio delle statistiche";
+"Statistics transmission is unavailable in this build." = "Invio delle statistiche non disponibile in questa build.";
+"No transmission attempts in this session. Statistics are sent in batches while sharing is enabled. This view shows the five most recent batches; reopen it to refresh." = "Nessun tentativo di invio in questa sessione. Le statistiche vengono inviate in gruppi quando la condivisione è attiva. Sono mostrati gli ultimi cinque gruppi; riapri la vista per aggiornarla.";
+"Usage statistics are on to help improve Duckpad. Document contents, names, and paths are excluded. You can turn sharing off in Privacy Settings." = "Le statistiche di utilizzo sono attive per migliorare Duckpad. Contenuti, nomi e percorsi dei documenti sono esclusi. Puoi disattivare la condivisione nelle impostazioni della privacy.";
+"Privacy Settings" = "Impostazioni della privacy";
+"Dismiss" = "Chiudi";

@@ -840,3 +840,15 @@
 "Don’t ask again for terminal sessions" = "关闭终端会话时不再询问";
 "Confirm Closing Terminal Sessions" = "关闭终端会话前确认";
 "Press ⌘T to start a terminal session." = "按 ⌘T 启动终端会话。";
+
+/* Usage statistics */
+"Privacy" = "隐私";
+"Share usage statistics" = "共享使用统计";
+"Share first-run and version-change counts, app and macOS versions, editing languages, feature and plugin counts, and operation results to improve Duckpad. No document contents, names, paths, searches, terminal commands, or persistent device IDs. On by default; you can turn it off at any time to clear pending statistics. Sent via Cloudflare to Duckpad’s statistics server; network providers process connection IP addresses." = "为改进 Duckpad，共享首次运行和版本变更次数、应用和 macOS 版本、编辑语言、功能和插件使用次数及操作结果。不包含文档内容、名称、路径、搜索词、终端命令或持久设备 ID。默认开启；可随时关闭并清除待发送的统计数据。数据通过 Cloudflare 发送至 Duckpad 统计服务器；网络服务商会处理连接 IP 地址。";
+"View statistics transmission log" = "查看统计发送日志";
+"Statistics transmission log" = "统计发送日志";
+"Statistics transmission is unavailable in this build." = "此构建不支持发送统计。";
+"No transmission attempts in this session. Statistics are sent in batches while sharing is enabled. This view shows the five most recent batches; reopen it to refresh." = "本次运行尚未尝试发送。启用共享后，统计将批量发送。此视图显示最近五个批次，重新打开可刷新。";
+"Usage statistics are on to help improve Duckpad. Document contents, names, and paths are excluded. You can turn sharing off in Privacy Settings." = "使用统计已开启，用于改进 Duckpad。不包含文档内容、名称和路径。您可以在隐私设置中关闭共享。";
+"Privacy Settings" = "隐私设置";
+"Dismiss" = "关闭";
