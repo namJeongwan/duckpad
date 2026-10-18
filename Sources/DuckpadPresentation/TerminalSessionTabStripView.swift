@@ -40,7 +40,8 @@ final class TerminalSessionTabStripView: NSView {
         self.selectedID = selectedID
         self.preferences = preferences
         let oldTabs = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, $0) })
-        for tab in tabs where !sessions.contains(where: { $0.id == tab.id }) { tab.removeFromSuperview() }
+        let liveIDs = Set(sessions.map(\.id))
+        for tab in tabs where !liveIDs.contains(tab.id) { tab.removeFromSuperview() }
         tabs = sessions.map { session in
             let tab = oldTabs[session.id] ?? TerminalSessionTabView(id: session.id)
             let title = catalog.text("Session %1$@", arguments: [session.number.formatted(.number.locale(catalog.locale))])

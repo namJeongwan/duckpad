@@ -33,6 +33,7 @@ public final class TabCloseCoordinator {
     private var reviewBusy = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var reviewVersions: [TabID: UInt64] = [:]
+    private var cancellationSerial: UInt64 = 0
 
     public init(workspace: ScratchWorkspaceUseCase) {
         self.workspace = workspace
@@ -93,7 +94,10 @@ public final class TabCloseCoordinator {
             switch result {
             case .completed:
                 cursor += 1
-            case .cancelled, .failed, .workspaceFailure, .alreadyPresented:
+            case .cancelled:
+                cancellationSerial &+= 1
+                return result
+            case .failed, .workspaceFailure, .alreadyPresented:
                 return result
             }
         }
@@ -108,11 +112,15 @@ public final class TabCloseCoordinator {
         decision: @escaping DecisionProvider,
         save: @escaping SaveHandler
     ) async -> TabCloseBatchOutcome {
+        let requestedCancellationSerial = cancellationSerial
         let requestedVersions = Dictionary(uniqueKeysWithValues: workspace.snapshot().tabs.map {
             ($0.id, reviewVersions[$0.id, default: 0])
         })
         await acquireReview()
         defer { releaseReview() }
+        // A cancelled earlier review can refer to a tab that no longer exists.
+        // Do not turn an already queued Quit into another prompt for a new tab.
+        guard requestedCancellationSerial == cancellationSerial else { return .cancelled }
         for tab in workspace.snapshot().tabs where tab.isDirty {
             if let requestedVersion = requestedVersions[tab.id],
                reviewVersions[tab.id, default: 0] != requestedVersion {
@@ -121,6 +129,13 @@ public final class TabCloseCoordinator {
         }
         while let tab = workspace.snapshot().tabs.first(where: \.isDirty) {
             let choice = await decision(tab, saveAvailable)
+            // Cancellation ends the operation even if the reviewed tab changed
+            // or disappeared while its prompt was open.
+            if choice == .cancel {
+                cancellationSerial &+= 1
+                reviewVersions[tab.id, default: 0] &+= 1
+                return .cancelled
+            }
             guard let current = workspace.snapshot().tabs.first(where: { $0.id == tab.id }) else {
                 continue
             }
@@ -143,6 +158,7 @@ public final class TabCloseCoordinator {
                 case .saved:
                     break
                 case .cancelled:
+                    cancellationSerial &+= 1
                     return .cancelled
                 case .reviewStale:
                     continue
@@ -189,6 +205,7 @@ public final class TabCloseCoordinator {
                 return .completed
             case .requiresDecision:
                 let choice = await decision(reviewedTab, saveAvailable)
+                guard choice != .cancel else { return .cancelled }
                 guard let current = workspace.snapshot().tabs.first(where: { $0.id == reviewedTab.id }) else {
                     return .completed
                 }

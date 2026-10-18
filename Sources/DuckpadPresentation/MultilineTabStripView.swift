@@ -138,7 +138,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         titleLabel.maximumNumberOfLines = 1
         titleLabel.cell?.truncatesLastVisibleLine = false
         titleLabel.cell?.usesSingleLineMode = true
-        titleLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        titleLabel.font = WorkspaceTabStyle.font
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         fileIconImage.imageScaling = .scaleProportionallyUpOrDown
         fileIconImage.setAccessibilityElement(false)
@@ -327,22 +327,9 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         }
         activeIndicator.backgroundColor = NSColor.controlAccentColor.cgColor
         dirtyIndicator.layer?.backgroundColor = NSColor.systemBlue.cgColor
-        titleLabel.textColor = active || isHovered ? .labelColor : .secondaryLabelColor
-        let separatorColor: NSColor
-        if active {
-            view.layer?.backgroundColor = (isHovered
-                ? NSColor.controlAccentColor.withAlphaComponent(0.13)
-                : WorkspaceColors.editor).cgColor
-            separatorColor = isHovered
-                ? NSColor.controlAccentColor.withAlphaComponent(0.48)
-                : WorkspaceColors.border
-        } else if isHovered {
-            view.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.11).cgColor
-            separatorColor = NSColor.controlAccentColor.withAlphaComponent(0.34)
-        } else {
-            view.layer?.backgroundColor = WorkspaceColors.panel.cgColor
-            separatorColor = WorkspaceColors.border
-        }
+        titleLabel.textColor = WorkspaceTabStyle.title(selected: active, hovered: isHovered)
+        view.layer?.backgroundColor = WorkspaceTabStyle.background(selected: active, hovered: isHovered).cgColor
+        let separatorColor = WorkspaceTabStyle.separator(selected: active, hovered: isHovered)
         trailingSeparator.backgroundColor = separatorColor.cgColor
         bottomSeparator.backgroundColor = separatorColor.cgColor
         trailingSeparator.isHidden = !ownsTrailingSeparator
@@ -1548,7 +1535,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
 
     private func tabWidth(_ tab: TabSnapshot) -> CGFloat {
         let width = (tab.title as NSString).size(
-            withAttributes: [.font: NSFont.systemFont(ofSize: 12)]
+            withAttributes: [.font: WorkspaceTabStyle.font]
         ).width
         // Reserve icon, status, pin, and close slots so hover never moves the title.
         return ceil(width) + 73

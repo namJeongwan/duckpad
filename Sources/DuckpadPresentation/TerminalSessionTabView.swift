@@ -26,7 +26,7 @@ final class TerminalSessionTabView: NSView {
         layer?.addSublayer(separator)
         activateButton.isBordered = false
         activateButton.alignment = .left
-        activateButton.font = .systemFont(ofSize: 12)
+        activateButton.font = WorkspaceTabStyle.font
         activateButton.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)
         activateButton.imagePosition = .imageLeading
         activateButton.imageScaling = .scaleProportionallyDown
@@ -50,7 +50,10 @@ final class TerminalSessionTabView: NSView {
         self.selected = selected
         self.showClose = showClose
         self.showInactiveClose = showInactiveClose
-        activateButton.title = title
+        if activateButton.title != title {
+            activateButton.title = title
+            preferredWidth = ceil((title as NSString).size(withAttributes: [.font: WorkspaceTabStyle.font]).width) + 58
+        }
         activateButton.setAccessibilityLabel(catalog.text("%1$@ tab", arguments: [title]))
         activateButton.setAccessibilityValue(catalog.text(selected ? "selected" : "not selected"))
         activateButton.setAccessibilityCustomActions([
@@ -66,16 +69,15 @@ final class TerminalSessionTabView: NSView {
         updateAppearance()
     }
 
-    var preferredWidth: CGFloat {
-        ceil((activateButton.title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width) + 58
-    }
+    private(set) var preferredWidth: CGFloat = 58
 
     override func layout() {
         super.layout()
         activateButton.frame = NSRect(x: 8, y: 2, width: max(0, bounds.width - 33), height: max(0, bounds.height - 4))
         closeButton.frame = NSRect(x: max(0, bounds.width - 23), y: (bounds.height - 20) / 2, width: 20, height: 20)
         indicator.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 2)
-        separator.frame = NSRect(x: bounds.width - 0.5, y: 0, width: 0.5, height: bounds.height)
+        let pixel = 1 / (window?.backingScaleFactor ?? 2)
+        separator.frame = NSRect(x: bounds.width - pixel, y: 0, width: pixel, height: bounds.height)
     }
 
     override func updateTrackingAreas() {
@@ -103,13 +105,12 @@ final class TerminalSessionTabView: NSView {
 
     private func updateAppearance() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = (hovered ? NSColor.controlAccentColor.withAlphaComponent(0.11)
-                : selected ? WorkspaceColors.editor : WorkspaceColors.panel).cgColor
+            layer?.backgroundColor = WorkspaceTabStyle.background(selected: selected, hovered: hovered).cgColor
             indicator.backgroundColor = NSColor.controlAccentColor.cgColor
-            separator.backgroundColor = WorkspaceColors.border.cgColor
+            separator.backgroundColor = WorkspaceTabStyle.separator(selected: selected, hovered: hovered).cgColor
         }
         indicator.isHidden = !selected
-        activateButton.contentTintColor = selected || hovered ? .labelColor : .secondaryLabelColor
+        activateButton.contentTintColor = WorkspaceTabStyle.title(selected: selected, hovered: hovered)
         closeButton.contentTintColor = hovered ? .controlAccentColor : .secondaryLabelColor
         closeButton.isHidden = !showClose || !(selected || hovered || showInactiveClose)
         if closeButton.isHidden { closeButton.resetPointerState() }

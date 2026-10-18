@@ -22,7 +22,7 @@ final class TerminalPanelView: NSView {
     }
     private var undoHistory: [Snapshot] = []
     private var redoHistory: [Snapshot] = []
-    private let commandPalette = TerminalCommandPaletteView()
+    private let commandPalette = CommandPaletteView()
     private var paletteMenu: NSMenu?
     private var historyExpiry: DispatchWorkItem?
     private let surfaceFactory: ((ShellLaunchConfiguration) -> TerminalSurfaceView?)?

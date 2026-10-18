@@ -852,3 +852,6 @@
 "Usage statistics are on to help improve Duckpad. Document contents, names, and paths are excluded. You can turn sharing off in Privacy Settings." = "使用统计已开启，用于改进 Duckpad。不包含文档内容、名称和路径。您可以在隐私设置中关闭共享。";
 "Privacy Settings" = "隐私设置";
 "Dismiss" = "关闭";
+
+"Ln: %1$@   Col: %2$@" = "行：%1$@   列：%2$@";
+"More document information" = "更多文档信息";

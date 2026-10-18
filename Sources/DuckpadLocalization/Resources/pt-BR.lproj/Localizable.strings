@@ -852,3 +852,6 @@
 "Usage statistics are on to help improve Duckpad. Document contents, names, and paths are excluded. You can turn sharing off in Privacy Settings." = "As estatísticas de uso estão ativadas para melhorar o Duckpad. Conteúdo, nomes e caminhos de documentos são excluídos. Você pode desativar o compartilhamento nas configurações de privacidade.";
 "Privacy Settings" = "Configurações de privacidade";
 "Dismiss" = "Dispensar";
+
+"Ln: %1$@   Col: %2$@" = "Lin: %1$@   Col: %2$@";
+"More document information" = "Mais informações do documento";

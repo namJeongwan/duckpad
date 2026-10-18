@@ -892,3 +892,6 @@
 "Usage statistics are on to help improve Duckpad. Document contents, names, and paths are excluded. You can turn sharing off in Privacy Settings." = "Usage statistics are on to help improve Duckpad. Document contents, names, and paths are excluded. You can turn sharing off in Privacy Settings.";
 "Privacy Settings" = "Privacy Settings";
 "Dismiss" = "Dismiss";
+
+"Ln: %1$@   Col: %2$@" = "Ln: %1$@   Col: %2$@";
+"More document information" = "More document information";

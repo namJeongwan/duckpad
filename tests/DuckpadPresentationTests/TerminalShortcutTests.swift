@@ -7,6 +7,51 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct TerminalShortcutTests {
+    @Test func splitRatiosSurviveZoomResizeAndHistoryRestore() throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        var created = 0
+        let workspace = TerminalSessionWorkspaceView(configuration: ShellLaunchConfiguration(workingDirectory: URL(fileURLWithPath: "/tmp"))) { _ in
+            created += 1
+            return RoutingSurface()
+        }
+        window.contentView = workspace
+        workspace.split(.right)
+        let initial = try #require(workspace.subviews.first as? NSSplitView)
+        initial.setPosition(200, ofDividerAt: 0)
+        let saved = try #require(workspace.snapshot)
+        workspace.toggleZoom()
+        workspace.frame.size.width = 1000
+        workspace.toggleZoom()
+        let restored = try #require(workspace.subviews.first as? NSSplitView)
+        #expect(abs(restored.arrangedSubviews[0].frame.width - 250) < 2)
+        workspace.split(.down)
+        let nested = try #require(workspace.subviews.first as? NSSplitView)
+        #expect(abs(nested.arrangedSubviews[0].frame.width - 250) < 2)
+        let horizontal = try #require(nested.arrangedSubviews[1] as? NSSplitView)
+        horizontal.setPosition(100, ofDividerAt: 0)
+        let nestedSnapshot = try #require(workspace.snapshot)
+        workspace.frame.size = NSSize(width: 1200, height: 600)
+        workspace.layoutSubtreeIfNeeded()
+        #expect(abs(nested.arrangedSubviews[0].frame.width - 300) < 2)
+        #expect(abs(horizontal.arrangedSubviews[0].frame.height - 150) < 2)
+        workspace.toggleZoom()
+        workspace.toggleZoom()
+        workspace.restore(nestedSnapshot)
+        let restoredNested = try #require(workspace.subviews.first as? NSSplitView)
+        let restoredHorizontal = try #require(restoredNested.arrangedSubviews[1] as? NSSplitView)
+        #expect(abs(restoredHorizontal.arrangedSubviews[0].frame.height - 150) < 2)
+        workspace.frame.size.width = 1000
+        workspace.equalize()
+        workspace.restore(saved)
+        let fromHistory = try #require(workspace.subviews.first as? NSSplitView)
+        #expect(abs(fromHistory.arrangedSubviews[0].frame.width - 250) < 2)
+        #expect(created == 3)
+    }
+
     @Test func firstSplitKeepsBothPanesVisibleAfterLayout() throws {
         _ = NSApplication.shared
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 200),

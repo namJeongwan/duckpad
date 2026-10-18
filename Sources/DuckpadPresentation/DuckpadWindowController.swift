@@ -45,7 +45,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let extensionsPanel = ExtensionsManagerPanel()
     private var extensionLocalInstallTask: Task<Void, Never>?
     private var extensionUpdater: ExtensionUpdateController?
-    let commandPalettePanel = CommandPalettePanel()
+    let commandPalettePanel = CommandPaletteView()
     let symbolOutlinePanel = SymbolOutlinePanel()
     private let workspaceSidebar = WorkspaceSidebarView(frame: .zero)
     private let workspaceContentSplit = WorkspaceSplitView(frame: .zero)
@@ -1480,16 +1480,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performShowFileFormatMenu(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable, fileUseCase != nil else { return }
         let menu = DuckpadMainMenuFactory.makeFileFormatStatusMenu(target: self)
+        let anchor = statusBar.menuAnchor(for: fileFormatStatus)
         menu.popUp(
             positioning: nil,
-            at: NSPoint(x: 0, y: fileFormatStatus.bounds.height + 2),
-            in: fileFormatStatus
+            at: NSPoint(x: 0, y: anchor.bounds.height + 2),
+            in: anchor
         )
     }
 
     @objc public func performShowLineEndingMenu(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable, fileUseCase != nil else { return }
-        let button = statusBar.lineEndingButton
+        let button = statusBar.menuAnchor(for: statusBar.lineEndingButton)
         let menu = DuckpadMainMenuFactory.makeLineEndingMenu(target: self)
         MenuLocalization.apply(to: menu)
         menu.popUp(
@@ -2075,7 +2076,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return (actionableEditorCommands as? any EditorCopyExportPort)?.canCopyAsImage ?? false
         }
         if let command = editorCommand(for: menuItem.action) {
-            if let surface = window?.firstResponder as? TerminalSurfaceView { return surface.canPerform(command) }
+            if let surface = CommandPaletteView.commandResponder(in: window) as? TerminalSurfaceView { return surface.canPerform(command) }
             if let focusedTextEditing { return focusedTextEditing.canPerform(command) }
             return actionableEditorCommands?.canPerform(command) ?? false
         }
@@ -2296,7 +2297,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     var editingCommandWindow: () -> NSWindow? = { NSApp.keyWindow }
 
     private var focusedTextEditing: FocusedTextEditing? {
-        guard let textView = editingCommandWindow()?.firstResponder as? NSTextView,
+        guard let textView = CommandPaletteView.commandResponder(in: editingCommandWindow()) as? NSTextView,
               !textView.isDescendant(of: editorHostView) else { return nil }
         return FocusedTextEditing(textView: textView)
     }
@@ -2307,7 +2308,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private var editorCommandsAreActionable: Bool {
-        guard focusedTextEditing == nil, !(window?.firstResponder is TerminalSurfaceView), window?.attachedSheet == nil,
+        guard focusedTextEditing == nil, !(CommandPaletteView.commandResponder(in: window) is TerminalSurfaceView), window?.attachedSheet == nil,
               editingCommandWindow() == nil || editingCommandWindow() === window else { return false }
         let snapshot = workspace.snapshot()
         return snapshot.startup == .ready

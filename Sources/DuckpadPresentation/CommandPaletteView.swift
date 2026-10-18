@@ -3,18 +3,43 @@ import DuckpadLocalization
 
 /// An in-window overlay: never opens a popover outside the editor's bounds.
 @MainActor
-final class TerminalCommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
+final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
+    private static weak var validatingPalette: CommandPaletteView?
+
+    /// Menu validation uses the invoking pane without moving the actual field
+    /// editor (which would interrupt search selection and IME composition).
+    static func commandResponder(in window: NSWindow?) -> NSResponder? {
+        guard let window else { return nil }
+        if let palette = validatingPalette, palette.window === window {
+            return palette.returnFocus
+        }
+        return window.firstResponder
+    }
+
+    private func withInvocationContext<T>(_ body: () -> T) -> T {
+        let previous = Self.validatingPalette
+        Self.validatingPalette = self
+        defer { Self.validatingPalette = previous }
+        return body()
+    }
+
     var onExecute: ((NSMenuItem, AnyObject) -> Void)?
     private let card = NSVisualEffectView()
     private let search = NSTextField()
     private let searchIcon = NSImageView()
-    private let clearButton = NSButton()
+    private let clearButton = StatusBarButton()
     private let table = NSTableView()
     private let scroll = NSScrollView()
     private let empty = NSTextField(labelWithString: "")
-    private var commands: [CommandPaletteCommand] = []
+    private(set) var commands: [CommandPaletteCommand] = []
+    private weak var sourceMenu: NSMenu?
+    private var excludedAction: Selector?
+    private var catalog = L10n.catalog
+    private let countLabel = NSTextField(labelWithString: "")
     private(set) var filteredCommands: [CommandPaletteCommand] = []
     private weak var returnFocus: NSResponder?
+    private weak var returnControl: NSControl?
+    private var returnSelection: NSRange?
     private var keyMonitor: Any?
     var isPresented: Bool { superview != nil }
     var cardFrame: NSRect { card.frame }
@@ -22,7 +47,7 @@ final class TerminalCommandPaletteView: NSView, NSTextFieldDelegate, NSTableView
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         autoresizingMask = [.width, .height]
-        setAccessibilityIdentifier("duckpad.terminal.commands")
+        setAccessibilityIdentifier("duckpad.commands")
         card.material = .popover
         card.blendingMode = .withinWindow
         card.state = .active
@@ -33,9 +58,9 @@ final class TerminalCommandPaletteView: NSView, NSTextFieldDelegate, NSTableView
         card.shadow?.shadowBlurRadius = 20
         card.shadow?.shadowOffset = NSSize(width: 0, height: -6)
         card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
-        card.appearance = NSAppearance(named: .darkAqua)
+        updateAppearance()
         addSubview(card)
+        search.cell = CommandPaletteSearchCell(textCell: "")
         search.isBordered = false
         search.drawsBackground = false
         search.focusRingType = .none
@@ -56,7 +81,7 @@ final class TerminalCommandPaletteView: NSView, NSTextFieldDelegate, NSTableView
         card.addSubview(searchIcon)
         card.addSubview(clearButton)
         search.delegate = self
-        search.setAccessibilityIdentifier("duckpad.terminal.commands.search")
+        search.setAccessibilityIdentifier("duckpad.commands.search")
         card.addSubview(search)
         let divider = NSBox()
         divider.boxType = .separator
@@ -70,16 +95,18 @@ final class TerminalCommandPaletteView: NSView, NSTextFieldDelegate, NSTableView
         let column = NSTableColumn(identifier: .init("command"))
         table.addTableColumn(column)
         table.headerView = nil
-        table.rowHeight = 32
+        table.rowHeight = 40
         table.intercellSpacing = NSSize(width: 0, height: 2)
+        table.allowsEmptySelection = false
         table.backgroundColor = .clear
-        table.style = .fullWidth
+        table.style = .plain
+        table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.selectionHighlightStyle = .regular
         table.dataSource = self
         table.delegate = self
         table.target = self
         table.action = #selector(activateSelectedResult)
-        table.setAccessibilityIdentifier("duckpad.terminal.commands.results")
+        table.setAccessibilityIdentifier("duckpad.commands.results")
         scroll.documentView = table
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
@@ -90,21 +117,86 @@ final class TerminalCommandPaletteView: NSView, NSTextFieldDelegate, NSTableView
         empty.textColor = .secondaryLabelColor
         empty.font = .systemFont(ofSize: 13)
         card.addSubview(empty)
+        countLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        countLabel.textColor = .secondaryLabelColor
+        countLabel.alignment = .right
+        card.addSubview(countLabel)
     }
 
     required init?(coder: NSCoder) { nil }
 
-    func present(menu: NSMenu, in host: NSView, catalog: LocalizationCatalog = L10n.catalog) {
-        dismiss()
-        guard let window = host.window else { return }
-        returnFocus = window.firstResponder
-        commands = CommandPaletteRegistry.commands(in: menu)
+    func apply(menu: NSMenu, excludingAction: Selector? = nil) {
+        sourceMenu = menu
+        excludedAction = excludingAction
+        commands = resolveCommands(in: menu)
+        refilter()
+    }
+
+    private func resolveCommands(in menu: NSMenu) -> [CommandPaletteCommand] {
+        withInvocationContext {
+            CommandPaletteRegistry.commands(in: menu, excludingAction: excludedAction) { [self] action, item in
+                if let target = item.target { return target as AnyObject }
+                if isPresented, let previous = commands.first(where: { $0.item === item }), let target = previous.target {
+                    return target
+                }
+                // Resolve newly registered responder-chain commands from the
+                // invoking pane, never from the palette's search field.
+                var responder = returnFocus
+                var visited = Set<ObjectIdentifier>()
+                while let current = responder, visited.insert(ObjectIdentifier(current)).inserted {
+                    if current.responds(to: action) { return current }
+                    responder = current.nextResponder
+                }
+                if !isPresented { return NSApp.target(forAction: action, to: nil, from: item) as AnyObject? }
+                if let delegate = NSApp.delegate, delegate.responds(to: action) { return delegate }
+                return NSApp.responds(to: action) ? NSApp : nil
+            }
+        }
+    }
+
+    func refreshIfPresented(menu: NSMenu, excludingAction: Selector?) {
+        guard isPresented else { return }
+        let selected = filteredCommands.indices.contains(table.selectedRow) ? filteredCommands[table.selectedRow].item : nil
+        apply(menu: menu, excludingAction: excludingAction)
+        if let selected, let row = filteredCommands.firstIndex(where: { $0.item === selected }) { selectResult(at: row) }
+    }
+
+    func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        self.catalog = catalog
         search.placeholderString = catalog.text("Search commands")
         clearButton.toolTip = catalog.text("Clear Search")
         clearButton.setAccessibilityLabel(catalog.text("Clear Search"))
         search.setAccessibilityLabel(catalog.text("Search Duckpad commands"))
         table.setAccessibilityLabel(catalog.text("Duckpad command search results"))
         empty.stringValue = catalog.text("No matching commands")
+        let selection = table.selectedRow
+        if let sourceMenu {
+            let visibleItems = filteredCommands.map(\.item)
+            commands = resolveCommands(in: sourceMenu)
+            filteredCommands = visibleItems.compactMap { item in commands.first { $0.item === item } }
+        }
+        table.reloadData()
+        if filteredCommands.indices.contains(selection) { selectResult(at: selection) }
+        updateCount()
+    }
+
+    func present(menu: NSMenu, excludingAction: Selector?, relativeTo anchor: NSView) {
+        guard let host = anchor.window?.contentView else { return }
+        present(menu: menu, excludingAction: excludingAction, in: host)
+    }
+
+    func present(menu: NSMenu, excludingAction: Selector? = nil, in host: NSView, catalog: LocalizationCatalog = L10n.catalog) {
+        dismiss()
+        guard let window = host.window else { return }
+        // A window has one command surface, regardless of the invoking pane.
+        for other in host.subviews.compactMap({ $0 as? CommandPaletteView }) { other.dismiss() }
+        returnFocus = window.firstResponder
+        if let editor = returnFocus as? NSTextView, editor.isFieldEditor {
+            returnControl = editor.delegate as? NSControl
+            returnSelection = editor.selectedRange()
+        }
+        refreshLocalization(catalog: catalog)
+        apply(menu: menu, excludingAction: excludingAction)
         frame = host.bounds
         host.addSubview(self, positioned: .above, relativeTo: nil)
         setQuery("")
@@ -128,8 +220,17 @@ final class TerminalCommandPaletteView: NSView, NSTextFieldDelegate, NSTableView
         NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: hostWindow)
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
         removeFromSuperview()
-        if restoreFocus, let returnFocus { hostWindow?.makeFirstResponder(returnFocus) }
+        if restoreFocus, let responder = returnControl ?? returnFocus {
+            hostWindow?.makeFirstResponder(responder)
+            if let selection = returnSelection, let editor = hostWindow?.firstResponder as? NSTextView {
+                let count = editor.string.utf16.count
+                let location = min(selection.location, count)
+                editor.setSelectedRange(NSRange(location: location, length: min(selection.length, count - location)))
+            }
+        }
         returnFocus = nil
+        returnControl = nil
+        returnSelection = nil
     }
 
     @objc private func hostClosed() { dismiss(restoreFocus: false) }
@@ -138,16 +239,26 @@ final class TerminalCommandPaletteView: NSView, NSTextFieldDelegate, NSTableView
     override func layout() {
         super.layout()
         let width = min(500, max(0, bounds.width - 32))
-        let desiredHeight = filteredCommands.isEmpty ? 130 : 58 + CGFloat(min(8, filteredCommands.count)) * 34
+        let desiredHeight = filteredCommands.isEmpty ? 130 : 80 + CGFloat(min(8, filteredCommands.count)) * 42
         let height = min(desiredHeight, max(0, bounds.height - 32))
         let top = min(max(16, bounds.height * 0.12), max(16, bounds.height - height - 16))
         card.frame = NSRect(x: (bounds.width - width) / 2, y: bounds.height - top - height, width: width, height: height)
         searchIcon.frame = NSRect(x: 16, y: height - 34, width: 18, height: 22)
         search.frame = NSRect(x: 44, y: height - 34, width: max(0, width - 88), height: 22)
         clearButton.frame = NSRect(x: max(0, width - 36), y: height - 34, width: 20, height: 22)
-        scroll.frame = NSRect(x: 6, y: 6, width: max(0, width - 12), height: max(0, height - 58))
-        table.tableColumns.first?.width = max(0, scroll.contentSize.width)
+        scroll.frame = NSRect(x: 6, y: 28, width: max(0, width - 12), height: max(0, height - 80))
+        countLabel.frame = NSRect(x: 12, y: 7, width: max(0, width - 24), height: 14)
+        table.frame.size.width = max(0, scroll.contentSize.width)
+        table.sizeLastColumnToFit()
         empty.frame = NSRect(x: 12, y: max(6, height / 2 - 12), width: max(0, width - 24), height: 24)
+    }
+
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); updateAppearance() }
+
+    private func updateAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            card.layer?.borderColor = NSColor.separatorColor.cgColor
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -168,8 +279,12 @@ final class TerminalCommandPaletteView: NSView, NSTextFieldDelegate, NSTableView
         table.reloadData()
         clearButton.isHidden = search.stringValue.isEmpty
         empty.isHidden = !filteredCommands.isEmpty
+        updateCount()
         if !filteredCommands.isEmpty { selectResult(at: 0) }
         needsLayout = true
+    }
+    private func updateCount() {
+        countLabel.stringValue = catalog.text("%1$@ of %2$@ commands", arguments: [L10n.argument(filteredCommands.count), L10n.argument(commands.count)])
     }
     func selectResult(at index: Int) {
         guard filteredCommands.indices.contains(index) else { return }
@@ -179,7 +294,8 @@ final class TerminalCommandPaletteView: NSView, NSTextFieldDelegate, NSTableView
     @objc func activateSelectedResult() {
         guard filteredCommands.indices.contains(table.selectedRow) else { return }
         let command = filteredCommands[table.selectedRow]
-        guard let target = command.target, CommandPaletteRegistry.isCurrentlyEnabled(command) else { NSSound.beep(); return }
+        guard let target = command.target,
+              withInvocationContext({ CommandPaletteRegistry.isCurrentlyEnabled(command) }) else { NSSound.beep(); return }
         dismiss()
         onExecute?(command.item, target)
     }
@@ -196,16 +312,35 @@ final class TerminalCommandPaletteView: NSView, NSTextFieldDelegate, NSTableView
     }
     private func moveSelection(_ offset: Int) {
         guard !filteredCommands.isEmpty else { return }
-        selectResult(at: (max(0, table.selectedRow) + offset + filteredCommands.count) % filteredCommands.count)
+        selectResult(at: min(max(0, max(0, table.selectedRow) + offset), filteredCommands.count - 1))
     }
     func numberOfRows(in tableView: NSTableView) -> Int { filteredCommands.count }
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        TerminalCommandPaletteRowView()
+        CommandPaletteRowView()
     }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let command = filteredCommands[row]
-        let cell = TerminalCommandPaletteCell()
-        cell.apply(command)
+        let identifier = NSUserInterfaceItemIdentifier("duckpad.command.cell")
+        let cell = (table.makeView(withIdentifier: identifier, owner: self) as? CommandPaletteCell) ?? CommandPaletteCell()
+        cell.identifier = identifier
+        let enabled = withInvocationContext { CommandPaletteRegistry.isCurrentlyEnabled(command) }
+        cell.apply(command, enabled: enabled, catalog: catalog)
         return cell
     }
+}
+
+/// Keep search edits separate from a text field that invoked the palette.
+/// Sharing NSWindow's default field editor would overwrite its text/selection.
+@MainActor
+private final class CommandPaletteSearchCell: NSTextFieldCell {
+    private let editor: NSTextView = {
+        let view = NSTextView()
+        view.isFieldEditor = true
+        view.isRichText = false
+        view.drawsBackground = false
+        view.allowsUndo = true
+        return view
+    }()
+
+    override func fieldEditor(for controlView: NSView) -> NSTextView? { editor }
 }
