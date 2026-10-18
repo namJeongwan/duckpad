@@ -880,3 +880,15 @@
 "Don’t ask again for terminal sessions" = "Don’t ask again for terminal sessions";
 "Confirm Closing Terminal Sessions" = "Confirm Closing Terminal Sessions";
 "Press ⌘T to start a terminal session." = "Press ⌘T to start a terminal session.";
+
+/* Usage statistics */
+"Privacy" = "Privacy";
+"Share usage statistics" = "Share usage statistics";
+"Share first-run and version-change counts, app and macOS versions, editing languages, feature and plugin counts, and operation results to improve Duckpad. No document contents, names, paths, searches, terminal commands, or persistent device IDs. On by default; you can turn it off at any time to clear pending statistics. Sent via Cloudflare to Duckpad’s statistics server; network providers process connection IP addresses." = "Share first-run and version-change counts, app and macOS versions, editing languages, feature and plugin counts, and operation results to improve Duckpad. No document contents, names, paths, searches, terminal commands, or persistent device IDs. On by default; you can turn it off at any time to clear pending statistics. Sent via Cloudflare to Duckpad’s statistics server; network providers process connection IP addresses.";
+"View statistics transmission log" = "View statistics transmission log";
+"Statistics transmission log" = "Statistics transmission log";
+"Statistics transmission is unavailable in this build." = "Statistics transmission is unavailable in this build.";
+"No transmission attempts in this session. Statistics are sent in batches while sharing is enabled. This view shows the five most recent batches; reopen it to refresh." = "No transmission attempts in this session. Statistics are sent in batches while sharing is enabled. This view shows the five most recent batches; reopen it to refresh.";
+"Usage statistics are on to help improve Duckpad. Document contents, names, and paths are excluded. You can turn sharing off in Privacy Settings." = "Usage statistics are on to help improve Duckpad. Document contents, names, and paths are excluded. You can turn sharing off in Privacy Settings.";
+"Privacy Settings" = "Privacy Settings";
+"Dismiss" = "Dismiss";

@@ -56,9 +56,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.12.0</string>
+    <string>0.12.1</string>
     <key>CFBundleVersion</key>
-    <string>58</string>
+    <string>59</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
     <key>LSMinimumSystemVersion</key>
@@ -71,6 +71,10 @@
     <string>NSApplication</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
+	<key>DuckpadUsageHost</key>
+	<string>https://dp-stats.hongyoungjun.com</string>
+	<key>DuckpadUsageAppKey</key>
+	<string>A-SH-3443511654</string>
 	<key>SUFeedURL</key>
 	<string>https://namjeongwan.github.io/duckpad/appcast.xml</string>
 	<key>SUPublicEDKey</key>

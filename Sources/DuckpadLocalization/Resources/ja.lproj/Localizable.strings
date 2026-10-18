@@ -840,3 +840,15 @@
 "Don’t ask again for terminal sessions" = "ターミナルセッションを閉じるときに再確認しない";
 "Confirm Closing Terminal Sessions" = "ターミナルセッションを閉じる前に確認";
 "Press ⌘T to start a terminal session." = "⌘Tを押してターミナルセッションを開始します。";
+
+/* Usage statistics */
+"Privacy" = "プライバシー";
+"Share usage statistics" = "利用統計を共有";
+"Share first-run and version-change counts, app and macOS versions, editing languages, feature and plugin counts, and operation results to improve Duckpad. No document contents, names, paths, searches, terminal commands, or persistent device IDs. On by default; you can turn it off at any time to clear pending statistics. Sent via Cloudflare to Duckpad’s statistics server; network providers process connection IP addresses." = "Duckpadの改善のため、初回起動・バージョン変更の回数、アプリ・macOSのバージョン、編集言語、機能・プラグインの使用回数と処理結果を共有します。文書の内容・名前・パス・検索語・ターミナルコマンド・永続的な端末IDは含みません。初期設定はオンです。いつでもオフにでき、未送信の統計は削除されます。Cloudflare経由でDuckpadの統計サーバーに送信され、ネットワーク事業者は接続IPアドレスを処理します。";
+"View statistics transmission log" = "統計の送信履歴を表示";
+"Statistics transmission log" = "統計の送信履歴";
+"Statistics transmission is unavailable in this build." = "このビルドでは統計を送信できません。";
+"No transmission attempts in this session. Statistics are sent in batches while sharing is enabled. This view shows the five most recent batches; reopen it to refresh." = "今回の起動では送信履歴がありません。共有がオンの場合、統計をまとめて送信します。最近の5件の送信バッチを表示します。開き直すと更新されます。";
+"Usage statistics are on to help improve Duckpad. Document contents, names, and paths are excluded. You can turn sharing off in Privacy Settings." = "Duckpad改善のため使用統計がオンになっています。文書の内容・名前・パスは含みません。プライバシー設定で共有をオフにできます。";
+"Privacy Settings" = "プライバシー設定";
+"Dismiss" = "閉じる";

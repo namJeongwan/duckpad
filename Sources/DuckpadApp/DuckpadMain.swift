@@ -23,6 +23,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         return controller
     }()
     private var appUpdater: SparkleUpdateController?
+    private var usageStatistics: UsageStatistics?
+    private var usageLogWindow: UsageStatisticsLogWindowController?
     private lazy var terminalRuntime = GhosttyRuntime()
     private let auxiliaryCloseKeys = AuxiliaryCloseKeyRouter()
     private var availableUpdateVersion: String?
@@ -91,6 +93,35 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         }
     }
 
+    private func configureUsageStatistics() {
+        var sender: UsageStatistics.Sender?
+        #if !DEBUG
+        if Bundle.main.bundleURL.pathExtension == "app",
+           !environment.keys.contains(where: { $0.hasPrefix("DUCKPAD_") }),
+           let host = Bundle.main.object(forInfoDictionaryKey: "DuckpadUsageHost") as? String,
+           let key = Bundle.main.object(forInfoDictionaryKey: "DuckpadUsageAppKey") as? String,
+           let transport = UsageStatisticsTransport(host: host, appKey: key) {
+            sender = { await transport.send($0) }
+        }
+        #endif
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        usageStatistics = UsageStatistics(defaults: .standard,
+            system: .init(isDebug: false, osVersion: "\(os.majorVersion).\(os.minorVersion)",
+                appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+                appBuildNumber: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"),
+            languages: Set(languageRegistry.definitions.map { $0.id.rawValue }), sender: sender)
+        usageStatistics?.setEnabled(settingsUseCase.state.settings.shareUsageStatistics)
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        usageStatistics?.recordActivity()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Never delay termination to send telemetry.
+        usageStatistics?.setEnabled(false)
+    }
+
     private func finishLaunching() {
         let securityScopeSmokeNamespace = environment["DUCKPAD_SECURITY_SCOPE_SMOKE_NAMESPACE"].flatMap {
             $0.range(of: #"^[a-zA-Z0-9-]{1,64}$"#, options: .regularExpression) == nil ? nil : $0
@@ -133,6 +164,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         let serviceRoot = extensionsRoot.deletingLastPathComponent().appendingPathComponent("PluginData", isDirectory: true)
         extensionServiceHost = ExtensionListServiceHost(storage: LocalExtensionServiceStorage(root: serviceRoot), nativeStorageRoot: serviceRoot,
             nativePackageRoot: ManagedNativePackageStore.appRoot(), nativeVerifier: LocalNativePluginInstallationVerifier(), prepareNativePackage: { files in try await NativeInstallerClient().install(files: files) })
+        configureUsageStatistics()
+        extensionServiceHost.onUsageMetric = { [weak self] in self?.usageStatistics?.record($0) }
         if Bundle.main.bundleURL.pathExtension == "app" {
             extensionTransport = XPCPluginHostTransport()
         } else {
@@ -157,6 +190,13 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         }
         register(runtime, recoveryRoot: recoveryBase)
         controller.showAndFocus()
+        if usageStatistics?.isEnabled == true, !UserDefaults.standard.bool(forKey: "usage.noticeShown") {
+            controller.showUsageStatisticsNotice { [weak self] in
+                self?.showSettings()
+                self?.settingsWindowController?.selectCategory("Privacy")
+            }
+            UserDefaults.standard.set(true, forKey: "usage.noticeShown")
+        }
         runtimeIsReady = true
         drainPendingFinderOpenRequests()
         restoreAdditionalWindows()
@@ -867,6 +907,12 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             automaticallyAuthorizesEnabledPackages: true
         )
         let formattingUseCase = DocumentFormattingUseCase(workspace: workspace, editor: editor, formatter: BundledPrettierFormatter())
+        formattingUseCase.onUsageMetric = { [weak self] in self?.usageStatistics?.record($0) }
+        extensionUseCase.onUsageMetric = { [weak self] in self?.usageStatistics?.record($0) }
+        editor.onAcceptedEditLanguage = { [weak self] language in
+            guard NSApplication.shared.isActive else { return }
+            self?.usageStatistics?.recordEdit(language: language.rawValue)
+        }
         formattingUseCase.settings = settings.formatting
         fileUseCase.formattingUseCase = formattingUseCase
         let panels = NativeFilePanelAdapter()
@@ -927,9 +973,27 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private func register(_ runtime: WindowRuntime, recoveryRoot: URL) {
         let controller = runtime.controller
         let identifier = ObjectIdentifier(controller)
+        controller.onUsageMetric = { [weak self] in
+            self?.usageStatistics?.recordActivity()
+            self?.usageStatistics?.record($0)
+        }
         controller.configureExtensionServices(extensionServiceHost)
         let updater = extensionUpdateInstaller!
-        controller.configureExtensionUpdates(check: { try await updater.check($0) }, prepare: { try await updater.prepare($0, publisherFingerprint: $1) }, install: { try await updater.install($0) }, browse: { try await updater.availablePlugins() },
+        let registry = runtime.extensionUseCase
+        controller.configureExtensionUpdates(check: { try await updater.check($0) }, prepare: { try await updater.prepare($0, publisherFingerprint: $1) }, install: { [weak self] prepared in
+            let installed = await registry.state().items.contains { $0.manifest.id == prepared.release.extensionID }
+            let kind: UsageMetric.Kind = installed ? .pluginUpdate : .pluginInstall
+            let started = ProcessInfo.processInfo.systemUptime
+            do {
+                try await updater.install(prepared)
+                await self?.usageStatistics?.record(.init(kind, dimension: prepared.release.extensionID.rawValue,
+                    outcome: .success, duration: ProcessInfo.processInfo.systemUptime - started))
+            } catch {
+                await self?.usageStatistics?.record(.init(kind, dimension: prepared.release.extensionID.rawValue,
+                    outcome: Task.isCancelled ? .cancelled : .failed, duration: ProcessInfo.processInfo.systemUptime - started))
+                throw error
+            }
+        }, browse: { try await updater.availablePlugins() },
             uninstall: { [weak self] item in
                 do {
                     try await updater.uninstall(item) { [weak self] in
@@ -937,14 +1001,23 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                         try await self.stopExtensionForRemoval(item.manifest.id)
                     }
                 } catch {
+                    await self?.usageStatistics?.record(.init(.pluginRemove, dimension: item.manifest.id.rawValue, outcome: .failed))
                     await self?.refreshAllExtensions()
                     throw error
                 }
+                await self?.usageStatistics?.record(.init(.pluginRemove, dimension: item.manifest.id.rawValue, outcome: .success))
                 await self?.refreshAllExtensions()
             })
         controller.onInstallExtension = { [weak self] url in
             guard let self else { throw ExtensionFailure.cancelled }
-            return try await self.extensionUpdateInstaller.installPackage(at: url)
+            do {
+                let id = try await self.extensionUpdateInstaller.installPackage(at: url)
+                self.usageStatistics?.record(.init(.pluginInstall, dimension: id.rawValue, outcome: .success))
+                return id
+            } catch {
+                self.usageStatistics?.record(.init(.pluginInstall, dimension: "other", outcome: .failed))
+                throw error
+            }
         }
         controller.applyPreferences(settingsUseCase.state.settings)
         windowControllers[identifier] = controller
@@ -1230,6 +1303,12 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private func configuredSettingsWindow() -> DuckpadSettingsWindowController {
         let settingsWindow = settingsWindowController ?? DuckpadSettingsWindowController()
         settingsWindowController = settingsWindow
+        settingsWindow.onShowUsageStatistics = { [weak self] in
+            guard let self else { return }
+            let controller = self.usageLogWindow ?? UsageStatisticsLogWindowController()
+            self.usageLogWindow = controller
+            controller.show(log: self.usageStatistics?.transmissionLog ?? "", configured: self.usageStatistics?.isConfigured == true)
+        }
         settingsWindow.acceptsUpdates = { [weak self] in
             self?.terminationCoordinator.permitsApplicationCommands == true
         }
@@ -1258,6 +1337,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     }
 
     private func apply(_ settings: AppSettings) {
+        usageStatistics?.setEnabled(settings.shareUsageStatistics)
+        if !settings.shareUsageStatistics { usageLogWindow?.close() }
         let nextCatalog = LocalizationCatalog(language: settings.appLanguage)
         let languageChanged = nextCatalog.language != L10n.catalog.language
         if languageChanged { L10n.configure(language: settings.appLanguage) }

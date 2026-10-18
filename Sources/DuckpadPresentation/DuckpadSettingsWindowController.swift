@@ -27,7 +27,8 @@ public struct DuckpadSettingsSmokeState: Equatable, Sendable {
 
 @MainActor
 public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
-    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation", "Searching", "Formatting"]
+    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation", "Searching", "Formatting", "Privacy"]
+    public var onShowUsageStatistics: (() -> Void)?
     public private(set) var selectedCategory = "General"
     private var catalog = L10n.catalog
     private var localizationBindings: [(LocalizationCatalog) -> Void] = []
@@ -150,6 +151,8 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         return field
     }
 
+    @objc private func showUsageStatistics(_ sender: Any?) { onShowUsageStatistics?() }
+
     private func setStatus(_ key: String, failure: AppSettingsStoreError? = nil) {
         statusLocalization = { catalog in
             catalog.text(key, arguments: failure.map { [PresentationErrorText.message($0, catalog: catalog)] } ?? [])
@@ -226,6 +229,14 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             (pages[category] as? NSStackView)?.addArrangedSubview(button)
         }
         checkbox("Include formatting when copying", \.copyWithFormatting, "Editing")
+        checkbox("Share usage statistics", \.shareUsageStatistics, "Privacy")
+        let usageNote = label("Share first-run and version-change counts, app and macOS versions, editing languages, feature and plugin counts, and operation results to improve Duckpad. No document contents, names, paths, searches, terminal commands, or persistent device IDs. On by default; you can turn it off at any time to clear pending statistics. Sent via Cloudflare to Duckpad’s statistics server; network providers process connection IP addresses.", wrapping: true)
+        usageNote.textColor = .secondaryLabelColor
+        (pages["Privacy"] as? NSStackView)?.addArrangedSubview(usageNote)
+        usageNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
+        let usageLog = NSButton(title: "", target: self, action: #selector(showUsageStatistics(_:)))
+        localize { usageLog.title = $0.text("View statistics transmission log") }
+        (pages["Privacy"] as? NSStackView)?.addArrangedSubview(usageLog)
         func choices(_ title: String, _ key: WritableKeyPath<AppSettings, Int>, _ choices: [(String, Int)], _ category: String) {
             let popup = NSPopUpButton(frame: .zero, pullsDown: false)
             for (label, value) in choices {

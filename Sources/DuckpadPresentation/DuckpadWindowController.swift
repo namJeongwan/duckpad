@@ -34,7 +34,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var updateAccessory: UpdateTitlebarAccessoryController?
     private var statusBarHeightConstraint: NSLayoutConstraint!
     private var appPreferences = AppSettings.defaults
+    public var onUsageMetric: ((UsageMetric) -> Void)?
     let statusBar = DocumentStatusBarView(frame: .zero)
+    private let usageNotice = UsageStatisticsNoticeView(frame: .zero)
     private let persistenceBanner = PersistenceErrorBanner(frame: .zero)
     private let languageStatus = StatusBarButton(title: L10n.text("Plain Text"), target: nil, action: nil)
     private let symbolStatus = NSButton(title: L10n.text("Symbols"), target: nil, action: nil)
@@ -1211,7 +1213,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         )
     }
 
+    public func showUsageStatisticsNotice(openSettings: @escaping () -> Void) {
+        usageNotice.onSettings = openSettings
+        usageNotice.show()
+    }
+
     public func applyPreferences(_ settings: AppSettings) {
+        if !settings.shareUsageStatistics { usageNotice.hideNotice() }
         let languageChanged = appPreferences.appLanguage != settings.appLanguage
         appPreferences = settings
         fileUseCase?.setLiveReloadEnabled(settings.liveFileReloadEnabled)
@@ -1256,6 +1264,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         searchPanel.refreshLocalization(catalog: catalog)
         liveFileBanner.refreshLocalization(catalog: catalog)
         persistenceBanner.refreshLocalization(catalog: catalog)
+        usageNotice.refreshLocalization(catalog: catalog)
         statusBar.refreshLocalization(catalog: catalog)
         extensionsPanel.refreshLocalization(catalog: catalog)
         extensionServiceHost?.refreshLocalization(catalog: catalog)
@@ -1512,6 +1521,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performToggleTerminal(_ sender: Any? = nil) {
         guard !hasTornDownWindow, !terminationReviewInProgress, window?.attachedSheet == nil else { return }
         if isTerminalVisible { hideTerminal(); return }
+        onUsageMetric?(.feature(.terminal))
         if terminalPanel == nil {
             let panel = TerminalPanelView(sessions: terminalSessions, surfaceFactory: terminalSurfaceFactory)
             panel.onNewSession = { [weak self] in self?.createTerminalSession() }
@@ -1658,6 +1668,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         guard workspaceInteractionsAreActionable, workspace.activeFileContext()?.binding?.isReadOnly != true else { return }
         markdownPreview.open(in: workspaceContentSplit) { [weak self] in self?.performCloseMarkdownPreview() }
+        onUsageMetric?(.feature(.markdownPreview))
         if let menu = markdownCommandsMenu { menuNeedsUpdate(menu) }
         scheduleMarkdownPreview()
     }
@@ -1761,10 +1772,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performShowFind(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
+        onUsageMetric?(.feature(.find))
         showSearchPanel(replace: false)
     }
     @objc public func performShowReplace(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
+        onUsageMetric?(.feature(.replace))
         showSearchPanel(replace: true)
     }
     @objc public func performFindNext(_ sender: Any? = nil) {
@@ -1817,6 +1830,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performFindInFolder(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
+        onUsageMetric?(.feature(.findInFolder))
         showSearchPanel(replace: false)
         searchPanel.show(tab: .folder)
         searchWindowController.present(in: window)
@@ -3209,6 +3223,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         root.view = dropView
         root.view.addSubview(persistenceBanner)
+        root.view.addSubview(usageNotice)
         root.view.addSubview(commandBar)
         root.view.addSubview(liveFileBanner)
         liveFileBanner.reload.target = self
@@ -3267,7 +3282,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             persistenceBanner.topAnchor.constraint(equalTo: root.view.topAnchor),
             commandBar.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             commandBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            commandBar.topAnchor.constraint(equalTo: persistenceBanner.bottomAnchor),
+            usageNotice.topAnchor.constraint(equalTo: persistenceBanner.bottomAnchor),
+            usageNotice.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            usageNotice.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            commandBar.topAnchor.constraint(equalTo: usageNotice.bottomAnchor),
             terminalWorkspaceSplit.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             terminalWorkspaceSplit.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
             liveFileBanner.topAnchor.constraint(equalTo: commandBar.bottomAnchor),

@@ -60,6 +60,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     public private(set) var lastRecoveryJournalWorkByteCount = 0
     public private(set) var recoveryJournalAppendCount = 0
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
+    public var onAcceptedEditLanguage: ((LanguageID) -> Void)?
     public var onEditorStatusChange: (() -> Void)?
     public var editorStatus: EditorStatusSnapshot? {
         guard let view = activeScintillaView else { return nil }
@@ -1685,6 +1686,7 @@ public final class ScintillaEditorAdapter: EditorSavePointPort, DeferredPasteEdi
     }
 
     private func appendRecovery(_ edit: EditorIncrementalEdit, resultingRevision: UInt64) {
+        onAcceptedEditLanguage?(languageConfigurations[edit.bufferID]?.languageID ?? .plainText)
         updateSnippet(edit)
         guard !isInvalidated,
               recoveryBuffers[edit.bufferID]?.revision == edit.expectedRevision,
