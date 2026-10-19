@@ -11,6 +11,7 @@
  */
 
 #include <cmath>
+#include <array>
 
 #include <string>
 #include <string_view>
@@ -229,6 +230,9 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 	// Set when we are in composition mode and partial input is displayed.
 	NSRange mMarkedTextRange;
+    BOOL mMultiComposition;
+    std::vector<std::array<sptr_t, 4>> mCompositionPositions;
+    sptr_t mCompositionMain;
 }
 
 @synthesize owner = mOwner;
@@ -620,12 +624,32 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * First removes the replacementRange.
  */
 - (void) insertText: (id) aString replacementRange: (NSRange) replacementRange {
+    if (mMultiComposition && replacementRange.location != NSNotFound && !NSEqualRanges(replacementRange, mMarkedTextRange)) {
+        // A replacement outside the marked range is an explicit primary-range edit.
+        [self unmarkText];
+        mOwner.backend->SelectOnlyMainSelection();
+    }
 	const BOOL wasComposing = mMarkedTextRange.location != NSNotFound;
 	NSString *newText = @"";
 	if ([aString isKindOfClass: [NSString class]])
 		newText = (NSString *) aString;
 	else if ([aString isKindOfClass: [NSAttributedString class]])
 		newText = (NSString *) [aString string];
+
+    if (mMultiComposition) {
+        mOwner.backend->CompositionUndo();
+        [self restoreMultiCompositionCarets];
+        mMarkedTextRange = NSMakeRange(NSNotFound, 0);
+        id delegate = mOwner.delegate;
+        if ([delegate respondsToSelector:@selector(scintillaWillInsertTextFromSource:)])
+            [delegate scintillaWillInsertTextFromSource:SCITextInputSourceIMECommit];
+        mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
+        if ([delegate respondsToSelector:@selector(scintillaDidInsertText)])
+            [delegate scintillaDidInsertText];
+        mOwner.backend->CompositionCommit();
+        [self finishMultiComposition];
+        return;
+    }
 
 	// Reconfirming unchanged text must not add a delete/insert pair to undo history.
 	if (!wasComposing && replacementRange.location < NSNotFound - 1 && replacementRange.length > 0) {
@@ -712,12 +736,87 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * @param range The range of the new text to select (given relative to the insertion point of the new text).
  * @param replacementRange The range to remove before insertion.
  */
+// Keep a single Cocoa marked range for the primary caret, while native tentative
+// undo and selection positions cover every mirrored insertion.
+- (void) restoreMultiCompositionCarets {
+    if (mCompositionPositions.empty()) return;
+    for (size_t i = 0; i < mCompositionPositions.size(); ++i) {
+        const auto &range = mCompositionPositions[i];
+        [mOwner message:i == 0 ? SCI_SETSELECTION : SCI_ADDSELECTION wParam:range[0] lParam:range[1]];
+        [mOwner message:SCI_SETSELECTIONNCARETVIRTUALSPACE wParam:i lParam:range[2]];
+        [mOwner message:SCI_SETSELECTIONNANCHORVIRTUALSPACE wParam:i lParam:range[3]];
+    }
+    [mOwner message:SCI_SETMAINSELECTION wParam:mCompositionMain];
+}
+
+- (void) finishMultiComposition {
+    if (!mMultiComposition) return;
+    mMultiComposition = NO;
+    mCompositionPositions.clear();
+    [mOwner message:SCI_ENDUNDOACTION];
+}
+
+- (void) setMultiMarkedText:(NSString *)text selectedRange:(NSRange)range {
+    if (mMultiComposition) {
+        mOwner.backend->CompositionUndo();
+        [self restoreMultiCompositionCarets];
+    } else {
+        [mOwner message:SCI_BEGINUNDOACTION];
+        // Retain original ranges until tentative insertion, so adjacent selected
+        // words do not collapse into coincident carets before composition.
+        mMultiComposition = YES;
+        mCompositionMain = [mOwner message:SCI_GETMAINSELECTION];
+        mCompositionPositions.clear();
+        const sptr_t count = [mOwner message:SCI_GETSELECTIONS];
+        for (sptr_t i = 0; i < count; ++i)
+            mCompositionPositions.push_back({
+                [mOwner message:SCI_GETSELECTIONNCARET wParam:i],
+                [mOwner message:SCI_GETSELECTIONNANCHOR wParam:i],
+                [mOwner message:SCI_GETSELECTIONNCARETVIRTUALSPACE wParam:i],
+                [mOwner message:SCI_GETSELECTIONNANCHORVIRTUALSPACE wParam:i]});
+    }
+    mOwner.backend->CompositionCommit(); // clear previous IME indicators
+    if (text.length == 0) {
+        mMarkedTextRange = NSMakeRange(NSNotFound, 0);
+        [self finishMultiComposition];
+        return;
+    }
+    mOwner.backend->CompositionStart();
+    id delegate = mOwner.delegate;
+    if ([delegate respondsToSelector:@selector(scintillaWillInsertTextFromSource:)])
+        [delegate scintillaWillInsertTextFromSource:SCITextInputSourceTentative];
+    const sptr_t length = mOwner.backend->InsertText(text, CharacterSource::TentativeInput);
+    if ([delegate respondsToSelector:@selector(scintillaDidInsertText)])
+        [delegate scintillaDidInsertText];
+    [mOwner message:SCI_SETINDICATORCURRENT wParam:INDICATOR_IME];
+    const sptr_t count = [mOwner message:SCI_GETSELECTIONS];
+    for (sptr_t i = 0; i < count; ++i) {
+        const sptr_t end = [mOwner message:SCI_GETSELECTIONNCARET wParam:i];
+        const sptr_t start = MAX(0, end - length);
+        [mOwner message:SCI_INDICATORFILLRANGE wParam:start lParam:length];
+        const NSRange marked = mOwner.backend->CharactersFromPositions(NSMakeRange(start, length));
+        if (i == mCompositionMain) mMarkedTextRange = marked;
+        const NSUInteger offset = MIN(range.location, marked.length);
+        const NSRange relative = NSMakeRange(marked.location + offset, MIN(range.length, marked.length - offset));
+        const NSRange selected = mOwner.backend->PositionsFromCharacters(relative);
+        [mOwner message:SCI_SETSELECTIONNANCHOR wParam:i lParam:selected.location];
+        [mOwner message:SCI_SETSELECTIONNCARET wParam:i lParam:NSMaxRange(selected)];
+    }
+}
+
 - (void) setMarkedText: (id) aString selectedRange: (NSRange) range replacementRange: (NSRange) replacementRange {
 	NSString *newText = @"";
 	if ([aString isKindOfClass: [NSString class]])
 		newText = (NSString *) aString;
 	else if ([aString isKindOfClass: [NSAttributedString class]])
 		newText = (NSString *) [aString string];
+
+    if (mMultiComposition || (mMarkedTextRange.length == 0 && replacementRange.location == NSNotFound && [mOwner message:SCI_GETSELECTIONS] > 1)) {
+        [self setMultiMarkedText:newText selectedRange:range];
+        return;
+    }
+    if (mMarkedTextRange.length == 0 && replacementRange.location != NSNotFound)
+        mOwner.backend->SelectOnlyMainSelection();
 
 	// Replace marked text if there is one.
 	if (mMarkedTextRange.length > 0) {
@@ -800,6 +899,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	if (mMarkedTextRange.length > 0) {
 		mOwner.backend->CompositionCommit();
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
+        [self finishMultiComposition];
 	}
 }
 
@@ -819,6 +919,12 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * its own input handling (character composition via NSTextInputClient protocol):
  */
 - (void) keyDown: (NSEvent *) theEvent {
+    if (theEvent.keyCode == 53 && mMarkedTextRange.length == 0
+        && (theEvent.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift)) == 0) {
+        id delegate = mOwner.delegate;
+        if ([delegate respondsToSelector:@selector(scintillaHandleSelectionEscape)]
+            && [delegate scintillaHandleSelectionEscape]) return;
+    }
 	bool handled = false;
 	if (mMarkedTextRange.length == 0) {
 		const NSEventModifierFlags commandModifiers = theEvent.modifierFlags &
@@ -944,6 +1050,10 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * The editor is losing the input focus.
  */
 - (BOOL) resignFirstResponder {
+    if (mMultiComposition) {
+        [[self inputContext] discardMarkedText];
+        [self unmarkText];
+    }
 	mOwner.backend->SetFirstResponder(false);
 	return YES;
 }
@@ -1092,6 +1202,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		[[NSTextInputContext currentInputContext] discardMarkedText];
 		mOwner.backend->CompositionCommit();
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
+        [self finishMultiComposition];
 	}
 	mOwner.backend->Paste();
 }
@@ -1102,6 +1213,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		[[NSTextInputContext currentInputContext] discardMarkedText];
 		mOwner.backend->CompositionCommit();
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
+        [self finishMultiComposition];
 	}
 	mOwner.backend->Undo();
 }

@@ -46,6 +46,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var extensionLocalInstallTask: Task<Void, Never>?
     private var extensionUpdater: ExtensionUpdateController?
     let commandPalettePanel = CommandPaletteView()
+    var shortcutRegistry: ShortcutRegistry?
+    private lazy var keyboardShortcutsWindow = KeyboardShortcutsWindow()
+    private var shortcutSuppressionMonitor: Any?
+    public var onMinimapVisibilityChanged: ((Bool) async -> Bool)?
+    private var minimapUpdatePending = false
+    public var onKeyboardShortcutsChanged: (([String: String], [String: String]) async -> Bool)?
+
     let symbolOutlinePanel = SymbolOutlinePanel()
     private let workspaceSidebar = WorkspaceSidebarView(frame: .zero)
     private let workspaceContentSplit = WorkspaceSplitView(frame: .zero)
@@ -440,6 +447,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         documentIntelligenceTask?.cancel()
         documentIntelligenceTask = nil
         documentIntelligenceUseCase?.cancel()
+        keyboardShortcutsWindow.close()
+        if let shortcutSuppressionMonitor { NSEvent.removeMonitor(shortcutSuppressionMonitor) }
+        shortcutSuppressionMonitor = nil
         commandPalettePanel.dismiss()
         symbolOutlinePanel.dismiss()
         if let terminationCoordinator {
@@ -479,6 +489,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         languageUseCase?.onStateChange = nil
         documentIntelligenceUseCase?.cancel()
+        keyboardShortcutsWindow.close()
+        if let shortcutSuppressionMonitor { NSEvent.removeMonitor(shortcutSuppressionMonitor) }
+        shortcutSuppressionMonitor = nil
         commandPalettePanel.dismiss()
         symbolOutlinePanel.dismiss()
         commandBar.tearDown()
@@ -1203,6 +1216,15 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         activeEditor.focus()
     }
 
+    @objc public func performShowKeyboardShortcuts(_ sender: Any? = nil) {
+        guard !terminationReviewInProgress, let shortcutRegistry else { return }
+        keyboardShortcutsWindow.onSave = { [weak self] bindings, expected in
+            guard let self, !self.terminationReviewInProgress else { return false }
+            return await self.onKeyboardShortcutsChanged?(bindings, expected) ?? false
+        }
+        keyboardShortcutsWindow.present(registry: shortcutRegistry)
+    }
+
     @objc public func performShowCommandPalette(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable,
               let menu = NSApplication.shared.mainMenu else { return }
@@ -1339,6 +1361,26 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func applicationMainMenuDidChange(_ menu: NSMenu) {
+        if let shortcutRegistry, keyboardShortcutsWindow.window?.isVisible == true {
+            keyboardShortcutsWindow.refresh(registry: shortcutRegistry)
+        }
+        if shortcutSuppressionMonitor == nil {
+            shortcutSuppressionMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                let suppressed = MainActor.assumeIsolated {
+                    guard let self, event.window === self.window,
+                          let responder = self.window?.firstResponder as? NSView,
+                          self.editorGroupLayout.snapshot.visibleGroups.contains(where: { group in
+                              self.editorGroupWorkspace.pane(for: group).map { responder.isDescendant(of: $0.editorHostView) } == true
+                          }),
+                          let declaration = ShortcutRecorder.declaration(for: event),
+                          let binding = MenuShortcut(declaration),
+                          self.shortcutRegistry?.suppressedDefaults.contains(binding.identity) == true else { return false }
+                    return true
+                }
+                return suppressed ? nil : event
+            }
+        }
+
         commandBar.apply(mainMenu: menu)
         commandPalettePanel.refreshIfPresented(
             menu: menu,
@@ -1876,6 +1918,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performPaste(_ sender: Any? = nil) { performEditorCommand(.paste) }
     @objc public func performDelete(_ sender: Any? = nil) { performEditorCommand(.delete) }
     @objc public func performSelectAll(_ sender: Any? = nil) { performEditorCommand(.selectAll) }
+    @objc public func performSelectNextOccurrence(_ sender: Any? = nil) { performEditorCommand(.selectNextOccurrence) }
+    @objc public func performSelectAllOccurrences(_ sender: Any? = nil) { performEditorCommand(.selectAllOccurrences) }
+    @objc public func performSkipCurrentOccurrence(_ sender: Any? = nil) { performEditorCommand(.skipCurrentOccurrence) }
+    @objc public func performUndoAddedSelection(_ sender: Any? = nil) { performEditorCommand(.undoAddedSelection) }
+    @objc public func performAddCursorAbove(_ sender: Any? = nil) { performEditorCommand(.addCursorAbove) }
+    @objc public func performAddCursorBelow(_ sender: Any? = nil) { performEditorCommand(.addCursorBelow) }
+    @objc public func performSplitSelectionIntoLines(_ sender: Any? = nil) { performEditorCommand(.splitSelectionIntoLines) }
+    @objc public func performCollapseSelections(_ sender: Any? = nil) { performEditorCommand(.collapseSelections) }
     @objc public func performDuplicateLine(_ sender: Any? = nil) { performEditorCommand(.duplicateLine) }
     @objc public func performMoveLineUp(_ sender: Any? = nil) { performEditorCommand(.moveLineUp) }
     @objc public func performMoveLineDown(_ sender: Any? = nil) { performEditorCommand(.moveLineDown) }
@@ -1886,6 +1936,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performIndent(_ sender: Any? = nil) { performEditorCommand(.indent) }
     @objc public func performUnindent(_ sender: Any? = nil) { performEditorCommand(.unindent) }
     @objc public func performTrimTrailingWhitespace(_ sender: Any? = nil) { performEditorCommand(.trimTrailingWhitespace) }
+
+    @objc public func performToggleMinimap(_ sender: Any? = nil) {
+        guard !terminationReviewInProgress, !minimapUpdatePending, let onMinimapVisibilityChanged else { return }
+        minimapUpdatePending = true
+        let visible = !appPreferences.minimapVisible
+        Task { [weak self] in
+            let saved = await onMinimapVisibilityChanged(visible)
+            self?.minimapUpdatePending = false
+            if !saved { NSSound.beep() }
+        }
+    }
 
     @objc public func performToggleWordWrap(_ sender: Any? = nil) {
         guard let editor = actionableEditorViewOptions else { return }
@@ -2122,6 +2183,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         if menuItem.action == #selector(performNewWindow(_:)) {
             return !terminationReviewInProgress
         }
+        if menuItem.action == #selector(performShowKeyboardShortcuts(_:)) {
+            return !terminationReviewInProgress && onKeyboardShortcutsChanged != nil
+        }
         if menuItem.action == #selector(performShowSettings(_:)) {
             return !terminationReviewInProgress && onSettingsRequested != nil
         }
@@ -2205,6 +2269,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performPreviousBookmark(_:)),
              #selector(performClearBookmarks(_:)):
             return actionableBookmarkEditor?.hasBookmarks == true
+        case #selector(performToggleMinimap(_:)):
+            menuItem.state = appPreferences.minimapVisible ? .on : .off
+            return !terminationReviewInProgress && !minimapUpdatePending && onMinimapVisibilityChanged != nil
         case #selector(performToggleWordWrap(_:)):
             guard let editor = actionableEditorViewOptions else {
                 menuItem.state = .off
@@ -2388,6 +2455,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case #selector(performPaste(_:)): .paste
         case #selector(performDelete(_:)): .delete
         case #selector(performSelectAll(_:)): .selectAll
+        case #selector(performSelectNextOccurrence(_:)): .selectNextOccurrence
+        case #selector(performSelectAllOccurrences(_:)): .selectAllOccurrences
+        case #selector(performSkipCurrentOccurrence(_:)): .skipCurrentOccurrence
+        case #selector(performUndoAddedSelection(_:)): .undoAddedSelection
+        case #selector(performAddCursorAbove(_:)): .addCursorAbove
+        case #selector(performAddCursorBelow(_:)): .addCursorBelow
+        case #selector(performSplitSelectionIntoLines(_:)): .splitSelectionIntoLines
+        case #selector(performCollapseSelections(_:)): .collapseSelections
         case #selector(performDuplicateLine(_:)): .duplicateLine
         case #selector(performMoveLineUp(_:)): .moveLineUp
         case #selector(performMoveLineDown(_:)): .moveLineDown
@@ -2968,6 +3043,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         documentIntelligenceTask?.cancel()
         documentIntelligenceTask = nil
         documentIntelligenceUseCase?.cancel()
+        keyboardShortcutsWindow.close()
         commandPalettePanel.dismiss()
         symbolOutlinePanel.dismiss()
         currentDocumentOutline = nil

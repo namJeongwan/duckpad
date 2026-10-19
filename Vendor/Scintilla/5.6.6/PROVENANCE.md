@@ -479,3 +479,106 @@ for document encoding/EOL metadata and save-point notifications. These actions
 publish zero-byte revision events through the existing recovery path, preserving
 selection and text. Only Duckpad-owned bridge sources/headers are changed; no
 upstream core changes or generated files are required.
+## Multi-cursor input integration
+
+The Duckpad-owned bridge enables multiple selections, additional-selection typing,
+per-selection paste, and switching a drag to rectangular selection with Option.
+It provides selection-only commands and Command-Option-click without changing
+Command-click declaration navigation. `cocoa/ScintillaView.h` and
+`cocoa/ScintillaView.mm` add an optional delegate hook for unmodified Escape:
+after completion/call-tip handling, multiple stream or rectangular selections
+collapse to the primary caret. Marked-text composition bypasses this hook.
+This is an intentional patch to the vendored Cocoa source and must be retained
+when regenerating the vendor tree. No engine search or undo implementation changes.
+
+The Cocoa input client also mirrors tentative IME composition across saved native
+selection ranges. Each update first rolls back tentative edits, restores UTF-8
+ranges and virtual-space offsets, then inserts the new marked text at every
+selection. The primary range remains the Cocoa input-method anchor. Commit,
+cancellation, paste, and Undo close the same native undo group. Explicit initial
+replacement ranges retain single-range semantics without deleting other ranges.
+`ScintillaCocoa::CompositionStart` now permits nonempty ranges because their
+replacement participates in tentative undo; cancellation can restore the original
+text, including adjacent matches.
+
+Composition is committed before a host reload, focus loss, or bridge teardown,
+while the Cocoa owner is still alive, so shared documents never retain an open
+undo group. The local acquisition script copies upstream Cocoa files verbatim;
+these documented integration patches remain repository-owned follow-up changes.
+
+## Automatic word and selection occurrence highlighting
+
+The Duckpad-owned `DPWordOccurrenceHighlighter` shares indicator 10 across panes
+of a document. A caret matches case-sensitive whole words (including Unicode
+letters/marks and underscores); an explicit single-line selection matches literal
+substrings, so selecting `ap` also highlights it within `apple` and `pineapple`.
+Whitespace-only, multiline, rectangular, and over-256-byte selections are skipped.
+Text, selections, Undo, search indicator 8 and declaration indicator 9 stay intact.
+
+Query changes coalesce over 100 ms. Caret-word extraction inspects at most 512
+nearby Unicode scalars, avoiding an unbounded scan of enormous tokens. The entire
+document is searched incrementally in 64 KiB chunks (plus pattern overlap), with
+at most 512 matches per main-queue slice and 100,000 total matches, matching the
+existing search decoration limit. Generation checks cancel obsolete work after
+edits, document changes or query changes. Repeated viewport updates reuse results.
+There are no document snapshots; binary/progressive loads and IME composition
+suppress occurrence decorations.
+
+Occurrence offsets use the existing scrollbar overview layout, wrapping/folding
+mapping, marker drawing and click navigation. Explicit search results take
+precedence while installed; clearing them restores occurrence markers. Clicking
+an occurrence marker selects the matching substring to preserve the query.
+Each shared pane registers a weak callback, so closing a pane does not retain it
+or prevent remaining panes from updating. Light/dark/high-contrast appearances
+are configured by the bridge. Only Duckpad-owned bridge files and the package
+source list change for this feature; no upstream Scintilla patch is required.
+
+## Minimap and scrollbar detail
+
+`DPMinimapView` is a Duckpad-owned, non-editable navigation surface beside the
+scrollbar. It draws actual syntax-coloured glyphs at a fixed 3-point font and
+4-point line pitch. Consecutive logical lines move through the minimap as the
+editor scrolls; long documents are not downsampled. A bitmap cache covers the
+visible minimap region plus 48 lines of overscan on either side, bounded by 800
+lines and 256 styled UTF-8 bytes per line. Tabs expand to tab stops and partial
+UTF-8 sequences at the sample boundary are omitted. No document snapshot or
+whole-document layout is requested. Edits and styling changes coalesce cache
+invalidation; scrolling within the overscan reuses the image.
+
+Clicking the code centres that local region in the editor. Dragging the neutral
+viewport thumb travels through the entire document, without moving the selection
+or changing Undo. Wheel events remain native. Folded lines can be revealed by
+navigation, and viewport mapping converts wrapped display rows back to document
+lines. The minimap represents logical lines rather than duplicating wrapped
+lines. Shared panes invalidate their own caches on document edits.
+
+The map uses the editor background, a faint neutral viewport without a frame,
+and faint row highlights for matches. The separate scrollbar rail
+retains full-document search/occurrence positions and click navigation. Its
+`DPEditorScroller` subclass customises drawing only; AppKit continues to handle
+scroll geometry, dragging, keyboard/accessibility actions and wheel momentum.
+Both axes use an eight-point square thumb; search marks are one-point straight
+lines. Hover does not enlarge marks, change contrast, or show a pointing-hand
+cursor. Minimap navigation retains its accessibility label without a tooltip.
+The legacy scroller layout reserves rail space
+independently; the bridge reserves only the map's responsive width (9% of the
+pane, clamped to 56–80 points). Panes narrower than 420 points, binary documents and
+progressive loads hide the minimap. The persisted `minimapVisible` preference
+defaults on and is exposed in Margins/Border/Edge settings in all eight languages.
+
+Design reference: Zed's `layout_minimap`, `paint_minimap`, and `paint_scrollbars`
+in [`crates/editor/src/element.rs`](https://github.com/zed-industries/zed/blob/56934ec0560bce8929025497411de7f5322fb6ca/crates/editor/src/element.rs),
+inspected at commit `56934ec0560bce8929025497411de7f5322fb6ca`. This is an independent
+AppKit/Scintilla implementation of the interaction and visual approach, not a
+copy of Zed's Rust/GPUI source. No upstream Scintilla source changes are required
+for the minimap or scrollbar styling.
+
+Release review hardening (2026-10-19): bulk occurrence selection and selection
+splitting preflight a 10,000-selection limit before changing any range, avoiding
+quadratic main-thread work in Scintilla's selection insertion. Whole-document
+occurrence selection also limits synchronous scanning to 16 MiB documents and
+64 KiB patterns. Rejected operations beep and preserve existing selections;
+no partial set is installed. Empty primary selections resolve word boundaries
+before native search, preventing zero-length search beside nonempty selections.
+Search target and flags are restored after preflight. These limits are in the
+Duckpad bridge; upstream core sources remain unchanged.

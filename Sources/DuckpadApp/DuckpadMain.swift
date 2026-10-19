@@ -17,6 +17,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private var windowEditors: [ObjectIdentifier: ScintillaEditorAdapter] = [:]
     private var windowRecoveryRoots: [ObjectIdentifier: URL] = [:]
     private var settingsWindowController: DuckpadSettingsWindowController?
+    private var minimapPreferenceUpdatePending = false
     private lazy var projectController: DuckpadAppInfoController = {
         let controller = DuckpadAppInfoController(loadRelease: { nil })
         controller.onCheckForUpdates = { [weak self] in self?.checkForAppUpdates() }
@@ -1043,6 +1044,28 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             case .failed: return false
             }
         }
+        controller.onMinimapVisibilityChanged = { [weak self] visible in
+            guard let self, self.terminationCoordinator.permitsApplicationCommands,
+                  self.settingsWindowController?.isUpdating != true,
+                  !self.minimapPreferenceUpdatePending else { return false }
+            self.minimapPreferenceUpdatePending = true
+            defer { self.minimapPreferenceUpdatePending = false }
+            let update = Task { await self.settingsUseCase.updateMinimapVisible(visible) }
+            self.terminationCoordinator.trackApplicationTask(Task { _ = await update.value })
+            switch await update.value {
+            case .saved(let saved), .savedWithWarning(let saved, _): self.apply(saved); return true
+            case .failed: return false
+            }
+        }
+        controller.onKeyboardShortcutsChanged = { [weak self, weak controller] bindings, expected in
+            guard let self, let controller, self.terminationCoordinator.permitsApplicationCommands else { return false }
+            let update = Task { await self.settingsUseCase.updateKeyboardShortcuts(bindings, expected: expected) }
+            self.terminationCoordinator.trackApplicationTask(Task { _ = await update.value })
+            switch await update.value {
+            case .saved(let saved), .savedWithWarning(let saved, _): self.apply(saved); self.installMainMenu(target: controller); return true
+            case .failed: return false
+            }
+        }
         controller.onSettingsRequested = { [weak self] in self?.showSettings() }
         controller.onThemeRequested = { [weak self] mode in self?.changeTheme(mode) }
         controller.currentAppearanceMode = { [weak self] in self?.settingsUseCase.state.settings.appearanceMode ?? .system }
@@ -1310,7 +1333,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             controller.show(log: self.usageStatistics?.transmissionLog ?? "", configured: self.usageStatistics?.isConfigured == true)
         }
         settingsWindow.acceptsUpdates = { [weak self] in
-            self?.terminationCoordinator.permitsApplicationCommands == true
+            self?.terminationCoordinator.permitsApplicationCommands == true && self?.minimapPreferenceUpdatePending == false
         }
         settingsWindow.onUpdateTaskStarted = { [weak self] task in
             self?.terminationCoordinator.trackApplicationTask(task)
@@ -1337,6 +1360,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     }
 
     private func apply(_ settings: AppSettings) {
+        settingsWindowController?.synchronizeMinimapVisibility(settings.minimapVisible)
         usageStatistics?.setEnabled(settings.shareUsageStatistics)
         if !settings.shareUsageStatistics { usageLogWindow?.close() }
         let nextCatalog = LocalizationCatalog(language: settings.appLanguage)

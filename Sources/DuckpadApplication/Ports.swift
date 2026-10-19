@@ -243,6 +243,14 @@ public enum EditorCommand: Equatable, Sendable {
     case indent
     case unindent
     case trimTrailingWhitespace
+    case selectNextOccurrence
+    case selectAllOccurrences
+    case skipCurrentOccurrence
+    case undoAddedSelection
+    case addCursorAbove
+    case addCursorBelow
+    case splitSelectionIntoLines
+    case collapseSelections
 }
 
 @MainActor

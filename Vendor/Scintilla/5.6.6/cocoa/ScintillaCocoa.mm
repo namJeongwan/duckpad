@@ -2458,9 +2458,8 @@ bool ScintillaCocoa::ClearAllSelections() {
  * Start composing for IME.
  */
 void ScintillaCocoa::CompositionStart() {
-	if (!sel.Empty()) {
-		NSLog(@"Selection not empty when starting composition");
-	}
+    // Duckpad multi-cursor composition replaces each saved range tentatively.
+    // Deletions belong to tentative history too, so cancellation restores text.
 	pdoc->TentativeStart();
 }
 

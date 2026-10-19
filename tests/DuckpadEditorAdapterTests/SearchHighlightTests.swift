@@ -78,7 +78,12 @@ struct SearchHighlightTests {
             }
         }
         controller.performCloseFindPanel()
-        #expect(view.searchOverviewPositions.isEmpty)
+        // Closing Find restores the current selection's occurrence ticks.
+        for _ in 0..<100 {
+            if view.searchOverviewPositions.count == offsets.count { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(view.searchOverviewPositions.count == offsets.count)
         #expect(offsets.allSatisfy { !view.isSearchHighlighted(atUTF8Position: UInt($0)) })
     }
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }

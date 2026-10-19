@@ -19,19 +19,8 @@ struct CommandPaletteCommand {
     var qualifiedTitle: String { path.isEmpty ? title : "\(path) › \(title)" }
     var target: AnyObject? { targetReference.value }
 
-    var shortcut: String {
-        guard !item.keyEquivalent.isEmpty else { return "" }
-        let modifiers = item.keyEquivalentModifierMask
-        var value = ""
-        if modifiers.contains(.control) { value += "⌃" }
-        if modifiers.contains(.option) { value += "⌥" }
-        if modifiers.contains(.shift) { value += "⇧" }
-        if modifiers.contains(.command) { value += "⌘" }
-        let key = item.keyEquivalent.count == 1
-            ? item.keyEquivalent.uppercased()
-            : item.keyEquivalent
-        return value + key
-    }
+    var shortcut: String { MenuShortcut.display(key: item.keyEquivalent, modifiers: item.keyEquivalentModifierMask) }
+
 }
 
 @MainActor

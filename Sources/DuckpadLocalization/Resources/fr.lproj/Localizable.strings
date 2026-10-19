@@ -857,3 +857,53 @@
 "More document information" = "Informations supplémentaires sur le document";
 
 "Some characters cannot be saved as %1$@. Nothing was saved. Choose UTF-8 to keep all characters." = "Certains caractères ne peuvent pas être enregistrés en %1$@. Rien n’a été enregistré. Choisissez UTF-8 pour conserver tous les caractères.";
+"Select Next Occurrence" = "Sélectionner l’occurrence suivante";
+"Select All Occurrences" = "Sélectionner toutes les occurrences";
+"Skip Current Occurrence" = "Ignorer l’occurrence actuelle";
+"Undo Last Added Selection" = "Annuler la dernière sélection ajoutée";
+"Add Cursor Above" = "Ajouter un curseur au-dessus";
+"Add Cursor Below" = "Ajouter un curseur au-dessous";
+"Split Selection into Lines" = "Diviser la sélection par ligne";
+"Collapse to Single Cursor" = "Revenir à un seul curseur";
+"Keyboard Shortcuts…" = "Raccourcis clavier…";
+"Keyboard Shortcuts" = "Raccourcis clavier";
+"Shortcut" = "Raccourci";
+"Record Shortcut" = "Saisir un raccourci";
+"Remove Shortcut" = "Supprimer le raccourci";
+"Restore Default" = "Rétablir la valeur par défaut";
+"Restore All Defaults" = "Tout rétablir par défaut";
+"Select a command, then record a shortcut. System shortcuts may take precedence." = "Sélectionnez une commande, puis saisissez un raccourci. Les raccourcis système peuvent être prioritaires.";
+"Press a shortcut with Command or Control. Escape cancels." = "Appuyez sur un raccourci avec Command ou Control. Échap annule.";
+"Use a supported shortcut with Command or Control." = "Utilisez un raccourci pris en charge avec Command ou Control.";
+"Shortcut already used by %1$@" = "Raccourci déjà utilisé par %1$@";
+"Shortcut settings saved" = "Raccourcis enregistrés";
+"Could not save shortcut settings. Please try again." = "Impossible d’enregistrer les raccourcis. Réessayez.";
+"Multiple Cursors" = "Curseurs multiples";
+"Command Name" = "Nom de la commande";
+
+"Show minimap" = "Afficher la minicarte";
+"Minimap — click or drag to scroll" = "Minicarte — cliquez ou faites glisser pour défiler";
+
+"Recording shortcut for %1$@" = "Enregistrement du raccourci — %1$@";
+"Cancel Recording" = "Annuler l’enregistrement";
+"Shortcut recording cancelled" = "Enregistrement du raccourci annulé";
+
+"Edit Shortcut…" = "Modifier le raccourci…";
+
+"Double-click to edit shortcut" = "Double-cliquez pour modifier le raccourci";
+
+"Double-click a command to edit its shortcut. System shortcuts may take precedence." = "Double-cliquez sur une commande pour modifier son raccourci. Les raccourcis système peuvent être prioritaires.";
+
+"Press shortcut…" = "Appuyez sur le raccourci…";
+
+"Ready to save. Press another shortcut to change it." = "Prêt à enregistrer. Appuyez sur un autre raccourci pour le modifier.";
+
+"Listening… Enter to apply · Esc to cancel" = "Saisie en cours… Entrée pour appliquer · Échap pour annuler";
+
+"Enter to apply · Esc to cancel" = "Entrée pour appliquer · Échap pour annuler";
+
+"Edit Shortcut" = "Modifier le raccourci";
+
+"Press a shortcut · Enter to apply · Esc to cancel" = "Saisissez un raccourci · Entrée pour appliquer · Échap pour annuler";
+
+"Select a command and press a shortcut, or double-click. Enter applies · Esc cancels." = "Sélectionnez une commande et saisissez un raccourci, ou double-cliquez. Entrée applique · Échap annule";

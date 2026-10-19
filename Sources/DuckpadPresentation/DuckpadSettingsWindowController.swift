@@ -99,6 +99,14 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         if !isUpdating { render(settings) }
     }
 
+    // A menu toggle must update the next preferences snapshot without discarding text-field drafts.
+    public func synchronizeMinimapVisibility(_ visible: Bool) {
+        settings.minimapVisible = visible
+        for (button, key) in booleanControls where key == \AppSettings.minimapVisible {
+            button.state = visible ? .on : .off
+        }
+    }
+
     public func selectAppearance(_ mode: AppAppearanceMode) {
         var proposed = settings
         proposed.appearanceMode = mode
@@ -384,6 +392,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         spacingInput("Text left padding (pt)", \.editorLeftPadding, maximum: 32, identifier: "editor-left-padding")
         spacingInput("Text right padding (pt)", \.editorRightPadding, maximum: 32, identifier: "editor-right-padding")
         spacingInput("Extra line spacing (pt)", \.editorLineSpacing, maximum: 20, identifier: "editor-line-spacing")
+        checkbox("Show minimap", \.minimapVisible, "Margins/Border/Edge")
         checkbox("Display line number", \.lineNumbersVisible, "Margins/Border/Edge")
         checkbox("Display bookmark", \.bookmarkMarginVisible, "Margins/Border/Edge")
         checkbox("Show vertical edge", \.edgeLineVisible, "Margins/Border/Edge")

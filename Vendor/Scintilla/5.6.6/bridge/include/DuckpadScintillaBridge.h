@@ -47,6 +47,17 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
     DPScintillaEditingCommandTrimTrailingWhitespace = 9,
 };
 
+typedef NS_ENUM(NSInteger, DPScintillaSelectionCommand) {
+    DPScintillaSelectionCommandSelectNextOccurrence = 0,
+    DPScintillaSelectionCommandSelectAllOccurrences = 1,
+    DPScintillaSelectionCommandSkipCurrentOccurrence = 2,
+    DPScintillaSelectionCommandUndoAddedSelection = 3,
+    DPScintillaSelectionCommandAddCursorAbove = 4,
+    DPScintillaSelectionCommandAddCursorBelow = 5,
+    DPScintillaSelectionCommandSplitSelectionIntoLines = 6,
+    DPScintillaSelectionCommandCollapseSelections = 7,
+};
+
 /// An owned edit value. `range` is measured in UTF-8 bytes, never UTF-16.
 @interface DPScintillaEdit : NSObject
 @property(nonatomic, readonly) NSRange range;
@@ -95,6 +106,8 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, readonly) double editorFontSize;
 @property(nonatomic, readonly) NSInteger editorLeftPadding;
 @property(nonatomic, readonly) NSInteger editorRightPadding;
+@property(nonatomic, getter=isMinimapVisible) BOOL minimapVisible;
+@property(nonatomic, copy) NSString *minimapNavigationLabel;
 @property(nonatomic, readonly) NSInteger editorLineSpacing;
 - (void)configureTextLayoutWithLeftPadding:(NSInteger)leftPadding
                             rightPadding:(NSInteger)rightPadding
@@ -202,6 +215,8 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (NSUInteger)changeHistoryStateAtLine:(NSUInteger)line;
 @property(nonatomic, readonly, copy) NSArray<NSNumber *> *searchOverviewPositions;
 - (BOOL)isSearchHighlightedAtUTF8Position:(NSUInteger)position NS_SWIFT_NAME(isSearchHighlighted(atUTF8Position:));
+- (BOOL)isWordHighlightedAtUTF8Position:(NSUInteger)position NS_SWIFT_NAME(isWordHighlighted(atUTF8Position:));
+@property(nonatomic, readonly) NSUInteger wordHighlightInspectedByteCount;
 - (void)setPrimarySelectionUTF8Range:(NSRange)range;
 - (void)revealDeclarationInUTF8Range:(NSRange)range NS_SWIFT_NAME(revealDeclaration(in:));
 - (void)restoreCaretUTF8Position:(NSUInteger)caret
@@ -240,6 +255,8 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 - (void)redo;
 - (BOOL)canPerformEditingCommand:(DPScintillaEditingCommand)command;
 - (void)performEditingCommand:(DPScintillaEditingCommand)command;
+- (BOOL)canPerformSelection:(DPScintillaSelectionCommand)command;
+- (void)performSelection:(DPScintillaSelectionCommand)command;
 - (void)beginGroupedUndo;
 - (void)endGroupedUndo;
 - (void)focusEditor;

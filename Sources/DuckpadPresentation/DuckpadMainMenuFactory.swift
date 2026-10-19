@@ -83,6 +83,15 @@ public enum DuckpadMainMenuFactory {
         add("Delete", #selector(DuckpadWindowController.performDelete(_:)), "", target, modifiers: [], to: editMenu)
         editMenu.addItem(.separator())
         add("Select All", #selector(DuckpadWindowController.performSelectAll(_:)), "a", target, to: editMenu)
+        add("Select Next Occurrence", #selector(DuckpadWindowController.performSelectNextOccurrence(_:)), "", target, modifiers: [], to: editMenu)
+        add("Select All Occurrences", #selector(DuckpadWindowController.performSelectAllOccurrences(_:)), "", target, modifiers: [], to: editMenu)
+        add("Skip Current Occurrence", #selector(DuckpadWindowController.performSkipCurrentOccurrence(_:)), "", target, modifiers: [], to: editMenu)
+        add("Undo Last Added Selection", #selector(DuckpadWindowController.performUndoAddedSelection(_:)), "", target, modifiers: [], to: editMenu)
+        add("Add Cursor Above", #selector(DuckpadWindowController.performAddCursorAbove(_:)), "", target, modifiers: [], to: editMenu)
+        add("Add Cursor Below", #selector(DuckpadWindowController.performAddCursorBelow(_:)), "", target, modifiers: [], to: editMenu)
+        add("Split Selection into Lines", #selector(DuckpadWindowController.performSplitSelectionIntoLines(_:)), "", target, modifiers: [], to: editMenu)
+        add("Collapse to Single Cursor", #selector(DuckpadWindowController.performCollapseSelections(_:)), "", target, modifiers: [], to: editMenu)
+
         editMenu.addItem(.separator())
         add("Duplicate Line", #selector(DuckpadWindowController.performDuplicateLine(_:)), "d", target, to: editMenu)
         add(
@@ -200,6 +209,7 @@ public enum DuckpadMainMenuFactory {
         themeItem.submenu = themeMenu
         viewMenu.addItem(themeItem)
         viewMenu.addItem(.separator())
+        add("Show minimap", #selector(DuckpadWindowController.performToggleMinimap(_:)), "", target, modifiers: [], to: viewMenu)
         add("Word Wrap", #selector(DuckpadWindowController.performToggleWordWrap(_:)), "", target, modifiers: [], to: viewMenu)
         add("Markdown Preview", #selector(DuckpadWindowController.performToggleMarkdownPreview(_:)), "V", target, modifiers: [.command, .shift], to: viewMenu)
         add("Close Preview", #selector(DuckpadWindowController.performCloseMarkdownPreview(_:)), "w", target, modifiers: [.control], to: viewMenu)
@@ -443,7 +453,7 @@ public enum DuckpadMainMenuFactory {
             item.target = target; item.representedObject = command.id.rawValue
             var accessibilityValue = L10n.text("No keyboard shortcut")
             if let declaration = target.extensionKeybinding(for: command.id) {
-                if let shortcut = ExtensionShortcut(declaration) {
+                if let shortcut = MenuShortcut(declaration) {
                     if occupiedShortcuts.insert(shortcut.identity).inserted {
                         item.keyEquivalent = shortcut.keyEquivalent
                         item.keyEquivalentModifierMask = shortcut.modifiers
@@ -475,6 +485,7 @@ public enum DuckpadMainMenuFactory {
             help.addItem(version)
         }
         MenuLocalization.apply(to: mainMenu)
+        target.shortcutRegistry = ShortcutRegistry(menu: mainMenu, overrides: settings.keyboardShortcuts)
         return mainMenu
     }
 
@@ -509,6 +520,7 @@ public enum DuckpadMainMenuFactory {
         endings.submenu = makeLineEndingMenu(target: target)
         edit.addItem(.separator())
         edit.addItem(endings)
+        group("Multiple Cursors", in: edit, actions: [#selector(DuckpadWindowController.performSelectNextOccurrence(_:)), #selector(DuckpadWindowController.performSelectAllOccurrences(_:)), #selector(DuckpadWindowController.performSkipCurrentOccurrence(_:)), #selector(DuckpadWindowController.performUndoAddedSelection(_:)), #selector(DuckpadWindowController.performAddCursorAbove(_:)), #selector(DuckpadWindowController.performAddCursorBelow(_:)), #selector(DuckpadWindowController.performSplitSelectionIntoLines(_:)), #selector(DuckpadWindowController.performCollapseSelections(_:))])
         group("Line Operations", in: edit, actions: [#selector(DuckpadWindowController.performDuplicateLine(_:)), #selector(DuckpadWindowController.performMoveLineUp(_:)), #selector(DuckpadWindowController.performMoveLineDown(_:)), #selector(DuckpadWindowController.performDeleteLine(_:)), #selector(DuckpadWindowController.performJoinLines(_:))])
         group("Convert Case to", in: edit, actions: [#selector(DuckpadWindowController.performUppercase(_:)), #selector(DuckpadWindowController.performLowercase(_:))])
         group("Blank Operations", in: edit, actions: [#selector(DuckpadWindowController.performIndent(_:)), #selector(DuckpadWindowController.performUnindent(_:)), #selector(DuckpadWindowController.performTrimTrailingWhitespace(_:))])
@@ -529,6 +541,7 @@ public enum DuckpadMainMenuFactory {
         menu("Extensions").title = "Plugins"
         menu("Plugins").items.first?.title = "Plugins Admin…"
         let preferences = NSMenu(title: "Preferences")
+        add("Keyboard Shortcuts…", #selector(DuckpadWindowController.performShowKeyboardShortcuts(_:)), "", target, modifiers: [], to: preferences)
         add("Preferences…", #selector(DuckpadWindowController.performShowSettings(_:)), "", settingsTarget, modifiers: [], to: preferences)
         if let theme = view.items.first(where: { $0.title == "Theme" }) {
             preferences.addItem(.separator())
@@ -570,87 +583,6 @@ public enum DuckpadMainMenuFactory {
             if let last = menu.items.last, last.isSeparatorItem { menu.removeItem(last) }
         }
         tidy(mainMenu)
-    }
-
-    private struct ShortcutIdentity: Hashable {
-        let key: String
-        let modifiers: NSEvent.ModifierFlags.RawValue
-    }
-
-    /// Strict, deterministic subset of the extension manifest key grammar.
-    /// Plain typing shortcuts are rejected; an extension must include Command,
-    /// Control, or Option and can never silently steal ordinary editor input.
-    private struct ExtensionShortcut {
-        let keyEquivalent: String
-        let modifiers: NSEvent.ModifierFlags
-        let accessibilityLabel: String
-
-        var identity: ShortcutIdentity {
-            ShortcutIdentity(
-                key: keyEquivalent.lowercased(),
-                modifiers: modifiers.intersection([.command, .control, .option, .shift]).rawValue
-            )
-        }
-
-        init?(_ declaration: String) {
-            let tokens = declaration.split(separator: "+", omittingEmptySubsequences: false)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-            guard tokens.count >= 2, tokens.allSatisfy({ !$0.isEmpty }) else { return nil }
-
-            var modifiers: NSEvent.ModifierFlags = []
-            var modifierNames: [String] = []
-            var keyToken: String?
-            for token in tokens {
-                let parsed: (NSEvent.ModifierFlags, String)? = switch token {
-                case "cmd", "command": (.command, "Command")
-                case "ctrl", "control": (.control, "Control")
-                case "opt", "option", "alt": (.option, "Option")
-                case "shift": (.shift, "Shift")
-                default: nil
-                }
-                if let parsed {
-                    guard !modifiers.contains(parsed.0) else { return nil }
-                    modifiers.insert(parsed.0)
-                    modifierNames.append(parsed.1)
-                } else {
-                    guard keyToken == nil else { return nil }
-                    keyToken = token
-                }
-            }
-            guard modifiers.contains(.command) || modifiers.contains(.control) || modifiers.contains(.option),
-                  let keyToken,
-                  let key = Self.key(for: keyToken)
-            else { return nil }
-            self.keyEquivalent = key.value
-            self.modifiers = modifiers
-            self.accessibilityLabel = (modifierNames + [key.label]).joined(separator: "-")
-        }
-
-        private static func key(for token: String) -> (value: String, label: String)? {
-            if token.count == 1,
-               let scalar = token.unicodeScalars.first,
-               scalar.isASCII,
-               (0x21...0x7E).contains(scalar.value) {
-                return (token, token.uppercased())
-            }
-            switch token {
-            case "space": return (" ", "Space")
-            case "tab": return ("\t", "Tab")
-            case "return", "enter": return ("\r", "Return")
-            case "escape", "esc": return ("\u{1b}", "Escape")
-            case "up": return (String(UnicodeScalar(NSUpArrowFunctionKey)!), "Up Arrow")
-            case "down": return (String(UnicodeScalar(NSDownArrowFunctionKey)!), "Down Arrow")
-            case "left": return (String(UnicodeScalar(NSLeftArrowFunctionKey)!), "Left Arrow")
-            case "right": return (String(UnicodeScalar(NSRightArrowFunctionKey)!), "Right Arrow")
-            default:
-                guard token.first == "f",
-                      let number = Int(token.dropFirst()),
-                      (1...20).contains(number),
-                      let scalar = UnicodeScalar(NSF1FunctionKey + number - 1)
-                else { return nil }
-                return (String(scalar), "F\(number)")
-            }
-        }
     }
 
     private static func shortcutIdentities(in menu: NSMenu) -> Set<ShortcutIdentity> {

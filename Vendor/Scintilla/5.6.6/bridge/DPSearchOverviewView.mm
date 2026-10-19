@@ -18,6 +18,7 @@
     return self;
 }
 - (BOOL)isFlipped { return YES; }
+- (void)resetCursorRects { [self addCursorRect:self.bounds cursor:NSCursor.arrowCursor]; }
 - (BOOL)isOpaque { return NO; }
 - (NSUInteger)markerAtPoint:(NSPoint)point {
     if (!NSPointInRect(point, self.bounds) || _positions.count == 0) return NSNotFound;
@@ -63,15 +64,16 @@
 - (void)drawRect:(NSRect)dirtyRect {
     const CGFloat scale = self.window.backingScaleFactor ?: 1;
     const CGFloat height = self.bounds.size.height;
+    if (height <= 0 || self.bounds.size.width <= 0) return;
     if (!_rows || height != _cachedHeight || scale != _cachedScale) {
         // Coalesce dense results to screen rows. Painting is bounded by track
         // height rather than the number of matches, and scrolling reuses it.
         NSMutableIndexSet *rows = [NSMutableIndexSet indexSet];
         for (NSNumber *position in _positions) {
             const CGFloat y = MAX(0, MIN(1, position.doubleValue)) * MAX(0, height - 3);
-            const NSUInteger first = (NSUInteger)std::floor(y * scale);
+            const NSUInteger first = (NSUInteger)std::floor((y + MIN(1, height / 2)) * scale);
             const NSUInteger end = MIN((NSUInteger)std::ceil(height * scale),
-                first + (NSUInteger)std::ceil(MIN(3, height) * scale));
+                first + (NSUInteger)std::ceil(MIN(1, height) * scale));
             [rows addIndexesInRange:NSMakeRange(first, end - first)];
         }
         _rows = rows;
@@ -82,8 +84,8 @@
     // Paint each covered pixel only once so dense results retain the same
     // transparency as isolated ticks and never obscure the native thumb.
     [_rows enumerateRangesUsingBlock:^(NSRange rows, BOOL *stop) {
-        NSRectFillUsingOperation(NSMakeRect(0, rows.location / scale,
-            self.bounds.size.width, rows.length / scale), NSCompositingOperationSourceOver);
+        NSRect mark = NSMakeRect(0, rows.location / scale, self.bounds.size.width, rows.length / scale);
+        NSRectFillUsingOperation(mark, NSCompositingOperationSourceOver);
     }];
 }
 @end

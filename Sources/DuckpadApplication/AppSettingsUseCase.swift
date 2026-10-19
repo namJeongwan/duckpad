@@ -65,9 +65,18 @@ public final class AppSettingsUseCase {
     public func update(_ settings: AppSettings) async -> AppSettingsUpdateOutcome {
         await acquireUpdate()
         defer { releaseUpdate() }
-        // An already-open preferences window must not overwrite newer snippets.
+        // An already-open preferences window must not overwrite separately edited snippets or shortcuts.
         var proposed = settings
         proposed.snippets = state.settings.snippets
+        proposed.keyboardShortcuts = state.settings.keyboardShortcuts
+        return await persist(proposed)
+    }
+
+    public func updateMinimapVisible(_ visible: Bool) async -> AppSettingsUpdateOutcome {
+        await acquireUpdate()
+        defer { releaseUpdate() }
+        var proposed = state.settings
+        proposed.minimapVisible = visible
         return await persist(proposed)
     }
 
@@ -82,6 +91,18 @@ public final class AppSettingsUseCase {
         }
         var proposed = state.settings
         proposed.snippets = snippets
+        return await persist(proposed)
+    }
+
+    public func updateKeyboardShortcuts(_ bindings: [String: String], expected: [String: String]) async -> AppSettingsUpdateOutcome {
+        await acquireUpdate()
+        defer { releaseUpdate() }
+        guard state.settings.keyboardShortcuts == expected else { return .failed(.writeFailed("keyboard shortcuts changed")) }
+        guard bindings.count <= 2048, bindings.allSatisfy({ $0.key.utf8.count <= 512 && $0.value.utf8.count <= 128 }) else {
+            return .failed(.writeFailed("keyboard shortcut storage limit exceeded"))
+        }
+        var proposed = state.settings
+        proposed.keyboardShortcuts = bindings
         return await persist(proposed)
     }
 

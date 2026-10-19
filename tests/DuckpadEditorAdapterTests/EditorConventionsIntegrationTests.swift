@@ -296,7 +296,7 @@ struct EditorConventionsIntegrationTests {
         let current = try #require(f.workspace.activeFileContext())
         f.editor.reload(.init(bufferID: current.buffer.bufferID, revision: current.buffer.revision, text: "replacement"))
         #expect(f.editor.snippetSession == nil)
-        #expect(!view.additionalSelectionTyping)
+        #expect(view.additionalSelectionTyping) // General multi-cursor typing remains enabled after snippet cancellation.
     }
 
     @Test func snippetInsertionIsOneUndoAndCompositionIsRejected() async throws {

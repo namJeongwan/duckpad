@@ -49,6 +49,7 @@ typedef NS_ENUM(NSInteger, SCITextInputSource) {
 - (void) notification: (SCNotification *) notification;
 @optional
 - (BOOL) scintillaHandleMouseDown: (NSEvent *) event;
+- (BOOL) scintillaHandleSelectionEscape;
 - (void) scintillaDeclarationHoverAt: (NSPoint) point modifiers: (NSEventModifierFlags) modifiers;
 - (void) scintillaClearDeclarationHover;
 - (void) scintillaWillInsertTextFromSource: (SCITextInputSource) source;

@@ -857,3 +857,53 @@
 "More document information" = "Weitere Dokumentinformationen";
 
 "Some characters cannot be saved as %1$@. Nothing was saved. Choose UTF-8 to keep all characters." = "Einige Zeichen können nicht als %1$@ gespeichert werden. Es wurde nichts gespeichert. Wählen Sie UTF-8, um alle Zeichen beizubehalten.";
+"Select Next Occurrence" = "Nächsten Treffer auswählen";
+"Select All Occurrences" = "Alle Treffer auswählen";
+"Skip Current Occurrence" = "Aktuellen Treffer überspringen";
+"Undo Last Added Selection" = "Zuletzt hinzugefügte Auswahl zurücknehmen";
+"Add Cursor Above" = "Cursor darüber hinzufügen";
+"Add Cursor Below" = "Cursor darunter hinzufügen";
+"Split Selection into Lines" = "Auswahl in Zeilen aufteilen";
+"Collapse to Single Cursor" = "Auf einen Cursor reduzieren";
+"Keyboard Shortcuts…" = "Tastenkürzel…";
+"Keyboard Shortcuts" = "Tastenkürzel";
+"Shortcut" = "Tastenkürzel";
+"Record Shortcut" = "Tastenkürzel aufnehmen";
+"Remove Shortcut" = "Tastenkürzel entfernen";
+"Restore Default" = "Standard wiederherstellen";
+"Restore All Defaults" = "Alle Standards wiederherstellen";
+"Select a command, then record a shortcut. System shortcuts may take precedence." = "Befehl auswählen und Tastenkürzel aufnehmen. Systemkürzel können Vorrang haben.";
+"Press a shortcut with Command or Control. Escape cancels." = "Tastenkürzel mit Command oder Control drücken. Escape bricht ab.";
+"Use a supported shortcut with Command or Control." = "Unterstütztes Tastenkürzel mit Command oder Control verwenden.";
+"Shortcut already used by %1$@" = "Tastenkürzel wird bereits von %1$@ verwendet";
+"Shortcut settings saved" = "Tastenkürzel gespeichert";
+"Could not save shortcut settings. Please try again." = "Tastenkürzel konnten nicht gespeichert werden. Bitte erneut versuchen.";
+"Multiple Cursors" = "Mehrere Cursor";
+"Command Name" = "Befehlsname";
+
+"Show minimap" = "Minimap anzeigen";
+"Minimap — click or drag to scroll" = "Minimap — zum Scrollen klicken oder ziehen";
+
+"Recording shortcut for %1$@" = "Tastenkürzel wird aufgezeichnet — %1$@";
+"Cancel Recording" = "Aufzeichnung abbrechen";
+"Shortcut recording cancelled" = "Aufzeichnung des Tastenkürzels abgebrochen";
+
+"Edit Shortcut…" = "Kurzbefehl bearbeiten…";
+
+"Double-click to edit shortcut" = "Zum Bearbeiten des Kurzbefehls doppelklicken";
+
+"Double-click a command to edit its shortcut. System shortcuts may take precedence." = "Doppelklicken Sie auf einen Befehl, um den Kurzbefehl zu bearbeiten. Systemkurzbefehle können Vorrang haben.";
+
+"Press shortcut…" = "Kurzbefehl drücken…";
+
+"Ready to save. Press another shortcut to change it." = "Bereit zum Speichern. Drücken Sie zum Ändern einen anderen Kurzbefehl.";
+
+"Listening… Enter to apply · Esc to cancel" = "Eingabe läuft… Enter zum Anwenden · Esc zum Abbrechen";
+
+"Enter to apply · Esc to cancel" = "Enter zum Anwenden · Esc zum Abbrechen";
+
+"Edit Shortcut" = "Kurzbefehl bearbeiten";
+
+"Press a shortcut · Enter to apply · Esc to cancel" = "Kurzbefehl drücken · Enter zum Anwenden · Esc zum Abbrechen";
+
+"Select a command and press a shortcut, or double-click. Enter applies · Esc cancels." = "Befehl auswählen und Kurzbefehl drücken oder doppelklicken. Enter wendet an · Esc bricht ab";
