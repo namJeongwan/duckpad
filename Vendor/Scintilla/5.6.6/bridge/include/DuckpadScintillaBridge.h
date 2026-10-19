@@ -74,6 +74,8 @@ typedef NS_ENUM(NSInteger, DPScintillaSelectionCommand) {
 
 /// Narrow AppKit facade. No Scintilla message, pointer, or C++ type is public.
 @interface DPScintillaEditorView : NSView
+/// Stable command keys: undo, redo, cut, copy, paste, delete, selectAll.
+@property(nonatomic, copy) NSDictionary<NSString *, NSString *> *contextMenuTitles;
 @property(nonatomic, copy, nullable) void (^onWillModifyDocument)(void);
 @property(nonatomic, copy, nullable) void (^onSavePointReached)(void);
 @property(nonatomic, copy, nullable) void (^onEdit)(DPScintillaEdit *edit);

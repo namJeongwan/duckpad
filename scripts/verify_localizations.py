@@ -11,6 +11,7 @@ LANGUAGES = ("en", "ko", "ja", "zh-Hans", "pt-BR", "it", "fr", "de")
 STRING = r'"(?:\\.|[^"\\])*"'
 ENTRY = re.compile(rf'({STRING})\s*=\s*({STRING})\s*;')
 FORMAT = re.compile(r'%(?:(\d+)\$)?(ld|lu|lld|llu|@|d|u|f)')
+C_FORMAT = re.compile(r"%(?:[0-9]+\$)?[-+#0 ']*(?:[0-9]+|\*)?(?:\.(?:[0-9]+|\*))?(?:hh|ll|[hlzjtL])?[diouxXfFeEgGaAcspn%]")
 
 
 def read_strings(path):
@@ -31,6 +32,8 @@ def placeholders(value):
 
 def main():
     english = read_strings(RESOURCES / 'en.lproj/Localizable.strings')
+    inspector_keys = json.loads((ROOT / 'Vendor/Ghostty/inspector-localization-keys.json').read_text())
+    assert set(inspector_keys) <= english.keys(), 'Inspector UI has uncataloged translation keys'
     english_plurals = plistlib.loads((RESOURCES / 'en.lproj/Localizable.stringsdict').read_bytes())
     for locale in LANGUAGES:
         path = RESOURCES / f'{locale}.lproj'
@@ -38,6 +41,10 @@ def main():
         assert strings.keys() == english.keys(), f"{locale}: missing/extra translation keys"
         for key, source in english.items():
             assert placeholders(strings[key]) == placeholders(source), f"{locale}: incompatible format arguments: {key}"
+        for key in inspector_keys:
+            assert C_FORMAT.findall(strings[key]) == C_FORMAT.findall(key), f"{locale}: unsafe Inspector printf format: {key}"
+            # ImGui's hidden identifiers must survive translation unchanged.
+            assert strings[key].split('##')[1:] == key.split('##')[1:], f"{locale}: altered Inspector widget ID: {key}"
         plurals = plistlib.loads((path / 'Localizable.stringsdict').read_bytes())
         assert plurals.keys() == english_plurals.keys(), f"{locale}: missing/extra plural keys"
         for key, entry in plurals.items():

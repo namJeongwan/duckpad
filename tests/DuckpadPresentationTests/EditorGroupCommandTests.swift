@@ -1,3 +1,4 @@
+import DuckpadLocalization
 import DuckpadInfrastructure
 import AppKit
 import DuckpadApplication
@@ -1200,4 +1201,37 @@ private extension NSMenu {
     }
     #expect(fixture.controller.tabStrip.tabIDs == [original[0].id])
     #expect(fixture.controller.editorGroupWorkspace.secondaryPane?.tabStrip.tabIDs == [original[4].id])
+}
+
+@Test @MainActor func generatedGroupTabTitlesAndWidthsRefreshWithoutChangingDocuments() async throws {
+    let fixture = await makeEditorGroupController(tabCount: 2)
+    let originalLanguage = DuckpadLocalization.L10n.catalog.language
+    defer { DuckpadLocalization.L10n.configure(language: originalLanguage); fixture.controller.close() }
+    fixture.controller.performCloneActiveTabToGroupRight(nil)
+    let before = fixture.workspace.snapshot()
+    let strips = [fixture.controller.tabStrip, try #require(fixture.controller.editorGroupWorkspace.secondaryPane?.tabStrip)]
+    var germanWidths: [[CGFloat]] = []
+    for language in [DuckpadDomain.AppLanguage.german, .korean, .japanese, .simplifiedChinese, .english] {
+        DuckpadLocalization.L10n.configure(language: language)
+        fixture.controller.refreshLocalization()
+        fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+        let catalog = DuckpadLocalization.L10n.catalog
+        for strip in strips {
+            strip.hostedCollectionView.layoutSubtreeIfNeeded()
+            for index in strip.tabIDs.indices {
+                let id = strip.tabIDs[index]
+                let tab = try #require(before.tabs.first { $0.id == id })
+                let item = try #require(strip.hostedCollectionView.item(at: IndexPath(item: index, section: 0)))
+                func fields(_ view: NSView) -> [NSTextField] { (view as? NSTextField).map { [$0] } ?? view.subviews.flatMap(fields) }
+                let expected = tab.localizedTitle(catalog: catalog)
+                #expect(fields(item.view).contains { $0.stringValue == expected })
+                let width = ceil((expected as NSString).size(withAttributes: [.font: WorkspaceTabStyle.font]).width) + 73
+                #expect(strip.flowLayout.itemWidths[index] == width)
+            }
+        }
+        if language == .german { germanWidths = strips.map { $0.flowLayout.itemWidths } }
+        #expect(fixture.workspace.snapshot().tabs == before.tabs)
+        #expect(fixture.controller.window?.title == before.tabs.first(where: \.isActive)?.localizedTitle(catalog: catalog).appending(" — Duckpad"))
+    }
+    #expect(germanWidths != strips.map { $0.flowLayout.itemWidths })
 }

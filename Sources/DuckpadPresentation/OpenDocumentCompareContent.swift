@@ -1,4 +1,7 @@
+import DuckpadApplication
+
 public struct OpenDocumentCompareContent: Equatable, Sendable {
+    public let comparison: OpenDocumentComparison?
     public let title: String
     public let leftTitle: String
     public let rightTitle: String
@@ -22,8 +25,10 @@ public struct OpenDocumentCompareContent: Equatable, Sendable {
         leftTitleKey: String? = nil,
         leftTitleArguments: [String] = [],
         rightTitleKey: String? = nil,
-        rightTitleArguments: [String] = []
+        rightTitleArguments: [String] = [],
+        comparison: OpenDocumentComparison? = nil
     ) {
+        self.comparison = comparison
         self.title = title
         self.leftTitle = leftTitle
         self.rightTitle = rightTitle

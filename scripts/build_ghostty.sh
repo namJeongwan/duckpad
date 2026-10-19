@@ -9,7 +9,7 @@ SOURCE="$ROOT/.build/ghostty-source"
 DESTINATION="$ROOT/Vendor/Ghostty/GhosttyKit.xcframework"
 COMMIT=332b2aefc6e72d363aa93ab6ecfc86eeeeb5ed28
 STAMP="$ROOT/.build/ghostty-build-$ARCHITECTURE.stamp"
-BUILD_KEY="$COMMIT-$(cat "$ROOT/scripts/build_ghostty.sh" "$ROOT/scripts/patch_ghostty_host_pty.py" "$ROOT/scripts/ghostty_archive.py" | shasum -a 256 | cut -d ' ' -f 1)"
+BUILD_KEY="$COMMIT-$(cat "$ROOT/scripts/build_ghostty.sh" "$ROOT/scripts/patch_ghostty_host_pty.py" "$ROOT/scripts/patch_ghostty_inspector.py" "$ROOT/Vendor/Ghostty/inspector-localization-keys.json" "$ROOT/scripts/ghostty_archive.py" | shasum -a 256 | cut -d ' ' -f 1)"
 # A universal framework also satisfies a native package build.
 if [[ -d "$DESTINATION" && -d "$SOURCE/zig-out/share/ghostty" ]] &&
    { [[ -f "$STAMP" && "$(cat "$STAMP")" == "$BUILD_KEY" ]] || [[ -f "$ROOT/.build/ghostty-build-universal.stamp" && "$(cat "$ROOT/.build/ghostty-build-universal.stamp")" == "$BUILD_KEY" ]]; }; then exit 0; fi
@@ -70,6 +70,7 @@ for name in ['ios','ios_sim']:
 p.write_text(s)
 PY
 python3 "$ROOT/scripts/patch_ghostty_host_pty.py" "$SOURCE"
+python3 "$ROOT/scripts/patch_ghostty_inspector.py" "$SOURCE"
 export PATH="$TOOLCHAIN/bin:$PATH"
 cd "$SOURCE"
 "$ZIG" build -Doptimize=ReleaseFast -Dsentry=false -Demit-xcframework=true -Dxcframework-target="$ARCHITECTURE" -Demit-macos-app=false

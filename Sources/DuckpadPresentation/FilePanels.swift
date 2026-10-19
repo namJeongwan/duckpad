@@ -271,7 +271,7 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
     public func decision(for tab: TabSnapshot, saveAvailable: Bool, attachedTo window: NSWindow?) async -> CloseDecision {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = L10n.text("Save changes to %1$@?", L10n.argument(tab.title))
+        alert.messageText = L10n.text("Save changes to %1$@?", L10n.argument(tab.displayTitle))
         alert.informativeText = L10n.text("Unsaved changes will be lost if you discard them.")
         if saveAvailable { alert.addButton(withTitle: L10n.text("Save")) }
         alert.addButton(withTitle: L10n.text("Cancel"))

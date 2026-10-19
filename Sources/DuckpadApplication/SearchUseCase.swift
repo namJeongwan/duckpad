@@ -32,13 +32,15 @@ public protocol RegexEnginePort: Sendable {
 public struct SearchBufferSnapshot: Equatable, Sendable {
     public let tabID: TabID
     public let title: String
+    public let generatedTitle: GeneratedDocumentTitle?
     public let bufferID: BufferID
     public let revision: UInt64
     public let utf8: Data
 
-    public init(tabID: TabID, title: String, bufferID: BufferID, revision: UInt64, utf8: Data) {
+    public init(tabID: TabID, title: String, bufferID: BufferID, revision: UInt64, utf8: Data, generatedTitle: GeneratedDocumentTitle? = nil) {
         self.tabID = tabID
         self.title = title
+        self.generatedTitle = generatedTitle
         self.bufferID = bufferID
         self.revision = revision
         self.utf8 = utf8
@@ -49,6 +51,7 @@ private struct SearchCaptureDescriptor: Sendable {
     let tabID: TabID
     let title: String
     let capture: EditorRecoveryCapture
+    let generatedTitle: GeneratedDocumentTitle?
 }
 
 private struct SearchSelectionCandidate: Sendable {
@@ -692,7 +695,7 @@ public final class SearchWorkspaceUseCase {
             captures.append(SearchCaptureDescriptor(
                 tabID: tab.id,
                 title: tab.title,
-                capture: capture
+                capture: capture, generatedTitle: tab.generatedTitle
             ))
         }
         let limits = limits
@@ -718,7 +721,7 @@ public final class SearchWorkspaceUseCase {
                     title: descriptor.title,
                     bufferID: materialized.bufferID,
                     revision: materialized.revision,
-                    utf8: materialized.utf8
+                    utf8: materialized.utf8, generatedTitle: descriptor.generatedTitle
                 )
                 let restriction = captures.count == 1 ? selectedRange : nil
                 let foundScan = try SearchEngine.scan(
@@ -730,7 +733,7 @@ public final class SearchWorkspaceUseCase {
                 let found = foundScan.matches
                 let accepted = Array(found.prefix(remaining))
                 if !accepted.isEmpty {
-                    documents.append(SearchDocumentResult(tabID: descriptor.tabID, title: descriptor.title, matches: accepted))
+                    documents.append(SearchDocumentResult(tabID: descriptor.tabID, title: descriptor.title, matches: accepted, generatedTitle: descriptor.generatedTitle))
                 }
                 remaining -= accepted.count
                 if !foundScan.isComplete || found.count > accepted.count || remaining == 0 {
@@ -779,7 +782,7 @@ public final class SearchWorkspaceUseCase {
         if let activeTab, let capture {
             snapshot = try await Task.detached(priority: .userInitiated) {
                 let materialized = try capture.materializedSnapshot()
-                return SearchBufferSnapshot(tabID: activeTab.id, title: activeTab.title, bufferID: materialized.bufferID, revision: materialized.revision, utf8: materialized.utf8)
+                return SearchBufferSnapshot(tabID: activeTab.id, title: activeTab.title, bufferID: materialized.bufferID, revision: materialized.revision, utf8: materialized.utf8, generatedTitle: activeTab.generatedTitle)
             }.value
         } else { snapshot = nil }
         if let selection, let snapshot {
@@ -857,7 +860,7 @@ public final class SearchWorkspaceUseCase {
             let materialized = try capture.materializedSnapshot()
             return SearchBufferSnapshot(
                 tabID: tab.id, title: tab.title, bufferID: materialized.bufferID,
-                revision: materialized.revision, utf8: materialized.utf8
+                revision: materialized.revision, utf8: materialized.utf8, generatedTitle: tab.generatedTitle
             )
         }.value
         guard snapshot.utf8.count <= limits.maximumDocumentBytes else {
@@ -992,7 +995,7 @@ public final class SearchWorkspaceUseCase {
                 limit: remaining + 1, regexEngine: regexEngine
             )
             let accepted = Array(matches.prefix(remaining))
-            if !accepted.isEmpty { documents.append(SearchDocumentResult(tabID: snapshot.tabID, title: snapshot.title, matches: accepted)) }
+            if !accepted.isEmpty { documents.append(SearchDocumentResult(tabID: snapshot.tabID, title: snapshot.title, matches: accepted, generatedTitle: snapshot.generatedTitle)) }
             remaining -= accepted.count
             if matches.count > accepted.count || remaining == 0 {
                 truncated = matches.count > accepted.count || index + 1 < snapshots.count

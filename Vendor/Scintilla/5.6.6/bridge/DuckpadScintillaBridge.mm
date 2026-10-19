@@ -307,6 +307,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
+        _contextMenuTitles = @{};
         _scintilla = [[ScintillaView alloc] initWithFrame:self.bounds];
         _scintilla.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         _scintilla.delegate = self;
@@ -419,6 +420,19 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         self.accessibilityIdentifier = @"duckpad.editor.scintilla";
     }
     return self;
+}
+
+- (void)scintillaPrepareContextMenu:(NSMenu *)menu {
+    // These command tags belong to the pinned ScintillaBase context menu.
+    // Keep this mapping inside the bridge; Swift only sees stable command keys.
+    NSArray<NSString *> *keys = @[@"undo", @"redo", @"cut", @"copy", @"paste", @"delete", @"selectAll"];
+    for (NSMenuItem *item in menu.itemArray) {
+        if (item.isSeparatorItem || item.tag < 10 || item.tag > 16) continue;
+        NSString *key = keys[item.tag - 10];
+        item.identifier = [@"duckpad.editor.context." stringByAppendingString:key];
+        NSString *title = self.contextMenuTitles[key];
+        if (title) item.title = title;
+    }
 }
 
 - (void)layout {

@@ -13,7 +13,8 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
     }
 
     private let diffBuilder: DiffBuilder
-    private var activeSourceTitle = ""
+    private var activeSource: TabSnapshot?
+    private var activeCandidates: [TabSnapshot] = []
     private var activeAlert: NSAlert?
     private var activePanel: OpenDocumentComparePanel?
     private var pendingDiff: PendingDiff?
@@ -46,12 +47,18 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
         self.catalog = catalog
         activePanel?.refreshLocalization(catalog: catalog)
         if let alert = activeAlert {
-            alert.messageText = localized("Compare %1$@", activeSourceTitle)
+            alert.messageText = localized("Compare %1$@", activeSource?.localizedTitle(catalog: catalog) ?? "")
             alert.informativeText = localized("Choose another open document.")
             alert.buttons[0].title = localized("Compare")
             alert.buttons[1].title = localized("Cancel")
             alert.accessoryView?.setAccessibilityLabel(localized("Open document to compare"))
             alert.accessoryView?.setAccessibilityHelp(localized("Choose a different open document for a read-only comparison."))
+            if let source = activeSource, let picker = alert.accessoryView as? NSPopUpButton {
+                let selected = picker.indexOfSelectedItem
+                picker.removeAllItems()
+                Self.choices(source: source, candidates: activeCandidates, catalog: catalog).forEach { picker.addItem(withTitle: $0.label) }
+                if selected >= 0, selected < picker.numberOfItems { picker.selectItem(at: selected) }
+            }
         }
         for (identifier, alert) in failureAlerts {
             alert.messageText = localized("Duckpad could not compare these documents.")
@@ -64,16 +71,18 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
 
     public static func choices(
         source: TabSnapshot,
-        candidates: [TabSnapshot]
+        candidates: [TabSnapshot],
+        catalog: LocalizationCatalog = L10n.catalog
     ) -> [OpenDocumentCompareChoice] {
         let eligible = candidates.filter { $0.id != source.id }
-        let titleCounts = Dictionary(grouping: eligible + [source], by: \.title).mapValues(\.count)
+        let titleCounts = Dictionary(grouping: eligible + [source], by: { $0.localizedTitle(catalog: catalog) }).mapValues(\.count)
         return eligible.map { tab in
             let label: String
-            if titleCounts[tab.title, default: 0] > 1 {
-                label = "\(tab.title) — \(tab.fullPath ?? "Untitled \(tab.id.rawValue.uuidString.prefix(8))")"
+            let title = tab.localizedTitle(catalog: catalog)
+            if titleCounts[title, default: 0] > 1 {
+                label = "\(title) — \(tab.fullPath ?? catalog.text("Untitled %1$@", arguments: [String(tab.id.rawValue.uuidString.prefix(8))]))"
             } else {
-                label = tab.title
+                label = title
             }
             return OpenDocumentCompareChoice(tabID: tab.id, label: label)
         }
@@ -84,10 +93,10 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
         candidates: [TabSnapshot],
         attachedTo window: NSWindow?
     ) async -> TabID? {
-        let choices = Self.choices(source: source, candidates: candidates)
+        let choices = Self.choices(source: source, candidates: candidates, catalog: catalog)
         guard !choices.isEmpty, !Task.isCancelled else { return nil }
         let alert = NSAlert()
-        alert.messageText = localized("Compare %1$@", L10n.argument(source.title))
+        alert.messageText = localized("Compare %1$@", source.localizedTitle(catalog: catalog))
         alert.informativeText = localized("Choose another open document.")
         alert.addButton(withTitle: localized("Compare"))
         alert.addButton(withTitle: localized("Cancel"))
@@ -97,7 +106,8 @@ public final class NativeOpenDocumentComparePresenter: OpenDocumentComparePresen
         picker.setAccessibilityHelp(localized("Choose a different open document for a read-only comparison."))
         alert.accessoryView = picker
         if let previous = activeAlert { dismissActiveAlert(previous) }
-        activeSourceTitle = source.title
+        activeSource = source
+        activeCandidates = candidates
         activeAlert = alert
         let response = await run(alert, attachedTo: window)
         if activeAlert === alert { activeAlert = nil }

@@ -1,5 +1,12 @@
 # Scintilla 5.6.6 provenance
 
+2026-10-19 localization integration: `SCIContentView.menuForEvent:` notifies the
+optional delegate before returning a generated context menu. The Duckpad-owned
+bridge maps pinned command tags to stable keys and localized labels without
+changing menu targets, actions, separators, or enabled states. Translation lives
+in the Swift localization bundle. This source patch is maintained here; generated
+vendoring output must preserve the delegate declaration and callback.
+
 - Upstream: https://www.scintilla.org/scintilla566.tgz
 - Version: `5.6.6` (`version.txt`: `566`)
 - Archive SHA-256: `b6b08598c68fac90990d010c1142494d707530602b5320753274d045c2b02189`

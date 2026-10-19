@@ -61,7 +61,12 @@ struct SearchPanelViewTests {
         panel.onIncrementalQuery = { queries.append($0) }
         matchCase.performClick(nil)
         #expect(invalidations == 1)
-        try await Task.sleep(for: .milliseconds(250))
+        // This checks delivery, not latency; native suites can occupy MainActor
+        // beyond the debounce interval while the scheduled refresh waits.
+        for _ in 0..<100 {
+            if !queries.isEmpty { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
         #expect(queries.count == 1)
         #expect(queries.first?.options.matchCase == true)
         panel.hide()

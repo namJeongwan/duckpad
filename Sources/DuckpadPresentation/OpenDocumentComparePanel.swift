@@ -62,8 +62,18 @@ public final class OpenDocumentComparePanel: NSWindowController, NSWindowDelegat
     public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
         self.catalog = catalog
         window?.title = content.titleKey.map { catalog.text($0, arguments: content.titleArguments) } ?? content.title
-        let leftTitle = content.leftTitleKey.map { catalog.text($0, arguments: content.leftTitleArguments) } ?? content.leftTitle
-        let rightTitle = content.rightTitleKey.map { catalog.text($0, arguments: content.rightTitleArguments) } ?? content.rightTitle
+        var leftTitle = content.leftTitleKey.map { catalog.text($0, arguments: content.leftTitleArguments) } ?? content.leftTitle
+        var rightTitle = content.rightTitleKey.map { catalog.text($0, arguments: content.rightTitleArguments) } ?? content.rightTitle
+        if let comparison = content.comparison {
+            let left = comparison.left.localizedTitle(catalog: catalog)
+            let right = comparison.right.localizedTitle(catalog: catalog)
+            window?.title = catalog.text("Diff — %1$@ ↔ %2$@", arguments: [left, right])
+            leftTitle = left; rightTitle = right
+            if left == right {
+                leftTitle += " — " + (comparison.left.fullPath ?? catalog.text("Untitled %1$@", arguments: [String(comparison.left.tabID.rawValue.uuidString.prefix(8))]))
+                rightTitle += " — " + (comparison.right.fullPath ?? catalog.text("Untitled %1$@", arguments: [String(comparison.right.tabID.rawValue.uuidString.prefix(8))]))
+            }
+        }
         leftTitleLabel.stringValue = leftTitle
         rightTitleLabel.stringValue = rightTitle
         done.title = localized("Close")

@@ -48,6 +48,7 @@ typedef NS_ENUM(NSInteger, SCITextInputSource) {
 @protocol ScintillaNotificationProtocol
 - (void) notification: (SCNotification *) notification;
 @optional
+- (void) scintillaPrepareContextMenu: (NSMenu *) menu;
 - (BOOL) scintillaHandleMouseDown: (NSEvent *) event;
 - (BOOL) scintillaHandleSelectionEscape;
 - (void) scintillaDeclarationHoverAt: (NSPoint) point modifiers: (NSEventModifierFlags) modifiers;

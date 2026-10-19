@@ -1383,6 +1383,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             installMainMenu(target: target)
         }
         if languageChanged {
+            terminalRuntime.refreshLocalization()
             settingsWindowController?.refreshLocalization()
             projectController.refreshLocalization()
             for controller in windowControllers.values where controller.window?.isKeyWindow != true {

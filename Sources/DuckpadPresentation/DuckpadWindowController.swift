@@ -1166,19 +1166,20 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func compareContent(_ comparison: OpenDocumentComparison) -> OpenDocumentCompareContent {
-        let duplicateTitle = comparison.left.title == comparison.right.title
+        let duplicateTitle = comparison.left.displayTitle == comparison.right.displayTitle
         return OpenDocumentCompareContent(
-            title: L10n.text("Diff — %1$@ ↔ %2$@", L10n.argument(comparison.left.title), L10n.argument(comparison.right.title)),
+            title: L10n.text("Diff — %1$@ ↔ %2$@", L10n.argument(comparison.left.displayTitle), L10n.argument(comparison.right.displayTitle)),
             leftTitle: duplicateTitle
-                ? "\(comparison.left.title) — \(comparison.left.fullPath ?? "Untitled")"
-                : comparison.left.title,
+                ? "\(comparison.left.displayTitle) — \(comparison.left.fullPath ?? "Untitled")"
+                : comparison.left.displayTitle,
             rightTitle: duplicateTitle
-                ? "\(comparison.right.title) — \(comparison.right.fullPath ?? "Untitled")"
-                : comparison.right.title,
+                ? "\(comparison.right.displayTitle) — \(comparison.right.fullPath ?? "Untitled")"
+                : comparison.right.displayTitle,
             leftText: comparison.left.text,
             rightText: comparison.right.text,
             titleKey: "Diff — %1$@ ↔ %2$@",
-            titleArguments: [comparison.left.title, comparison.right.title]
+            titleArguments: [comparison.left.displayTitle, comparison.right.displayTitle],
+            comparison: comparison
         )
     }
 
@@ -1278,6 +1279,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
         declarationNavigation.cancel()
+        if let latestWorkspaceSnapshot { updateWindowTitle(latestWorkspaceSnapshot, catalog: catalog) }
         updateAccessory?.refreshLocalization(catalog: catalog)
         markdownPreviewPanel?.refreshLocalization(catalog: catalog)
         workspaceSidebar.refreshLocalization(catalog: catalog)
@@ -1323,8 +1325,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard let tab = workspace.snapshot().tabs.first(where: \.isActive),
               let change = fileUseCase?.externalChanges[tab.id] else { liveFileBanner.show(nil); return }
         liveFileBanner.show(change == .conflict
-            ? L10n.text("%1$@ changed on disk. Your unsaved edits were kept.", tab.title)
-            : L10n.text("%1$@ is unavailable on disk. Your contents were kept.", tab.title))
+            ? L10n.text("%1$@ changed on disk. Your unsaved edits were kept.", tab.displayTitle)
+            : L10n.text("%1$@ is unavailable on disk. Your contents were kept.", tab.displayTitle))
     }
 
     @objc private func performKeepEditingExternalFile(_ sender: Any?) {
@@ -1337,7 +1339,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               let tab = workspace.snapshot().tabs.first(where: \.isActive), let window else { return }
         if tab.isDirty {
             let alert = NSAlert()
-            alert.messageText = L10n.text("Reload %1$@ from disk?", L10n.argument(tab.title))
+            alert.messageText = L10n.text("Reload %1$@ from disk?", L10n.argument(tab.displayTitle))
             alert.informativeText = L10n.text("Your unsaved edits will be replaced by the file on disk.")
             alert.addButton(withTitle: L10n.text("Cancel"))
             alert.addButton(withTitle: L10n.text("Reload"))
@@ -3528,7 +3530,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                     isDirty: changedTab.isDirty,
                     isPinned: changedTab.isPinned,
                     buffer: changedTab.buffer,
-                    fullPath: changedTab.fullPath
+                    fullPath: changedTab.fullPath,
+                    isReadOnly: changedTab.isReadOnly,
+                    generatedTitle: changedTab.generatedTitle
                 )
                 guard strip.apply(tab: groupTab, at: groupIndex) else { return false }
             }
@@ -3631,7 +3635,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 isDirty: tab.isDirty,
                 isPinned: tab.isPinned,
                 buffer: tab.buffer,
-                fullPath: tab.fullPath
+                fullPath: tab.fullPath,
+                isReadOnly: tab.isReadOnly,
+                generatedTitle: tab.generatedTitle
             ))
         }
         guard editorGroupWorkspace.applyFocus(layout: currentLayout) else { return false }
@@ -3693,7 +3699,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             isDirty: tab.isDirty,
             isPinned: tab.isPinned,
             buffer: tab.buffer,
-            fullPath: tab.fullPath
+            fullPath: tab.fullPath,
+            isReadOnly: tab.isReadOnly,
+            generatedTitle: tab.generatedTitle
         )
     }
 
@@ -4105,7 +4113,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = L10n.text("Save changes to %1$@ before closing?", L10n.argument(tab.title))
+        alert.messageText = L10n.text("Save changes to %1$@ before closing?", L10n.argument(tab.displayTitle))
         alert.informativeText = L10n.text("Discard closes this exact reviewed revision without writing.")
         if saveAvailable { alert.addButton(withTitle: L10n.text("Save")) }
         alert.addButton(withTitle: L10n.text("Cancel"))
@@ -4883,14 +4891,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    private func updateWindowTitle(_ snapshot: WorkspaceSnapshot) {
+    private func updateWindowTitle(_ snapshot: WorkspaceSnapshot, catalog: LocalizationCatalog = L10n.catalog) {
         guard let active = snapshot.tabs.first(where: \.isActive) else {
             window?.title = "Duckpad"
             window?.isDocumentEdited = false
             return
         }
         if let menu = markdownCommandsMenu { updateMarkdownMenu(menu, isMarkdown: active.isMarkdownDocument) }
-        window?.title = "\(active.title) — Duckpad"
+        window?.title = "\(active.localizedTitle(catalog: catalog)) — Duckpad"
         window?.isDocumentEdited = active.isDirty
     }
 

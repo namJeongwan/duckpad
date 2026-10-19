@@ -22,6 +22,10 @@ public final class GhosttyRuntime: NSObject {
         return view
     }
 
+    public func refreshLocalization() {
+        for surface in surfaces.allObjects { surface.inspectorController?.refreshLocalization() }
+    }
+
     private func initialize() {
         guard !initialized else { return }
         initialized = true

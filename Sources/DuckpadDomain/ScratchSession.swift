@@ -45,16 +45,19 @@ public struct ScratchDocument: Codable, Equatable, Sendable {
     public let id: DocumentID
     public let bufferID: BufferID
     public var title: String
+    public var generatedTitle: GeneratedDocumentTitle?
     public var pendingFileFormat: DocumentFileFormat?
 
     public init(
         id: DocumentID = DocumentID(),
         bufferID: BufferID,
-        title: String
+        title: String,
+        generatedTitle: GeneratedDocumentTitle? = nil
     ) {
         self.id = id
         self.bufferID = bufferID
         self.title = title
+        self.generatedTitle = generatedTitle
     }
 }
 
@@ -259,7 +262,8 @@ public struct ScratchSession: Codable, Equatable, Sendable {
     private mutating func addUniqueUntitled(buffer: BufferMetadata) -> TabID {
         let document = ScratchDocument(
             bufferID: buffer.id,
-            title: "new \(nextUntitledNumber)"
+            title: "new \(nextUntitledNumber)",
+            generatedTitle: .untitled(nextUntitledNumber)
         )
         let tab = WorkspaceTab(documentID: document.id)
         nextUntitledNumber += 1
@@ -527,6 +531,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
             lineEnding: previousBinding?.lineEnding ?? .none)
         var updated = document
         updated.title = title
+        updated.generatedTitle = nil
         documents[document.id] = updated
         fileBindings[document.id] = binding
         guard var buffer = buffers[document.bufferID] else {
@@ -553,6 +558,7 @@ public struct ScratchSession: Codable, Equatable, Sendable {
             throw SessionError.duplicateFileBinding(binding.canonicalPath)
         }
         document.title = title
+        document.generatedTitle = nil
         documents[document.id] = document
         fileBindings[document.id] = binding
         if binding == nil { buffers[document.bufferID]?.markDirty() }
