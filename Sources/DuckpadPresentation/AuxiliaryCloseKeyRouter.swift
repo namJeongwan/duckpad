@@ -23,6 +23,10 @@ public final class AuxiliaryCloseKeyRouter {
     }
 
     func handle(_ event: NSEvent) -> Bool {
+        // A selected shortcut row owns key combinations before app/menu commands.
+        if event.type == .keyDown,
+           let table = (event.window ?? NSApp.keyWindow)?.firstResponder as? ShortcutTableView,
+           table.routeShortcutKey(event) { return true }
         if event.type == .keyUp {
             if event.keyCode == consumedCloseKey { consumedCloseKey = nil }
             return false

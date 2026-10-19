@@ -585,3 +585,29 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
     #expect(left.integerValue == 7 && line.integerValue == 8)
     #expect(saved?.editorRightPadding == 8)
 }
+
+@Test @MainActor func minimapMenuChoiceSurvivesAnOpenPreferencesUpdateWithoutDiscardingDrafts() async throws {
+    _ = NSApplication.shared
+    let store = ThemeSettingsStore()
+    let useCase = AppSettingsUseCase(store: store)
+    await useCase.start()
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    controller.configure(settings: useCase.state.settings) { await useCase.update($0) }
+    let root = try #require(controller.window?.contentView)
+    let fontSize = try #require(findView(in: root, identifier: "duckpad.settings.editor-font-size") as? NSTextField)
+    fontSize.stringValue = "19"
+    guard case .saved(let latest) = await useCase.updateMinimapVisible(false) else {
+        Issue.record("minimap toggle did not save"); return
+    }
+    controller.synchronizeMinimapVisibility(latest.minimapVisible)
+    #expect(fontSize.stringValue == "19")
+    var updateTask: Task<Void, Never>?
+    controller.onUpdateTaskStarted = { updateTask = $0 }
+    controller.selectAppearance(.dark)
+    await updateTask?.value
+    let restored = await AppSettingsUseCase(store: store).start().settings
+    #expect(!restored.minimapVisible)
+    #expect(restored.appearanceMode == .dark)
+    #expect(restored.editorFontSize == 19)
+}

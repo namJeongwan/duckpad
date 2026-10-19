@@ -372,6 +372,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorFindTextPo
             return textView.isEditable && (selection.length > 0 || selection.location < textView.string.utf16.count)
         case .selectAll:
             return !textView.string.isEmpty
+        case .selectNextOccurrence, .selectAllOccurrences, .skipCurrentOccurrence, .undoAddedSelection, .addCursorAbove, .addCursorBelow, .splitSelectionIntoLines, .collapseSelections: return false
         case .duplicateLine, .indent, .unindent:
             return textView.isEditable && !textView.hasMarkedText()
         case .moveLineUp:
@@ -401,6 +402,7 @@ public final class TextViewEditorAdapter: NSObject, EditorPort, EditorFindTextPo
         case .paste: textView.paste(nil)
         case .delete: textView.deleteForward(nil)
         case .selectAll: textView.selectAll(nil)
+        case .selectNextOccurrence, .selectAllOccurrences, .skipCurrentOccurrence, .undoAddedSelection, .addCursorAbove, .addCursorBelow, .splitSelectionIntoLines, .collapseSelections: break
         case .duplicateLine: duplicateSelectedLines()
         case .moveLineUp: moveSelectedLines(up: true)
         case .moveLineDown: moveSelectedLines(up: false)

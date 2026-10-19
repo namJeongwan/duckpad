@@ -897,3 +897,53 @@
 "More document information" = "문서 정보 더 보기";
 
 "Some characters cannot be saved as %1$@. Nothing was saved. Choose UTF-8 to keep all characters." = "일부 문자는 %1$@로 저장할 수 없습니다. 아무것도 저장하지 않았습니다. 모든 문자를 유지하려면 UTF-8을 선택하세요.";
+"Select Next Occurrence" = "다음 일치 항목 추가 선택";
+"Select All Occurrences" = "모든 일치 항목 선택";
+"Skip Current Occurrence" = "현재 일치 항목 건너뛰기";
+"Undo Last Added Selection" = "마지막 추가 선택 되돌리기";
+"Add Cursor Above" = "위쪽 줄에 커서 추가";
+"Add Cursor Below" = "아래쪽 줄에 커서 추가";
+"Split Selection into Lines" = "선택을 줄별로 나누기";
+"Collapse to Single Cursor" = "커서 하나로 돌아가기";
+"Keyboard Shortcuts…" = "키보드 단축키…";
+"Keyboard Shortcuts" = "키보드 단축키";
+"Shortcut" = "단축키";
+"Record Shortcut" = "단축키 입력";
+"Remove Shortcut" = "단축키 해제";
+"Restore Default" = "기본값 복원";
+"Restore All Defaults" = "모든 기본값 복원";
+"Select a command, then record a shortcut. System shortcuts may take precedence." = "명령을 선택한 뒤 단축키를 입력하세요. 시스템 단축키가 우선할 수 있습니다.";
+"Press a shortcut with Command or Control. Escape cancels." = "Command 또는 Control이 포함된 단축키를 누르세요. Esc로 취소합니다.";
+"Use a supported shortcut with Command or Control." = "Command 또는 Control이 포함된 지원 가능한 단축키를 사용하세요.";
+"Shortcut already used by %1$@" = "%1$@에서 이미 사용하는 단축키입니다";
+"Shortcut settings saved" = "단축키 설정을 저장했습니다";
+"Could not save shortcut settings. Please try again." = "단축키 설정을 저장하지 못했습니다. 다시 시도하세요.";
+"Multiple Cursors" = "멀티 커서";
+"Command Name" = "명령 이름";
+
+"Show minimap" = "미니맵 표시";
+"Minimap — click or drag to scroll" = "미니맵 — 클릭하거나 드래그하여 스크롤";
+
+"Recording shortcut for %1$@" = "단축키 입력 중 — %1$@";
+"Cancel Recording" = "입력 취소";
+"Shortcut recording cancelled" = "단축키 입력을 취소했습니다";
+
+"Edit Shortcut…" = "단축키 편집…";
+
+"Double-click to edit shortcut" = "더블 클릭하여 단축키 편집";
+
+"Double-click a command to edit its shortcut. System shortcuts may take precedence." = "명령을 더블 클릭하여 단축키를 편집하세요. 시스템 단축키가 우선할 수 있습니다.";
+
+"Press shortcut…" = "단축키를 누르세요…";
+
+"Ready to save. Press another shortcut to change it." = "저장할 수 있습니다. 다른 단축키를 눌러 변경할 수 있습니다.";
+
+"Listening… Enter to apply · Esc to cancel" = "입력 중… Enter 적용 · Esc 취소";
+
+"Enter to apply · Esc to cancel" = "Enter 적용 · Esc 취소";
+
+"Edit Shortcut" = "단축키 편집";
+
+"Press a shortcut · Enter to apply · Esc to cancel" = "단축키 입력 · Enter 적용 · Esc 취소";
+
+"Select a command and press a shortcut, or double-click. Enter applies · Esc cancels." = "명령을 선택하고 단축키를 누르거나 더블 클릭하세요. Enter 적용 · Esc 취소";

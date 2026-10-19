@@ -2100,11 +2100,11 @@ struct LanguageEditorAdapterTests {
             keyCode: 30,
             to: multipleWindow
         )
-        #expect(multipleSelection.contentUTF8 == Data("  \n  }".utf8))
-        #expect(multipleSelection.revision == 1)
+        #expect(multipleSelection.contentUTF8 == Data("  }\n  }".utf8))
+        #expect(multipleSelection.revision == 2)
         assertFollowingEditUndoesWithoutGrouping(
             in: multipleSelection,
-            preserving: "  \n  }"
+            preserving: "  }\n  }"
         )
         multipleWindow.orderOut(nil)
 

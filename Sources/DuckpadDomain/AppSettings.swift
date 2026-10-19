@@ -33,6 +33,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var tabDragEnabled: Bool
     public var showTabCloseButton: Bool
     public var showInactiveTabButtons: Bool
+    public var minimapVisible: Bool
     public var lineNumbersVisible: Bool
     public var bookmarkMarginVisible: Bool
     public var highlightCurrentLine: Bool
@@ -57,6 +58,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var findSelectionMaximumCharacters: Int
     public var monospacedFindFields: Bool
     public var markdownImageDropAction: Int
+    public var keyboardShortcuts: [String: String]
     public var snippets: [TextSnippet]
     public var formatting: FormattingSettings
 
@@ -84,6 +86,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         tabDragEnabled: Bool = true,
         showTabCloseButton: Bool = true,
         showInactiveTabButtons: Bool = false,
+        minimapVisible: Bool = true,
         lineNumbersVisible: Bool = true,
         bookmarkMarginVisible: Bool = true,
         highlightCurrentLine: Bool = true,
@@ -105,6 +108,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         findSelectionMaximumCharacters: Int = 1024,
         monospacedFindFields: Bool = false,
         markdownImageDropAction: Int = 0,
+        keyboardShortcuts: [String: String] = [:],
         snippets: [TextSnippet] = [],
         formatting: FormattingSettings = .init()
     ) {
@@ -131,6 +135,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.tabDragEnabled = tabDragEnabled
         self.showTabCloseButton = showTabCloseButton
         self.showInactiveTabButtons = showInactiveTabButtons
+        self.minimapVisible = minimapVisible
         self.lineNumbersVisible = lineNumbersVisible
         self.bookmarkMarginVisible = bookmarkMarginVisible
         self.highlightCurrentLine = highlightCurrentLine
@@ -152,6 +157,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.findSelectionMaximumCharacters = findSelectionMaximumCharacters
         self.monospacedFindFields = monospacedFindFields
         self.markdownImageDropAction = markdownImageDropAction
+        self.keyboardShortcuts = keyboardShortcuts
         self.snippets = snippets
         self.formatting = formatting
     }
@@ -181,6 +187,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         tabDragEnabled = try values.decodeIfPresent(Bool.self, forKey: .tabDragEnabled) ?? true
         showTabCloseButton = try values.decodeIfPresent(Bool.self, forKey: .showTabCloseButton) ?? true
         showInactiveTabButtons = try values.decodeIfPresent(Bool.self, forKey: .showInactiveTabButtons) ?? false
+        minimapVisible = try values.decodeIfPresent(Bool.self, forKey: .minimapVisible) ?? true
         lineNumbersVisible = try values.decodeIfPresent(Bool.self, forKey: .lineNumbersVisible) ?? true
         bookmarkMarginVisible = try values.decodeIfPresent(Bool.self, forKey: .bookmarkMarginVisible) ?? true
         highlightCurrentLine = try values.decodeIfPresent(Bool.self, forKey: .highlightCurrentLine) ?? true
@@ -202,6 +209,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         findSelectionMaximumCharacters = try values.decodeIfPresent(Int.self, forKey: .findSelectionMaximumCharacters) ?? 1024
         monospacedFindFields = try values.decodeIfPresent(Bool.self, forKey: .monospacedFindFields) ?? false
         markdownImageDropAction = try values.decodeIfPresent(Int.self, forKey: .markdownImageDropAction) ?? 0
+        keyboardShortcuts = try values.decodeIfPresent([String: String].self, forKey: .keyboardShortcuts) ?? [:]
         snippets = try values.decodeIfPresent([TextSnippet].self, forKey: .snippets) ?? []
         formatting = try values.decodeIfPresent(FormattingSettings.self, forKey: .formatting) ?? .init()
     }

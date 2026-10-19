@@ -857,3 +857,53 @@
 "More document information" = "Altre informazioni sul documento";
 
 "Some characters cannot be saved as %1$@. Nothing was saved. Choose UTF-8 to keep all characters." = "Alcuni caratteri non possono essere salvati in %1$@. Non è stato salvato nulla. Scegli UTF-8 per conservare tutti i caratteri.";
+"Select Next Occurrence" = "Seleziona occorrenza successiva";
+"Select All Occurrences" = "Seleziona tutte le occorrenze";
+"Skip Current Occurrence" = "Salta occorrenza corrente";
+"Undo Last Added Selection" = "Annulla ultima selezione aggiunta";
+"Add Cursor Above" = "Aggiungi cursore sopra";
+"Add Cursor Below" = "Aggiungi cursore sotto";
+"Split Selection into Lines" = "Dividi selezione per righe";
+"Collapse to Single Cursor" = "Torna a un solo cursore";
+"Keyboard Shortcuts…" = "Scorciatoie da tastiera…";
+"Keyboard Shortcuts" = "Scorciatoie da tastiera";
+"Shortcut" = "Scorciatoia";
+"Record Shortcut" = "Registra scorciatoia";
+"Remove Shortcut" = "Rimuovi scorciatoia";
+"Restore Default" = "Ripristina predefinito";
+"Restore All Defaults" = "Ripristina tutti i predefiniti";
+"Select a command, then record a shortcut. System shortcuts may take precedence." = "Seleziona un comando e registra una scorciatoia. Le scorciatoie di sistema possono avere la precedenza.";
+"Press a shortcut with Command or Control. Escape cancels." = "Premi una scorciatoia con Command o Control. Escape annulla.";
+"Use a supported shortcut with Command or Control." = "Usa una scorciatoia supportata con Command o Control.";
+"Shortcut already used by %1$@" = "Scorciatoia già usata da %1$@";
+"Shortcut settings saved" = "Scorciatoie salvate";
+"Could not save shortcut settings. Please try again." = "Impossibile salvare le scorciatoie. Riprova.";
+"Multiple Cursors" = "Cursori multipli";
+"Command Name" = "Nome del comando";
+
+"Show minimap" = "Mostra minimappa";
+"Minimap — click or drag to scroll" = "Minimappa — fai clic o trascina per scorrere";
+
+"Recording shortcut for %1$@" = "Registrazione della scorciatoia — %1$@";
+"Cancel Recording" = "Annulla registrazione";
+"Shortcut recording cancelled" = "Registrazione della scorciatoia annullata";
+
+"Edit Shortcut…" = "Modifica scorciatoia…";
+
+"Double-click to edit shortcut" = "Fai doppio clic per modificare la scorciatoia";
+
+"Double-click a command to edit its shortcut. System shortcuts may take precedence." = "Fai doppio clic su un comando per modificarne la scorciatoia. Le scorciatoie di sistema possono avere la precedenza.";
+
+"Press shortcut…" = "Premi la scorciatoia…";
+
+"Ready to save. Press another shortcut to change it." = "Pronto per il salvataggio. Premi un’altra scorciatoia per cambiarla.";
+
+"Listening… Enter to apply · Esc to cancel" = "In ascolto… Invio per applicare · Esc per annullare";
+
+"Enter to apply · Esc to cancel" = "Invio per applicare · Esc per annullare";
+
+"Edit Shortcut" = "Modifica scorciatoia";
+
+"Press a shortcut · Enter to apply · Esc to cancel" = "Premi una scorciatoia · Invio per applicare · Esc per annullare";
+
+"Select a command and press a shortcut, or double-click. Enter applies · Esc cancels." = "Seleziona un comando e premi una scorciatoia, oppure fai doppio clic. Invio applica · Esc annulla";

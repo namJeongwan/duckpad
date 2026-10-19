@@ -129,3 +129,56 @@ private final class AppSettingsStoreFake: AppSettingsStore {
     if case .failed = await useCase.updateSnippets([], expected: []) {} else { Issue.record("stale panel overwrote snippets") }
     #expect(store.saved.last?.snippets == snippets)
 }
+
+@Test @MainActor func shortcutUpdatesPreserveOtherPreferencesAndRejectStaleWriters() async {
+    let store = AppSettingsStoreFake()
+    let useCase = AppSettingsUseCase(store: store)
+    _ = await useCase.start()
+    let shortcuts = ["performSelectNextOccurrence:": "cmd+shift+d"]
+    guard case .saved = await useCase.updateKeyboardShortcuts(shortcuts, expected: [:]) else {
+        Issue.record("shortcut save failed"); return
+    }
+    var staleSettings = AppSettings.defaults
+    staleSettings.editorFontSize = 18
+    _ = await useCase.update(staleSettings)
+    #expect(useCase.state.settings.keyboardShortcuts == shortcuts)
+    #expect(useCase.state.settings.editorFontSize == 18)
+    guard case .failed = await useCase.updateKeyboardShortcuts([:], expected: [:]) else {
+        Issue.record("stale writer was accepted"); return
+    }
+    store.saveFailure = .writeFailed("fixture")
+    guard case .failed = await useCase.updateKeyboardShortcuts([:], expected: shortcuts) else {
+        Issue.record("failed persistence was accepted"); return
+    }
+    #expect(useCase.state.settings.keyboardShortcuts == shortcuts)
+}
+
+@Test @MainActor func minimapPreferencePersistsAndOlderSettingsEnableIt() async throws {
+    let defaults = try JSONEncoder().encode(AppSettings.defaults)
+    var legacy = try #require(JSONSerialization.jsonObject(with: defaults) as? [String: Any])
+    legacy.removeValue(forKey: "minimapVisible")
+    let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONSerialization.data(withJSONObject: legacy))
+    #expect(decoded.minimapVisible)
+    let useCase = AppSettingsUseCase(store: AppSettingsStoreFake())
+    _ = await useCase.update(AppSettings(minimapVisible: false))
+    #expect(!useCase.state.settings.minimapVisible)
+    let data = try JSONEncoder().encode(useCase.state.settings)
+    #expect(try !JSONDecoder().decode(AppSettings.self, from: data).minimapVisible)
+}
+
+@Test @MainActor func minimapMenuPreferencePersistsWithoutChangingOtherSettings() async {
+    let store = AppSettingsStoreFake()
+    var original = AppSettings.defaults
+    original.appearanceMode = .dark
+    original.keyboardShortcuts = ["performCopy:": "ctrl+c"]
+    store.loaded = original
+    let useCase = AppSettingsUseCase(store: store)
+    await useCase.start()
+    var expected = original
+    expected.minimapVisible = false
+    #expect(await useCase.updateMinimapVisible(false) == .saved(expected))
+    #expect(store.saved.last == expected)
+    store.saveFailure = .writeFailed("fixture")
+    #expect(await useCase.updateMinimapVisible(true) == .failed(.writeFailed("fixture")))
+    #expect(!useCase.state.settings.minimapVisible)
+}

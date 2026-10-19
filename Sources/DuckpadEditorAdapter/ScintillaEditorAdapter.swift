@@ -995,6 +995,8 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
             }
             RichClipboardWriter.addRepresentations(presentation, tabWidth: Int(view.configuredTabWidth), to: pasteboard)
         }
+        view.isMinimapVisible = settings.minimapVisible
+        view.minimapNavigationLabel = L10n.text("Minimap — click or drag to scroll")
         view.configureEditorFont(settings.editorFontName, size: settings.editorFontSize)
         view.configureTextLayout(withLeftPadding: settings.editorLeftPadding,
                                  rightPadding: settings.editorRightPadding,
@@ -1203,6 +1205,8 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
             return editorView.canDelete
         case .selectAll:
             return editorView.canSelectAll
+        case .selectNextOccurrence, .selectAllOccurrences, .skipCurrentOccurrence, .undoAddedSelection, .addCursorAbove, .addCursorBelow, .splitSelectionIntoLines, .collapseSelections:
+            return editorView.canPerformSelection(nativeSelectionCommand(command))
         case .duplicateLine, .moveLineUp, .moveLineDown, .deleteLine, .joinLines,
              .uppercase, .lowercase, .indent, .unindent, .trimTrailingWhitespace:
             return editorView.canPerform(nativeEditingCommand(command))
@@ -1219,9 +1223,26 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
         case .paste: editorView.paste()
         case .delete: editorView.deleteSelectionOrNextCharacter()
         case .selectAll: editorView.selectAll()
+        case .selectNextOccurrence, .selectAllOccurrences, .skipCurrentOccurrence, .undoAddedSelection, .addCursorAbove, .addCursorBelow, .splitSelectionIntoLines, .collapseSelections:
+            cancelSnippet()
+            editorView.performSelection(nativeSelectionCommand(command))
         case .duplicateLine, .moveLineUp, .moveLineDown, .deleteLine, .joinLines,
              .uppercase, .lowercase, .indent, .unindent, .trimTrailingWhitespace:
             editorView.perform(nativeEditingCommand(command))
+        }
+    }
+
+    private func nativeSelectionCommand(_ command: EditorCommand) -> DPScintillaSelectionCommand {
+        switch command {
+        case .selectNextOccurrence: .selectNextOccurrence
+        case .selectAllOccurrences: .selectAllOccurrences
+        case .skipCurrentOccurrence: .skipCurrentOccurrence
+        case .undoAddedSelection: .undoAddedSelection
+        case .addCursorAbove: .addCursorAbove
+        case .addCursorBelow: .addCursorBelow
+        case .splitSelectionIntoLines: .splitSelectionIntoLines
+        case .collapseSelections: .collapseSelections
+        default: preconditionFailure("Not a selection command")
         }
     }
 
@@ -1253,7 +1274,7 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
         case .indent: .indent
         case .unindent: .unindent
         case .trimTrailingWhitespace: .trimTrailingWhitespace
-        case .undo, .redo, .cut, .copy, .paste, .delete, .selectAll:
+        default:
             preconditionFailure("Standard responder command has no native editing-command mapping")
         }
     }
