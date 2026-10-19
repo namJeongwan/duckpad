@@ -111,11 +111,13 @@ public struct SearchMatch: Hashable, Sendable {
 public struct SearchDocumentResult: Equatable, Sendable {
     public let tabID: TabID
     public let title: String
+    public let generatedTitle: GeneratedDocumentTitle?
     public let matches: [SearchMatch]
 
-    public init(tabID: TabID, title: String, matches: [SearchMatch]) {
+    public init(tabID: TabID, title: String, matches: [SearchMatch], generatedTitle: GeneratedDocumentTitle? = nil) {
         self.tabID = tabID
         self.title = title
+        self.generatedTitle = generatedTitle
         self.matches = matches
     }
 }

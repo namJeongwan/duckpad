@@ -62,7 +62,9 @@ public final class EditorGroupPaneView: NSView {
                 isDirty: tab.isDirty,
                 isPinned: tab.isPinned,
                 buffer: tab.buffer,
-                fullPath: tab.fullPath
+                fullPath: tab.fullPath,
+                isReadOnly: tab.isReadOnly,
+                generatedTitle: tab.generatedTitle
             )
         }
         tabStrip.apply(tabs: selectedTabs)

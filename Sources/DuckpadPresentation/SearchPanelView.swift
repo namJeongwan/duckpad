@@ -343,7 +343,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
 
     private func renderRows(_ result: SearchResultSet) {
         rows = result.documents.flatMap { document in
-            [(localized("%1$@ — %2$@", document.title, localized("search.matches", document.matches.count)), nil)]
+            [(localized("%1$@ — %2$@", LocalizedDocumentTitle.text(document.title, generated: document.generatedTitle, catalog: catalog), localized("search.matches", document.matches.count)), nil)]
                 + document.matches.map { ("  \($0.line):\($0.column)  \($0.snippet)", Optional(.openDocument($0))) }
         }
     }

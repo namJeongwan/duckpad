@@ -322,6 +322,11 @@ let package = Package(
                 .product(name: "Testing", package: "swift-testing"),
             ]
         ),
+        .testTarget(
+            name: "DuckpadTerminalAdapterTests",
+            dependencies: ["DuckpadTerminalAdapter", "DuckpadLocalization", "DuckpadDomain", "GhosttyKit",
+                           .product(name: "Testing", package: "swift-testing")]
+        ),
     ],
     cxxLanguageStandard: .cxx17
 )

@@ -88,7 +88,7 @@ public final class OpenDocumentComparisonUseCase {
             fullPath: tab.fullPath,
             bufferID: descriptor.bufferID,
             revision: descriptor.revision,
-            text: snapshot.text
+            text: snapshot.text, generatedTitle: tab.generatedTitle
         )
     }
 

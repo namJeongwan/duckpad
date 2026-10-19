@@ -228,10 +228,10 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         configuredRow = row
         self.ownsTrailingSeparator = ownsTrailingSeparator
         self.ownsBottomSeparator = ownsBottomSeparator
-        titleLabel.stringValue = tab.title
+        titleLabel.stringValue = tab.displayTitle
         dirtyIndicator.isHidden = !tab.isDirty
-        titleLabel.toolTip = tab.fullPath ?? tab.title
-        view.toolTip = tab.fullPath ?? tab.title
+        titleLabel.toolTip = tab.fullPath ?? tab.displayTitle
+        view.toolTip = tab.fullPath ?? tab.displayTitle
         updateVisualState()
         updateActionVisibility()
 
@@ -241,6 +241,9 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
         guard let tab = configuredTab, let index = configuredIndex, let row = configuredRow else { return }
         func text(_ key: String, _ arguments: CVarArg...) -> String { catalog.text(key, arguments: arguments) }
+        titleLabel.stringValue = tab.localizedTitle(catalog: catalog)
+        titleLabel.toolTip = tab.fullPath ?? tab.localizedTitle(catalog: catalog)
+        view.toolTip = titleLabel.toolTip
         let stableID = tab.id.rawValue.uuidString.lowercased()
         let state = [
             tab.isActive ? text("selected") : text("not selected"),
@@ -252,26 +255,26 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         view.setAccessibilityElement(true)
         view.setAccessibilityRole(.button)
         view.setAccessibilityIdentifier("duckpad.tab.\(stableID)")
-        view.setAccessibilityLabel(text("%1$@ tab", L10n.argument(tab.title)))
+        view.setAccessibilityLabel(text("%1$@ tab", L10n.argument(tab.localizedTitle(catalog: catalog))))
         view.setAccessibilityValue(state)
-        view.setAccessibilityHelp(text("Activate %1$@ tab", L10n.argument(tab.title)))
+        view.setAccessibilityHelp(text("Activate %1$@ tab", L10n.argument(tab.localizedTitle(catalog: catalog))))
         previewButton.toolTip = text("Markdown Preview") + " (⇧⌘V)"
         previewButton.setAccessibilityLabel(text("Markdown Preview"))
         previewButton.setAccessibilityIdentifier("duckpad.tab.markdown-preview.\(stableID)")
         closeButton.setAccessibilityIdentifier("duckpad.tab.close.\(stableID)")
-        closeButton.setAccessibilityLabel(text("Close %1$@", L10n.argument(tab.title)))
+        closeButton.setAccessibilityLabel(text("Close %1$@", L10n.argument(tab.localizedTitle(catalog: catalog))))
         closeButton.setAccessibilityValue(tab.isDirty ? text("modified tab") : text("unmodified tab"))
         pinButton.setAccessibilityIdentifier("duckpad.tab.pin.\(stableID)")
-        pinButton.setAccessibilityLabel(tab.isPinned ? text("Unpin %1$@", L10n.argument(tab.title)) : text("Pin %1$@", L10n.argument(tab.title)))
+        pinButton.setAccessibilityLabel(tab.isPinned ? text("Unpin %1$@", L10n.argument(tab.localizedTitle(catalog: catalog))) : text("Pin %1$@", L10n.argument(tab.localizedTitle(catalog: catalog))))
         pinButton.setAccessibilityValue(tab.isPinned ? text("pinned") : text("unpinned"))
         pinButton.toolTip = tab.isPinned ? text("Unpin Tab") : text("Pin Tab")
         view.setAccessibilityCustomActions([
-            NSAccessibilityCustomAction(name: text("Close %1$@", L10n.argument(tab.title))) { [weak self] in
+            NSAccessibilityCustomAction(name: text("Close %1$@", L10n.argument(tab.localizedTitle(catalog: catalog)))) { [weak self] in
                 guard let self, self.closeButton.isEnabled else { return false }
                 self.onClose?()
                 return true
             },
-            NSAccessibilityCustomAction(name: tab.isPinned ? text("Unpin %1$@", L10n.argument(tab.title)) : text("Pin %1$@", L10n.argument(tab.title))) { [weak self] in
+            NSAccessibilityCustomAction(name: tab.isPinned ? text("Unpin %1$@", L10n.argument(tab.localizedTitle(catalog: catalog))) : text("Pin %1$@", L10n.argument(tab.localizedTitle(catalog: catalog)))) { [weak self] in
                 self?.pinButton.accessibilityPerformPress() ?? false
             },
         ])
@@ -317,7 +320,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         let active = configuredTab?.isActive == true || isSelected
         if let tab = configuredTab {
             let icon = MaterialFileIconTheme.shared.icon(
-                for: tab.fullPath ?? tab.title,
+                for: tab.fullPath ?? tab.displayTitle,
                 appearance: view.effectiveAppearance
             )
             fileIconImage.image = icon.image
@@ -357,7 +360,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
 
     override var draggingImageComponents: [NSDraggingImageComponent] {
         guard let tab = configuredTab else { return super.draggingImageComponents }
-        let image = TabDragPreview.image(title: tab.title, icon: fileIconImage.image,
+        let image = TabDragPreview.image(title: tab.displayTitle, icon: fileIconImage.image,
                                          isDirty: tab.isDirty, appearance: view.effectiveAppearance)
         let component = NSDraggingImageComponent(key: .icon)
         component.contents = image
@@ -388,7 +391,7 @@ private final class DuckpadTabItem: NSCollectionViewItem {
 
     private func makeContextMenu() -> NSMenu? {
         guard let tab = configuredTab else { return nil }
-        let menu = NSMenu(title: tab.title)
+        let menu = NSMenu(title: tab.displayTitle)
         if tab.isMarkdownDocument {
             add(L10n.text("Markdown Preview"), action: #selector(previewMarkdown), to: menu, contextAction: .previewMarkdown)
             menu.addItem(.separator())
@@ -988,7 +991,7 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
               documentSwitcher.apply(tab: tab, at: index) else { return false }
         let previous = tabs[index]
         tabs[index] = tab
-        if previous.title != tab.title || previous.isPinned != tab.isPinned {
+        if previous.displayTitle != tab.displayTitle || previous.isPinned != tab.isPinned {
             flowLayout.updateItemWidth(tabWidth(tab), at: index)
         }
         hostedCollectionView.reloadItems(at: [IndexPath(item: index, section: 0)])
@@ -1070,6 +1073,13 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         for case let item as DuckpadTabItem in hostedCollectionView.visibleItems() {
             item.refreshLocalization(catalog: catalog)
         }
+        // Language changes are rare. Recompute every generated title width here,
+        // keeping this work out of document edits and incremental tab updates.
+        flowLayout.itemWidths = tabs.map { tabWidth($0, catalog: catalog) }
+        flowLayout.invalidateLayout()
+        hostedCollectionView.layoutSubtreeIfNeeded()
+        updateDocumentFrame()
+        updateViewportHeight()
     }
 
     public func setEditorGroupID(_ groupID: EditorGroupID) {
@@ -1533,8 +1543,10 @@ public final class MultilineTabStripView: NSView, NSCollectionViewDataSource, NS
         )
     }
 
-    private func tabWidth(_ tab: TabSnapshot) -> CGFloat {
-        let width = (tab.title as NSString).size(
+    private func tabWidth(_ tab: TabSnapshot) -> CGFloat { tabWidth(tab, catalog: L10n.catalog) }
+
+    private func tabWidth(_ tab: TabSnapshot, catalog: LocalizationCatalog) -> CGFloat {
+        let width = (tab.localizedTitle(catalog: catalog) as NSString).size(
             withAttributes: [.font: WorkspaceTabStyle.font]
         ).width
         // Reserve icon, status, pin, and close slots so hover never moves the title.

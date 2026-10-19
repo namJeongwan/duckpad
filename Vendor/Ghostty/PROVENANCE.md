@@ -1,5 +1,16 @@
 # Ghostty
 
+2026-10-19 inspector localization: `scripts/patch_ghostty_inspector.py` wraps
+static Inspector labels and complete help expressions with a host-owned UTF-8
+translation callback. The reviewed key inventory is stored in
+`inspector-localization-keys.json` and validated against all eight Swift catalogs.
+Internal ImGui IDs, protocol field names, terminal contents, and user data are
+preserved. A supplemental system font supports CJK glyphs through Dear ImGui
+1.92's dynamic atlas. The unrelated upstream ImGui demonstration is no longer
+opened by default. Locale changes recreate only open inspector views/atlases,
+preserving terminal sessions. The callback patch, inventory, and script are part
+of the framework build cache key; no generated framework is committed.
+
 - Source: https://github.com/ghostty-org/ghostty
 - Version: v1.3.1
 - Commit: `332b2aefc6e72d363aa93ab6ecfc86eeeeb5ed28`

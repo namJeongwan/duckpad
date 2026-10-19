@@ -211,8 +211,16 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
         internalSecondaryHost.setAccessibilityLabel(catalog.text("Secondary editor pane"))
         secondaryGroupHost.setAccessibilityLabel(catalog.text("Secondary editor group"))
         for view in Array(bufferViews.values) + Array(secondaryBufferViews.values) + groupPeerViews.values.flatMap({ $0 }) {
+            view.contextMenuTitles = Self.contextMenuTitles(catalog)
             view.configureColorPreview(withChangeLabel: catalog.text("Change color"), applyLabel: catalog.text("Apply"))
         }
+    }
+
+    private static func contextMenuTitles(_ catalog: LocalizationCatalog) -> [String: String] {
+        ["undo": catalog.text("Undo"), "redo": catalog.text("Redo"),
+         "cut": catalog.text("Cut"), "copy": catalog.text("Copy"),
+         "paste": catalog.text("Paste"), "delete": catalog.text("Delete"),
+         "selectAll": catalog.text("Select All")]
     }
 
     public func reloadFile(_ snapshot: EditorTextSnapshot, from: DocumentFileFormat, to: DocumentFileFormat) {
@@ -976,6 +984,7 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
     }
 
     private func applyDisplayPreferences(to view: DPScintillaEditorView) {
+        view.contextMenuTitles = Self.contextMenuTitles(L10n.catalog)
         let settings = displayPreferences
         view.configureColorPreview(withChangeLabel: L10n.text("Change color"), applyLabel: L10n.text("Apply"))
         view.didCopySelection = { [weak self, weak view] pasteboard in

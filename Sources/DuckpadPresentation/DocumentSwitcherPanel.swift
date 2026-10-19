@@ -31,7 +31,7 @@ struct DocumentSwitcherSearch {
     static func matchTier(for tab: TabSnapshot, terms: [String]) -> Int? {
         guard !terms.isEmpty else { return 0 }
         let phrase = terms.joined(separator: " ")
-        let title = folded(tab.title)
+        let title = folded(tab.displayTitle)
         let path = folded(tab.fullPath ?? "")
         let searchable = title + "\n" + path
         guard terms.allSatisfy({ searchable.contains($0) }) else { return nil }
@@ -298,7 +298,7 @@ final class DocumentSwitcherPanel: NSObject,
         let cell = (tableView.makeView(withIdentifier: identifier, owner: nil) as? NSTableCellView)
             ?? makeCell(identifier: identifier)
         let tab = tabs[filteredIndices[row]]
-        let title = tab.title + (tab.isDirty ? "  •" : "")
+        let title = tab.localizedTitle(catalog: catalog) + (tab.isDirty ? "  •" : "")
         cell.textField?.stringValue = title
         cell.textField?.textColor = tab.isDirty ? .labelColor : .secondaryLabelColor
         cell.imageView?.image = NSImage(
@@ -307,7 +307,7 @@ final class DocumentSwitcherPanel: NSObject,
         )
         cell.toolTip = tab.fullPath ?? localized("Unsaved scratch document")
         cell.setAccessibilityLabel(
-            tab.title
+            tab.localizedTitle(catalog: catalog)
                 + (tab.isActive ? localized(", current document") : "")
                 + (tab.isDirty ? localized(", modified") : "")
                 + (tab.isPinned ? localized(", pinned") : "")

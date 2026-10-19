@@ -4,6 +4,7 @@ import Foundation
 public struct TabSnapshot: Equatable, Sendable {
     public let id: TabID
     public let title: String
+    public let generatedTitle: GeneratedDocumentTitle?
     public let isActive: Bool
     public let isDirty: Bool
     public let isPinned: Bool
@@ -11,9 +12,10 @@ public struct TabSnapshot: Equatable, Sendable {
     public let fullPath: String?
     public let isReadOnly: Bool
 
-    public init(id: TabID, title: String, isActive: Bool, isDirty: Bool, isPinned: Bool, buffer: EditorBufferDescriptor, fullPath: String? = nil, isReadOnly: Bool = false) {
+    public init(id: TabID, title: String, isActive: Bool, isDirty: Bool, isPinned: Bool, buffer: EditorBufferDescriptor, fullPath: String? = nil, isReadOnly: Bool = false, generatedTitle: GeneratedDocumentTitle? = nil) {
         self.id = id
         self.title = title
+        self.generatedTitle = generatedTitle
         self.isActive = isActive
         self.isDirty = isDirty
         self.isPinned = isPinned
@@ -696,7 +698,8 @@ public final class ScratchWorkspaceUseCase {
                     document: ScratchDocument(
                         id: closed.state.document.id,
                         bufferID: closed.state.document.bufferID,
-                        title: "\(closed.state.document.title) (restored)"
+                        title: "\(closed.state.document.title) (restored)",
+                        generatedTitle: .restored(closed.state.document.title)
                     ),
                     buffer: BufferMetadata(
                         id: closed.state.buffer.id,
@@ -878,7 +881,8 @@ public final class ScratchWorkspaceUseCase {
                 isPinned: tab.isPinned,
                 buffer: EditorBufferDescriptor(bufferID: buffer.id, revision: buffer.revision),
                 fullPath: session.fileBindings[document.id]?.canonicalPath,
-                isReadOnly: session.fileBindings[document.id]?.isReadOnly == true
+                isReadOnly: session.fileBindings[document.id]?.isReadOnly == true,
+                generatedTitle: document.generatedTitle
             )
         }
         return WorkspaceSnapshot(sessionID: session.id, tabs: tabs, activeBuffer: tabs.first(where: \.isActive)?.buffer, persistence: persistenceState, startup: startupState)

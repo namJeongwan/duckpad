@@ -41,6 +41,7 @@ public struct OpenDocumentComparison: Equatable, Sendable {
     public struct Document: Equatable, Sendable {
         public let tabID: TabID
         public let title: String
+        public let generatedTitle: GeneratedDocumentTitle?
         public let fullPath: String?
         public let bufferID: BufferID
         public let revision: UInt64
@@ -52,10 +53,12 @@ public struct OpenDocumentComparison: Equatable, Sendable {
             fullPath: String?,
             bufferID: BufferID,
             revision: UInt64,
-            text: String
+            text: String,
+            generatedTitle: GeneratedDocumentTitle? = nil
         ) {
             self.tabID = tabID
             self.title = title
+            self.generatedTitle = generatedTitle
             self.fullPath = fullPath
             self.bufferID = bufferID
             self.revision = revision

@@ -9,6 +9,7 @@ final class GhosttyInspectorController: NSWindowController, NSWindowDelegate {
     private var surface: ghostty_surface_t?
 
     init?(surface: ghostty_surface_t) {
+        GhosttyInspectorLocalization.configure()
         guard let inspector = ghostty_surface_inspector(surface), let view = GhosttyInspectorView(inspector: inspector) else { return nil }
         self.surface = surface
         inspectorView = view
@@ -23,6 +24,21 @@ final class GhosttyInspectorController: NSWindowController, NSWindowDelegate {
     }
     required init?(coder: NSCoder) { nil }
     func windowWillClose(_ notification: Notification) { shutdown() }
+    func refreshLocalization() {
+        guard let surface, let window, window.isVisible else { return }
+        // Recreate the inspector (not the terminal) so the renderer and its font
+        // atlas switch languages together, including Latin → CJK changes.
+        inspectorView?.shutdown()
+        inspectorView = nil
+        ghostty_inspector_free(surface)
+        GhosttyInspectorLocalization.configure()
+        guard let inspector = ghostty_surface_inspector(surface), let view = GhosttyInspectorView(inspector: inspector) else {
+            shutdown(); return
+        }
+        inspectorView = view
+        window.contentView = view
+        window.title = L10n.text("Terminal Inspector")
+    }
     func shutdown() {
         inspectorView?.shutdown()
         inspectorView = nil

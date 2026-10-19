@@ -150,7 +150,11 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	if (menu) {
 		return menu;
 	} else if (owner.backend->ShouldDisplayPopupOnMargin()) {
-		return owner.backend->CreateContextMenu(theEvent);
+		NSMenu *generated = owner.backend->CreateContextMenu(theEvent);
+		if ([(id)owner.delegate respondsToSelector: @selector(scintillaPrepareContextMenu:)]) {
+			[owner.delegate scintillaPrepareContextMenu: generated];
+		}
+		return generated;
 	} else {
 		return nil;
 	}
@@ -502,7 +506,11 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	if (menu) {
 		return menu;
 	} else if (mOwner.backend->ShouldDisplayPopupOnText()) {
-		return mOwner.backend->CreateContextMenu(theEvent);
+		NSMenu *generated = mOwner.backend->CreateContextMenu(theEvent);
+		if ([(id)mOwner.delegate respondsToSelector: @selector(scintillaPrepareContextMenu:)]) {
+			[mOwner.delegate scintillaPrepareContextMenu: generated];
+		}
+		return generated;
 	} else {
 		return nil;
 	}
