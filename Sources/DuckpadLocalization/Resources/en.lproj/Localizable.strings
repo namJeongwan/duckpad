@@ -122,8 +122,8 @@
 "Completion paused · %1$@ MiB" = "Completion paused · %1$@ MiB";
 "Control" = "Control";
 "Convert Case to" = "Convert Case to";
-"Convert and Save Encoding" = "Convert and Save Encoding";
-"Convert and Save Line Endings" = "Convert and Save Line Endings";
+"Convert Encoding" = "Convert Encoding";
+"Convert Line Endings" = "Convert Line Endings";
 "Copy" = "Copy";
 "Copy Full Path" = "Copy Full Path";
 "Copy app info" = "Copy app info";
@@ -895,3 +895,5 @@
 
 "Ln: %1$@   Col: %2$@" = "Ln: %1$@   Col: %2$@";
 "More document information" = "More document information";
+
+"Some characters cannot be saved as %1$@. Nothing was saved. Choose UTF-8 to keep all characters." = "Some characters cannot be saved as %1$@. Nothing was saved. Choose UTF-8 to keep all characters.";

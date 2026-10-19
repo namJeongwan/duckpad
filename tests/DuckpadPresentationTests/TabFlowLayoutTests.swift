@@ -1524,7 +1524,7 @@ func languageMenuPositionsNestedManualSelectionAtItsContainingRootItem() async t
     let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), automaticallyStarts: false)
     defer { controller.close() }
     let menu = DuckpadMainMenuFactory.makeFileFormatStatusMenu(target: controller)
-    #expect(menu.items.map(\.title) == ["Open or Reopen Using Encoding", "Convert and Save Encoding"])
+    #expect(menu.items.map(\.title) == ["Open or Reopen Using Encoding", "Convert Encoding"])
     #expect(menu.items.first?.submenu?.items.first?.action == #selector(DuckpadWindowController.performOpenAsUTF8(_:)))
     #expect(menu.items.last?.submenu?.items.first?.action == #selector(DuckpadWindowController.performConvertToUTF8(_:)))
 }

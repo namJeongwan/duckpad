@@ -10,7 +10,7 @@ func openingPreviewReadsOnlyBoundedPrefixAndTrimsPartialUnicode(_ encoding: Text
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: url) }
     let prefix = String(repeating: "a", count: encoding == .utf8 ? 65535 : 32766)
-    let data = TextFileCodec.encode(prefix + "🦆tail", encoding: encoding,
+    let data = try TextFileCodec.encode(prefix + "🦆tail", encoding: encoding,
         byteOrderMark: encoding == .utf8 ? .absent : .present)
     try data.write(to: url)
     let file = try FileHandle(forWritingTo: url)

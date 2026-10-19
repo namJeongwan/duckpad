@@ -122,8 +122,8 @@
 "Completion paused · %1$@ MiB" = "Complétion en pause · %1$@ MiB";
 "Control" = "Contrôle";
 "Convert Case to" = "Changer la casse";
-"Convert and Save Encoding" = "Convertir l’encodage et enregistrer";
-"Convert and Save Line Endings" = "Convertir les fins de ligne et enregistrer";
+"Convert Encoding" = "Convertir l’encodage";
+"Convert Line Endings" = "Convertir les fins de ligne";
 "Copy" = "Copier";
 "Copy Full Path" = "Copier le chemin complet";
 "Copy app info" = "Copier les informations de l’application";
@@ -855,3 +855,5 @@
 
 "Ln: %1$@   Col: %2$@" = "Lig : %1$@   Col : %2$@";
 "More document information" = "Informations supplémentaires sur le document";
+
+"Some characters cannot be saved as %1$@. Nothing was saved. Choose UTF-8 to keep all characters." = "Certains caractères ne peuvent pas être enregistrés en %1$@. Rien n’a été enregistré. Choisissez UTF-8 pour conserver tous les caractères.";

@@ -143,6 +143,7 @@ NSString *DPScintillaResourcePath(NSString *name) {
 
 @interface DPScintillaEdit ()
 @property(nonatomic, readwrite) BOOL isIntermediateUndoRedo;
+@property(nonatomic, readwrite) NSInteger metadataToken;
 - (instancetype)initWithRange:(NSRange)range
                   insertedUTF8:(NSData *)inserted
                    deletedUTF8:(NSData *)deleted
@@ -1285,7 +1286,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         return;
     }
     uptr_t mask = _publishesDocumentEdits
-        ? SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT
+        ? SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT | SC_MOD_CONTAINER
             | SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE
         : 0;
     if (_smartEditingEnabled || _plainTextIndentationEnabled) mask |= SC_MOD_INSERTCHECK;
@@ -1330,6 +1331,35 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     if (_documentPublisher != nil) _loadingText = _documentPublisher->_loadingText;
     [_scintilla setEditable:_requestedInputEnabled && !_binaryDocument && !_loadingText && revision != UINT64_MAX];
 }
+- (void)publishMetadataToken:(NSInteger)token origin:(DPScintillaEditOrigin)origin {
+    const uint64_t base = _revision;
+    _revision += 1;
+    if (_revision == UINT64_MAX) [_scintilla setEditable:NO];
+    DPScintillaEdit *edit = [[DPScintillaEdit alloc] initWithRange:NSMakeRange(0, 0)
+        insertedUTF8:[NSData data] deletedUTF8:[NSData data]
+        baseRevision:base resultingRevision:_revision origin:origin];
+    edit.metadataToken = token;
+    if (self.onEdit) self.onEdit(edit);
+    if (self.onStatusChange) self.onStatusChange();
+}
+
+- (void)beginMetadataReload:(NSInteger)token {
+    [_scintilla message:SCI_BEGINUNDOACTION];
+    [_scintilla message:SCI_ADDUNDOACTION wParam:token lParam:0];
+}
+- (void)endMetadataReload { [_scintilla message:SCI_ENDUNDOACTION]; }
+
+- (BOOL)addMetadataUndoAction:(NSInteger)token expectedRevision:(uint64_t)revision {
+    if (token <= 0 || token > INT_MAX || _revision != revision || _revision == UINT64_MAX
+        || _binaryDocument || _loadingText) return NO;
+    // An admitted file command may finish while termination locks typing.
+    // Application validates read-only state and drains this command before recovery.
+    // No coalescing: each format selection is a distinct step among text edits.
+    [_scintilla message:SCI_ADDUNDOACTION wParam:token lParam:0];
+    [self publishMetadataToken:token origin:DPScintillaEditOriginUser];
+    return YES;
+}
+
 - (void)recordSavePointAtRevision:(uint64_t)revision {
     if (!_binaryDocument && _revision == revision) [_scintilla message:SCI_SETSAVEPOINT];
 }
@@ -3130,6 +3160,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)notification:(SCNotification *)notification {
+    if (notification->nmhdr.code == SCN_SAVEPOINTREACHED && _publishesDocumentEdits && !_suppressEdit) {
+        if (self.onSavePointReached) self.onSavePointReached();
+    }
     if (notification->nmhdr.code == SCN_MODIFIED
         && (notification->modificationType & (SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE | SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT))) {
         // Only the publisher receives text notifications for a shared document.
@@ -3263,6 +3296,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     }
     if ((flags & SC_MOD_INSERTCHECK) != 0) {
         [self handleSmartInsertionCheck:notification];
+        return;
+    }
+    if ((flags & SC_MOD_CONTAINER) != 0 && _revision != UINT64_MAX) {
+        [self publishMetadataToken:notification->token
+                            origin:(flags & SC_PERFORMED_UNDO) ? DPScintillaEditOriginUndo : DPScintillaEditOriginRedo];
         return;
     }
     const BOOL inserted = (flags & SC_MOD_INSERTTEXT) != 0;

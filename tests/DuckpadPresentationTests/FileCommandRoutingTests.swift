@@ -1,3 +1,4 @@
+import DuckpadEditorAdapter
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
@@ -8,8 +9,11 @@ import Testing
 
 private actor RoutingSessionStore: SessionStore {
     private var stored: StoredSession?
+    private var failsCommit = false
+    func setFailsCommit(_ value: Bool) { failsCommit = value }
     func loadSession() async throws(SessionStoreError) -> StoredSession? { stored }
     func commitSession(_ session: ScratchSession, generation: PersistenceGeneration) async throws(SessionStoreError) -> SessionCommitResult {
+        if failsCommit { throw .unavailable("injected metadata failure") }
         stored = StoredSession(session: session, generation: generation)
         return .committed
     }
@@ -249,6 +253,8 @@ private actor RoutingFileStore: TextFileStore {
     private var readPaths: [String] = []
     private var generation: UInt64 = 0
     private var forcedWriteError: TextFileStoreError?
+    private var failureAfterWrite: FileCommitFailureState?
+    func setFailureAfterWrite(_ state: FileCommitFailureState) { failureAfterWrite = state }
     private(set) var renewedPaths: [String] = []
     private var renewalError: TextFileStoreError?
     func setRenewalError(_ error: TextFileStoreError?) { renewalError = error }
@@ -287,6 +293,9 @@ private actor RoutingFileStore: TextFileStore {
         generation += 1
         let identity = FileIdentity(canonicalPath: url.path, device: 1, inode: 1, byteCount: UInt64(data.count), modifiedNanoseconds: Int64(generation), contentToken: "routing-\(generation)")
         values[url.path] = FileReadResult(data: data, identity: identity)
+        if let failureAfterWrite {
+            throw .durabilityFailure(state: failureAfterWrite, current: identity, recoveryPath: nil, detail: "injected failure after replacement")
+        }
         return FileWriteReceipt(identity: identity)
     }
     func seed(_ text: String, at url: URL) {
@@ -924,7 +933,7 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     let url = URL(fileURLWithPath: "/tmp/duckpad-routing-format.txt")
     let original = "한\r둘🙂"
     await files.seed(
-        TextFileCodec.encode(
+        try TextFileCodec.encode(
             original,
             encoding: .utf16LittleEndian,
             byteOrderMark: .absent
@@ -1091,10 +1100,10 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     #expect(panels.failures.isEmpty)
 }
 
-@Test @MainActor func immediateTerminationJoinsAcceptedBlockedFormatConversion() async throws {
+@Test @MainActor func immediateTerminationRecoversAcceptedFormatWithoutSavingFile() async throws {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
-    let editor = TextViewEditorAdapter()
+    let editor = ScintillaEditorAdapter()
     let files = RoutingFileStore()
     let recoveryStore = RoutingRecoveryStore()
     let recovery = SessionRecoveryUseCase(
@@ -1111,34 +1120,28 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
         workspace: workspace,
             previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
         editorAdapter: editor,
-        editorView: editor.scrollView,
+        editorView: editor.view,
         fileUseCase: fileUseCase,
         recoveryUseCase: recovery,
         terminationCoordinator: coordinator,
         automaticallyStarts: false
     )
-    defer { controller.close() }
+    defer { controller.close(); editor.invalidate() }
     controller.start()
     await controller.waitForStartup()
     guard case .opened = await fileUseCase.open(url) else {
         Issue.record("format termination fixture did not open")
         return
     }
-    await files.armNextWrite()
 
     controller.performConvertToCRLF()
     var terminationReply: Bool?
     #expect(coordinator.applicationShouldTerminate { terminationReply = $0 } == .terminateLater)
-    await files.waitUntilWriteIsBlocked()
-    for _ in 0..<20 { await Task.yield() }
-    #expect(terminationReply == nil)
-    #expect(await recoveryStore.commitCount == 0)
-
-    await files.releaseWrite()
     for _ in 0..<2_000 where terminationReply == nil { await Task.yield() }
     #expect(terminationReply == true)
-    #expect(await files.text(at: url) == "first\r\nsecond")
-    #expect(workspace.activeFileContext()?.binding?.lineEnding == .crlf)
+    #expect(await files.text(at: url) == "first\nsecond")
+    #expect(workspace.activeFileContext()?.pendingFileFormat?.lineEnding == .crlf)
+    #expect(workspace.snapshot().tabs.first(where: { $0.isActive })?.isDirty == true)
     #expect(await recoveryStore.commitCount == 1)
 }
 
@@ -2523,4 +2526,151 @@ struct FileLifecycleTests {
     #expect(panels.preferredFileDirectory?()?.path == "/tmp/duckpad-folder")
     controller.applyPreferences(.defaults)
     #expect(panels.preferredFileDirectory?() == nil)
+}
+
+@Test @MainActor func legacyEncodingMenusRouteAndReflectTheActiveFormat() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = ScintillaEditorAdapter()
+    let store = RoutingFileStore()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-legacy-menu.txt")
+    await store.seed(Data([0xC7, 0xD1, 0xB1, 0xDB]), at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    let panels = PanelFake(); panels.openURL = url
+    let controller = DuckpadWindowController(workspace: workspace,
+        previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
+        editorAdapter: editor, editorView: editor.view, fileUseCase: files,
+        filePanels: panels, fileConflictPresenter: panels, automaticallyStarts: false)
+    defer { controller.close(); editor.invalidate() }
+    controller.start(); await controller.waitForStartup()
+    let menu = DuckpadMainMenuFactory.makeFileFormatStatusMenu(target: controller)
+    func descendants(_ menu: NSMenu) -> [NSMenuItem] {
+        menu.items.flatMap { [$0] + ($0.submenu.map(descendants) ?? []) }
+    }
+    let entries = descendants(menu)
+    for encoding in TextFileEncoding.legacyEncodings {
+        #expect(entries.filter { $0.representedObject as? String == encoding.rawValue }.count == 2)
+    }
+    let open = try #require(entries.first { $0.representedObject as? String == TextFileEncoding.windows949.rawValue
+        && $0.action == #selector(DuckpadWindowController.performOpenAsLegacyEncoding(_:)) })
+    #expect(controller.validateMenuItem(open))
+    controller.performOpenAsLegacyEncoding(open)
+    for _ in 0..<500 where workspace.activeFileContext()?.binding?.encoding != .windows949 {
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(editor.activeScintillaView?.contentUTF8 == Data("한글".utf8))
+    #expect(controller.fileFormatStatusSmokeState().text == "CP949")
+    let selected = try #require(entries.first { $0.representedObject as? String == TextFileEncoding.windows949.rawValue
+        && $0.action == #selector(DuckpadWindowController.performConvertToLegacyEncoding(_:)) })
+    #expect(controller.validateMenuItem(selected)); #expect(selected.state == .on)
+    let convert = try #require(entries.first { $0.representedObject as? String == TextFileEncoding.eucKR.rawValue
+        && $0.action == #selector(DuckpadWindowController.performConvertToLegacyEncoding(_:)) })
+    controller.performConvertToLegacyEncoding(convert)
+    for _ in 0..<500 where workspace.activeFileContext()?.pendingFileFormat?.encoding != .eucKR {
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(controller.fileFormatStatusSmokeState().text == "EUC-KR")
+    #expect(workspace.activeFileContext()?.binding?.encoding == .windows949)
+    #expect(workspace.snapshot().tabs.first(where: { $0.isActive })?.isDirty == true)
+    editor.activeScintillaView?.undo()
+    #expect(controller.fileFormatStatusSmokeState().text == "CP949")
+    editor.activeScintillaView?.redo()
+    #expect(controller.fileFormatStatusSmokeState().text == "EUC-KR")
+    #expect(await store.data(at: url) == Data([0xC7, 0xD1, 0xB1, 0xDB]))
+    let invalid = NSMenuItem(title: "invalid", action: convert.action, keyEquivalent: "")
+    invalid.representedObject = "unknown"
+    #expect(!controller.validateMenuItem(invalid))
+}
+
+@Test @MainActor func pendingFormatSaveDuringUndoRetainsUnsavedFormatAndInvalidatesOldSavePoint() async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = ScintillaEditorAdapter()
+    let store = RoutingFileStore()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-format-undo-save-race.txt")
+    await store.seed("first\nsecond", at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    let controller = DuckpadWindowController(workspace: workspace,
+        previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
+        editorAdapter: editor, editorView: editor.view, fileUseCase: files, automaticallyStarts: false)
+    defer { controller.close(); editor.invalidate() }
+    controller.start(); await controller.waitForStartup()
+    guard case .opened = await files.open(url) else { Issue.record("open failed"); return }
+    let context = try #require(workspace.activeFileContext())
+    let crlf = TextFileConversion(encoding: .utf8, byteOrderMark: .absent, lineEnding: .crlf)
+    #expect(await files.changeFormat(crlf, expectedContext: context) == nil)
+    await store.armNextWrite()
+    let saving = Task { await files.saveActive() }
+    await store.waitUntilWriteIsBlocked()
+    let view = try #require(editor.activeScintillaView)
+    view.undo()
+    await store.releaseWrite()
+    #expect(await saving.value == .saved(context.tabID))
+    #expect(await store.text(at: url) == "first\r\nsecond")
+    #expect(workspace.activeFileContext()?.binding?.lineEnding == .crlf)
+    #expect(workspace.activeFileContext()?.pendingFileFormat?.lineEnding == .lf)
+    #expect(workspace.snapshot().tabs.first(where: { $0.isActive })?.isDirty == true)
+    view.redo(); view.undo()
+    #expect(workspace.snapshot().tabs.first(where: { $0.isActive })?.isDirty == true)
+    #expect(workspace.activeFileContext()?.pendingFileFormat?.lineEnding == .lf)
+    #expect(await files.saveActive() == .saved(context.tabID))
+    #expect(await store.text(at: url) == "first\nsecond")
+}
+
+@Test @MainActor func pendingFormatDiskWriteThenMetadataFailureKeepsUndoDirty() async throws {
+    _ = NSApplication.shared
+    let sessionStore = RoutingSessionStore()
+    let workspace = ScratchWorkspaceUseCase(store: sessionStore)
+    let editor = ScintillaEditorAdapter()
+    let store = RoutingFileStore()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-format-metadata-failure.txt")
+    await store.seed("first\nsecond", at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    let controller = DuckpadWindowController(workspace: workspace,
+        previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
+        editorAdapter: editor, editorView: editor.view, fileUseCase: files, automaticallyStarts: false)
+    defer { controller.close(); editor.invalidate() }
+    controller.start(); await controller.waitForStartup()
+    guard case .opened = await files.open(url) else { Issue.record("open failed"); return }
+    let context = try #require(workspace.activeFileContext())
+    #expect(await files.changeFormat(.init(encoding: .utf8, byteOrderMark: .absent, lineEnding: .crlf), expectedContext: context) == nil)
+    await store.armNextWrite()
+    let saving = Task { await files.saveActive() }
+    await store.waitUntilWriteIsBlocked()
+    await sessionStore.setFailsCommit(true)
+    await store.releaseWrite()
+    guard case .failed(.workspace) = await saving.value else { Issue.record("expected metadata failure"); return }
+    #expect(await store.text(at: url) == "first\r\nsecond")
+    let view = try #require(editor.activeScintillaView)
+    view.undo()
+    #expect(workspace.snapshot().tabs.first(where: { $0.isActive })?.isDirty == true)
+    view.redo(); view.undo()
+    #expect(workspace.snapshot().tabs.first(where: { $0.isActive })?.isDirty == true)
+    await sessionStore.setFailsCommit(false)
+}
+
+@Test(arguments: [FileCommitFailureState.originalRestored, .replacementVisibleDurabilityUncertain, .filesystemStateUncertain])
+@MainActor func pendingFormatUncertainWriteInvalidatesUndoCleanState(state: FileCommitFailureState) async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = ScintillaEditorAdapter()
+    let store = RoutingFileStore()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-format-uncertain-write-\(state.rawValue).txt")
+    await store.seed("first\nsecond", at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    let controller = DuckpadWindowController(workspace: workspace,
+        previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
+        editorAdapter: editor, editorView: editor.view, fileUseCase: files, automaticallyStarts: false)
+    defer { controller.close(); editor.invalidate() }
+    controller.start(); await controller.waitForStartup()
+    guard case .opened = await files.open(url) else { Issue.record("open failed"); return }
+    let context = try #require(workspace.activeFileContext())
+    #expect(await files.changeFormat(.init(encoding: .utf8, byteOrderMark: .absent, lineEnding: .crlf), expectedContext: context) == nil)
+    if state == .originalRestored {
+        await store.setWriteError(.durabilityFailure(state: state, current: context.binding?.observedIdentity, recoveryPath: nil, detail: "original restored"))
+    } else { await store.setFailureAfterWrite(state) }
+    guard case .failed(.store(.durabilityFailure)) = await files.saveActive() else { Issue.record("expected durability failure"); return }
+    #expect(await store.text(at: url) == (state == .originalRestored ? "first\nsecond" : "first\r\nsecond"))
+    editor.activeScintillaView?.undo()
+    #expect(workspace.snapshot().tabs.first(where: { $0.isActive })?.isDirty == (state != .originalRestored))
 }

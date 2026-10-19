@@ -122,8 +122,8 @@
 "Completion paused · %1$@ MiB" = "补全已暂停 · %1$@ MiB";
 "Control" = "Control";
 "Convert Case to" = "转换大小写";
-"Convert and Save Encoding" = "转换编码并保存";
-"Convert and Save Line Endings" = "转换行尾符并保存";
+"Convert Encoding" = "转换编码";
+"Convert Line Endings" = "转换换行符";
 "Copy" = "复制";
 "Copy Full Path" = "复制完整路径";
 "Copy app info" = "复制应用信息";
@@ -855,3 +855,5 @@
 
 "Ln: %1$@   Col: %2$@" = "行：%1$@   列：%2$@";
 "More document information" = "更多文档信息";
+
+"Some characters cannot be saved as %1$@. Nothing was saved. Choose UTF-8 to keep all characters." = "部分字符无法以 %1$@ 保存。未保存任何更改。请选择 UTF-8 以保留所有字符。";

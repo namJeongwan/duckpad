@@ -82,9 +82,11 @@ public final class DocumentConventionsUseCase {
 
     /// Re-read rules for the destination (including Save As), then apply changes
     /// through the editor transaction so disk, undo and recovery agree.
-    public func prepareSave(context: FileWorkspaceContext, destination: URL) async throws -> (FileWorkspaceContext, EditorConventions) {
+    public func prepareSave(context: FileWorkspaceContext, destination: URL, resolvedRules: EditorConventions? = nil) async throws -> (FileWorkspaceContext, EditorConventions) {
         let preferences = settings
-        let rules = preferences.editorConfigEnabled ? await reader.conventions(for: destination) : .init()
+        let rules: EditorConventions
+        if let resolvedRules { rules = resolvedRules }
+        else { rules = preferences.editorConfigEnabled ? await reader.conventions(for: destination) : .init() }
         try Task.checkCancellation()
         guard workspace.activeFileContext() == context else { throw FormattingFailure.staleDocument }
         rulesByPath[destination.path] = rules
@@ -95,7 +97,7 @@ public final class DocumentConventionsUseCase {
               let capture = editor.recoveryCapture(for: context.buffer.bufferID), capture.revision == context.buffer.revision else {
             throw FormattingFailure.staleDocument
         }
-        let ending = rules.lineEnding ?? context.binding?.lineEnding ?? .lf
+        let ending = context.pendingFileFormat?.lineEnding ?? rules.lineEnding ?? context.binding?.lineEnding ?? .lf
         let edits = try await Task.detached(priority: .userInitiated) {
             try SaveCleanupEdits.make(utf8: capture.materializedSnapshot().utf8, trim: trim, finalNewline: newline, lineEnding: ending)
         }.value

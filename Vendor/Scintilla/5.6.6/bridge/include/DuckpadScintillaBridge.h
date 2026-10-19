@@ -58,11 +58,13 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
 @property(nonatomic, readonly) DPScintillaEditOrigin origin;
 /// More text edits follow synchronously in the same native Undo/Redo action.
 @property(nonatomic, readonly) BOOL isIntermediateUndoRedo;
+@property(nonatomic, readonly) NSInteger metadataToken;
 @end
 
 /// Narrow AppKit facade. No Scintilla message, pointer, or C++ type is public.
 @interface DPScintillaEditorView : NSView
 @property(nonatomic, copy, nullable) void (^onWillModifyDocument)(void);
+@property(nonatomic, copy, nullable) void (^onSavePointReached)(void);
 @property(nonatomic, copy, nullable) void (^onEdit)(DPScintillaEdit *edit);
 @property(nonatomic, copy, nullable) void (^onError)(NSError *error);
 @property(nonatomic, copy, nullable) void (^onFocus)(void);
@@ -193,6 +195,9 @@ typedef NS_ENUM(NSInteger, DPScintillaEditingCommand) {
     NS_SWIFT_NAME(setSearchHighlights(_:revision:));
 - (void)clearSearchHighlights;
 - (void)recordSavePointAtRevision:(uint64_t)revision;
+- (void)beginMetadataReload:(NSInteger)token;
+- (void)endMetadataReload;
+- (BOOL)addMetadataUndoAction:(NSInteger)token expectedRevision:(uint64_t)revision;
 /// Bits: reverted-to-origin, saved, modified, reverted-to-modified.
 - (NSUInteger)changeHistoryStateAtLine:(NSUInteger)line;
 @property(nonatomic, readonly, copy) NSArray<NSNumber *> *searchOverviewPositions;

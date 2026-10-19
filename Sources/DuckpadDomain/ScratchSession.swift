@@ -45,6 +45,7 @@ public struct ScratchDocument: Codable, Equatable, Sendable {
     public let id: DocumentID
     public let bufferID: BufferID
     public var title: String
+    public var pendingFileFormat: DocumentFileFormat?
 
     public init(
         id: DocumentID = DocumentID(),
@@ -444,6 +445,26 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         return revision
     }
 
+    public mutating func setPendingFileFormat(_ format: DocumentFileFormat, for tabID: TabID) throws {
+        var document = try document(for: tabID)
+        let binding = fileBindings[document.id]
+        let saved = DocumentFileFormat(encoding: binding?.encoding ?? .utf8,
+            byteOrderMark: binding?.byteOrderMark ?? .absent, lineEnding: binding?.lineEnding ?? .none)
+        document.pendingFileFormat = format == saved ? nil : format
+        documents[document.id] = document
+    }
+
+    public mutating func markBufferDirty(for tabID: TabID) throws {
+        let document = try document(for: tabID)
+        buffers[document.bufferID]?.markDirty()
+    }
+
+    public mutating func markBufferClean(for tabID: TabID, revision: UInt64) throws {
+        let document = try document(for: tabID)
+        guard buffers[document.bufferID]?.revision == revision else { return }
+        buffers[document.bufferID]?.markClean()
+    }
+
     public func document(for tabID: TabID) throws -> ScratchDocument {
         guard let tab = tabs.first(where: { $0.id == tabID }) else {
             throw SessionError.unknownTab(tabID)
@@ -499,6 +520,11 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         if let duplicate = self.tabID(canonicalPath: binding.canonicalPath), duplicate != tabID {
             throw SessionError.duplicateFileBinding(binding.canonicalPath)
         }
+        let previousBinding = fileBindings[document.id]
+        let previousFormat = document.pendingFileFormat ?? DocumentFileFormat(
+            encoding: previousBinding?.encoding ?? .utf8,
+            byteOrderMark: previousBinding?.byteOrderMark ?? .absent,
+            lineEnding: previousBinding?.lineEnding ?? .none)
         var updated = document
         updated.title = title
         documents[document.id] = updated
@@ -506,7 +532,17 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         guard var buffer = buffers[document.bufferID] else {
             throw SessionError.brokenBufferReference(document.bufferID)
         }
-        if savedRevision == nil || savedRevision == buffer.revision { buffer.markClean() }
+        if savedRevision == nil || savedRevision == buffer.revision {
+            buffer.markClean()
+            documents[document.id]?.pendingFileFormat = nil
+        } else {
+            // The completed write saved an older state, even if a concurrent
+            // Undo had reached the previous native save point.
+            buffer.markDirty()
+            let savedFormat = DocumentFileFormat(encoding: binding.encoding,
+                byteOrderMark: binding.byteOrderMark, lineEnding: binding.lineEnding)
+            documents[document.id]?.pendingFileFormat = previousFormat == savedFormat ? nil : previousFormat
+        }
         buffers[buffer.id] = buffer
     }
 

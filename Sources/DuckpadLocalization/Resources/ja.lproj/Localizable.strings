@@ -122,8 +122,8 @@
 "Completion paused · %1$@ MiB" = "補完一時停止 · %1$@ MiB";
 "Control" = "Control";
 "Convert Case to" = "大文字・小文字の変換";
-"Convert and Save Encoding" = "エンコーディングを変換して保存";
-"Convert and Save Line Endings" = "行末を変換して保存";
+"Convert Encoding" = "文字コードを変換";
+"Convert Line Endings" = "改行コードを変換";
 "Copy" = "コピー";
 "Copy Full Path" = "フルパスをコピー";
 "Copy app info" = "アプリ情報をコピー";
@@ -855,3 +855,5 @@
 
 "Ln: %1$@   Col: %2$@" = "行: %1$@   列: %2$@";
 "More document information" = "ドキュメント情報をさらに表示";
+
+"Some characters cannot be saved as %1$@. Nothing was saved. Choose UTF-8 to keep all characters." = "一部の文字は %1$@ で保存できません。何も保存されていません。すべての文字を保持するには UTF-8 を選択してください。";

@@ -58,6 +58,180 @@ struct EditorConventionsIntegrationTests {
         #expect(f.workspace.snapshot().tabs.first(where: { $0.id == context.tabID })?.isDirty == true)
         #expect(try f.editor.recoveryCapture(for: context.buffer.bufferID)?.materializedSnapshot().utf8 == Data(source.utf8))
     }
+    @Test func pendingFormatChangesUndoInOrderWithoutWritingAndSaveOnlyOnRequest() async throws {
+        let f = try Fixture(); await f.start(); defer { f.dispose() }
+        let original = "한글\nnext\n"
+        let opened = try await f.open(original)
+        let url = URL(fileURLWithPath: opened.binding!.canonicalPath)
+        let crlf = TextFileConversion(encoding: .utf8, byteOrderMark: .absent, lineEnding: .crlf)
+        #expect(await f.files.changeFormat(crlf, expectedContext: opened) == nil)
+        #expect(f.workspace.snapshot().tabs.first(where: { $0.id == opened.tabID })?.isDirty == true)
+        #expect(f.workspace.activeFileContext()?.pendingFileFormat == crlf)
+        #expect(try Data(contentsOf: url) == Data(original.utf8))
+        let view = try #require(f.editor.activeScintillaView)
+        view.undo()
+        #expect(f.workspace.activeFileContext()?.pendingFileFormat == nil)
+        #expect(f.workspace.snapshot().tabs.first(where: { $0.id == opened.tabID })?.isDirty == false)
+        view.redo()
+        #expect(f.workspace.activeFileContext()?.pendingFileFormat == crlf)
+        view.setPrimarySelectionUTF8Range(NSRange(location: view.contentUTF8.count, length: 0))
+        view.insertCommittedText("x")
+        let beforeEncoding = try #require(f.workspace.activeFileContext())
+        let cp949 = TextFileConversion(encoding: .windows949, byteOrderMark: .absent, lineEnding: .crlf)
+        #expect(await f.files.changeFormat(cp949, expectedContext: beforeEncoding) == nil)
+        view.undo() // encoding
+        #expect(f.workspace.activeFileContext()?.pendingFileFormat == crlf)
+        #expect(view.contentUTF8 == Data((original + "x").utf8))
+        view.undo() // typing
+        #expect(view.contentUTF8 == Data(original.utf8))
+        view.undo() // line ending
+        #expect(f.workspace.activeFileContext()?.pendingFileFormat == nil)
+        view.redo(); view.redo(); view.redo()
+        #expect(f.workspace.activeFileContext()?.pendingFileFormat == cp949)
+        #expect(try Data(contentsOf: url) == Data(original.utf8))
+        #expect(await f.files.saveActive() == .saved(opened.tabID))
+        let written = try TextFileCodec.encode(TextFileCodec.convert(original + "x", to: .crlf), encoding: .windows949, byteOrderMark: .absent)
+        #expect(try Data(contentsOf: url) == written)
+        #expect(f.workspace.activeFileContext()?.pendingFileFormat == nil)
+        #expect(f.workspace.activeFileContext()?.binding?.encoding == .windows949)
+        view.undo() // undo encoding even after saving
+        #expect(f.workspace.activeFileContext()?.pendingFileFormat == crlf)
+        #expect(f.workspace.snapshot().tabs.first(where: { $0.id == opened.tabID })?.isDirty == true)
+        #expect(try Data(contentsOf: url) == written)
+        view.redo()
+        #expect(f.workspace.snapshot().tabs.first(where: { $0.id == opened.tabID })?.isDirty == false)
+    }
+
+    @Test(arguments: [false, true])
+    func pendingFormatReloadUndoRestoresFormatAndText(sameText: Bool) async throws {
+        let f = try Fixture(); await f.start(); defer { f.dispose() }
+        let source = "한글\n"
+        let context = try await f.open(source)
+        let format = TextFileConversion(encoding: .windows949, byteOrderMark: .absent, lineEnding: .crlf)
+        #expect(await f.files.changeFormat(format, expectedContext: context) == nil)
+        let dirty = try #require(f.workspace.activeFileContext())
+        let url = URL(fileURLWithPath: context.binding!.canonicalPath)
+        let external = sameText ? source : "external\n"
+        try Data(external.utf8).write(to: url)
+        await f.files.refreshFromDisk(tabID: context.tabID, discardingRevision: dirty.buffer.revision)
+        #expect(f.workspace.activeFileContext()?.pendingFileFormat == nil)
+        let view = try #require(f.editor.activeScintillaView)
+        #expect(view.canUndo)
+        let reloadedRevision = view.revision
+        view.undo()
+        #expect(view.revision > reloadedRevision)
+        #expect(view.revision == f.workspace.activeFileContext()?.buffer.revision)
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(f.workspace.activeFileContext()?.pendingFileFormat == format)
+        #expect(f.workspace.snapshot().tabs.first(where: { $0.isActive })?.isDirty == true)
+        view.redo()
+        #expect(view.contentUTF8 == Data(external.utf8))
+        #expect(f.workspace.activeFileContext()?.pendingFileFormat == nil)
+        #expect(f.workspace.snapshot().tabs.first(where: { $0.isActive })?.isDirty == false)
+    }
+
+    @Test(arguments: [false, true])
+    func pendingFormatSurvivesRecoveryBeforeFirstSave(untitled: Bool) async throws {
+        let f = try Fixture(); await f.start(); defer { f.dispose() }
+        if !untitled { _ = try await f.open("한글\n") }
+        else { f.editor.activeScintillaView?.insertCommittedText("한글\n") }
+        let context = try #require(f.workspace.activeFileContext())
+        let pending = TextFileConversion(encoding: .windows949, byteOrderMark: .absent, lineEnding: .crlf)
+        #expect(await f.files.changeFormat(pending, expectedContext: context) == nil)
+        let recoveryStore = LocalRecoveryStore(root: f.root.appendingPathComponent("pending-recovery"))
+        let recovery = SessionRecoveryUseCase(workspace: f.workspace, editor: f.editor, store: recoveryStore)
+        guard case .saved = await recovery.flush() else { Issue.record("Recovery flush failed"); return }
+        let restored = try Fixture(); defer { restored.dispose() }
+        let nextRecovery = SessionRecoveryUseCase(workspace: restored.workspace, editor: restored.editor, store: recoveryStore)
+        #expect(await nextRecovery.start() == .saved)
+        await nextRecovery.waitForPendingAutosave()
+        #expect(restored.workspace.activeFileContext()?.pendingFileFormat == pending)
+        #expect(restored.workspace.snapshot().tabs.first(where: { $0.isActive })?.isDirty == true)
+        let url = untitled ? restored.root.appendingPathComponent("untitled.txt") : URL(fileURLWithPath: context.binding!.canonicalPath)
+        if !untitled { #expect(try Data(contentsOf: url) == Data("한글\n".utf8)) }
+        #expect(await restored.files.saveAs(url) == .saved(context.tabID))
+        #expect(try Data(contentsOf: url) == Data([0xc7, 0xd1, 0xb1, 0xdb, 13, 10]))
+    }
+
+    @Test func pendingFormatRejectsIMECompositionAndKeepsSelectionThroughUndo() async throws {
+        let f = try Fixture(); await f.start(); defer { f.dispose() }
+        let context = try await f.open("한글\nnext")
+        let view = try #require(f.editor.activeScintillaView)
+        view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 6))
+        let selection = f.editor.activeSelectionUTF8Range()
+        let format = TextFileConversion(encoding: .utf8, byteOrderMark: .present, lineEnding: .crlf)
+        #expect(await f.files.changeFormat(format, expectedContext: context) == nil)
+        #expect(f.editor.activeSelectionUTF8Range() == selection)
+        view.undo()
+        #expect(f.editor.activeSelectionUTF8Range() == selection)
+        view.setMarkedText("한", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        let current = try #require(f.workspace.activeFileContext())
+        #expect(await f.files.changeFormat(format, expectedContext: current) == .comparisonInvalidated)
+        #expect(f.workspace.activeFileContext() == current)
+    }
+
+    @Test func pendingFormatOnUntitledAndRejectedLegacyConversionPreserveText() async throws {
+        let f = try Fixture(); await f.start(); defer { f.dispose() }
+        let context = try #require(f.workspace.activeFileContext())
+        let utf16 = TextFileConversion(encoding: .utf16LittleEndian, byteOrderMark: .present, lineEnding: .crlf)
+        #expect(await f.files.changeFormat(utf16, expectedContext: context) == nil)
+        #expect(f.workspace.activeFileContext()?.binding == nil)
+        let view = try #require(f.editor.activeScintillaView)
+        view.insertCommittedText("한글🦆\n")
+        let dirty = try #require(f.workspace.activeFileContext())
+        #expect(await f.files.changeFormat(.init(encoding: .windows949, byteOrderMark: .absent, lineEnding: .lf), expectedContext: dirty)
+            == .codec(.unrepresentableCharacters(.windows949)))
+        #expect(f.workspace.activeFileContext() == dirty)
+        let destination = f.root.appendingPathComponent("new.txt")
+        #expect(await f.files.saveAs(destination) == .saved(context.tabID))
+        let decoded = try TextFileCodec.decode(Data(contentsOf: destination))
+        #expect(decoded.encoding == .utf16LittleEndian)
+        #expect(decoded.byteOrderMark == .present)
+        #expect(decoded.text == "한글🦆\r\n")
+    }
+
+    @Test func legacyEncodingDirtyRecoveryRestoresAndSavesTheOriginalFormat() async throws {
+        let f = try Fixture(); await f.start(); defer { f.dispose() }
+        let context = try await f.open("한글")
+        #expect(await f.files.saveActive(conversion: .init(encoding: .windows949, byteOrderMark: .absent, lineEnding: .crlf)) == .saved(context.tabID))
+        let view = try #require(f.editor.activeScintillaView)
+        view.setPrimarySelectionUTF8Range(NSRange(location: view.contentUTF8.count, length: 0))
+        view.insertCommittedText("뷁\n")
+        let dirtyContext = try #require(f.workspace.activeFileContext())
+        #expect(f.workspace.snapshot().tabs.first(where: { $0.id == context.tabID })?.isDirty == true)
+        let store = LocalRecoveryStore(root: f.root.appendingPathComponent("recovery"))
+        let recovery = SessionRecoveryUseCase(workspace: f.workspace, editor: f.editor, store: store)
+        guard case .saved = await recovery.flush() else { Issue.record("Recovery flush failed"); return }
+
+        let relaunched = try Fixture(); defer { relaunched.dispose() }
+        let restoredRecovery = SessionRecoveryUseCase(workspace: relaunched.workspace, editor: relaunched.editor, store: store)
+        #expect(await restoredRecovery.start() == .saved)
+        await restoredRecovery.waitForPendingAutosave()
+        #expect(relaunched.workspace.activeFileContext() == dirtyContext)
+        #expect(relaunched.workspace.snapshot().tabs.first(where: { $0.id == context.tabID })?.isDirty == true)
+        #expect(relaunched.editor.activeScintillaView?.contentUTF8 == Data("한글뷁\n".utf8))
+        #expect(await relaunched.files.saveActive() == .saved(context.tabID))
+        let saved = try Data(contentsOf: URL(fileURLWithPath: context.binding!.canonicalPath))
+        #expect(saved == Data([0xc7, 0xd1, 0xb1, 0xdb, 0x94, 0xee, 0x0d, 0x0a]))
+        #expect(relaunched.workspace.activeFileContext()?.binding?.encoding == .windows949)
+    }
+
+    @Test func legacyEncodingFailureLeavesCleanupAndUndoUntouched() async throws {
+        let f = try Fixture(); await f.start(); defer { f.dispose() }
+        let source = "한글🦆  "
+        let context = try await f.open(source)
+        f.conventions.settings.trimWhitespaceOnSave = true
+        f.conventions.settings.finalNewlineOnSave = true
+        let view = try #require(f.editor.activeScintillaView)
+        let couldUndo = view.canUndo
+        #expect(await f.files.saveActive(conversion: .init(encoding: .windows949, byteOrderMark: .absent, lineEnding: .lf))
+            == .failed(.codec(.unrepresentableCharacters(.windows949))))
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(view.canUndo == couldUndo)
+        #expect(f.workspace.activeFileContext() == context)
+        #expect(try Data(contentsOf: URL(fileURLWithPath: context.binding!.canonicalPath)) == Data(source.utf8))
+    }
+
     @Test func snippetInsertEditNavigateAndUndo() async throws {
         let f = try Fixture(); await f.start(); defer { f.dispose() }
         let context = try await f.open("")

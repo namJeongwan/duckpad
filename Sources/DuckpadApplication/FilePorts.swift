@@ -141,19 +141,12 @@ public enum TextFileCodecError: Error, Equatable, Sendable {
     case invalidUTF8
     case truncatedUTF16
     case invalidUTF16
+    case invalidBytes(TextFileEncoding)
+    case unrepresentableCharacters(TextFileEncoding)
+    case unsupportedByteOrderMark(TextFileEncoding)
 }
 
-public struct TextFileConversion: Equatable, Sendable {
-    public let encoding: TextFileEncoding
-    public let byteOrderMark: ByteOrderMark
-    public let lineEnding: LineEnding
-
-    public init(encoding: TextFileEncoding, byteOrderMark: ByteOrderMark, lineEnding: LineEnding) {
-        self.encoding = encoding
-        self.byteOrderMark = byteOrderMark
-        self.lineEnding = lineEnding
-    }
-}
+public typealias TextFileConversion = DocumentFileFormat
 
 public enum TextFileCodec {
     private static let utf8BOM = Data([0xEF, 0xBB, 0xBF])
@@ -201,6 +194,10 @@ public enum TextFileCodec {
                 text = try decodeUTF16(hasBOM ? data.dropFirst(2) : data[...], littleEndian: false)
                 encoding = .utf16BigEndian
                 bom = hasBOM ? .present : .absent
+            default:
+                text = try LegacyTextCodec.decode(data, encoding: explicitEncoding)
+                encoding = explicitEncoding
+                bom = .absent
             }
         } else if data.starts(with: utf8BOM) {
             guard let decoded = String(data: data.dropFirst(3), encoding: .utf8) else { throw .invalidUTF8 }
@@ -228,7 +225,11 @@ public enum TextFileCodec {
         _ text: String,
         encoding: TextFileEncoding,
         byteOrderMark: ByteOrderMark
-    ) -> Data {
+    ) throws(TextFileCodecError) -> Data {
+        if encoding.isLegacy {
+            guard byteOrderMark == .absent else { throw .unsupportedByteOrderMark(encoding) }
+            return try LegacyTextCodec.encode(text, encoding: encoding)
+        }
         var result = Data()
         switch encoding {
         case .utf8:
@@ -243,6 +244,7 @@ public enum TextFileCodec {
                 let low = UInt8(truncatingIfNeeded: unit)
                 result.append(contentsOf: encoding == .utf16LittleEndian ? [low, high] : [high, low])
             }
+        default: throw .unrepresentableCharacters(encoding)
         }
         return result
     }
@@ -255,7 +257,7 @@ public enum TextFileCodec {
         encoding: TextFileEncoding,
         byteOrderMark: ByteOrderMark,
         lineEnding: LineEnding
-    ) -> Data {
+    ) throws(TextFileCodecError) -> Data {
         let normalized = convertUTF8(utf8, to: lineEnding)
         if encoding == .utf8 {
             guard byteOrderMark == .present else { return normalized }
@@ -263,7 +265,7 @@ public enum TextFileCodec {
             result.append(normalized)
             return result
         }
-        return encode(String(decoding: normalized, as: UTF8.self),
+        return try encode(String(decoding: normalized, as: UTF8.self),
                       encoding: encoding, byteOrderMark: byteOrderMark)
     }
 

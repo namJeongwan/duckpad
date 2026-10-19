@@ -783,6 +783,44 @@ private final class EditorFake: EditorPort {
     #expect(await store.maximumConcurrentCommits == 1)
 }
 
+@Test @MainActor func autosaveHandoffKeepsMetadataUndoEditsEnabled() async {
+    let store = AdversarialStore()
+    let useCase = ScratchWorkspaceUseCase(store: store)
+    _ = await useCase.start()
+    let bufferID = useCase.snapshot().activeBuffer!.bufferID
+    var rejected = 0
+    func edit() {
+        let revision = useCase.snapshot().activeBuffer!.revision
+        let outcome = useCase.acceptEditorEdit(EditorIncrementalEdit(
+            bufferID: bufferID, expectedRevision: revision,
+            range: TextEditRange(location: 0, length: 0), replacement: "",
+            fileFormat: DocumentFileFormat(encoding: .utf8, byteOrderMark: .absent, lineEnding: .crlf)
+        ))
+        if outcome != .accepted(newRevision: revision + 1) { rejected += 1 }
+    }
+    for _ in 0..<5 {
+        await store.armBlockingCommit()
+        edit()
+        await store.waitUntilCommitEntered()
+        edit()
+        // Let a second autosave queue behind the blocked store operation.
+        try? await Task.sleep(for: .milliseconds(300))
+        let edits = Task { @MainActor in
+            for _ in 0..<200 {
+                edit()
+                await Task.yield()
+            }
+        }
+        await store.releaseCommit()
+        await edits.value
+        await useCase.waitForPendingPersistence()
+    }
+    #expect(rejected == 0)
+    #expect(await useCase.flushPersistence() == .saved)
+    #expect(await store.storedRevision(for: bufferID) == useCase.snapshot().activeBuffer?.revision)
+    #expect(await store.maximumConcurrentCommits == 1)
+}
+
 @Test @MainActor func editorRetiresOnlySuccessfullyClosedBufferAndPreservesInactiveOrFailedClose() async {
     let store = StoreSpy()
     let useCase = ScratchWorkspaceUseCase(store: store)
