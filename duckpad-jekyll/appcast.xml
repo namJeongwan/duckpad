@@ -3,46 +3,38 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.12.1</title>
-            <pubDate>Sun, 18 Oct 2026 20:54:30 +0900</pubDate>
-            <sparkle:version>59</sparkle:version>
-            <sparkle:shortVersionString>0.12.1</sparkle:shortVersionString>
+            <title>0.12.2</title>
+            <pubDate>Mon, 19 Oct 2026 11:33:15 +0900</pubDate>
+            <sparkle:version>60</sparkle:version>
+            <sparkle:shortVersionString>0.12.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.12.1
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.12.2
 
-Duckpad adds usage statistics to help prioritize editor and plugin improvements.
+Changing a document's encoding or LF/CRLF/CR line endings now marks it unsaved instead of immediately overwriting the file. Format changes share the normal Undo/Redo history with typing; Save or Save As writes the selected format to disk.
 
-- Statistics are enabled by default. A one-time, nonmodal notice links to Privacy settings, where sharing can be turned off at any time. An existing explicit opt-out stays off.
-- Reports cover first observed runs, version changes, daily activity, editing languages, feature and plugin usage, and operation outcomes. First-run and version-change markers are saved only after successful delivery, so interrupted or rejected transmissions remain eligible on the next launch.
-- Document contents, file names and paths, searches, terminal commands, raw errors, and persistent device identifiers are excluded. Private plugin IDs and unrecognized languages are grouped as `other`.
-- Counters are aggregated in memory and sent in bounded background batches. Disabling sharing cancels transmission and clears pending statistics and the local transmission log. Failed delivery does not interrupt editing or delay app termination.
-- Privacy settings and the first-run notice are localized in all eight supported languages. The transmission log lets you inspect the five most recent batches in the current session.
+- Undo and redo format changes with Command-Z and Shift-Command-Z. Undo after saving changes the document and marks it unsaved; disk bytes change only on the next save.
+- Pending encoding and line-ending choices survive session recovery, including unnamed documents. Reload groups text and format changes into one undoable action. Undo history itself remains limited to the current session.
+- Add explicit open/reopen and conversion for CP949, EUC-KR, Shift-JIS (CP932), Windows-1252, Windows-1251, ISO-8859-1, GB18030, and Big5. Invalid input or characters that cannot be represented are rejected without silently replacing characters.
+- Keep dirty state and pending format consistent when Undo overlaps a save, recovery metadata persistence fails, or a file write has an uncertain durability outcome.
+- Include the editor control alignment, hover spacing, and close-flow refinements merged after 0.12.1.
 
-App and helpers: **0.12.1 (59)**. Requires **macOS 13 or later**. Universal binaries support Apple Silicon and Intel. Existing document formats, recovery, settings and native plugin ABI remain compatible.
+App and all helpers: **0.12.2 (60)**. Requires **macOS 13 or later**. Universal distribution binaries support Apple Silicon and Intel. Existing UTF/BOM files, session recovery, settings, and the native plugin ABI remain compatible.
 
 ## Installation
 
-Download `Duckpad-0.12.1-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.12.1-universal.zip`. Verify downloads against `SHA256SUMS.txt`. The signed Sparkle update feed is published after the release archive is uploaded.
+Download `Duckpad-0.12.2-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.12.2-universal.zip`. Verify downloads against `SHA256SUMS.txt`.
 
-## Privacy and measurement limits
+## Validation and limitations
 
-Statistics are sent through Cloudflare to Duckpad's self-hosted statistics server. The ingestion proxy strips connection-IP, cookie and location headers before forwarding events to the analytics application; network providers still process connection IP addresses. Cloudflare account-level logging and retention settings have not been verified.
+The related Swift suites pass **256 test functions**, including native editor Undo/Redo, reload, named/unnamed recovery, IME rejection, selection preservation, strict encoding fixtures, save failures, and concurrent editing. All eight localization catalogs pass validation (796 strings and four plural entries). Independent implementation review resolved the identified save-state and transaction-handoff issues.
 
-First observed runs are not DMG download or installation counts. Existing installations are first observed when they run a version with statistics enabled. Offline use, short sessions, opt-outs and retries can produce missing or duplicate counts. No persistent user identifier is sent, and the analytics dashboard's unique-user counts must not be treated as reliable user totals. Disabling sharing does not delete statistics already received by the server.
+Automatic opening and unopened-file folder search remain UTF/BOM based; ambiguous legacy files require explicit encoding selection. Full manual inspection in all eight languages, the entire test suite, physical Intel hardware, and macOS 13 were not exercised. The universal Release build, bundle/resource/signature validation, and isolated Finder/Open With, bookmark-recovery save, window resizing, and sandboxed XPC extension/isolation smoke checks pass. Native save-panel UI automation was skipped.
 
-The default build is ad-hoc signed, without Developer ID signing or Apple notarization. Physical Intel hardware, macOS 13, server reboot/backup restoration and the full test suite have not been exercised for this release.
+The default distribution is ad-hoc signed, without Developer ID signing or Apple notarization.
 
-## Validation
-
-The final focused checks pass 11 statistics and UI tests plus 30 existing settings compatibility tests, along with the Apple Silicon Release build. Earlier feature-hook validation passed 91 focused tests covering settings, plugins, formatting and editor operations. All eight localization catalogs pass key and format checks; privacy settings and the narrow first-run notice were checked in light/dark layouts and inspected in captured windows for every supported language.
-
-Independent code review and re-review resolved lifecycle-delivery and login-email rate-limit findings. Isolated proxy tests cover registration blocking, per-IP and global sign-in limits, ingestion header stripping and login continuation. The deployed server passed public health, blocked-registration and Debug-event ingestion checks.
-
-## Packaged release checks
-
-The app and all three helpers were verified as 0.12.1 (59), with both arm64 and x86_64 slices. Resource, license, sandbox/XPC and signature checks passed. Isolated Apple Silicon smoke checks passed Finder/Open With, bookmark recovery, native save-access renewal, saving after relaunch, window resizing and XPC isolation. The DMG passed `hdiutil verify`; the ZIP passed `unzip -tq`. The build source tree matches release commit `2188cb1dc8a4c9e7fe7cc1b3af8b963f6b37cc2c`.
+Release source: `5b064b107d8a7be9c838fb8dbe6b1aa353dd2be7` ([PR #81](https://github.com/namJeongwan/duckpad/pull/81)). The packaged source tree matches the merged release commit.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.12.1/Duckpad-0.12.1-universal.zip" length="43336707" type="application/octet-stream" sparkle:edSignature="ENZv5lxqaVdUWoo3tdNWlJyFDyvNrjj1sdj2ukQ/8EkBFz8ZHOK/okuklVajLO9ChDnHKhlcawuqlnDk1g5qDA=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.12.2/Duckpad-0.12.2-universal.zip" length="43583670" type="application/octet-stream" sparkle:edSignature="LA7Cn5aQvxvKyhLB0hAcAQE6PzXEduT+GHt4OunDpgTdJ6m589CrQyTdeK8KNuY4eZ2f6IkXEknM3wL2pZxxCg=="/>
         </item>
     </channel>
 </rss>
