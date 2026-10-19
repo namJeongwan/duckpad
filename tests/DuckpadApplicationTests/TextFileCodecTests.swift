@@ -11,7 +11,7 @@ import Testing
     for (encoding, bom) in cases {
         for (ending, separator) in [(LineEnding.lf, "\n"), (.crlf, "\r\n"), (.cr, "\r")] {
             let text = "한글🙂e\u{301}\(separator)둘째\(separator)"
-            let bytes = TextFileCodec.encode(text, encoding: encoding, byteOrderMark: bom)
+            let bytes = try TextFileCodec.encode(text, encoding: encoding, byteOrderMark: bom)
             let decoded = try TextFileCodec.decode(bytes)
             #expect(decoded.text == text)
             #expect(decoded.encoding == encoding)
@@ -41,7 +41,7 @@ import Testing
 @Test func callerSelectedUTF16WithoutBOMRoundTripsStrictly() throws {
     let text = "한글🙂e\u{301}\r\n끝"
     for encoding in [TextFileEncoding.utf16LittleEndian, .utf16BigEndian] {
-        let bytes = TextFileCodec.encode(text, encoding: encoding, byteOrderMark: .absent)
+        let bytes = try TextFileCodec.encode(text, encoding: encoding, byteOrderMark: .absent)
         #expect(throws: TextFileCodecError.invalidUTF8) { try TextFileCodec.decode(bytes) }
         let selected = try TextFileCodec.decode(bytes, assuming: encoding)
         #expect(selected.text == text)
@@ -59,7 +59,7 @@ import Testing
         #expect(preview.text.contains("\u{FFFD}"))
         #expect(preview.encoding == .utf8)
     }
-    let bytes = TextFileCodec.encode("한글🙂", encoding: .utf16LittleEndian, byteOrderMark: .present)
+    let bytes = try TextFileCodec.encode("한글🙂", encoding: .utf16LittleEndian, byteOrderMark: .present)
     #expect(TextFileCodec.decodeForDisplay(bytes).text == "한글🙂")
     #expect(TextFileCodec.decodeForDisplay(bytes).encoding == .utf16LittleEndian)
     #expect(throws: TextFileCodecError.invalidUTF8) { try TextFileCodec.decode(Data([0x80])) }
@@ -84,9 +84,9 @@ import Testing
                     #expect(TextFileCodec.convert(text, to: ending) == expected)
                     for encoding in [TextFileEncoding.utf8, .utf16LittleEndian, .utf16BigEndian] {
                         for bom in [ByteOrderMark.absent, .present] {
-                            let actual = TextFileCodec.encodeUTF8(Data(text.utf8), encoding: encoding,
+                            let actual = try TextFileCodec.encodeUTF8(Data(text.utf8), encoding: encoding,
                                 byteOrderMark: bom, lineEnding: ending)
-                            #expect(actual == TextFileCodec.encode(expected, encoding: encoding, byteOrderMark: bom))
+                            #expect(try actual == TextFileCodec.encode(expected, encoding: encoding, byteOrderMark: bom))
                         }
                     }
                 }

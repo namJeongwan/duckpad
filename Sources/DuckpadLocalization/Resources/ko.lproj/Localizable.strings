@@ -122,8 +122,8 @@
 "Completion paused · %1$@ MiB" = "자동완성 일시 중지 · %1$@ MiB";
 "Control" = "Control";
 "Convert Case to" = "대소문자 변환";
-"Convert and Save Encoding" = "인코딩 변환 후 저장";
-"Convert and Save Line Endings" = "줄 끝 변환 후 저장";
+"Convert Encoding" = "인코딩 변환";
+"Convert Line Endings" = "줄바꿈 변환";
 "Copy" = "복사";
 "Copy Full Path" = "전체 경로 복사";
 "Copy app info" = "앱 정보 복사";
@@ -895,3 +895,5 @@
 
 "Ln: %1$@   Col: %2$@" = "줄: %1$@   열: %2$@";
 "More document information" = "문서 정보 더 보기";
+
+"Some characters cannot be saved as %1$@. Nothing was saved. Choose UTF-8 to keep all characters." = "일부 문자는 %1$@로 저장할 수 없습니다. 아무것도 저장하지 않았습니다. 모든 문자를 유지하려면 UTF-8을 선택하세요.";

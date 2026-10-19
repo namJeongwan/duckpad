@@ -57,7 +57,7 @@ private actor FileStoreFake: TextFileStore {
 
     func seed(_ text: String, at url: URL, encoding: TextFileEncoding = .utf8, bom: ByteOrderMark = .absent) {
         serial += 1
-        let data = TextFileCodec.encode(text, encoding: encoding, byteOrderMark: bom)
+        let data = try! TextFileCodec.encode(text, encoding: encoding, byteOrderMark: bom)
         let path = url.standardizedFileURL.path
         files[path] = FileReadResult(data: data, identity: makeIdentity(path: path, data: data, serial: serial))
     }
@@ -1180,4 +1180,73 @@ private actor FileSessionStoreFake: SessionStore {
     #expect(await files.text(at: url) == "저장🙂\r\n")
     #expect(editor.snapshotCount == 0)
     #expect(editor.savePoints == [workspace.snapshot().activeBuffer!])
+}
+
+@Test @MainActor func legacyEncodingReopenSaveAndReloadKeepFileSemantics() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let store = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-legacy-cp949.txt")
+    let original = Data([0xC7, 0xD1, 0xB1, 0xDB, 0x94, 0xEE])
+    await store.seedBytes(original, at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    guard case .opened(let id) = await files.open(url) else { Issue.record("open failed"); return }
+    #expect(workspace.fileContext(tabID: id)?.binding?.isReadOnly == true)
+    #expect(await files.open(url, assuming: .windows949) == .activatedExisting(id))
+    let context = try #require(workspace.fileContext(tabID: id))
+    #expect(context.binding?.isReadOnly == false)
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "한글뷁")
+    #expect(await store.data(at: url) == original)
+    editor.replaceWith("바뀜\n")
+    #expect(await files.saveActive() == .saved(id))
+    let saved = try #require(await store.data(at: url))
+    #expect(try TextFileCodec.decode(saved, assuming: .windows949).text == "바뀜\n")
+    #expect(workspace.fileContext(tabID: id)?.binding?.encoding == .windows949)
+    await store.seed("외부 변경", at: url, encoding: .windows949)
+    await files.refreshFromDisk(tabID: id)
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "외부 변경")
+    editor.replaceWith("로컬 변경")
+    await store.seed("다른 외부 변경", at: url, encoding: .windows949)
+    guard case .conflict = await files.saveActive() else { Issue.record("missing conflict"); return }
+    _ = await files.resolveConflict(.reload)
+    #expect(workspace.fileContext(tabID: id)?.binding?.encoding == .windows949)
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "다른 외부 변경")
+    let beforeInvalidReload = workspace.fileContext(tabID: id)
+    await store.seedBytes(Data([0x81]), at: url)
+    await files.refreshFromDisk(tabID: id)
+    #expect(workspace.fileContext(tabID: id) == beforeInvalidReload)
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "다른 외부 변경")
+}
+
+@Test @MainActor func legacyEncodingSaveFailurePreservesDiskBufferBindingAndDirtyState() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let store = FileStoreFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-legacy-no-loss.txt")
+    await store.seed("한글", at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    guard case .opened(let id) = await files.open(url) else { Issue.record("open failed"); return }
+    editor.replaceWith("한글🦆")
+    _ = await workspace.flushPersistence()
+    let before = workspace.fileContext(tabID: id)
+    let savedPoints = editor.savePoints
+    let conversion = TextFileConversion(encoding: .windows949, byteOrderMark: .absent, lineEnding: .crlf)
+    #expect(await files.saveActive(conversion: conversion) == .failed(.codec(.unrepresentableCharacters(.windows949))))
+    #expect(await store.text(at: url) == "한글")
+    #expect(workspace.fileContext(tabID: id) == before)
+    #expect(workspace.snapshot().tabs.first(where: { $0.id == id })?.isDirty == true)
+    #expect(editor.snapshot(for: before!.buffer.bufferID)?.text == "한글🦆")
+    #expect(editor.savePoints == savedPoints)
+    let copyURL = URL(fileURLWithPath: "/tmp/duckpad-legacy-new-file.txt")
+    #expect(await files.saveAs(copyURL, conversion: conversion) == .failed(.codec(.unrepresentableCharacters(.windows949))))
+    #expect(await store.data(at: copyURL) == nil)
+    #expect(workspace.fileContext(tabID: id) == before)
+    #expect(await files.saveActive() == .saved(id))
+    #expect(await store.text(at: url) == "한글🦆")
 }

@@ -473,3 +473,9 @@ folds and places the target at approximately one fifth of the pane height.
 It uses rendered display rows (including soft wraps), preserves horizontal
 caret visibility and respects the existing beginning/end scroll bounds. Generic
 search selection and ordinary caret scrolling retain their existing behavior.
+
+Duckpad bridge extension (2026-10-19): expose Scintilla container Undo actions
+for document encoding/EOL metadata and save-point notifications. These actions
+publish zero-byte revision events through the existing recovery path, preserving
+selection and text. Only Duckpad-owned bridge sources/headers are changed; no
+upstream core changes or generated files are required.

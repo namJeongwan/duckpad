@@ -44,8 +44,10 @@ struct LiveFileReloadIntegrationTests {
             if reopenWithEncoding {
                 #expect(await files.open(url, assuming: .utf8) == .activatedExisting(id))
             }
-            let deadline = ContinuousClock.now + .seconds(3)
-            while view.contentUTF8 != Data(text.utf8), ContinuousClock.now < deadline {
+            // This checks eventual reload, not its latency. Other native suites
+            // may occupy MainActor for seconds; count scheduling opportunities
+            // instead of spending the deadline while this test cannot run.
+            for _ in 0..<300 where view.contentUTF8 != Data(text.utf8) {
                 try await Task.sleep(for: .milliseconds(10))
             }
             #expect(view.contentUTF8 == Data(text.utf8))

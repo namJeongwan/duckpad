@@ -54,7 +54,7 @@ private func folderIdentity(_ path: String, _ data: Data, serial: Int64) -> File
     let secondPath = "/tmp/project/nested/b.txt"
     let invalidPath = "/tmp/project/image.bin"
     let first = Data("duck α\nnot here\nduck🙂".utf8)
-    let second = TextFileCodec.encode("한글 duck", encoding: .utf16LittleEndian, byteOrderMark: .present)
+    let second = try TextFileCodec.encode("한글 duck", encoding: .utf16LittleEndian, byteOrderMark: .present)
     let invalid = Data([0xFF, 0x00, 0xC0])
     let enumeration = FolderSearchEnumeration(
         rootPath: "/tmp/project",

@@ -299,6 +299,8 @@ let package = Package(
             dependencies: [
                 "DuckpadApplication",
                 "DuckpadDomain",
+                "DuckpadEditorAdapter",
+                "DuckpadScintillaBridge",
                 "DuckpadInfrastructure",
                 "DuckpadPresentation",
                 "DuckpadLocalization",

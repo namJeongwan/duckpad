@@ -67,6 +67,8 @@ enum PresentationErrorText {
             case .noActiveDocument, .editorSnapshotUnavailable: return catalog.text("The document is unavailable. Select an open document and try again.")
             case .editorRevisionMismatch, .comparisonInvalidated: return catalog.text("The document or selection changed. Try again.")
             case .comparisonTooLarge: return catalog.text("The operation exceeds the supported size or complexity limit.")
+            case .codec(.unrepresentableCharacters(let encoding)):
+                return catalog.text("Some characters cannot be saved as %1$@. Nothing was saved. Choose UTF-8 to keep all characters.", arguments: [encoding.displayName])
             case .codec: return catalog.text("The text cannot be read or saved with this encoding. Choose another encoding.")
             case .session: return catalog.text("Saved data could not be read. Your document contents have been kept.")
             }

@@ -20,10 +20,10 @@ struct BinaryFileContentTests {
         #expect(decoded.binaryByteCount == data.count)
     }
 
-    @Test func validUnicodeRemainsEditableIncludingASplitSampleScalar() {
+    @Test func validUnicodeRemainsEditableIncludingASplitSampleScalar() throws {
         let text = String(repeating: "a", count: 65_535) + "🦆한글\r\n"
-        for encoding in TextFileEncoding.allCases {
-            let data = TextFileCodec.encode(text, encoding: encoding, byteOrderMark: .present)
+        for encoding in TextFileEncoding.allCases where !encoding.isLegacy {
+            let data = try TextFileCodec.encode(text, encoding: encoding, byteOrderMark: .present)
             let decoded = TextFileCodec.decodeForDisplay(data)
             #expect(decoded.binaryByteCount == nil)
             #expect(decoded.text == text)

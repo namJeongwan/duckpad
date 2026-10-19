@@ -224,7 +224,7 @@ public final class ScratchWorkspaceUseCase {
     private var transactionBusy = false
     private var acceptsEditsDuringAutosave = false
     private var editorBatchReservationID: UUID?
-    private var transactionWaiters: [CheckedContinuation<Void, Never>] = []
+    private var transactionWaiters: [(continuation: CheckedContinuation<Void, Never>, acceptingEditorEdits: Bool)] = []
     private var closeRecoveryCommitter: (@MainActor (ScratchSession) async -> RecoveryOutcome)?
     private var captureClosedBuffer: (@MainActor (BufferID) -> EditorRecoveryCapture?)?
     private var installClosedBuffer: (@MainActor (EditorRecoverySnapshot) -> Void)?
@@ -761,6 +761,7 @@ public final class ScratchWorkspaceUseCase {
         }
         do {
             let revision = try session.recordEdit(in: tabID, expectedRevision: edit.expectedRevision)
+            if let format = edit.fileFormat { try session.setPendingFileFormat(format, for: tabID) }
             persistenceState = .pending
             if !edit.isIntermediateUndoRedo {
                 schedulePersistence()
@@ -771,6 +772,28 @@ public final class ScratchWorkspaceUseCase {
             let current = (try? session.buffer(for: tabID).revision) ?? edit.expectedRevision
             return .rejected(currentRevision: current)
         }
+    }
+
+    /// Disk bytes have changed, but binding/persistence may still fail. Never
+    /// treat an Undo to the previous disk state as a clean document afterward.
+    public func fileWriteCompleted(for bufferID: BufferID) {
+        guard let index = session.tabs.firstIndex(where: { (try? session.buffer(for: $0.id).id) == bufferID }),
+              (try? session.buffer(for: session.tabs[index].id).isDirty) == false else { return }
+        try? session.markBufferDirty(for: session.tabs[index].id)
+        persistenceState = .pending
+        schedulePersistence()
+        publish(.tabUpdated(index: index))
+    }
+
+    public func fileFormatSavePointReached(_ buffer: EditorBufferDescriptor) {
+        guard startupState == .ready, !transactionBusy || acceptsEditsDuringAutosave,
+              let index = session.tabs.firstIndex(where: { (try? session.buffer(for: $0.id).id) == buffer.bufferID }) else { return }
+        let tab = session.tabs[index].id
+        guard (try? session.buffer(for: tab).revision) == buffer.revision else { return }
+        try? session.markBufferClean(for: tab, revision: buffer.revision)
+        persistenceState = .pending
+        schedulePersistence()
+        publish(.tabUpdated(index: index))
     }
 
     public func reserveEditorBatch(
@@ -915,7 +938,8 @@ public final class ScratchWorkspaceUseCase {
             tabID: tabID,
             title: document.title,
             buffer: EditorBufferDescriptor(bufferID: buffer.id, revision: buffer.revision),
-            binding: try? session.fileBinding(for: tabID)
+            binding: try? session.fileBinding(for: tabID),
+            pendingFileFormat: document.pendingFileFormat
         )
     }
 
@@ -1152,12 +1176,8 @@ public final class ScratchWorkspaceUseCase {
         retry: PersistenceRetry,
         acceptingEditorEdits: Bool = false
     ) async -> PersistenceOutcome {
-        await acquireTransaction()
-        acceptsEditsDuringAutosave = acceptingEditorEdits
-        defer {
-            acceptsEditsDuringAutosave = false
-            releaseTransaction()
-        }
+        await acquireTransaction(acceptingEditorEdits: acceptingEditorEdits)
+        defer { releaseTransaction() }
         // A newer edit may supersede an autosave while it waits for a
         // structural transaction. Only the latest pending save needs to run.
         if acceptingEditorEdits, Task.isCancelled { return .saved }
@@ -1202,21 +1222,27 @@ public final class ScratchWorkspaceUseCase {
         onChange?(WorkspaceChange(snapshot: snapshot(), kind: kind, failureEvent: failure))
     }
 
-    private func acquireTransaction() async {
+    private func acquireTransaction(acceptingEditorEdits: Bool = false) async {
         if !transactionBusy {
             transactionBusy = true
+            acceptsEditsDuringAutosave = acceptingEditorEdits
             return
         }
         await withCheckedContinuation { continuation in
-            transactionWaiters.append(continuation)
+            transactionWaiters.append((continuation, acceptingEditorEdits))
         }
     }
 
     private func releaseTransaction() {
         if transactionWaiters.isEmpty {
+            acceptsEditsDuringAutosave = false
             transactionBusy = false
         } else {
-            transactionWaiters.removeFirst().resume()
+            let next = transactionWaiters.removeFirst()
+            // Transfer edit admission with ownership, before the waiting task
+            // resumes, so native Undo is not rejected in the handoff interval.
+            acceptsEditsDuringAutosave = next.acceptingEditorEdits
+            next.continuation.resume()
         }
     }
 
@@ -1250,6 +1276,9 @@ public final class EditorBindingUseCase {
             install: { [weak editor] snapshot in editor?.installRecovery(snapshot) },
             retire: { [weak editor] bufferID in editor?.retire(bufferID: bufferID) }
         )
+        (editor as? any EditorFileFormatPort)?.onFileFormatSavePointReached = { [weak workspace] buffer in
+            workspace?.fileFormatSavePointReached(buffer)
+        }
         editor.onEdit = { [weak workspace] edit in
             workspace?.acceptEditorEdit(edit) ?? .rejected(currentRevision: edit.expectedRevision)
         }

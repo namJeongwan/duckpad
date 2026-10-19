@@ -14,6 +14,9 @@ public enum BinaryFileContent {
         if sample.contains(0) { return true }
         let controls = sample.filter { $0 < 0x20 && ![9, 10, 12, 13].contains($0) }.count
         if controls > sample.count / 10 { return true }
+        // An explicit legacy selection overrides UTF-8 heuristics. Full decoding
+        // validates multibyte sequences later, without trusting a split sample.
+        if encoding?.isLegacy == true { return false }
         if String(data: sample, encoding: .utf8) != nil { return false }
         // A sample can end in the middle of a valid UTF-8 scalar.
         if data.count > sample.count {

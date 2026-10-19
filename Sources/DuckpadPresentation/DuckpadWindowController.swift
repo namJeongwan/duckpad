@@ -1441,6 +1441,23 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    @objc public func performOpenAsLegacyEncoding(_ sender: Any?) {
+        guard workspaceInteractionsAreActionable,
+              let item = sender as? NSMenuItem, let encoding = legacyEncodingChoice(item) else { return }
+        beginFileCommandTask { [weak self] in await self?.routeOpenFile(encodingHint: encoding) }
+    }
+
+    @objc public func performConvertToLegacyEncoding(_ sender: Any?) {
+        guard let item = sender as? NSMenuItem, let encoding = legacyEncodingChoice(item) else { return }
+        routeFileFormatConversion(encoding: encoding, byteOrderMark: .absent)
+    }
+
+    private func legacyEncodingChoice(_ item: NSMenuItem) -> TextFileEncoding? {
+        guard let raw = item.representedObject as? String,
+              let encoding = TextFileEncoding(rawValue: raw), encoding.isLegacy else { return nil }
+        return encoding
+    }
+
     @objc public func performConvertToUTF8(_ sender: Any? = nil) {
         routeFileFormatConversion(encoding: .utf8, byteOrderMark: .absent)
     }
@@ -2080,7 +2097,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             if let focusedTextEditing { return focusedTextEditing.canPerform(command) }
             return actionableEditorCommands?.canPerform(command) ?? false
         }
-        if let choice = fileEncodingChoice(for: menuItem.action) {
+        if menuItem.action == #selector(performOpenAsLegacyEncoding(_:))
+            || menuItem.action == #selector(performConvertToLegacyEncoding(_:)) {
+            guard legacyEncodingChoice(menuItem) != nil else { return false }
+        }
+        if let choice = fileEncodingChoice(for: menuItem) {
             let current = activeTextFileFormat
             menuItem.state = current.encoding == choice.encoding
                 && current.byteOrderMark == choice.byteOrderMark ? .on : .off
@@ -2386,6 +2407,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func textFileFormat(for context: FileWorkspaceContext?) -> TextFileConversion {
+        if let pending = context?.pendingFileFormat { return pending }
         guard let binding = context?.binding else {
             return TextFileConversion(
                 encoding: .utf8,
@@ -2401,9 +2423,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func fileEncodingChoice(
-        for action: Selector?
+        for item: NSMenuItem
     ) -> (encoding: TextFileEncoding, byteOrderMark: ByteOrderMark)? {
-        switch action {
+        if item.action == #selector(performConvertToLegacyEncoding(_:)), let encoding = legacyEncodingChoice(item) {
+            return (encoding, .absent)
+        }
+        return switch item.action {
         case #selector(performConvertToUTF8(_:)): (.utf8, .absent)
         case #selector(performConvertToUTF8BOM(_:)): (.utf8, .present)
         case #selector(performConvertToUTF16LittleEndian(_:)): (.utf16LittleEndian, .present)
@@ -2427,7 +2452,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         switch action {
         case #selector(performOpenAsUTF8(_:)),
              #selector(performOpenAsUTF16LittleEndian(_:)),
-             #selector(performOpenAsUTF16BigEndian(_:)):
+             #selector(performOpenAsUTF16BigEndian(_:)),
+             #selector(performOpenAsLegacyEncoding(_:)):
             true
         default:
             false
@@ -2449,10 +2475,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         )
         guard conversion != current else { return }
         beginFileCommandTask { [weak self] in
-            await self?.routeAcceptedSaveFile(
-                conversion: conversion,
-                expectedContext: context
-            )
+            guard let self, let fileUseCase = self.fileUseCase else { return }
+            if let failure = await fileUseCase.changeFormat(conversion, expectedContext: context) {
+                await self.handle(fileOutcome: .failed(failure)) { [weak self] in
+                    self?.routeFileFormatConversion(encoding: encoding, byteOrderMark: byteOrderMark, lineEnding: lineEnding)
+                }
+            }
         }
     }
 
@@ -4826,6 +4854,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             encoding = format.byteOrderMark == .present ? "UTF-16 LE BOM" : "UTF-16 LE"
         case .utf16BigEndian:
             encoding = format.byteOrderMark == .present ? "UTF-16 BE BOM" : "UTF-16 BE"
+        default:
+            encoding = format.encoding.displayName
         }
         let ending: String
         switch format.lineEnding {

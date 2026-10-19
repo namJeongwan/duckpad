@@ -49,7 +49,7 @@ public final class DocumentFormattingUseCase {
     /// Returns the new revision to the save transaction. All changes enter the
     /// editor's ordinary undo/recovery path; the formatter never writes files.
     @discardableResult
-    public func format(expectedContext: FileWorkspaceContext? = nil, destination: URL? = nil) async throws -> FileWorkspaceContext {
+    public func format(expectedContext: FileWorkspaceContext? = nil, destination: URL? = nil, outputEncoding: TextFileEncoding? = nil) async throws -> FileWorkspaceContext {
         try Task.checkCancellation()
         guard !isFormatting else { throw FormattingFailure.busy }
         guard let context = workspace.activeFileContext(), expectedContext == nil || expectedContext == context,
@@ -58,7 +58,7 @@ public final class DocumentFormattingUseCase {
         guard editor.activeDocumentByteLength <= Self.maximumInputBytes else { throw FormattingFailure.tooLarge }
         let requestedSettings = settings
         let key = SuccessfulFormat(buffer: context.buffer, parser: parser, settings: requestedSettings,
-            boundLineEnding: context.binding?.lineEnding)
+            boundLineEnding: context.pendingFileFormat?.lineEnding ?? context.binding?.lineEnding)
         if successfulFormat == key { return context }
         guard let snapshot = editor.snapshot(for: context.buffer.bufferID), snapshot.revision == context.buffer.revision else {
             throw FormattingFailure.staleDocument
@@ -77,13 +77,20 @@ public final class DocumentFormattingUseCase {
         // WebKit may return NSString-backed storage. Convert once before the
         // byte scans rather than repeatedly transcoding its UTF-16 view.
         result.makeContiguousUTF8()
-        let ending = context.binding?.lineEnding ?? TextFileCodec.decodeForDisplay(Data(snapshot.text.utf8)).lineEnding
+        let ending = context.pendingFileFormat?.lineEnding ?? context.binding?.lineEnding ?? TextFileCodec.decodeForDisplay(Data(snapshot.text.utf8)).lineEnding
         let normalizedEnding: LineEnding = ending == .none || ending == .mixed ? .lf : ending
         // Bundled formatters normally return LF already. Preserve the original
         // string storage when no conversion is necessary.
         let formatted = normalizedEnding == .lf && !result.utf8.contains(13)
             ? result : TextFileCodec.convert(result, to: normalizedEnding)
-        let edits = await Task.detached(priority: .userInitiated) { FormattingEdits.between(snapshot.text, formatted) }.value
+        let edits = try await Task.detached(priority: .userInitiated) {
+            // A save formatter must not mutate the document before discovering
+            // that its output cannot be represented in the destination encoding.
+            if let outputEncoding, outputEncoding.isLegacy {
+                _ = try TextFileCodec.encode(formatted, encoding: outputEncoding, byteOrderMark: .absent)
+            }
+            return FormattingEdits.between(snapshot.text, formatted)
+        }.value
         try Task.checkCancellation()
         guard workspace.activeFileContext() == context, workspace.activeLanguageContext() == language,
               editor.isReadyForFormatting(context.buffer) else { throw FormattingFailure.staleDocument }
@@ -101,7 +108,7 @@ public final class DocumentFormattingUseCase {
             throw FormattingFailure.staleDocument
         }
         successfulFormat = SuccessfulFormat(buffer: updated.buffer, parser: parser, settings: requestedSettings,
-            boundLineEnding: updated.binding?.lineEnding)
+            boundLineEnding: updated.pendingFileFormat?.lineEnding ?? updated.binding?.lineEnding)
         succeeded = true
         return updated
     }

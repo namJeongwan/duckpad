@@ -4,6 +4,34 @@ public enum TextFileEncoding: String, CaseIterable, Codable, Equatable, Sendable
     case utf8
     case utf16LittleEndian
     case utf16BigEndian
+    case windows949
+    case eucKR
+    case shiftJIS
+    case windows1252
+    case windows1251
+    case isoLatin1
+    case gb18030
+    case big5
+
+    public var isLegacy: Bool { ![Self.utf8, .utf16LittleEndian, .utf16BigEndian].contains(self) }
+    public static var legacyEncodings: [Self] { allCases.filter(\.isLegacy) }
+
+    /// Technical names are shared by menus and status indicators, not translated.
+    public var displayName: String {
+        switch self {
+        case .utf8: "UTF-8"
+        case .utf16LittleEndian: "UTF-16 LE"
+        case .utf16BigEndian: "UTF-16 BE"
+        case .windows949: "CP949"
+        case .eucKR: "EUC-KR"
+        case .shiftJIS: "Shift-JIS (CP932)"
+        case .windows1252: "Windows-1252"
+        case .windows1251: "Windows-1251"
+        case .isoLatin1: "ISO-8859-1"
+        case .gb18030: "GB18030"
+        case .big5: "Big5"
+        }
+    }
 }
 
 public enum ByteOrderMark: String, Codable, Equatable, Sendable {

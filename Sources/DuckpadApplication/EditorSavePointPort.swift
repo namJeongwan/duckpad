@@ -4,5 +4,10 @@ import DuckpadDomain
 @MainActor
 public protocol EditorSavePointPort: EditorPort {
     /// A newer edit must never be marked saved by an older asynchronous write.
+    func invalidateSavePoint(for bufferID: BufferID)
     func recordSavePoint(for bufferID: BufferID, revision: UInt64)
+}
+
+public extension EditorSavePointPort {
+    func invalidateSavePoint(for bufferID: BufferID) {}
 }

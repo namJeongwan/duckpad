@@ -6,12 +6,14 @@ public struct FileWorkspaceContext: Equatable, Sendable {
     public let title: String
     public let buffer: EditorBufferDescriptor
     public let binding: FileBinding?
+    public let pendingFileFormat: DocumentFileFormat?
 
-    public init(tabID: TabID, title: String, buffer: EditorBufferDescriptor, binding: FileBinding?) {
+    public init(tabID: TabID, title: String, buffer: EditorBufferDescriptor, binding: FileBinding?, pendingFileFormat: DocumentFileFormat? = nil) {
         self.tabID = tabID
         self.title = title
         self.buffer = buffer
         self.binding = binding
+        self.pendingFileFormat = pendingFileFormat
     }
 }
 
@@ -235,7 +237,9 @@ public final class FileDocumentUseCase {
                 return
             }
             let contents = try await prepareContents(read.data,
-                assuming: binding.isReadOnly ? nil : binding.encoding, preservingUndo: true)
+                assuming: binding.isReadOnly ? nil : binding.encoding,
+                strictEncoding: binding.encoding.isLegacy, preservingUndo: true,
+                previousFormat: outputFormat(context: current, conversion: nil))
             let decoded = contents.decoded
             guard !Task.isCancelled, !liveReloadSuspended else { return }
             let retained = try await store.prepareSecurityScopedAccess(to: url, ownerID: securityScopeOwnerID)
@@ -547,7 +551,8 @@ public final class FileDocumentUseCase {
         let projectEncoding = TextFileCodec.byteOrderMarkEncoding(in: read.data) == nil ? rules?.charset?.0 : nil
         let decodingEncoding = encodingHint ?? projectEncoding
         let contents: PreparedContents
-        do { contents = try await prepareContents(read.data, assuming: decodingEncoding, strictEncoding: true, preservingUndo: reopening != nil) }
+        do { contents = try await prepareContents(read.data, assuming: decodingEncoding, strictEncoding: true, preservingUndo: reopening != nil,
+            previousFormat: reopening.map { outputFormat(context: $0, conversion: nil) }) }
         catch { return .failed(error) }
         let decoded = contents.decoded
         let binding = FileBinding(
@@ -625,6 +630,30 @@ public final class FileDocumentUseCase {
         selectionEditor.selectAndReveal(match.range)
         selectionEditor.focus()
         return .activated(tabID)
+    }
+
+    /// Changes document metadata through the editor Undo history, without file IO.
+    public func changeFormat(_ format: TextFileConversion, expectedContext: FileWorkspaceContext) async -> FileOperationFailure? {
+        await acquireOperation()
+        defer { releaseOperation() }
+        guard workspace.activeFileContext() == expectedContext else { return .comparisonInvalidated }
+        guard expectedContext.binding?.isReadOnly != true else { return .readOnly }
+        let current = outputFormat(context: expectedContext, conversion: nil)
+        guard format != current else { return nil }
+        if format.encoding.isLegacy {
+            guard let capture = editor.recoveryCapture(for: expectedContext.buffer.bufferID),
+                  capture.revision == expectedContext.buffer.revision else {
+                return .editorSnapshotUnavailable(expectedContext.buffer.bufferID)
+            }
+            do { _ = try await prepareSave(capture, format: format) }
+            catch { return error }
+        }
+        guard !Task.isCancelled else { return .cancelled }
+        guard workspace.activeFileContext() == expectedContext,
+              let formatEditor = editor as? any EditorFileFormatPort else { return .comparisonInvalidated }
+        let dirty = workspace.snapshot().tabs.first(where: { $0.id == expectedContext.tabID })?.isDirty ?? true
+        return formatEditor.changeFileFormat(from: current, to: format, buffer: expectedContext.buffer, wasDirty: dirty)
+            ? nil : .comparisonInvalidated
     }
 
     public func saveActive(
@@ -822,7 +851,9 @@ public final class FileDocumentUseCase {
             loadingProgress = FileLoadingProgress(path: pendingConflict.url.path, loadedByteCount: 0, totalByteCount: nil)
             defer { loadingProgress = nil }
             do {
-                let read = try await store.readForDisplay(from: pendingConflict.url, assuming: nil)
+                let retainedEncoding = context.binding?.canonicalPath == pendingConflict.url.path
+                    && context.binding?.encoding.isLegacy == true ? context.binding?.encoding : nil
+                let read = try await store.readForDisplay(from: pendingConflict.url, assuming: retainedEncoding)
                 guard UInt64(read.data.count) == read.identity.byteCount else {
                     return .failed(.store(.io("\(pendingConflict.url.path): incomplete file read")))
                 }
@@ -830,7 +861,9 @@ public final class FileDocumentUseCase {
                     to: pendingConflict.url, ownerID: securityScopeOwnerID
                 )
                 let contents: PreparedContents
-                do { contents = try await prepareContents(read.data, assuming: nil, preservingUndo: true) }
+                do { contents = try await prepareContents(read.data, assuming: retainedEncoding,
+                    strictEncoding: retainedEncoding != nil, preservingUndo: true,
+                    previousFormat: outputFormat(context: context, conversion: nil)) }
                 catch { return .failed(error) }
                 let decoded = contents.decoded
                 let updated = FileBinding(
@@ -989,9 +1022,35 @@ public final class FileDocumentUseCase {
             return .failed(.session(.duplicateFileBinding(url.path)))
         }
         var context = context
+        let initialBuffer = context.buffer
+        let existingFormat = outputFormat(context: context, conversion: conversion)
+        let appliesConventions = conventionsUseCase != nil
+            && (editor as? any BinaryEditorPort)?.hasBinaryContent(for: context.buffer.bufferID) != true
+        let rules = appliesConventions ? await conventionsUseCase!.rules(for: url) : EditorConventions()
+        guard !Task.isCancelled else { return .cancelled(context.tabID) }
+        guard workspace.fileContext(tabID: context.tabID) == context else { return .failed(.comparisonInvalidated) }
+        let format = conversion ?? context.pendingFileFormat ?? TextFileConversion(
+            encoding: rules.charset?.0 ?? existingFormat.encoding,
+            byteOrderMark: rules.charset?.1 ?? existingFormat.byteOrderMark,
+            lineEnding: rules.lineEnding ?? existingFormat.lineEnding)
+        var validatedLegacy: (data: Data, lineEnding: LineEnding)?
+        if format.encoding.isLegacy {
+            guard let capture = editor.recoveryCapture(for: context.buffer.bufferID),
+                  capture.revision == context.buffer.revision else {
+                return .failed(.editorSnapshotUnavailable(context.buffer.bufferID))
+            }
+            // Validate before formatting/cleanup enters the undo history. Reuse
+            // these bytes when neither operation changes the document.
+            do { validatedLegacy = try await prepareSave(capture, format: format) }
+            catch { return .failed(error) }
+            guard !Task.isCancelled else { return .cancelled(context.tabID) }
+            guard workspace.fileContext(tabID: context.tabID) == context else { return .failed(.comparisonInvalidated) }
+        }
         if let formattingUseCase, formattingUseCase.settings.formatOnSave {
             do {
-                context = try await formattingUseCase.format(expectedContext: context, destination: url)
+                context = try await formattingUseCase.format(expectedContext: context, destination: url, outputEncoding: format.encoding)
+            } catch let error as TextFileCodecError {
+                return .failed(.codec(error))
             } catch FormattingFailure.unsupportedLanguage {
                 // Unsupported documents still save normally.
             } catch FormattingFailure.staleDocument {
@@ -1006,17 +1065,11 @@ public final class FileDocumentUseCase {
                 return .failed(.comparisonInvalidated)
             }
         }
-        var rules = EditorConventions()
-        if let conventionsUseCase, (editor as? any BinaryEditorPort)?.hasBinaryContent(for: context.buffer.bufferID) != true {
-            do { (context, rules) = try await conventionsUseCase.prepareSave(context: context, destination: url) }
+        if appliesConventions, let conventionsUseCase {
+            do { (context, _) = try await conventionsUseCase.prepareSave(context: context, destination: url, resolvedRules: rules) }
             catch is CancellationError { return .cancelled(context.tabID) }
             catch { return .failed(.comparisonInvalidated) }
         }
-        let existingFormat = outputFormat(context: context, conversion: conversion)
-        let format = conversion ?? TextFileConversion(
-            encoding: rules.charset?.0 ?? existingFormat.encoding,
-            byteOrderMark: rules.charset?.1 ?? existingFormat.byteOrderMark,
-            lineEnding: rules.lineEnding ?? existingFormat.lineEnding)
         // Do not replace an unchanged file just because rules were inspected.
         // Save As must still write its destination, even for an empty document.
         if skipUnchanged, conversion == nil, context.binding?.canonicalPath == url.path,
@@ -1039,11 +1092,17 @@ public final class FileDocumentUseCase {
         // Bound EOL is a durable format choice, not a one-shot transformation.
         // Normal saves therefore normalize to the binding selected by a prior conversion.
         let prepared: (data: Data, lineEnding: LineEnding)
-        do { prepared = try await prepareSave(snapshot, format: format) }
-        catch { return .failed(error) }
+        if context.buffer == initialBuffer, let validatedLegacy {
+            prepared = validatedLegacy
+        } else {
+            do { prepared = try await prepareSave(snapshot, format: format) }
+            catch { return .failed(error) }
+        }
         let expected = !overwrite && context.binding?.canonicalPath == url.path ? context.binding?.observedIdentity : nil
         do {
             let receipt = try await store.writeAtomically(prepared.data, to: url, expectedIdentity: expected, overwrite: overwrite)
+            (editor as? any EditorSavePointPort)?.invalidateSavePoint(for: snapshot.bufferID)
+            workspace.fileWriteCompleted(for: snapshot.bufferID)
             let retainedAccess = try await store.prepareSecurityScopedAccess(to: url, ownerID: securityScopeOwnerID)
             let identity = receipt.identity
             let binding = FileBinding(
@@ -1083,6 +1142,10 @@ public final class FileDocumentUseCase {
             )
             return .conflict(tabID: context.tabID, current: current)
         } catch let error {
+            if case .durabilityFailure(let state, _, _, _) = error, state != .originalRestored {
+                (editor as? any EditorSavePointPort)?.invalidateSavePoint(for: snapshot.bufferID)
+                workspace.fileWriteCompleted(for: snapshot.bufferID)
+            }
             return .failed(.store(error))
         }
     }
@@ -1091,7 +1154,8 @@ public final class FileDocumentUseCase {
         _ data: Data,
         assuming encoding: TextFileEncoding?,
         strictEncoding: Bool = false,
-        preservingUndo: Bool = false
+        preservingUndo: Bool = false,
+        previousFormat: DocumentFileFormat? = nil
     ) async throws(FileOperationFailure) -> PreparedContents {
         let path = loadingProgress?.path ?? ""
         loadingProgress = FileLoadingProgress(path: path, loadedByteCount: 0, totalByteCount: data.count)
@@ -1142,8 +1206,11 @@ public final class FileDocumentUseCase {
         }
         return (decoded, { [editor] descriptor in
             if preservingUndo {
-                editor.reload(EditorTextSnapshot(bufferID: descriptor.bufferID,
-                    revision: descriptor.revision, text: decoded.text))
+                let snapshot = EditorTextSnapshot(bufferID: descriptor.bufferID, revision: descriptor.revision, text: decoded.text)
+                if let previousFormat, let formatEditor = editor as? any EditorFileFormatPort {
+                    formatEditor.reloadFile(snapshot, from: previousFormat, to: .init(encoding: decoded.encoding,
+                        byteOrderMark: decoded.byteOrderMark, lineEnding: decoded.lineEnding))
+                } else { editor.reload(snapshot) }
                 (editor as? any EditorSavePointPort)?.recordSavePoint(for: descriptor.bufferID, revision: descriptor.revision)
             } else {
                 editor.install(EditorTextSnapshot(bufferID: descriptor.bufferID,
@@ -1189,10 +1256,12 @@ public final class FileDocumentUseCase {
                 let snapshot = try capture.materializedSnapshot()
                 let ending = format.lineEnding == .none
                     ? TextFileCodec.detectLineEnding(inUTF8: snapshot.utf8) : format.lineEnding
-                let data = TextFileCodec.encodeUTF8(snapshot.utf8, encoding: format.encoding,
+                let data = try TextFileCodec.encodeUTF8(snapshot.utf8, encoding: format.encoding,
                     byteOrderMark: format.byteOrderMark, lineEnding: format.lineEnding)
                 return (data, ending)
             }.value
+        } catch let error as TextFileCodecError {
+            throw .codec(error)
         } catch {
             throw .editorSnapshotUnavailable(capture.bufferID)
         }
@@ -1203,9 +1272,9 @@ public final class FileDocumentUseCase {
         conversion: TextFileConversion?
     ) -> TextFileConversion {
         TextFileConversion(
-            encoding: conversion?.encoding ?? context.binding?.encoding ?? .utf8,
-            byteOrderMark: conversion?.byteOrderMark ?? context.binding?.byteOrderMark ?? .absent,
-            lineEnding: conversion?.lineEnding ?? context.binding?.lineEnding ?? .none
+            encoding: conversion?.encoding ?? context.pendingFileFormat?.encoding ?? context.binding?.encoding ?? .utf8,
+            byteOrderMark: conversion?.byteOrderMark ?? context.pendingFileFormat?.byteOrderMark ?? context.binding?.byteOrderMark ?? .absent,
+            lineEnding: conversion?.lineEnding ?? context.pendingFileFormat?.lineEnding ?? context.binding?.lineEnding ?? .none
         )
     }
 

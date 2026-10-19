@@ -496,7 +496,7 @@ public enum DuckpadMainMenuFactory {
         let file = menu("File"), edit = menu("Edit"), view = menu("View")
         let format = menu("Format"), tabs = menu("Tabs"), window = menu("Window")
         let encoding = NSMenu(title: "Encoding")
-        let conversion = NSMenuItem(title: "Convert and Save Encoding", action: nil, keyEquivalent: "")
+        let conversion = NSMenuItem(title: "Convert Encoding", action: nil, keyEquivalent: "")
         conversion.submenu = makeEncodingMenu(target: target)
         encoding.addItem(conversion)
         if let open = format.items.first(where: { $0.title == "Open or Reopen Using Encoding" }) {
@@ -737,11 +737,11 @@ public enum DuckpadMainMenuFactory {
     static func makeFormatMenu(target: DuckpadWindowController) -> NSMenu {
         let formatMenu = NSMenu(title: "Format")
 
-        let encodingItem = NSMenuItem(title: "Convert and Save Encoding", action: nil, keyEquivalent: "")
+        let encodingItem = NSMenuItem(title: "Convert Encoding", action: nil, keyEquivalent: "")
         encodingItem.submenu = makeEncodingMenu(target: target)
         formatMenu.addItem(encodingItem)
 
-        let endingsItem = NSMenuItem(title: "Convert and Save Line Endings", action: nil, keyEquivalent: "")
+        let endingsItem = NSMenuItem(title: "Convert Line Endings", action: nil, keyEquivalent: "")
         endingsItem.submenu = makeLineEndingMenu(target: target)
         formatMenu.addItem(endingsItem)
 
@@ -758,7 +758,7 @@ public enum DuckpadMainMenuFactory {
         open.submenu = makeOpenEncodingMenu(target: target)
         open.toolTip = "Read the file from disk using another encoding without saving."
         menu.addItem(open)
-        let save = NSMenuItem(title: "Convert and Save Encoding", action: nil, keyEquivalent: "")
+        let save = NSMenuItem(title: "Convert Encoding", action: nil, keyEquivalent: "")
         save.submenu = makeEncodingMenu(target: target)
         save.toolTip = "Save the displayed text using another encoding; this does not repair garbled text."
         menu.addItem(save)
@@ -771,11 +771,23 @@ public enum DuckpadMainMenuFactory {
         add("Open as UTF-8…", #selector(DuckpadWindowController.performOpenAsUTF8(_:)), "", target, modifiers: [], to: openMenu)
         add("Open as UTF-16 LE…", #selector(DuckpadWindowController.performOpenAsUTF16LittleEndian(_:)), "", target, modifiers: [], to: openMenu)
         add("Open as UTF-16 BE…", #selector(DuckpadWindowController.performOpenAsUTF16BigEndian(_:)), "", target, modifiers: [], to: openMenu)
+        appendLegacyEncodings(to: openMenu, target: target, action: #selector(DuckpadWindowController.performOpenAsLegacyEncoding(_:)))
         return openMenu
     }
 
+    private static func appendLegacyEncodings(to menu: NSMenu, target: DuckpadWindowController, action: Selector) {
+        menu.addItem(.separator())
+        for encoding in TextFileEncoding.legacyEncodings {
+            let item = NSMenuItem(title: encoding.displayName, action: action, keyEquivalent: "")
+            item.target = target
+            item.representedObject = encoding.rawValue
+            item.identifier = NSUserInterfaceItemIdentifier("duckpad.encoding." + encoding.rawValue)
+            menu.addItem(item)
+        }
+    }
+
     static func makeEncodingMenu(target: DuckpadWindowController) -> NSMenu {
-        let encodingMenu = NSMenu(title: "Convert and Save Encoding")
+        let encodingMenu = NSMenu(title: "Convert Encoding")
         add("UTF-8 without BOM", #selector(DuckpadWindowController.performConvertToUTF8(_:)), "", target, modifiers: [], to: encodingMenu)
         add("UTF-8 with BOM", #selector(DuckpadWindowController.performConvertToUTF8BOM(_:)), "", target, modifiers: [], to: encodingMenu)
         encodingMenu.addItem(.separator())
@@ -783,11 +795,12 @@ public enum DuckpadMainMenuFactory {
         add("UTF-16 LE without BOM", #selector(DuckpadWindowController.performConvertToUTF16LittleEndianWithoutBOM(_:)), "", target, modifiers: [], to: encodingMenu)
         add("UTF-16 BE with BOM", #selector(DuckpadWindowController.performConvertToUTF16BigEndian(_:)), "", target, modifiers: [], to: encodingMenu)
         add("UTF-16 BE without BOM", #selector(DuckpadWindowController.performConvertToUTF16BigEndianWithoutBOM(_:)), "", target, modifiers: [], to: encodingMenu)
+        appendLegacyEncodings(to: encodingMenu, target: target, action: #selector(DuckpadWindowController.performConvertToLegacyEncoding(_:)))
         return encodingMenu
     }
 
     static func makeLineEndingMenu(target: DuckpadWindowController) -> NSMenu {
-        let endingsMenu = NSMenu(title: "Convert and Save Line Endings")
+        let endingsMenu = NSMenu(title: "Convert Line Endings")
         add("Unix (LF)", #selector(DuckpadWindowController.performConvertToLF(_:)), "", target, modifiers: [], to: endingsMenu)
         add("Windows (CRLF)", #selector(DuckpadWindowController.performConvertToCRLF(_:)), "", target, modifiers: [], to: endingsMenu)
         add("Classic Mac (CR)", #selector(DuckpadWindowController.performConvertToCR(_:)), "", target, modifiers: [], to: endingsMenu)

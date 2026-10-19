@@ -61,19 +61,22 @@ public struct EditorIncrementalEdit: Equatable, Sendable {
     /// Revision/recovery work remains synchronous; UI and persistence can wait
     /// for the final edit of the native Undo/Redo action.
     public let isIntermediateUndoRedo: Bool
+    public let fileFormat: DocumentFileFormat?
 
     public init(
         bufferID: BufferID,
         expectedRevision: UInt64,
         range: TextEditRange,
         replacement: String,
-        isIntermediateUndoRedo: Bool = false
+        isIntermediateUndoRedo: Bool = false,
+        fileFormat: DocumentFileFormat? = nil
     ) {
         self.bufferID = bufferID
         self.expectedRevision = expectedRevision
         self.range = range
         self.replacement = replacement
         self.isIntermediateUndoRedo = isIntermediateUndoRedo
+        self.fileFormat = fileFormat
     }
 }
 

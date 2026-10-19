@@ -53,6 +53,24 @@ struct DocumentFormattingIntegrationTests {
         func dispose() { controller.close(); editor.invalidate(); try? FileManager.default.removeItem(at: root) }
     }
 
+    @Test(arguments: [false, true])
+    func legacyEncodingFailureLeavesFormattingAndUndoUntouched(emojiInInput: Bool) async throws {
+        let f = try Fixture(); await f.start(); defer { f.dispose() }
+        let source = emojiInInput ? "{\"한글\":\"🦆\"}" : "{\"한글\":1}"
+        let context = try await f.open(source)
+        #expect(f.editor.applyLanguage(.init(languageID: .init(rawValue: "json"), lexerName: "json", indentation: .init(), folding: true, braceMatching: true)))
+        f.formatting.settings.formatOnSave = true
+        f.engine.output = "{ \"한글\": \"🦆\" }\n"
+        let view = try #require(f.editor.activeScintillaView)
+        let couldUndo = view.canUndo
+        #expect(await f.files.saveActive(conversion: .init(encoding: .windows949, byteOrderMark: .absent, lineEnding: .lf))
+            == .failed(.codec(.unrepresentableCharacters(.windows949))))
+        #expect(view.contentUTF8 == Data(source.utf8))
+        #expect(view.canUndo == couldUndo)
+        #expect(f.workspace.activeFileContext() == context)
+        #expect(try Data(contentsOf: URL(fileURLWithPath: context.binding!.canonicalPath)) == Data(source.utf8))
+    }
+
     @Test func markdownSavePreservesIndentationWithoutCallingFormatter() async throws {
         let f = try Fixture(); await f.start(); defer { f.dispose() }
         let source = "\'\'\'rust\nfn main() {\n    let n = 1;\n}\n\'\'\'\n"
