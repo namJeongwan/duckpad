@@ -3,41 +3,52 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.13.0</title>
-            <pubDate>Mon, 19 Oct 2026 12:30:18 +0900</pubDate>
-            <sparkle:version>61</sparkle:version>
-            <sparkle:shortVersionString>0.13.0</sparkle:shortVersionString>
+            <title>0.14.0</title>
+            <pubDate>Tue, 20 Oct 2026 17:00:06 +0900</pubDate>
+            <sparkle:version>62</sparkle:version>
+            <sparkle:shortVersionString>0.14.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.13.0
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.14.0
 
-Edit multiple selections together, customize command shortcuts, and navigate matching text with an optional code minimap.
+Search file contents across open documents and directories, replace matches without automatically saving files, and find files by name with two taps of Shift.
 
-- Add cursors with Command-Option-click or make a rectangular selection with Option-drag. Edit > Multiple Cursors includes next/all occurrences, skip, undo the last added selection, cursors above/below, split into lines, and collapse to one cursor. Typing and Korean IME composition share the normal Undo/Redo history. Command-D remains Duplicate Line; assign occurrence commands in Keyboard Shortcuts.
-- Open Preferences > Keyboard Shortcuts, select a command and type a shortcut, or double-click its row. The row shows the previous and proposed shortcuts side by side. Enter applies, Escape immediately cancels, and conflicts identify the existing command. Bindings persist across launches and appear in menus and the command palette. Remove or restore individual bindings, or restore all defaults.
-- Highlight matching whole words at the caret and literal substrings when text is selected, including selecting `ap` inside `apple`. Matching positions appear in the scrollbar; explicit search results take priority.
-- Navigate with a compact, syntax-coloured minimap and flat scrollbar markers. Toggle View > Show minimap or the corresponding preference. Minimap scrolling preserves the caret, selection, and Undo history; narrow panes, binary documents, and progressive loading hide it automatically.
+- Use Command-Shift-F / Command-Shift-R for Find / Replace in Files. Compact match rows show filenames and line numbers above a resizable, syntax-coloured context preview. Search supports case matching, whole words, Normal / Extended / Regex modes, and filename masks.
+- Choose All, Open Documents, Workspace, or Folder in both project search and filename search. Open buffers take precedence over duplicate disk paths. A separately chosen Folder does not become a workspace root.
+- Tap Shift twice to search filenames and paths. Open a result normally or in a right split. Unsaved tabs are included in Open Documents and All.
+- Replace one selected match or confirm Replace All after a completed, nontruncated search. Changes remain unsaved, preserve per-document Undo, and are checked against the searched revision and file identity. Changed, read-only, composing, cancelled and over-limit targets are reported.
+- Folder discovery uses bundled ripgrep 15.1.0 and respects its ignore rules; Duckpad's existing matcher determines final text matches and replacement semantics. No separate ripgrep installation is required.
+- Preferences > General > Show hidden files includes dotfiles, hidden directories and macOS hidden attributes in the workspace tree, filename search and folder content search. The setting defaults off, persists across launches and refreshes existing lists. Search ignore rules, package/symlink exclusions and resource limits still apply; already-open tabs remain available.
+- Command-R opens Replace and switches an active classic Find dialog to Replace without changing its query, replacement, mask or options. Command-Shift-R continues to open Replace in Files; customized shortcut bindings remain authoritative.
+- Classic Command-F / Command-R retain the familiar Notepad++ style Find / Replace dialog. Shared colours, controls and input alignment connect the search windows, while Korean marked-text edits update search without a trailing space or backspace.
+- Keep long highlighted search results on one row with proper ellipsis truncation. Reaching the bounded filename-discovery budget returns explicitly incomplete results instead of reporting an unavailable folder; incomplete results cannot trigger Replace All.
+- Remove the repository's unused deployment/telemetry configuration. This does not remove the application's existing usage-statistics controls.
 
-App and all helpers: **0.13.0 (61)**, upgrading **0.12.2 (60)**. Requires **macOS 13 or later**. Universal binaries support Apple Silicon and Intel. Existing settings, session recovery, document encodings, and the native plugin ABI remain compatible. The encoding and line-ending changes from 0.12.2 are included.
+App and helpers: **0.14.0 (62)**, upgrading **0.13.0 (61)**. Requires **macOS 13 or later**. Universal binaries support Apple Silicon and Intel. Existing settings, recovery data, encodings and native plugin ABI remain compatible.
 
 ## Installation
 
-Download `Duckpad-0.13.0-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.13.0-universal.zip`. Verify downloads against `SHA256SUMS.txt`.
+Download `Duckpad-0.14.0-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.14.0-universal.zip`. Verify downloads against `SHA256SUMS.txt`.
 
 ## Validation and limitations
 
-The related Swift suites pass **177 test functions**, covering multi-selection input and IME Undo, occurrence scanning and search precedence, minimap navigation and bounded rendering, format-change Undo from 0.12.2, settings persistence, shortcut conflicts, and keyboard focus. The shortcut interaction was also exercised in an isolated application session. All eight localization catalogs (834 strings and four plural entries) are checked for missing keys and format arguments; shortcut layout is checked in all eight languages.
+Final pre-release validation passed **136 related test functions across 18 suites**, covering search and replacement budgets, retained partial results, scope precedence, root/symlink authority, hidden-file discovery and settings migration, expanded-tree and live-index refresh, stale search/confirmation cancellation, native Command-R routing, shortcut customization, Korean IME, and result-row layout. All eight localization catalogs pass key and format validation (1,182 strings and four plural entries). Layout checks include all eight languages; selected English dark and Korean light result views were visually inspected. Packaged artifact verification and isolated launch smoke results are recorded with the published release.
 
-Bulk occurrence selection and line splitting are limited to 10,000 selections. Select All Occurrences also requires a document no larger than 16 MiB and a selected pattern no larger than 64 KiB. Exceeding a limit sounds an alert and leaves the original selections intact, without installing a partial set.
+Filename indexing is bounded to 20,000 entries and displays up to 100 results. Project search displays up to 5,000 match rows and reports truncation. Replace All is disabled for incomplete or truncated results; folder replacement prepares at most 200 files per operation. Undo is per document, not a single transaction across files. Context previews are bounded excerpts, not a full before/after diff. Gold match-row highlights are provided for Normal literal searches; exact context highlighting is available when the native preview can be prepared. Folder content search does not decode every legacy encoding supported by manually opened documents.
 
-Shortcut capture requires Command or Control; key chords and shortcuts intercepted by macOS are not supported. Occurrence decoration is bounded to 100,000 matches and skips multiline, whitespace-only, rectangular, and over-256-byte selections. The minimap shows logical lines and samples up to 256 styled UTF-8 bytes per line.
+The full repository test suite, physical Korean keyboard interaction, full manual inspection in all eight languages, Intel hardware and macOS 13 were not exercised. The native Save panel automation is skipped by the isolated smoke script. No universal sub-50-ms search latency guarantee is made.
 
-Full manual UI inspection in all eight languages, the entire test suite, physical Intel hardware, and macOS 13 were not exercised. The universal Release build, bundle/resource/signature validation, and isolated Finder/Open With, bookmark-recovery save, window resizing, and sandboxed XPC extension/isolation smoke checks pass. Native save-panel UI automation was skipped.
+The distribution is ad-hoc signed, without Developer ID signing or Apple notarization. Bundled ripgrep attribution and dependency notices are included in the app.
 
-The distribution is ad-hoc signed, without Developer ID signing or Apple notarization.
 
-Release source: `d39d4edb88ea4f5dc44f6c5b25510eddd21031b2` ([PR #83](https://github.com/namJeongwan/duckpad/pull/83)).
+## Verified distribution
+
+Source commit: `112ea30ee61aadfd7f5e8ef9a18d2cf096df79a8`; reviewed source tree: `fe11a64ce950a97922ce7635a34dee5237a93daa`. Changes were integrated through [#86](https://github.com/namJeongwan/duckpad/pull/86), [#87](https://github.com/namJeongwan/duckpad/pull/87), and [#88](https://github.com/namJeongwan/duckpad/pull/88).
+
+The app, three helpers and bundled ripgrep contain both arm64 and x86_64 slices. App/helper versions are 0.14.0 (62). Bundle/resource/signature verification and isolated Finder/Open With, window resizing, sandboxed XPC and signed ripgrep smokes passed. The helper smoke also confirmed hidden-file opt-in and a validated hidden-file read. A separate copied-bookmark workspace smoke passed both normal search and a no-match scan exceeding the 32 MiB filename stream budget, returning explicit truncation. Native Save panel automation was skipped.
+
+The DMG passed `hdiutil verify`; the ZIP passed `unzip -tq`. SHA-256 hashes are supplied in `SHA256SUMS.txt`. These are ad-hoc signed universal artifacts without Apple notarization; Intel hardware and macOS 13 execution were not tested.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.13.0/Duckpad-0.13.0-universal.zip" length="43798966" type="application/octet-stream" sparkle:edSignature="Jqefe74quWdu7kANipTYkHqB6SGnXVxREa4JTpAA2bnBQ/PxCspbMm42XIfCx+sPj4Gotl2WNhuBHsBhprWxDw=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.14.0/Duckpad-0.14.0-universal.zip" length="49125863" type="application/octet-stream" sparkle:edSignature="9g3O3jGui8FkoXs0T8esq8qCec9MgKhPk7oWYyOlPzh7bFmQSN64LJpjyVLujF6x6n1pjdgO1ZE8l7ZacCG8Bg=="/>
         </item>
     </channel>
 </rss>
