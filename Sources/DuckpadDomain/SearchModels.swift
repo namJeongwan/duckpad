@@ -25,6 +25,7 @@ public struct SearchOptions: Equatable, Sendable {
     public var wrapAround: Bool
     public var direction: SearchDirection
     public var scope: SearchScope
+    public var includeHiddenFiles: Bool
 
     public init(
         mode: SearchMode = .normal,
@@ -33,7 +34,8 @@ public struct SearchOptions: Equatable, Sendable {
         dotMatchesNewline: Bool = false,
         wrapAround: Bool = true,
         direction: SearchDirection = .forward,
-        scope: SearchScope = .document
+        scope: SearchScope = .document,
+        includeHiddenFiles: Bool = false
     ) {
         self.mode = mode
         self.matchCase = matchCase
@@ -42,6 +44,7 @@ public struct SearchOptions: Equatable, Sendable {
         self.wrapAround = wrapAround
         self.direction = direction
         self.scope = scope
+        self.includeHiddenFiles = includeHiddenFiles
     }
 }
 

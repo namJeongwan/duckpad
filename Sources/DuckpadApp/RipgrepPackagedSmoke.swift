@@ -56,6 +56,18 @@ enum RipgrepPackagedSmoke {
             let result = try await useCase.search(rootPath: root.path, query: query)
             guard result.matchCount == 1, !result.isTruncated else { throw SmokeFailure.incorrectResults }
         }
+        try Data("hiddenNeedle".utf8).write(to: root.appendingPathComponent(".hidden.txt"))
+        for visible in [false, true] {
+            let result = try await useCase.search(rootPath: root.path,
+                query: .init(pattern: "hiddenNeedle", options: .init(includeHiddenFiles: visible), fileMask: ".hidden.txt"))
+            guard result.matchCount == (visible ? 1 : 0), !result.isTruncated else { throw SmokeFailure.incorrectResults }
+        }
+        let indexer = LocalFolderFileNameIndex(executable: helper)
+        let names = try await indexer.index(in: root, includeHiddenFiles: true)
+        guard names.relativePaths.contains(".hidden.txt"),
+              try await indexer.readFile(in: root, root: names.root, relativePath: ".hidden.txt").result.data == Data("hiddenNeedle".utf8) else {
+            throw SmokeFailure.incorrectResults
+        }
         print("DUCKPAD_RIPGREP_READY signed sandbox discovery + ignore rules + native immutable reads + UTF-16 + ICU regex")
     }
     static func runWorkspace(store: LocalWorkspaceRootStore, expectDiscoveryLimit: Bool) async throws {

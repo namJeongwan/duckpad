@@ -32,7 +32,7 @@ The embedded Ghostty 1.3.1 macOS default bindings are retained directly; there i
 | Command-Z / Shift-Z / Shift-T | Terminal layout undo/redo (five-second history) | Document undo/redo/reopen |
 | Command-Shift-P | Terminal command palette | Duckpad command palette |
 | Command-C / V / A | Terminal copy/paste/select all | Document editing |
-| Command-H / Option-H / M | macOS hide / hide others / minimize | Duckpad Replace uses Command-H |
+| Command-H / Option-H / M | macOS hide / hide others / minimize | Duckpad Replace uses Command-R |
 | Control-W | Forward to shell (delete word) | Duckpad auxiliary-panel close router |
 
 Font size, screen clearing, scrollback, selection adjustment, prompt jumps, line navigation, screen-file export and other engine-owned bindings execute in Ghostty. The host implements split/session/window actions; Command-Q retains Duckpad’s normal quit and unsaved-document review. Command-Option-I opens the engine inspector. The engine’s paste confirmation remains enabled; explicit clipboard operations do not enable OSC 52 clipboard access.

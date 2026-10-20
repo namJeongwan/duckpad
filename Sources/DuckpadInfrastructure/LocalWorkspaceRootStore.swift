@@ -223,6 +223,10 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
         rootID: WorkspaceRootID,
         relativeDirectory: String
     ) async throws(WorkspaceBrowserFailure) -> [WorkspaceBrowserEntry] {
+        try await children(rootID: rootID, relativeDirectory: relativeDirectory, includeHiddenFiles: false)
+    }
+
+    public func children(rootID: WorkspaceRootID, relativeDirectory: String, includeHiddenFiles: Bool) async throws(WorkspaceBrowserFailure) -> [WorkspaceBrowserEntry] {
         try loadIfNeeded()
         guard Self.isValidRelativePath(relativeDirectory) else { throw .invalidPath(relativeDirectory) }
         let access = try availableRoot(rootID)
@@ -234,7 +238,7 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
                 rootID: rootID,
                 relativeDirectory: relativeDirectory,
                 access: access,
-                limit: limit,
+                limit: limit, includeHiddenFiles: includeHiddenFiles,
                 beforeOpeningEntry: beforeOpeningEntry,
                 afterReadingDirectoryEntry: afterReadingDirectoryEntry
             )
@@ -294,7 +298,7 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
         rootID: WorkspaceRootID,
         relativeDirectory: String,
         access: RootAccess,
-        limit: Int,
+        limit: Int, includeHiddenFiles: Bool,
         beforeOpeningEntry: (@Sendable (String) -> Void)?,
         afterReadingDirectoryEntry: (@Sendable () -> Void)?
     ) throws -> [WorkspaceBrowserEntry] {
@@ -322,7 +326,7 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
             observedEntryCount += 1
             afterReadingDirectoryEntry?()
             guard observedEntryCount <= limit else { throw WorkspaceBrowserFailure.entryLimitExceeded(limit) }
-            guard !name.hasPrefix("."), !name.contains("/"), !name.contains("\0") else {
+            guard (includeHiddenFiles || !name.hasPrefix(".")), !name.contains("/"), !name.contains("\0") else {
                 errno = 0
                 continue
             }
@@ -330,7 +334,7 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
             beforeOpeningEntry?(relative)
             var info = stat()
             guard fstatat(descriptor, name, &info, AT_SYMLINK_NOFOLLOW) == 0,
-                  info.st_flags & UInt32(UF_HIDDEN) == 0 else { errno = 0; continue }
+                  (includeHiddenFiles || info.st_flags & UInt32(UF_HIDDEN) == 0) else { errno = 0; continue }
             let kind: WorkspaceEntryKind
             switch fileType(info) {
             case S_IFDIR where !isPackageDirectory(name): kind = .directory

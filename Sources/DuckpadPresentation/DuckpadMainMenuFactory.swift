@@ -146,7 +146,7 @@ public enum DuckpadMainMenuFactory {
         add("Find…", #selector(DuckpadWindowController.performShowFind(_:)), "f", target, to: searchMenu)
         add("Find Next", #selector(DuckpadWindowController.performFindNext(_:)), "g", target, to: searchMenu)
         add("Find Previous", #selector(DuckpadWindowController.performFindPrevious(_:)), "g", target, modifiers: [.command, .shift], to: searchMenu)
-        add("Replace…", #selector(DuckpadWindowController.performShowReplace(_:)), "h", target, to: searchMenu)
+        add("Replace…", #selector(DuckpadWindowController.performShowReplace(_:)), "r", target, to: searchMenu)
         add("Find in Files…", #selector(DuckpadWindowController.performFindInFolder(_:)), "f", target, modifiers: [.command, .shift], to: searchMenu)
         add("Replace in Files…", #selector(DuckpadWindowController.performReplaceInFiles(_:)), "r", target, modifiers: [.command, .shift], to: searchMenu)
         add("Search Files…", #selector(DuckpadWindowController.performSearchFiles(_:)), "", target, modifiers: [], to: searchMenu)

@@ -150,6 +150,20 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
+    func invalidateChildren() -> [WorkspaceRoot] {
+        let navigation = roots.map { root in
+            var expanded: [String] = []
+            if let node = rootNodes.first(where: { $0.rootID == root.id }) {
+                traverse(node) { if outline.isItemExpanded($0) { expanded.append($0.relativePath) } }
+            }
+            return WorkspaceRoot(id: root.id, canonicalPath: root.canonicalPath, displayName: root.displayName,
+                isAvailable: root.isAvailable, expandedRelativePaths: expanded,
+                selectedRelativePath: selectedNode?.rootID == root.id ? selectedNode?.relativePath : root.selectedRelativePath)
+        }
+        roots = []; rootNodes = []; outline.reloadData()
+        return navigation
+    }
+
     @discardableResult
     func apply(roots: [WorkspaceRoot]) -> Bool {
         displayedFailure = nil

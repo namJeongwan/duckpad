@@ -45,6 +45,7 @@ final class MultiFileSearchController: NSWindowController, NSWindowDelegate, NST
     private let status = NSTextField(labelWithString: "")
     private let empty = NSTextField(labelWithString: "")
     private var catalog = L10n.catalog
+    private var includeHiddenFiles = false
     private let dismissal = SearchPopupDismissal()
     private var previewTask: Task<Void, Never>?
     private var previewGeneration = UUID()
@@ -305,11 +306,18 @@ final class MultiFileSearchController: NSWindowController, NSWindowDelegate, NST
         if let summary { rows = MultiFileSearchResults.replacementRows(summary, catalog: catalog); table.reloadData() }
         updateStatus(); updateControls(); updatePreview()
     }
+    func applyPreferences(_ settings: AppSettings) {
+        guard includeHiddenFiles != settings.showHiddenFiles else { return }
+        includeHiddenFiles = settings.showHiddenFiles
+        if let sheet = window?.attachedSheet { window?.endSheet(sheet, returnCode: .abort) }
+        if window?.isVisible == true { invalidateAndSearch() }
+        else { cancel(); result = nil; summary = nil; rows = []; table.reloadData(); preview.clear(); updateControls() }
+    }
     func currentQuery() -> SearchQuery {
         SearchQuery(pattern: find.stringValue, replacement: replacement.stringValue,
                     options: SearchOptions(mode: SearchMode.allCases[max(0, mode.indexOfSelectedItem)],
                                            matchCase: matchCase.isOn, wholeWord: wholeWord.isOn,
-                                           dotMatchesNewline: dotNewline.isOn, scope: .allOpenDocuments),
+                                           dotMatchesNewline: dotNewline.isOn, scope: .allOpenDocuments, includeHiddenFiles: includeHiddenFiles),
                     fileMask: maskEnabled.state == .on ? mask.stringValue : nil)
     }
     func setQuery(_ query: SearchQuery) {

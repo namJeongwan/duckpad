@@ -71,7 +71,7 @@
 "Choose Language…" = "选择语言…";
 "Choose a different open document for a read-only comparison." = "选择另一个打开的文档进行只读比较。";
 "Choose a folder to keep in the Duckpad workspace sidebar." = "选择要保留在 Duckpad 工作区侧栏中的文件夹。";
-"Choose a folder to search recursively. Hidden files, packages, and symbolic links are skipped." = "选择要递归搜索的文件夹。隐藏文件、软件包和符号链接将被跳过。";
+"Choose a folder to search recursively. Hidden file visibility follows preferences; packages and symbolic links are skipped." = "请选择要递归搜索的文件夹。隐藏文件的显示遵循偏好设置；软件包和符号链接将被跳过。";
 "Choose a folder…" = "选择文件夹…";
 "Choose another encoding. The file and any open document contents have been kept unchanged." = "请选择另一种编码。文件及所有打开的文档内容均保持不变。";
 "Choose another open document." = "选择另一个打开的文档。";
@@ -569,7 +569,7 @@
 "Search options" = "搜索选项";
 "Find all in current document" = "在当前文档中查找全部";
 "Find all in open documents" = "在打开的文档中查找全部";
-"Search includes subfolders. Hidden files, packages, and symbolic links are skipped." = "搜索包括子文件夹。隐藏文件、软件包和符号链接将被跳过。";
+"Search includes subfolders. Hidden file visibility follows preferences; packages and symbolic links are skipped." = "搜索包含子文件夹。隐藏文件的显示遵循偏好设置；软件包和符号链接将被跳过。";
 "Find in Files" = "在文件中查找";
 "Bookmarks" = "书签";
 "Bookmark matching lines" = "为匹配行添加书签";
@@ -1258,3 +1258,5 @@
 "All" = "全部";
 
 "Workspace folders: %1$@" = "工作区文件夹：%1$@";
+"Show hidden files" = "显示隐藏文件";
+"Show hidden files in the workspace and file searches. Search ignore rules still apply." = "在工作区和文件搜索中显示隐藏文件。搜索忽略规则仍然适用。";

@@ -71,7 +71,7 @@
 "Choose Language…" = "Choose Language…";
 "Choose a different open document for a read-only comparison." = "Choose a different open document for a read-only comparison.";
 "Choose a folder to keep in the Duckpad workspace sidebar." = "Choose a folder to keep in the Duckpad workspace sidebar.";
-"Choose a folder to search recursively. Hidden files, packages, and symbolic links are skipped." = "Choose a folder to search recursively. Hidden files, packages, and symbolic links are skipped.";
+"Choose a folder to search recursively. Hidden file visibility follows preferences; packages and symbolic links are skipped." = "Choose a folder to search recursively. Hidden file visibility follows preferences; packages and symbolic links are skipped.";
 "Choose a folder…" = "Choose a folder…";
 "Choose another encoding. The file and any open document contents have been kept unchanged." = "Choose another encoding. The file and any open document contents have been kept unchanged.";
 "Choose another open document." = "Choose another open document.";
@@ -576,7 +576,7 @@
 "Search options" = "Search options";
 "Find all in current document" = "Find all in current document";
 "Find all in open documents" = "Find all in open documents";
-"Search includes subfolders. Hidden files, packages, and symbolic links are skipped." = "Search includes subfolders. Hidden files, packages, and symbolic links are skipped.";
+"Search includes subfolders. Hidden file visibility follows preferences; packages and symbolic links are skipped." = "Search includes subfolders. Hidden file visibility follows preferences; packages and symbolic links are skipped.";
 "Find in Files" = "Find in Files";
 "Bookmarks" = "Bookmarks";
 "Bookmark matching lines" = "Bookmark matching lines";
@@ -1298,3 +1298,5 @@
 "All" = "All";
 
 "Workspace folders: %1$@" = "Workspace folders: %1$@";
+"Show hidden files" = "Show hidden files";
+"Show hidden files in the workspace and file searches. Search ignore rules still apply." = "Show hidden files in the workspace and file searches. Search ignore rules still apply.";

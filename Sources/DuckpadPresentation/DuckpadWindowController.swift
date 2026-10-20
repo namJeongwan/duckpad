@@ -76,6 +76,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
             self.searchWindowController.present(in: self.window)
         }
+        coordinator.applyPreferences(appPreferences)
         searchExperienceStorage = coordinator
         return coordinator
     }
@@ -1311,7 +1312,16 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     public func applyPreferences(_ settings: AppSettings) {
         if !settings.shareUsageStatistics { usageNotice.hideNotice() }
         let languageChanged = appPreferences.appLanguage != settings.appLanguage
+        let visibilityChanged = appPreferences.showHiddenFiles != settings.showHiddenFiles
         appPreferences = settings
+        workspaceBrowserUseCase?.showHiddenFiles = settings.showHiddenFiles
+        searchExperienceStorage?.applyPreferences(settings)
+        if visibilityChanged {
+            workspaceRestoreTask?.cancel()
+            let navigation = workspaceSidebar.invalidateChildren()
+            if case .ready = workspaceBrowserUseCase?.state { renderWorkspaceBrowser(.ready(navigation)) }
+            else if let state = workspaceBrowserUseCase?.state { renderWorkspaceBrowser(state) }
+        }
         fileUseCase?.setLiveReloadEnabled(settings.liveFileReloadEnabled)
         fileUseCase?.conventionsUseCase?.settingsDidChange(settings)
         formattingUseCase?.settings = settings.formatting
@@ -1894,7 +1904,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func showSearchPanel(replace: Bool) {
         searchExperienceStorage?.dismiss()
-        let selectedText = appPreferences.fillFindWithSelection
+        let switchingSearchTab = !searchPanel.isHidden && searchPanel.selectedTab != (replace ? .replace : .find)
+        let selectedText = appPreferences.fillFindWithSelection && !switchingSearchTab
             ? (activeEditor as? any EditorFindTextPort)?.selectedTextForFind(maximumUTF16Length: appPreferences.findSelectionMaximumCharacters)
             : nil
         _ = searchWindowController
@@ -1981,7 +1992,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func showMultiFileSearch(replace: Bool) {
-        let selectedText = appPreferences.fillFindWithSelection
+        let switchingSearchTab = !searchPanel.isHidden && searchPanel.selectedTab != (replace ? .replace : .find)
+        let selectedText = appPreferences.fillFindWithSelection && !switchingSearchTab
             ? (activeEditor as? any EditorFindTextPort)?.selectedTextForFind(maximumUTF16Length: appPreferences.findSelectionMaximumCharacters) : nil
         cancelSearch()
         searchWindowController.dismiss()
@@ -2776,27 +2788,28 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func routeLoadWorkspaceChildren(rootID: WorkspaceRootID, relativeDirectory: String) {
         guard workspaceBrowserCommandsAreActionable, let workspaceBrowserUseCase else { return }
+        let visibility = appPreferences.showHiddenFiles
         beginWorkspaceBrowserTask { [weak self] in
             do {
                 let children = try await workspaceBrowserUseCase.children(
                     rootID: rootID,
                     relativeDirectory: relativeDirectory
                 )
-                guard let self, !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled, self.appPreferences.showHiddenFiles == visibility else { return }
                 self.workspaceSidebar.applyChildren(
                     rootID: rootID,
                     relativeDirectory: relativeDirectory,
                     entries: children
                 )
             } catch let failure as WorkspaceBrowserFailure {
-                guard let self, !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled, self.appPreferences.showHiddenFiles == visibility else { return }
                 self.workspaceSidebar.applyChildrenFailure(
                     rootID: rootID,
                     relativeDirectory: relativeDirectory,
                     failure: failure
                 )
             } catch {
-                guard let self, !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled, self.appPreferences.showHiddenFiles == visibility else { return }
                 self.workspaceSidebar.applyChildrenFailure(
                     rootID: rootID,
                     relativeDirectory: relativeDirectory,
@@ -3928,6 +3941,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                             )
                             self.workspaceSidebar.restoreNavigation(for: root)
                         } catch let failure as WorkspaceBrowserFailure {
+                            guard !Task.isCancelled else { return }
                             self.workspaceSidebar.applyChildrenFailure(
                                 rootID: root.id,
                                 relativeDirectory: path,
@@ -3935,6 +3949,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                             )
                             break
                         } catch {
+                            guard !Task.isCancelled else { return }
                             self.workspaceSidebar.applyChildrenFailure(
                                 rootID: root.id,
                                 relativeDirectory: path,

@@ -25,5 +25,12 @@ public struct FolderFileNameIndex: Sendable {
 
 public protocol FolderFileNameIndexing: Sendable {
     func index(in folder: URL, maximumEntries: Int) async throws -> FolderFileNameIndex
+    func index(in folder: URL, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex
     func readFile(in folder: URL, root: FolderFileNameRoot, relativePath: String) async throws -> WorkspaceFileRead
+}
+
+public extension FolderFileNameIndexing {
+    func index(in folder: URL, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex {
+        try await index(in: folder, maximumEntries: maximumEntries)
+    }
 }

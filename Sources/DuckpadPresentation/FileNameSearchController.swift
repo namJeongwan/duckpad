@@ -152,6 +152,7 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
     private func includes(_ path: String, under root: String) -> Bool {
         path.hasPrefix(root == "/" ? "/" : root + "/")
     }
+    func refreshIndex() { reloadScope() }
     private func reloadScope() {
         task?.cancel(); generation = UUID()
         let selected = selectedScope, selectedFolder = folder

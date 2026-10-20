@@ -71,7 +71,7 @@
 "Choose Language…" = "言語を選択…";
 "Choose a different open document for a read-only comparison." = "読み取り専用で比較する別の開いている文書を選んでください。";
 "Choose a folder to keep in the Duckpad workspace sidebar." = "Duckpadのワークスペースサイドバーに追加するフォルダを選んでください。";
-"Choose a folder to search recursively. Hidden files, packages, and symbolic links are skipped." = "再帰検索するフォルダを選んでください。隠しファイル、パッケージ、シンボリックリンクは除外されます。";
+"Choose a folder to search recursively. Hidden file visibility follows preferences; packages and symbolic links are skipped." = "再帰検索するフォルダを選択してください。隠しファイルは設定に従い、パッケージとシンボリックリンクは除外します。";
 "Choose a folder…" = "フォルダを選択…";
 "Choose another encoding. The file and any open document contents have been kept unchanged." = "別のエンコーディングを選んでください。ファイルと開いている文書の内容は変更されていません。";
 "Choose another open document." = "別の開いている文書を選んでください。";
@@ -569,7 +569,7 @@
 "Search options" = "検索オプション";
 "Find all in current document" = "現在の文書ですべて検索";
 "Find all in open documents" = "開いている文書ですべて検索";
-"Search includes subfolders. Hidden files, packages, and symbolic links are skipped." = "サブフォルダも検索します。隠しファイル、パッケージ、シンボリックリンクは除外されます。";
+"Search includes subfolders. Hidden file visibility follows preferences; packages and symbolic links are skipped." = "サブフォルダも検索します。隠しファイルは設定に従い、パッケージとシンボリックリンクは除外します。";
 "Find in Files" = "ファイル内を検索";
 "Bookmarks" = "ブックマーク";
 "Bookmark matching lines" = "一致する行をブックマーク";
@@ -1258,3 +1258,5 @@
 "All" = "すべて";
 
 "Workspace folders: %1$@" = "ワークスペースフォルダ: %1$@";
+"Show hidden files" = "隠しファイルを表示";
+"Show hidden files in the workspace and file searches. Search ignore rules still apply." = "ワークスペースとファイル検索に隠しファイルを表示します。検索の除外ルールは引き続き適用されます。";

@@ -135,7 +135,7 @@ public final class NativeFilePanelAdapter: FilePanelPresenting, FileConflictPres
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
         panel.prompt = L10n.text("Search")
-        panel.message = L10n.text("Choose a folder to search recursively. Hidden files, packages, and symbolic links are skipped.")
+        panel.message = L10n.text("Choose a folder to search recursively. Hidden file visibility follows preferences; packages and symbolic links are skipped.")
         return await run(panel, attachedTo: window) == .OK ? panel.url : nil
     }
 

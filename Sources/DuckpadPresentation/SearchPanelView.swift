@@ -38,6 +38,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     var onCancel: (() -> Void)?
     var onLayoutChanged: (() -> Void)?
     private(set) var selectedTab: Tab = .find
+    private var includeHiddenFiles = false
     private(set) var folderURL: URL?
 
     let appearanceOptions = SearchWindowAppearanceView(frame: .zero)
@@ -319,7 +320,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         clearPrevious.title = localized("Clear previous bookmarks")
         modeBox.title = localized("Search mode")
         backwards.title = localized("Search backwards")
-        folderHint.stringValue = localized("Search includes subfolders. Hidden files, packages, and symbolic links are skipped.")
+        folderHint.stringValue = localized("Search includes subfolders. Hidden file visibility follows preferences; packages and symbolic links are skipped.")
         if folderURL == nil { directoryField.stringValue = localized("Choose a folder…") }
         table.tableColumns.first?.title = localized("Search Results")
         let selection = table.selectedRowIndexes
@@ -343,6 +344,11 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     }
 
     func applyPreferences(_ settings: AppSettings) {
+        if includeHiddenFiles != settings.showHiddenFiles {
+            includeHiddenFiles = settings.showHiddenFiles
+            incrementalTask?.cancel(); onQueryInvalidated?(); clearResults()
+            if !isHidden { scheduleIncrementalQuery() }
+        }
         let font = settings.monospacedFindFields
             ? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular) : NSFont.systemFont(ofSize: 13)
         findField.font = font
@@ -417,7 +423,8 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
             wrapAround: wrap.state == .on,
             direction: direction ?? (backwards.state == .on ? .backward : .forward),
             scope: (selectedTab == .replace || selectedTab == .find && (projectContext != nil || hasExplicitFindScope)) ? replacementScopes[min(2, max(0, replacementScope.indexOfSelectedItem))]
-                : (selectedTab != .folder && inSelection.state == .on ? .selection : .document)
+                : (selectedTab != .folder && inSelection.state == .on ? .selection : .document),
+            includeHiddenFiles: includeHiddenFiles
         ), fileMask: activeFileMask)
     }
 

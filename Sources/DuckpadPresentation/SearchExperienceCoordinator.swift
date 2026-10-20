@@ -25,6 +25,19 @@ final class SearchExperienceCoordinator {
     private var gesture = DoubleShiftGesture()
     private var activationTask: Task<Void, Never>?
     private var activationGeneration = UUID()
+    private var preferences = AppSettings.defaults
+
+    func applyPreferences(_ settings: AppSettings) {
+        let visibilityChanged = preferences.showHiddenFiles != settings.showHiddenFiles
+        preferences = settings
+        browser?.showHiddenFiles = settings.showHiddenFiles
+        multiPanelStorage?.applyPreferences(settings)
+        if visibilityChanged {
+            activationTask?.cancel(); activationGeneration = UUID()
+            if filePanelStorage?.window?.isVisible == true { filePanelStorage?.refreshIndex() }
+        }
+    }
+
 
     init(workspace: ScratchWorkspaceUseCase, search: SearchWorkspaceUseCase?, folderSearch: FolderSearchUseCase?,
          folderFileNames: (any FolderFileNameIndexing)? = nil,
@@ -58,7 +71,7 @@ final class SearchExperienceCoordinator {
             guard let self, self.actionable() else { throw CancellationError() }
             if scope == .folder {
                 guard let folder, let indexer = self.folderFileNames else { throw SearchFailure.invalidLimits }
-                let index = try await indexer.index(in: folder, maximumEntries: 20_000)
+                let index = try await indexer.index(in: folder, maximumEntries: 20_000, includeHiddenFiles: self.preferences.showHiddenFiles)
                 try Task.checkCancellation()
                 guard self.actionable() else { throw CancellationError() }
                 let worker = Task.detached(priority: .userInitiated) {
@@ -165,6 +178,7 @@ final class SearchExperienceCoordinator {
     var multiPanel: MultiFileSearchController {
         if let multiPanelStorage { return multiPanelStorage }
         let panel = MultiFileSearchController()
+        panel.applyPreferences(preferences)
         panel.onSearchRequest = { [weak self] query, scope, folder, progress in
             guard let self, self.actionable(), let search = self.search else { throw SearchFailure.cancelled }
             let roots = self.browser?.roots ?? []

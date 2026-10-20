@@ -46,10 +46,10 @@ final class FolderSearchRoot {
         }
     }
 
-    func open(_ relative: String) -> File? {
+    func open(_ relative: String, includeHiddenFiles: Bool = false) -> File? {
         let components = relative.split(separator: "/", omittingEmptySubsequences: false)
         guard !components.isEmpty, !relative.utf8.contains(0), components.count <= 257,
-              components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && !$0.hasPrefix(".") }) else { return nil }
+              components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && (includeHiddenFiles || !$0.hasPrefix(".")) }) else { return nil }
         var parent = descriptor
         defer { if parent != descriptor { Darwin.close(parent) } }
         var display = url
@@ -58,7 +58,7 @@ final class FolderSearchRoot {
             let next = Darwin.openat(parent, String(part), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
             guard next >= 0 else { return nil }
             var status = stat()
-            guard fstat(next, &status) == 0, status.st_flags & UInt32(UF_HIDDEN) == 0,
+            guard fstat(next, &status) == 0, (includeHiddenFiles || status.st_flags & UInt32(UF_HIDDEN) == 0),
                   !LocalFolderSearchFileStore.isPackageDirectory(name: String(part), displayPath: display.path) else {
                 Darwin.close(next); return nil
             }
@@ -69,7 +69,7 @@ final class FolderSearchRoot {
         guard leaf >= 0 else { return nil }
         var status = stat()
         guard fstat(leaf, &status) == 0, LocalFolderSearchFileStore.fileType(status) == S_IFREG,
-              status.st_flags & UInt32(UF_HIDDEN) == 0, status.st_size >= 0 else { Darwin.close(leaf); return nil }
+              (includeHiddenFiles || status.st_flags & UInt32(UF_HIDDEN) == 0), status.st_size >= 0 else { Darwin.close(leaf); return nil }
         return .init(descriptor: leaf, relativePath: relative, info: status)
     }
 
