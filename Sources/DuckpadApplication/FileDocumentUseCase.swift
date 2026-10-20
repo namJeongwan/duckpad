@@ -387,7 +387,9 @@ public final class FileDocumentUseCase {
 
     private func openWithoutAcquiring(
         _ url: URL,
-        assuming encodingHint: TextFileEncoding?
+        assuming encodingHint: TextFileEncoding?,
+        activate: Bool = true,
+        expectedIdentity: FileIdentity? = nil
     ) async -> FileOpenOutcome {
         guard !Task.isCancelled else { return .failed(.cancelled) }
         loadingProgress = FileLoadingProgress(path: url.standardizedFileURL.path, loadedByteCount: 0, totalByteCount: nil)
@@ -412,7 +414,8 @@ public final class FileDocumentUseCase {
                 canonical,
                 prepared: nil,
                 encodingHint: encodingHint,
-                securityScopedBookmark: access.bookmark
+                securityScopedBookmark: access.bookmark,
+                activate: activate, expectedIdentity: expectedIdentity
             )
             if case .failed = outcome, workspace.tabID(canonicalPath: canonical.path) == nil {
                 await store.releaseSecurityScopedAccess(
@@ -436,6 +439,17 @@ public final class FileDocumentUseCase {
         _ workspaceRead: WorkspaceFileRead,
         assuming encodingHint: TextFileEncoding? = nil
     ) async -> FileOpenOutcome {
+        await openWorkspaceRead(workspaceRead, assuming: encodingHint, activate: true)
+    }
+
+    /// Uses a root-validated snapshot without changing the invoking pane or focus.
+    public func prepareFileForNavigation(_ read: WorkspaceFileRead) async -> FileOpenOutcome {
+        // A navigation snapshot must carry the full-content overwrite identity.
+        guard !read.result.identity.contentToken.hasPrefix("binary-readonly:") else { return .failed(.comparisonInvalidated) }
+        return await openWorkspaceRead(read, assuming: nil, activate: false)
+    }
+
+    private func openWorkspaceRead(_ workspaceRead: WorkspaceFileRead, assuming encodingHint: TextFileEncoding?, activate: Bool) async -> FileOpenOutcome {
         await acquireOperation()
         defer { releaseOperation() }
         guard !Task.isCancelled else { return .failed(.cancelled) }
@@ -462,7 +476,8 @@ public final class FileDocumentUseCase {
                 canonical,
                 prepared: workspaceRead.result,
                 encodingHint: encodingHint,
-                securityScopedBookmark: access.bookmark
+                securityScopedBookmark: access.bookmark,
+                activate: activate
             )
             if case .failed = outcome, workspace.tabID(canonicalPath: canonical.path) == nil {
                 await store.releaseSecurityScopedAccess(
@@ -486,11 +501,25 @@ public final class FileDocumentUseCase {
         _ canonical: URL,
         prepared: FileReadResult?,
         encodingHint: TextFileEncoding?,
-        securityScopedBookmark: Data?
+        securityScopedBookmark: Data?,
+        activate: Bool = true,
+        expectedIdentity: FileIdentity? = nil
     ) async throws(TextFileStoreError) -> FileOpenOutcome {
         let existing = workspace.tabID(canonicalPath: canonical.path)
+        if !activate, let existing, let context = workspace.fileContext(tabID: existing), needsBinaryContent(context) {
+            return .failed(.comparisonInvalidated)
+        }
         if let existing, encodingHint == nil,
            let context = workspace.fileContext(tabID: existing), !needsBinaryContent(context) {
+            if !activate {
+                guard expectedIdentity == context.binding?.observedIdentity,
+                      workspace.snapshot().tabs.first(where: { $0.id == existing })?.isDirty == false else {
+                    return .failed(.comparisonInvalidated)
+                }
+                if let textEditor = editor as? any ProgressiveTextEditorPort,
+                   textEditor.hasPendingTextLoad(for: context.buffer.bufferID) { return .failed(.comparisonInvalidated) }
+                return .activatedExisting(existing)
+            }
             switch await workspace.activate(tabID: existing) {
             case .applied:
                 if let textEditor = editor as? any ProgressiveTextEditorPort,
@@ -516,7 +545,7 @@ public final class FileDocumentUseCase {
         async let openingRules = conventionsUseCase?.rules(for: canonical)
         let previewEditor = editor as? any FileOpeningPreviewEditorPort
         defer { previewEditor?.dismissOpeningPreview() }
-        if prepared == nil, reopening == nil, let previewEditor,
+        if activate, prepared == nil, reopening == nil, let previewEditor,
            let preview = await store.openingPreview(from: canonical, assuming: encodingHint) {
             guard !Task.isCancelled else { return .failed(.cancelled) }
             previewEditor.showOpeningPreview(preview, path: canonical.path)
@@ -533,8 +562,10 @@ public final class FileDocumentUseCase {
             guard UInt64(prepared.data.count) == prepared.identity.byteCount else {
                 return .failed(.store(.io("\(canonical.path): incomplete file read")))
             }
-            // An explicit text encoding needs the store's full overwrite identity.
-            if readEncoding != nil, BinaryFileContent.isBinary(prepared.data) {
+            // Normal Open As may need the store's full overwrite identity. Inactive
+            // filename navigation already has an immutable, fully hashed root-relative
+            // snapshot and must never substitute an unchecked path read.
+            if activate, readEncoding != nil, BinaryFileContent.isBinary(prepared.data) {
                 read = try await store.readForDisplay(from: canonical, assuming: readEncoding)
             } else {
                 read = prepared
@@ -542,6 +573,7 @@ public final class FileDocumentUseCase {
         } else {
             read = try await store.readForDisplay(from: canonical, assuming: readEncoding)
         }
+        if let expectedIdentity, read.identity != expectedIdentity { return .failed(.comparisonInvalidated) }
         guard UInt64(read.data.count) == read.identity.byteCount else {
             return .failed(.store(.io("\(canonical.path): incomplete file read")))
         }
@@ -591,15 +623,24 @@ public final class FileDocumentUseCase {
             case .rejected(let error): return .failed(.session(error))
             }
         }
-        switch await workspace.addOpenedFile(binding: binding, title: canonical.lastPathComponent) {
+        switch await workspace.addOpenedFile(binding: binding, title: canonical.lastPathComponent, activate: activate) {
         case .applied:
-            guard let context = workspace.activeFileContext() else { return .failed(.noActiveDocument) }
+            guard let id = workspace.tabID(canonicalPath: canonical.path),
+                  let context = workspace.fileContext(tabID: id) else { return .failed(.noActiveDocument) }
             contents.install(context.buffer)
             if let failure = await finishLoading(contents.finish, context: context) { return .failed(failure) }
             return .opened(context.tabID)
         case .persistenceFailed(let failure): return .failed(.workspace(failure))
         case .rejected(let error): return .failed(.session(error))
         }
+    }
+
+    /// Opens a preview-validated target without activation, selection changes or editor focus.
+    public func prepareFolderSearchDocument(_ document: FolderSearchDocumentResult) async -> FileOpenOutcome {
+        await acquireOperation()
+        defer { releaseOperation() }
+        return await openWithoutAcquiring(URL(fileURLWithPath: document.path), assuming: nil,
+                                          activate: false, expectedIdentity: document.identity)
     }
 
     public func activateFolderSearchMatch(

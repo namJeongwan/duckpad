@@ -1,0 +1,21 @@
+{
+  "version": "15.1.0",
+  "assets": {
+    "arm64": {
+      "archive": "ripgrep-15.1.0-aarch64-apple-darwin.tar.gz",
+      "sha256": "378e973289176ca0c6054054ee7f631a065874a352bf43f0fa60ef079b6ba715"
+    },
+    "x86_64": {
+      "archive": "ripgrep-15.1.0-x86_64-apple-darwin.tar.gz",
+      "sha256": "64811cb24e77cac3057d6c40b63ac9becf9082eedd54ca411b475b755d334882"
+    }
+  },
+  "source": {
+    "url": "https://github.com/BurntSushi/ripgrep/archive/refs/tags/15.1.0.tar.gz",
+    "sha256": "046fa01a216793b8bd2750f9d68d4ad43986eb9c0d6122600f993906012972e8"
+  },
+  "pcre2_license": {
+    "url": "https://raw.githubusercontent.com/PCRE2Project/pcre2/pcre2-10.45/LICENCE.md",
+    "sha256": "9cf7ac6976099a1d856826d3ef1b093bd6b84489dc6100628ac79e740cf9885a"
+  }
+}

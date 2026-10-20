@@ -148,6 +148,8 @@ public enum DuckpadMainMenuFactory {
         add("Find Previous", #selector(DuckpadWindowController.performFindPrevious(_:)), "g", target, modifiers: [.command, .shift], to: searchMenu)
         add("Replace…", #selector(DuckpadWindowController.performShowReplace(_:)), "h", target, to: searchMenu)
         add("Find in Files…", #selector(DuckpadWindowController.performFindInFolder(_:)), "f", target, modifiers: [.command, .shift], to: searchMenu)
+        add("Replace in Files…", #selector(DuckpadWindowController.performReplaceInFiles(_:)), "r", target, modifiers: [.command, .shift], to: searchMenu)
+        add("Search Files…", #selector(DuckpadWindowController.performSearchFiles(_:)), "", target, modifiers: [], to: searchMenu)
         add("Close Find Panel", #selector(DuckpadWindowController.performCloseFindPanel(_:)), "\u{1b}", target, modifiers: [], to: searchMenu)
         searchMenu.addItem(.separator())
         add("Go to Declaration", #selector(DuckpadWindowController.performGoToDeclaration(_:)), String(UnicodeScalar(NSF12FunctionKey)!), target, modifiers: [], to: searchMenu)

@@ -49,11 +49,13 @@ public struct SearchQuery: Equatable, Sendable {
     public var pattern: String
     public var replacement: String
     public var options: SearchOptions
+    public var fileMask: String?
 
-    public init(pattern: String, replacement: String = "", options: SearchOptions = SearchOptions()) {
+    public init(pattern: String, replacement: String = "", options: SearchOptions = SearchOptions(), fileMask: String? = nil) {
         self.pattern = pattern
         self.replacement = replacement
         self.options = options
+        self.fileMask = fileMask
     }
 }
 
@@ -127,12 +129,14 @@ public struct SearchResultSet: Equatable, Sendable {
     public let documents: [SearchDocumentResult]
     public let isTruncated: Bool
     public let searchedByteCount: Int
+    public let searchedDocumentCount: Int
 
-    public init(generation: UInt64, documents: [SearchDocumentResult], isTruncated: Bool, searchedByteCount: Int) {
+    public init(generation: UInt64, documents: [SearchDocumentResult], isTruncated: Bool, searchedByteCount: Int, searchedDocumentCount: Int? = nil) {
         self.generation = generation
         self.documents = documents
         self.isTruncated = isTruncated
         self.searchedByteCount = searchedByteCount
+        self.searchedDocumentCount = searchedDocumentCount ?? documents.count
     }
 
     public var matchCount: Int { documents.reduce(0) { $0 + $1.matches.count } }

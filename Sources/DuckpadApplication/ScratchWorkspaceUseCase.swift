@@ -168,6 +168,8 @@ public struct EditorBatchReservation: Equatable, Sendable {
     fileprivate let bufferID: BufferID
     fileprivate let expectedRevision: UInt64
     fileprivate let editCount: Int
+    fileprivate let tabID: TabID
+    fileprivate let requiresActive: Bool
 }
 
 private actor OrderedSessionWriter {
@@ -362,6 +364,15 @@ public final class ScratchWorkspaceUseCase {
     public func activate(tabID: TabID) async -> WorkspaceActionOutcome {
         await acquireTransaction()
         defer { releaseTransaction() }
+        return await activateLocked(tabID: tabID)
+    }
+
+    /// Asynchronous navigation may be superseded while waiting for persistence.
+    /// Check the request after acquiring ownership, before publishing selection.
+    public func activateIfCurrent(tabID: TabID, isCurrent: () -> Bool) async -> WorkspaceActionOutcome? {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        guard !Task.isCancelled, isCurrent() else { return nil }
         return await activateLocked(tabID: tabID)
     }
 
@@ -802,21 +813,24 @@ public final class ScratchWorkspaceUseCase {
     public func reserveEditorBatch(
         bufferID: BufferID,
         expectedRevision: UInt64,
-        editCount: Int
+        editCount: Int,
+        requiresActive: Bool = true
     ) async -> EditorBatchReservation? {
         guard editCount > 0, UInt64(editCount) <= UInt64.max - expectedRevision else { return nil }
         await acquireTransaction()
         guard !Task.isCancelled, startupState == .ready,
-              let activeTab = session.activeTabID,
-              (try? session.fileBinding(for: activeTab))?.isReadOnly != true,
-              let buffer = try? session.buffer(for: activeTab),
-              buffer.id == bufferID, buffer.revision == expectedRevision else {
+              let targetTab = session.tabs.first(where: { (try? session.buffer(for: $0.id).id) == bufferID })?.id,
+              !requiresActive || session.activeTabID == targetTab,
+              (try? session.fileBinding(for: targetTab))?.isReadOnly != true,
+              let buffer = try? session.buffer(for: targetTab),
+              buffer.revision == expectedRevision else {
             releaseTransaction()
             return nil
         }
         let reservation = EditorBatchReservation(
             id: UUID(), bufferID: bufferID,
-            expectedRevision: expectedRevision, editCount: editCount
+            expectedRevision: expectedRevision, editCount: editCount,
+            tabID: targetTab, requiresActive: requiresActive
         )
         editorBatchReservationID = reservation.id
         return reservation
@@ -828,10 +842,11 @@ public final class ScratchWorkspaceUseCase {
     ) -> EditorEditOutcome {
         guard editorBatchReservationID == reservation.id,
               edits.count == reservation.editCount,
-              let activeTab = session.activeTabID,
-              let index = session.tabs.firstIndex(where: { $0.id == activeTab }) else {
+              !reservation.requiresActive || session.activeTabID == reservation.tabID,
+              let index = session.tabs.firstIndex(where: { $0.id == reservation.tabID }) else {
             return .rejected(currentRevision: snapshot().activeBuffer?.revision ?? reservation.expectedRevision)
         }
+        let activeTab = reservation.tabID
         var candidate = session
         var expected = reservation.expectedRevision
         do {
@@ -987,12 +1002,12 @@ public final class ScratchWorkspaceUseCase {
     }
 
     @discardableResult
-    public func addOpenedFile(binding: FileBinding, title: String) async -> WorkspaceActionOutcome {
+    public func addOpenedFile(binding: FileBinding, title: String, activate: Bool = true) async -> WorkspaceActionOutcome {
         await acquireTransaction()
         defer { releaseTransaction() }
         var candidate = session
         do {
-            _ = try candidate.addFile(binding: binding, title: title)
+            _ = try candidate.addFile(binding: binding, title: title, activate: activate)
             return await persistMutation(candidate, kind: .tabInserted(index: candidate.tabs.count - 1), retry: .saveCurrent)
         } catch let error as SessionError { return .rejected(error) }
         catch { preconditionFailure("ScratchSession only throws SessionError") }

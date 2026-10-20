@@ -33,8 +33,8 @@ final class SearchWindowAppearanceView: NSView {
         stack.alignment = .leading
         stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let box = NSBox()
-        box.boxType = .primary
+        let box = SearchSectionBox()
+        box.boxType = .custom
         box.titlePosition = .noTitle
         box.contentViewMargins = NSSize(width: 8, height: 6)
         box.translatesAutoresizingMaskIntoConstraints = false

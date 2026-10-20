@@ -8,13 +8,15 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
         self.searchView = searchView
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 330),
                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        panel.titlebarAppearsTransparent = true
+        panel.backgroundColor = WorkspaceColors.panel
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
         panel.setAccessibilityIdentifier("duckpad.search.window")
         super.init(window: panel)
         panel.delegate = self
-        let root = NSView(frame: panel.contentLayoutRect)
+        let root = SearchSurfaceView(.panel)
         root.addSubview(searchView)
         NSLayoutConstraint.activate([
             searchView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -32,6 +34,7 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
 
     func present(in parent: NSWindow?) {
         guard let window else { return }
+        window.appearance = parent?.effectiveAppearance
         resizeToFit()
         if !window.isVisible {
             if let parent {

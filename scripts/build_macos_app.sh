@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUTPUT="$REPOSITORY_ROOT/build/Duckpad.app"
 IDENTITY="-"
-SHORT_VERSION="0.13.0"
-BUILD_VERSION="61"
+SHORT_VERSION="0.14.0"
+BUILD_VERSION="62"
 NOTARY_PROFILE=""
 ARCHITECTURE="universal"
 
@@ -49,6 +49,7 @@ if [[ -n "$NOTARY_PROFILE" && "$IDENTITY" == "-" ]]; then
 fi
 
 "$SCRIPT_DIR/build_ghostty.sh" --architecture "$ARCHITECTURE"
+python3 "$SCRIPT_DIR/build_ripgrep.py" --architecture "$ARCHITECTURE"
 
 STAGING_ROOT="$(mktemp -d "$OUTPUT_PARENT/.duckpad-package.XXXXXX")"
 trap 'rm -rf "$STAGING_ROOT"' EXIT
@@ -109,6 +110,10 @@ install -m 0644 "$REPOSITORY_ROOT/Sources/DuckpadApp/Resources/Duckpad.icns" "$A
 ditto "$REPOSITORY_ROOT/.build/ghostty-source/zig-out/share/ghostty" "$APP/Contents/Resources/ghostty"
 ditto "$REPOSITORY_ROOT/.build/ghostty-source/zig-out/share/terminfo" "$APP/Contents/Resources/terminfo"
 
+mkdir -p "$APP/Contents/Helpers"
+install -m 0755 "$REPOSITORY_ROOT/.build/ripgrep/15.1.0/$ARCHITECTURE/rg" "$APP/Contents/Helpers/rg"
+install -m 0644 "$REPOSITORY_ROOT/Vendor/Ripgrep/manifest.json" "$APP/Contents/Resources/ripgrep-version.json"
+
 # Binary distributions retain the notices required by the bundled engines.
 mkdir -p "$APP/Contents/Resources/ThirdPartyLicenses"
 install -m 0644 "$REPOSITORY_ROOT/Vendor/Ghostty/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/Ghostty.txt"
@@ -116,6 +121,8 @@ install -m 0644 "$REPOSITORY_ROOT/Vendor/Scintilla/5.6.6/License.txt" "$APP/Cont
 install -m 0644 "$REPOSITORY_ROOT/Vendor/Lexilla/5.5.3/License.txt" "$APP/Contents/Resources/ThirdPartyLicenses/Lexilla.txt"
 install -m 0644 "$REPOSITORY_ROOT/Vendor/WAMR/2.4.5/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/WAMR.txt"
 install -m 0644 "$REPOSITORY_ROOT/.build/checkouts/Sparkle/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/Sparkle.txt"
+
+ditto "$REPOSITORY_ROOT/Vendor/Ripgrep/NOTICES" "$APP/Contents/Resources/ThirdPartyLicenses/Ripgrep"
 
 python3 "$REPOSITORY_ROOT/scripts/collect_ghostty_licenses.py" "$REPOSITORY_ROOT/.build/ghostty-source" "$APP/Contents/Resources/ThirdPartyLicenses/GhosttyDependencies"
 
@@ -148,6 +155,7 @@ plutil -lint "$TERMINAL/Contents/Info.plist" "$APP/Contents/Info.plist" "$XPC/Co
 
 SIGNING_FLAGS=(--force --sign "$IDENTITY" --options runtime)
 if [[ "$IDENTITY" != "-" ]]; then SIGNING_FLAGS+=(--timestamp); fi
+codesign "${SIGNING_FLAGS[@]}" --identifier com.namjeongwan.duckpad.search --entitlements "$REPOSITORY_ROOT/Packaging/SearchHelper.entitlements" "$APP/Contents/Helpers/rg"
 codesign "${SIGNING_FLAGS[@]}" "$SPARKLE/Versions/B/XPCServices/Installer.xpc"
 codesign "${SIGNING_FLAGS[@]}" "$SPARKLE/Versions/B/Autoupdate"
 codesign "${SIGNING_FLAGS[@]}" "$SPARKLE/Versions/B/Updater.app"

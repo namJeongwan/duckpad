@@ -1212,3 +1212,49 @@
 "Hide tab bar###HideTabBar" = "隐藏标签栏###HideTabBar";
 "Hold SHIFT to enable Docking window." = "按住 Shift 可停靠窗口。";
 "Click and drag to move or undock whole node." = "拖动可移动或分离整个分组。";
+"Scope" = "范围";
+"Current document" = "当前文档";
+"Use Find All or Replace All for all open documents." = "对所有打开的文档，请使用“查找全部”或“全部替换”。";
+"Replacing in open documents…" = "正在打开的文档中替换…";
+"No changes needed" = "无需更改";
+"Skipped: read-only" = "已跳过：只读";
+"Skipped: document unavailable" = "已跳过：文档不可用";
+"Skipped: document changed" = "已跳过：文档已更改";
+"Skipped: size or match limit" = "已跳过：超出大小或匹配数限制";
+"Not processed: cancelled" = "未处理：已取消";
+"Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@" = "替换：%1$@ · 文档：%2$@ · 跳过：%3$@";
+"Cancelled · Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@" = "已取消 · 替换：%1$@ · 文档：%2$@ · 跳过：%3$@";
+"Skipped: search timed out" = "已跳过：搜索超时";
+
+"Search Files" = "搜索文件";
+"Search Files…" = "搜索文件…";
+"Search files by name or path" = "按文件名或路径搜索";
+"Files" = "文件";
+"↑↓ Select · ↵ Open · Esc Close" = "↑↓ 选择 · ↵ 打开 · Esc 关闭";
+"Indexing file names…" = "正在收集文件名…";
+"No matching files" = "没有匹配的文件";
+"Showing %1$@ files · Index limit reached · Skipped items: %2$@" = "显示 %1$@ 个文件 · 已达索引上限 · 跳过的项目：%2$@";
+"Showing %1$@ files · Skipped items: %2$@" = "显示 %1$@ 个文件 · 跳过的项目：%2$@";
+"Replace in Files" = "在多个文件中替换";
+"Replace in Files…" = "在多个文件中替换…";
+"Folder" = "文件夹";
+"Type to search in files" = "输入内容以搜索文件";
+"Changes stay unsaved in the editor. Undo is available in each document." = "更改保留在编辑器中，尚未保存。可在各文档中撤销。";
+"Double-click a result to open it. Searches use the same options as Find." = "双击结果以打开。搜索使用与现有查找相同的选项。";
+"Match Preview" = "匹配预览";
+"Replace matches in %1$@ files?" = "替换 %1$@ 个文件中的匹配项？";
+"Open" = "打开";
+"Open in Find Window" = "在查找窗口中打开";
+"File mask:" = "文件掩码：";
+"Filename patterns separated by commas; * and ? are wildcards. Prefix ! to exclude." = "用逗号分隔文件名模式；* 和 ? 为通配符。前缀 ! 表示排除。";
+"Changes stay unsaved." = "更改保持未保存状态。";
+"File mask: %1$@" = "文件掩码：%1$@";
+"Open in Right Split" = "在右侧拆分中打开";
+
+/* Streaming folder search */
+"Searching… %1$@ matches in %2$@ files" = "正在搜索… 在 %2$@ 个文件中找到 %1$@ 处匹配";
+"Matches: %1$@ · Files: %2$@ · Skipped: %3$@ · Showing first %4$@ matches" = "匹配：%1$@ · 文件：%2$@ · 已跳过：%3$@ · 显示前 %4$@ 处匹配";
+
+"All" = "全部";
+
+"Workspace folders: %1$@" = "工作区文件夹：%1$@";

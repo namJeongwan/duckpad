@@ -119,3 +119,33 @@ private func matches(_ text: String, _ query: SearchQuery, restrictTo: SearchUTF
     )
     #expect(zero?.range.length == 0)
 }
+
+private struct UnexpectedLiteralRegexEngine: RegexEnginePort {
+    func matches(pattern: String, utf8: Data, matchCase: Bool, dotMatchesNewline: Bool,
+                 restrictTo: SearchUTF8Range?, maximumMatches: Int) throws(SearchFailure) -> [RegexEngineMatch] {
+        throw .replacementFailed
+    }
+    func directionalMatch(pattern: String, utf8: Data, matchCase: Bool, dotMatchesNewline: Bool,
+                          restrictTo: SearchUTF8Range, backwards: Bool) throws(SearchFailure) -> RegexEngineMatch? {
+        throw .replacementFailed
+    }
+}
+
+@Test func asciiCaseInsensitiveLiteralSearchDoesNotRequireRegexConversion() throws {
+    let result = try SearchEngine.matches(in: snapshot("duck DUCK Duckling .DUCK.\r\nduck"),
+        query: .init(pattern: "duck", options: .init(wholeWord: true)), regexEngine: UnexpectedLiteralRegexEngine())
+    #expect(result.map(\.range.location) == [0, 5, 20, 27])
+    #expect(result.map(\.line) == [1, 1, 1, 2])
+}
+
+@Test func optimizedLiteralSearchRetainsICUUnicodeCaseFoldingAndLiteralSemantics() throws {
+    for text in ["duck DUCK duckling", "a.b A.B aXb", "A\0b a\0B", "Straße STRASSE strasse", "s ſ S", "K K k", "한글 DUCK duck", "café CAFE\u{301}"] {
+        for pattern in ["duck", "a.b", "a\0b", "strasse", "s", "k", "café"] {
+            let escaped = pattern.unicodeScalars.map { "\\.^$|?*+()[]{}".unicodeScalars.contains($0) ? "\\" + String($0) : String($0) }.joined()
+            let expected = try regexEngine.matches(pattern: escaped, utf8: Data(text.utf8), matchCase: false,
+                dotMatchesNewline: false, restrictTo: nil, maximumMatches: 100)
+            let actual = try matches(text, .init(pattern: pattern), limit: 100)
+            #expect(actual.map(\.range) == expected.map(\.range))
+        }
+    }
+}

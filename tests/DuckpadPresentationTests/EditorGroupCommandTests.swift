@@ -193,6 +193,57 @@ private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPor
 @Suite(.serialized)
 struct EditorGroupCommandTests {
     @Test @MainActor
+    func cancelledQueuedFilenameActivationCannotReplaceTheInvokingPane() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 4)
+        defer { fixture.controller.close() }
+        let tabs = fixture.workspace.snapshot().tabs
+        let original = tabs[0], older = tabs[1], newer = tabs[2], closing = tabs[3]
+        _ = await fixture.workspace.activate(tabID: original.id)
+        await fixture.workspace.waitForPendingPersistence()
+        await fixture.store.blockNextCommit()
+        let close = Task { await fixture.workspace.close(tabID: closing.id, decision: .discard) }
+        await fixture.store.waitUntilCommitIsBlocked()
+        let coordinator = SearchExperienceCoordinator(workspace: fixture.workspace, search: nil, folderSearch: nil,
+            files: nil, browser: nil, parent: nil, actionable: { true }, openWorkspace: { _ in }, activate: { _ in },
+            onGesture: {}, chooseFolder: { _ in nil })
+        defer { coordinator.tearDown() }
+        var splitID: TabID?
+        coordinator.prepareFileSplit = { { splitID = $0 } }
+        let panel = coordinator.filePanel
+        panel.onOpen?(.init(name: older.displayTitle, path: older.displayTitle, target: .tab(older.id)))
+        // Let the older normal open wait for the occupied workspace transaction.
+        for _ in 0..<10 { await Task.yield() }
+        panel.onOpenInSplit?(.init(name: newer.displayTitle, path: newer.displayTitle, target: .tab(newer.id)))
+        await fixture.store.releaseCommit(); _ = await close.value
+        _ = await fixture.workspace.flushPersistence()
+        for _ in 0..<10 { await Task.yield() }
+        #expect(splitID == newer.id)
+        #expect(fixture.workspace.snapshot().tabs.first(where: { $0.isActive })?.id == original.id)
+        #expect(fixture.controller.editorGroupLayoutSnapshot.primarySelectedTabID == original.id)
+    }
+
+    @Test @MainActor
+    func fileSearchRightSplitRetainsTheSourceAndWorksFromASecondaryPane() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 2)
+        defer { fixture.controller.close() }
+        let active = try #require(fixture.workspace.snapshot().tabs.first(where: { $0.isActive }))
+        for expectedCount in [2, 3] {
+            fixture.controller.performSearchFiles()
+            let panel = fixture.controller.searchExperience.filePanel
+            panel.setQuery(active.displayTitle)
+            let root = try #require(panel.window?.contentView)
+            func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+            let split = try #require(views(root).first { $0.accessibilityIdentifier() == "duckpad.files.split" } as? NSButton)
+            _ = NSApp.sendAction(try #require(split.action), to: split.target, from: split)
+            await eventually { fixture.controller.editorGroupLayoutSnapshot.visibleGroups.count == expectedCount }
+            let layout = fixture.controller.editorGroupLayoutSnapshot
+            #expect(layout.visibleGroups.count == expectedCount)
+            #expect(layout.visibleGroups.allSatisfy { layout.tabIDs(in: $0).contains(active.id) })
+            #expect(fixture.workspace.snapshot().tabs.count == 2)
+        }
+    }
+
+    @Test @MainActor
     func adjacentSplitsRouteDynamicPanesAndKeepTheSourceEditorPopulated() async throws {
         let fixture = await makeEditorGroupController(tabCount: 5)
         defer { fixture.controller.close() }

@@ -7,7 +7,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, ProgressiveTextEditorPort, FileOpeningPreviewEditorPort, SearchEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, EditorCopyExportPort, BookmarkEditorPort, SplitEditorPort, DeclarationNavigationEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, ProgressiveTextEditorPort, FileOpeningPreviewEditorPort, OpenDocumentsReplacementEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, EditorCopyExportPort, BookmarkEditorPort, SplitEditorPort, DeclarationNavigationEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     var snippetSession: SnippetSession?
     var snippetBuffer: BufferID?
     var snippetKeyMonitor: Any?
@@ -1667,24 +1667,59 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
         expectedRevision: UInt64,
         accept: ([EditorIncrementalEdit]) -> EditorEditOutcome
     ) -> EditorEditOutcome {
-        guard !isInvalidated, openingPreview == nil, let activeBuffer, pendingTextLoads[activeBuffer.bufferID] == nil,
-              let editorView = bufferViews[activeBuffer.bufferID],
-              activeBuffer.revision == expectedRevision,
-              UInt64(replacements.count) <= UInt64.max - expectedRevision else {
+        guard let activeBuffer, activeBuffer.revision == expectedRevision else {
             return .rejected(currentRevision: activeBuffer?.revision ?? expectedRevision)
         }
+        return applyBufferBatch(replacements, buffer: activeBuffer, accept: accept)
+    }
+
+    public func canReplaceBuffer(_ buffer: EditorBufferDescriptor) -> Bool {
+        guard !isInvalidated, openingPreview == nil, !isRecovering,
+              pendingTextLoads[buffer.bufferID] == nil, binaryDocuments[buffer.bufferID] == nil,
+              !pendingRecoveryBuffers.contains(buffer.bufferID), !readOnlyBuffers.contains(buffer.bufferID),
+              isInputEnabled(for: buffer.bufferID) else { return false }
+        if let view = bufferViews[buffer.bufferID] {
+            guard view.revision == buffer.revision else { return false }
+        } else {
+            guard snapshots[buffer.bufferID]?.revision == buffer.revision else { return false }
+        }
+        return allViews(for: buffer.bufferID).allSatisfy { !$0.hasMarkedText() }
+    }
+
+    public func replaceBufferBatch(
+        _ replacements: [SearchReplacementEdit],
+        buffer: EditorBufferDescriptor,
+        accept: ([EditorIncrementalEdit]) -> EditorEditOutcome
+    ) -> EditorEditOutcome {
+        guard canReplaceBuffer(buffer) else { return .rejected(currentRevision: currentRevision(for: buffer.bufferID)) }
+        // Files opened for folder replacement have never been displayed. Create
+        // their native backing document only after the bounded replacement plan.
+        _ = preparePrimaryView(for: buffer)
+        return applyBufferBatch(replacements, buffer: buffer, accept: accept)
+    }
+
+    private func applyBufferBatch(
+        _ replacements: [SearchReplacementEdit], buffer: EditorBufferDescriptor,
+        accept: ([EditorIncrementalEdit]) -> EditorEditOutcome
+    ) -> EditorEditOutcome {
+        guard !isInvalidated, openingPreview == nil, pendingTextLoads[buffer.bufferID] == nil,
+              let editorView = bufferViews[buffer.bufferID], editorView.revision == buffer.revision,
+              UInt64(replacements.count) <= UInt64.max - buffer.revision else {
+            return .rejected(currentRevision: currentRevision(for: buffer.bufferID))
+        }
+        let expectedRevision = buffer.revision
         let generation = lifecycleGeneration
         var revision = expectedRevision
         let edits: [EditorIncrementalEdit] = replacements.map { replacement in
             defer { revision += 1 }
             return EditorIncrementalEdit(
-                bufferID: activeBuffer.bufferID,
+                bufferID: buffer.bufferID,
                 expectedRevision: revision,
                 range: TextEditRange(location: replacement.range.location, length: replacement.range.length),
                 replacement: String(decoding: replacement.replacementUTF8, as: UTF8.self)
             )
         }
-        captureGroupRecoveryViewStates(bufferID: activeBuffer.bufferID)
+        captureGroupRecoveryViewStates(bufferID: buffer.bufferID)
         do {
             try editorView.replaceUTF8Ranges(
                 replacements.map { NSValue(range: NSRange(location: $0.range.location, length: $0.range.length)) },
@@ -1696,7 +1731,7 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
                 return .rejected(currentRevision: expectedRevision)
             }
             lastMutationError = error
-            return .rejected(currentRevision: activeBuffer.revision)
+            return .rejected(currentRevision: buffer.revision)
         }
         guard isCurrentLifecycle(generation) else {
             return .rejected(currentRevision: expectedRevision)
@@ -1706,19 +1741,21 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
         guard isCurrentLifecycle(generation) else { return outcome }
         guard case .accepted(let resultingRevision) = outcome,
               resultingRevision == expectedRevision + UInt64(edits.count) else {
-            scheduleRecovery(bufferID: activeBuffer.bufferID)
+            scheduleRecovery(bufferID: buffer.bufferID)
             return outcome
         }
-        self.activeBuffer = EditorBufferDescriptor(bufferID: activeBuffer.bufferID, revision: resultingRevision)
-        updateDisplayedRevision(resultingRevision, for: activeBuffer.bufferID)
-        updateRevisionExhaustion(bufferID: activeBuffer.bufferID, revision: resultingRevision)
-        synchronizeRevision(resultingRevision, for: activeBuffer.bufferID)
+        if activeBuffer?.bufferID == buffer.bufferID {
+            self.activeBuffer = EditorBufferDescriptor(bufferID: buffer.bufferID, revision: resultingRevision)
+        }
+        updateDisplayedRevision(resultingRevision, for: buffer.bufferID)
+        updateRevisionExhaustion(bufferID: buffer.bufferID, revision: resultingRevision)
+        synchronizeRevision(resultingRevision, for: buffer.bufferID)
         for edit in edits {
-            acceptedEdits[activeBuffer.bufferID, default: []].append(edit)
+            acceptedEdits[buffer.bufferID, default: []].append(edit)
             appendRecovery(edit, resultingRevision: edit.expectedRevision + 1)
         }
-        discardPendingFoldRecovery(bufferID: activeBuffer.bufferID)
-        captureGroupRecoveryViewStates(bufferID: activeBuffer.bufferID)
+        discardPendingFoldRecovery(bufferID: buffer.bufferID)
+        captureGroupRecoveryViewStates(bufferID: buffer.bufferID)
         return outcome
     }
 

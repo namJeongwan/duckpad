@@ -33,12 +33,43 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
         self.maximumDirectoryNameBytes = maximumDirectoryNameBytes
     }
 
+    public func previewFile(_ document: FolderSearchDocumentResult, maximumBytes: Int) async -> FolderSearchFile? {
+        guard maximumBytes > 0, document.identity.byteCount <= maximumBytes else { return nil }
+        let worker = Task.detached(priority: .userInitiated) { () -> FolderSearchFile? in
+            let url = URL(fileURLWithPath: document.path)
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let descriptor = Darwin.open(document.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+            guard descriptor >= 0 else { return nil }
+            defer { Darwin.close(descriptor) }
+            var before = stat(), after = stat()
+            guard fstat(descriptor, &before) == 0, Self.fileType(before) == S_IFREG,
+                  before.st_size >= 0, before.st_size <= maximumBytes,
+                  UInt64(before.st_dev) == document.identity.device, UInt64(before.st_ino) == document.identity.inode,
+                  let data = try? Self.boundedRead(descriptor: descriptor, documentLimit: maximumBytes, aggregateLimit: maximumBytes),
+                  !Task.isCancelled, fstat(descriptor, &after) == 0, Self.sameSnapshot(before, after),
+                  Self.identity(path: document.path, info: after, data: data) == document.identity else { return nil }
+            return .init(path: document.path, relativePath: document.relativePath, data: data, identity: document.identity)
+        }
+        return await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+    }
+
     public func enumerateTextCandidates(
         rootPath: String,
         maximumFiles: Int,
         maximumDocumentBytes: Int,
         maximumTotalBytes: Int
     ) async throws(FolderSearchFailure) -> FolderSearchEnumeration {
+        try await enumerateTextCandidates(rootPath: rootPath, maximumFiles: maximumFiles, maximumDocumentBytes: maximumDocumentBytes, maximumTotalBytes: maximumTotalBytes, fileMask: nil)
+    }
+
+    public func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int, fileMask: SearchFileMask?) async throws(FolderSearchFailure) -> FolderSearchEnumeration {
+        try await enumerateTextCandidates(rootPath: rootPath, maximumFiles: maximumFiles, maximumDocumentBytes: maximumDocumentBytes,
+            maximumTotalBytes: maximumTotalBytes, fileMask: fileMask, excluding: .init())
+    }
+
+    public func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int,
+                                        fileMask: SearchFileMask?, excluding: FolderSearchExclusions) async throws(FolderSearchFailure) -> FolderSearchEnumeration {
         let beforeOpeningEntry = beforeOpeningEntry
         let afterReadingDirectoryEntry = afterReadingDirectoryEntry
         let beforeReadingFile = beforeReadingFile
@@ -54,7 +85,7 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
                 afterReadingDirectoryEntry: afterReadingDirectoryEntry,
                 beforeReadingFile: beforeReadingFile,
                 maximumDirectoryEntries: maximumDirectoryEntries,
-                maximumDirectoryNameBytes: maximumDirectoryNameBytes
+                maximumDirectoryNameBytes: maximumDirectoryNameBytes, fileMask: fileMask, excluding: excluding
             )
         }
         do {
@@ -81,7 +112,8 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
         afterReadingDirectoryEntry: (@Sendable () -> Void)?,
         beforeReadingFile: (@Sendable (String) -> Void)?,
         maximumDirectoryEntries: Int,
-        maximumDirectoryNameBytes: Int
+        maximumDirectoryNameBytes: Int,
+        fileMask: SearchFileMask?, excluding: FolderSearchExclusions
     ) throws(FolderSearchFailure) -> FolderSearchEnumeration {
         guard maximumFiles > 0, maximumDocumentBytes > 0, maximumTotalBytes > 0,
               maximumDirectoryEntries > 0, maximumDirectoryNameBytes > 0 else {
@@ -136,6 +168,7 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
                 if Task.isCancelled { throw .search(.cancelled) }
                 guard !name.hasPrefix("."), !name.contains("/") else { skipped += 1; continue }
                 let relativePath = relativeDirectory.isEmpty ? name : "\(relativeDirectory)/\(name)"
+                if excluding.contains(joinedPath(root: root.path, relative: relativePath)) { continue }
                 beforeOpeningEntry?(relativePath)
                 let descriptor = Darwin.openat(
                     directoryDescriptor,
@@ -155,6 +188,7 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
                     try walk(directoryDescriptor: descriptor, relativeDirectory: relativePath, depth: depth + 1)
                     if truncated { return }
                 case S_IFREG:
+                    guard fileMask?.matches(name) ?? true else { continue }
                     guard files.count < maximumFiles else { truncated = true; return }
                     guard before.st_size >= 0, before.st_size <= maximumDocumentBytes else {
                         skipped += 1
@@ -231,7 +265,7 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
         case input
     }
 
-    private static func boundedRead(
+    static func boundedRead(
         descriptor: Int32,
         documentLimit: Int,
         aggregateLimit: Int
@@ -318,11 +352,11 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
         )
     }
 
-    private static func fileType(_ info: stat) -> mode_t {
+    static func fileType(_ info: stat) -> mode_t {
         info.st_mode & S_IFMT
     }
 
-    private static func isPackageDirectory(name: String, displayPath: String) -> Bool {
+    static func isPackageDirectory(name: String, displayPath: String) -> Bool {
         let packageExtensions: Set<String> = [
             "app", "appex", "bundle", "framework", "kext", "mdimporter", "pkg",
             "plugin", "qlgenerator", "rtfd", "wdgt", "xcodeproj", "xcworkspace", "playground",
@@ -336,7 +370,7 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
         root == "/" ? "/" + relative : root + "/" + relative
     }
 
-    private static func sameSnapshot(_ before: stat, _ after: stat) -> Bool {
+    static func sameSnapshot(_ before: stat, _ after: stat) -> Bool {
         before.st_dev == after.st_dev
             && before.st_ino == after.st_ino
             && before.st_size == after.st_size
@@ -346,7 +380,7 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
             && before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec
     }
 
-    private static func identity(path: String, info: stat, data: Data) -> FileIdentity {
+    static func identity(path: String, info: stat, data: Data) -> FileIdentity {
         let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let nanos = Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec)
         return FileIdentity(
