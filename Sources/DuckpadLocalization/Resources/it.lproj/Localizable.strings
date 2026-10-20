@@ -71,7 +71,7 @@
 "Choose Language…" = "Scegli linguaggio…";
 "Choose a different open document for a read-only comparison." = "Scegli un altro documento aperto per un confronto in sola lettura.";
 "Choose a folder to keep in the Duckpad workspace sidebar." = "Scegli una cartella da mantenere nella barra laterale di Duckpad.";
-"Choose a folder to search recursively. Hidden files, packages, and symbolic links are skipped." = "Scegli una cartella in cui cercare ricorsivamente. File nascosti, pacchetti e link simbolici vengono ignorati.";
+"Choose a folder to search recursively. Hidden file visibility follows preferences; packages and symbolic links are skipped." = "Scegli una cartella da cercare ricorsivamente. I file nascosti seguono le preferenze; pacchetti e collegamenti simbolici vengono ignorati.";
 "Choose a folder…" = "Scegli una cartella…";
 "Choose another encoding. The file and any open document contents have been kept unchanged." = "Scegli un’altra codifica. Il file e il contenuto dei documenti aperti sono rimasti invariati.";
 "Choose another open document." = "Scegli un altro documento aperto.";
@@ -569,7 +569,7 @@
 "Search options" = "Opzioni di ricerca";
 "Find all in current document" = "Trova nel documento corrente";
 "Find all in open documents" = "Trova nei documenti aperti";
-"Search includes subfolders. Hidden files, packages, and symbolic links are skipped." = "La ricerca include le sottocartelle. File nascosti, pacchetti e collegamenti simbolici vengono ignorati.";
+"Search includes subfolders. Hidden file visibility follows preferences; packages and symbolic links are skipped." = "La ricerca include le sottocartelle. I file nascosti seguono le preferenze; pacchetti e collegamenti simbolici vengono ignorati.";
 "Find in Files" = "Trova nei file";
 "Bookmarks" = "Segnalibri";
 "Bookmark matching lines" = "Segna le righe corrispondenti";
@@ -1258,3 +1258,5 @@
 "All" = "Tutti";
 
 "Workspace folders: %1$@" = "Cartelle dello spazio di lavoro: %1$@";
+"Show hidden files" = "Mostra file nascosti";
+"Show hidden files in the workspace and file searches. Search ignore rules still apply." = "Mostra i file nascosti nell’area di lavoro e nelle ricerche di file. Le regole di esclusione restano applicate.";

@@ -35,6 +35,8 @@ public protocol FolderSearchFileStore: Sendable {
     func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int, fileMask: SearchFileMask?) async throws(FolderSearchFailure) -> FolderSearchEnumeration
     func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int,
                                  fileMask: SearchFileMask?, excluding: FolderSearchExclusions) async throws(FolderSearchFailure) -> FolderSearchEnumeration
+    func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int,
+                                 fileMask: SearchFileMask?, excluding: FolderSearchExclusions, includeHiddenFiles: Bool) async throws(FolderSearchFailure) -> FolderSearchEnumeration
     func previewFile(_ document: FolderSearchDocumentResult, maximumBytes: Int) async -> FolderSearchFile?
     func enumerateTextCandidates(
         rootPath: String,
@@ -45,6 +47,12 @@ public protocol FolderSearchFileStore: Sendable {
 }
 
 public extension FolderSearchFileStore {
+    func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int,
+                                 fileMask: SearchFileMask?, excluding: FolderSearchExclusions, includeHiddenFiles: Bool) async throws(FolderSearchFailure) -> FolderSearchEnumeration {
+        try await enumerateTextCandidates(rootPath: rootPath, maximumFiles: maximumFiles, maximumDocumentBytes: maximumDocumentBytes,
+            maximumTotalBytes: maximumTotalBytes, fileMask: fileMask, excluding: excluding)
+    }
+
     func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int, fileMask: SearchFileMask?) async throws(FolderSearchFailure) -> FolderSearchEnumeration {
         let result = try await enumerateTextCandidates(rootPath: rootPath, maximumFiles: maximumFiles, maximumDocumentBytes: maximumDocumentBytes, maximumTotalBytes: maximumTotalBytes)
         return .init(rootPath: result.rootPath, files: result.files.filter { fileMask?.matches($0.relativePath) ?? true }, isTruncated: result.isTruncated, skippedFileCount: result.skippedFileCount, totalBytes: result.totalBytes)
@@ -122,7 +130,7 @@ public final class FolderSearchUseCase: Sendable {
             rootPath: rootPath,
             maximumFiles: limits.maximumFiles,
             maximumDocumentBytes: limits.maximumDocumentBytes,
-            maximumTotalBytes: limits.maximumTotalBytes, fileMask: fileMask, excluding: excluding
+            maximumTotalBytes: limits.maximumTotalBytes, fileMask: fileMask, excluding: excluding, includeHiddenFiles: query.options.includeHiddenFiles
         )
         let regexEngine = regexEngine
         let task = Task.detached(priority: .userInitiated) {

@@ -70,6 +70,12 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
 
     public func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int,
                                         fileMask: SearchFileMask?, excluding: FolderSearchExclusions) async throws(FolderSearchFailure) -> FolderSearchEnumeration {
+        try await enumerateTextCandidates(rootPath: rootPath, maximumFiles: maximumFiles, maximumDocumentBytes: maximumDocumentBytes,
+            maximumTotalBytes: maximumTotalBytes, fileMask: fileMask, excluding: excluding, includeHiddenFiles: false)
+    }
+
+    public func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int,
+                                        fileMask: SearchFileMask?, excluding: FolderSearchExclusions, includeHiddenFiles: Bool) async throws(FolderSearchFailure) -> FolderSearchEnumeration {
         let beforeOpeningEntry = beforeOpeningEntry
         let afterReadingDirectoryEntry = afterReadingDirectoryEntry
         let beforeReadingFile = beforeReadingFile
@@ -85,7 +91,7 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
                 afterReadingDirectoryEntry: afterReadingDirectoryEntry,
                 beforeReadingFile: beforeReadingFile,
                 maximumDirectoryEntries: maximumDirectoryEntries,
-                maximumDirectoryNameBytes: maximumDirectoryNameBytes, fileMask: fileMask, excluding: excluding
+                maximumDirectoryNameBytes: maximumDirectoryNameBytes, fileMask: fileMask, excluding: excluding, includeHiddenFiles: includeHiddenFiles
             )
         }
         do {
@@ -113,7 +119,7 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
         beforeReadingFile: (@Sendable (String) -> Void)?,
         maximumDirectoryEntries: Int,
         maximumDirectoryNameBytes: Int,
-        fileMask: SearchFileMask?, excluding: FolderSearchExclusions
+        fileMask: SearchFileMask?, excluding: FolderSearchExclusions, includeHiddenFiles: Bool
     ) throws(FolderSearchFailure) -> FolderSearchEnumeration {
         guard maximumFiles > 0, maximumDocumentBytes > 0, maximumTotalBytes > 0,
               maximumDirectoryEntries > 0, maximumDirectoryNameBytes > 0 else {
@@ -166,7 +172,7 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
 
             for name in listing.names {
                 if Task.isCancelled { throw .search(.cancelled) }
-                guard !name.hasPrefix("."), !name.contains("/") else { skipped += 1; continue }
+                guard (includeHiddenFiles || !name.hasPrefix(".")), !name.contains("/") else { skipped += 1; continue }
                 let relativePath = relativeDirectory.isEmpty ? name : "\(relativeDirectory)/\(name)"
                 if excluding.contains(joinedPath(root: root.path, relative: relativePath)) { continue }
                 beforeOpeningEntry?(relativePath)
@@ -179,7 +185,7 @@ public actor LocalFolderSearchFileStore: FolderSearchFileStore {
                 defer { Darwin.close(descriptor) }
                 var before = stat()
                 guard fstat(descriptor, &before) == 0 else { skipped += 1; continue }
-                guard before.st_flags & UInt32(UF_HIDDEN) == 0 else { skipped += 1; continue }
+                guard includeHiddenFiles || before.st_flags & UInt32(UF_HIDDEN) == 0 else { skipped += 1; continue }
 
                 switch fileType(before) {
                 case S_IFDIR:

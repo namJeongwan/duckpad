@@ -227,11 +227,12 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
             ])
             pages[category] = page
         }
-        func checkbox(_ title: String, _ key: WritableKeyPath<AppSettings, Bool>, _ category: String) {
+        func checkbox(_ title: String, _ key: WritableKeyPath<AppSettings, Bool>, _ category: String, help: String? = nil) {
             let button = NSButton(checkboxWithTitle: L10n.text(title), target: self, action: #selector(settingChanged(_:)))
             localize { catalog in
                 button.title = catalog.text(title)
                 button.setAccessibilityLabel(catalog.text(title))
+                if let help { button.toolTip = catalog.text(help) }
             }
             booleanControls.append((button, key))
             (pages[category] as? NSStackView)?.addArrangedSubview(button)
@@ -319,6 +320,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         (pages["General"] as? NSStackView)?.addArrangedSubview(languageNote)
         languageNote.widthAnchor.constraint(lessThanOrEqualTo: pageHost.widthAnchor).isActive = true
         checkbox("Show menu bar in document windows", \.menuBarVisible, "General")
+        checkbox("Show hidden files", \.showHiddenFiles, "General", help: "Show hidden files in the workspace and file searches. Search ignore rules still apply.")
         checkbox("Show status bar", \.statusBarVisible, "General")
         checkbox("Multi-line tabs", \.multilineTabsEnabled, "Tab Bar")
         checkbox("Allow tab drag and drop", \.tabDragEnabled, "Tab Bar")

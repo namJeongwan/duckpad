@@ -45,7 +45,7 @@ Replace All is intentionally current-document only. All-open Replace All, folder
 
 ## macOS command surface
 
-The Search menu routes `⌘F` Find, `⌘G` Find Next, `⇧⌘G` Find Previous, `⌘H` Replace, and Escape Close Find Panel. Closing by Escape or the close button cancels the owned operation, hides the search window, and returns focus to the editor. All-open-document search is an explicit action on the Find tab; Replace All is limited to the current buffer.
+The Search menu routes `⌘F` Find, `⌘G` Find Next, `⇧⌘G` Find Previous, `⌘R` Replace, and Escape Close Find Panel. Closing by Escape or the close button cancels the owned operation, hides the search window, and returns focus to the editor. All-open-document search is an explicit action on the Find tab; Replace All is limited to the current buffer.
 
 ## Verification
 

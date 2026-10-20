@@ -93,12 +93,19 @@ public protocol WorkspaceRootStore: Sendable {
     func addRoot(_ url: URL) async throws(WorkspaceBrowserFailure) -> WorkspaceRoot
     func removeRoot(_ id: WorkspaceRootID) async throws(WorkspaceBrowserFailure)
     func children(rootID: WorkspaceRootID, relativeDirectory: String) async throws(WorkspaceBrowserFailure) -> [WorkspaceBrowserEntry]
+    func children(rootID: WorkspaceRootID, relativeDirectory: String, includeHiddenFiles: Bool) async throws(WorkspaceBrowserFailure) -> [WorkspaceBrowserEntry]
     func readFile(_ entry: WorkspaceBrowserEntry) async throws(WorkspaceBrowserFailure) -> WorkspaceFileRead
     func updateNavigation(
         rootID: WorkspaceRootID,
         expandedRelativePaths: [String],
         selectedRelativePath: String?
     ) async throws(WorkspaceBrowserFailure) -> WorkspaceRoot
+}
+
+extension WorkspaceRootStore {
+    public func children(rootID: WorkspaceRootID, relativeDirectory: String, includeHiddenFiles: Bool) async throws(WorkspaceBrowserFailure) -> [WorkspaceBrowserEntry] {
+        try await children(rootID: rootID, relativeDirectory: relativeDirectory)
+    }
 }
 
 public enum WorkspaceBrowserState: Equatable, Sendable {
@@ -111,6 +118,7 @@ public enum WorkspaceBrowserState: Equatable, Sendable {
 @MainActor
 public final class WorkspaceBrowserUseCase {
     private let store: any WorkspaceRootStore
+    public var showHiddenFiles = false
     private var currentRoots: [WorkspaceRoot] = []
     private var mutationBusy = false
     private var mutationWaiters: [CheckedContinuation<Void, Never>] = []
@@ -218,7 +226,7 @@ public final class WorkspaceBrowserUseCase {
 
     public func children(rootID: WorkspaceRootID, relativeDirectory: String) async throws(WorkspaceBrowserFailure) -> [WorkspaceBrowserEntry] {
         guard roots.contains(where: { $0.id == rootID }) else { throw .unknownRoot(rootID) }
-        return try await store.children(rootID: rootID, relativeDirectory: relativeDirectory)
+        return try await store.children(rootID: rootID, relativeDirectory: relativeDirectory, includeHiddenFiles: showHiddenFiles)
     }
 
     public func readFile(_ entry: WorkspaceBrowserEntry) async throws(WorkspaceBrowserFailure) -> WorkspaceFileRead {

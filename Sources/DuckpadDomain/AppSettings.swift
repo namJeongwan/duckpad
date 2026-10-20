@@ -11,6 +11,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var schemaVersion: Int
     public var appLanguage: AppLanguage
     public var shareUsageStatistics: Bool
+    public var showHiddenFiles: Bool
     public var appearanceMode: AppAppearanceMode
     public var defaultWordWrapEnabled: Bool
     public var defaultWrapMarkerVisible: Bool
@@ -66,6 +67,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         schemaVersion: Int = AppSettings.currentSchemaVersion,
         appLanguage: AppLanguage = .system,
         shareUsageStatistics: Bool = true,
+        showHiddenFiles: Bool = false,
         appearanceMode: AppAppearanceMode = .system,
         defaultWordWrapEnabled: Bool = true,
         defaultWrapMarkerVisible: Bool = false,
@@ -115,6 +117,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.schemaVersion = schemaVersion
         self.appLanguage = appLanguage
         self.shareUsageStatistics = shareUsageStatistics
+        self.showHiddenFiles = showHiddenFiles
         self.appearanceMode = appearanceMode
         self.defaultWordWrapEnabled = defaultWordWrapEnabled
         self.defaultWrapMarkerVisible = defaultWrapMarkerVisible
@@ -167,6 +170,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
         appLanguage = (try values.decodeIfPresent(String.self, forKey: .appLanguage)).flatMap(AppLanguage.init(rawValue:)) ?? .system
         shareUsageStatistics = try values.decodeIfPresent(Bool.self, forKey: .shareUsageStatistics) ?? true
+        showHiddenFiles = try values.decodeIfPresent(Bool.self, forKey: .showHiddenFiles) ?? false
         appearanceMode = try values.decode(AppAppearanceMode.self, forKey: .appearanceMode)
         defaultWordWrapEnabled = try values.decode(Bool.self, forKey: .defaultWordWrapEnabled)
         defaultWrapMarkerVisible = try values.decode(Bool.self, forKey: .defaultWrapMarkerVisible)

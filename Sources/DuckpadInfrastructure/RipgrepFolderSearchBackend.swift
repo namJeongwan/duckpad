@@ -85,7 +85,7 @@ public struct RipgrepFolderSearchBackend: FolderSearchBackend {
             progress()
         }
         if truncated { return result(incomplete: false) }
-        let status = try process.run(arguments: ["--no-config", "--no-messages", "--no-ignore-global", "--no-ignore-parent", "--no-require-git", "--files", "--null", "."], directory: root.descriptor, maximumOutputBytes: maximumDiscoveryBytes) { record in
+        let status = try process.run(arguments: ["--no-config", "--no-messages", "--no-ignore-global", "--no-ignore-parent", "--no-require-git", "--files", "--null"] + (query.options.includeHiddenFiles ? ["--hidden"] : []) + ["."], directory: root.descriptor, maximumOutputBytes: maximumDiscoveryBytes) { record in
             try process.check()
             guard let emitted = String(data: record, encoding: .utf8) else {
                 throw FolderSearchFailure.enumerationFailed("ripgrep returned an unsupported path")
@@ -94,7 +94,7 @@ public struct RipgrepFolderSearchBackend: FolderSearchBackend {
             if let mask, !mask.matches(relative) { return true }
             if excluding.contains(root.url.appendingPathComponent(relative).path) { return true }
             guard files < limits.maximumFiles else { truncated = true; return false }
-            guard let handle = root.open(relative) else { skipped += 1; return true }
+            guard let handle = root.open(relative, includeHiddenFiles: query.options.includeHiddenFiles) else { skipped += 1; return true }
             defer { Darwin.close(handle.descriptor) }
             guard handle.info.st_size <= limits.maximumDocumentBytes else { skipped += 1; return true }
             guard handle.info.st_size <= limits.maximumTotalBytes - bytes else { truncated = true; return false }

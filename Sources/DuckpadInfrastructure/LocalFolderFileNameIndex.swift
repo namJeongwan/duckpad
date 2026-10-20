@@ -10,10 +10,14 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
     public init(executable: URL? = RipgrepFolderSearchBackend.bundledExecutable) { self.executable = executable }
 
     public func index(in folder: URL, maximumEntries: Int = 20_000) async throws -> FolderFileNameIndex {
+        try await index(in: folder, maximumEntries: maximumEntries, includeHiddenFiles: false)
+    }
+
+    public func index(in folder: URL, maximumEntries: Int = 20_000, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex {
         guard maximumEntries > 0, maximumEntries <= 100_000 else { throw WorkspaceBrowserFailure.entryLimitExceeded(maximumEntries) }
         let process = executable.map { RipgrepProcess(executable: $0, timeout: .seconds(30)) }
         let worker = Task.detached(priority: .userInitiated) {
-            try self.indexBlocking(folder: folder, maximumEntries: maximumEntries, process: process)
+            try self.indexBlocking(folder: folder, maximumEntries: maximumEntries, process: process, includeHiddenFiles: includeHiddenFiles)
         }
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel(); process?.cancel() }
     }
@@ -22,7 +26,7 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
         let worker = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             let root = try FolderSearchRoot(path: folder.path)
-            guard root.fileNameRoot == expected, let handle = root.open(relativePath) else {
+            guard root.fileNameRoot == expected, let handle = root.open(relativePath, includeHiddenFiles: true) else {
                 throw WorkspaceBrowserFailure.invalidPath(relativePath)
             }
             defer { Darwin.close(handle.descriptor) }
@@ -35,20 +39,20 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
     }
 
-    private func indexBlocking(folder: URL, maximumEntries: Int, process: RipgrepProcess?) throws -> FolderFileNameIndex {
+    private func indexBlocking(folder: URL, maximumEntries: Int, process: RipgrepProcess?, includeHiddenFiles: Bool) throws -> FolderFileNameIndex {
         let root = try FolderSearchRoot(path: folder.path)
         var paths: [String] = [], skipped = 0, observed = 0, nameBytes = 0, truncated = false
         func admit(_ relative: String) throws -> Bool {
             try Task.checkCancellation(); try process?.check()
             guard observed < maximumEntries, relative.utf8.count <= 16 * 1_024 * 1_024 - nameBytes else { truncated = true; return false }
             observed += 1; nameBytes += relative.utf8.count
-            guard let file = root.open(relative) else { skipped += 1; return true }
+            guard let file = root.open(relative, includeHiddenFiles: includeHiddenFiles) else { skipped += 1; return true }
             Darwin.close(file.descriptor)
             paths.append(relative)
             return true
         }
         if let process {
-            let status = try process.run(arguments: ["--no-config", "--no-messages", "--no-ignore-global", "--no-ignore-parent", "--no-require-git", "--files", "--null", "."], directory: root.descriptor) { record in
+            let status = try process.run(arguments: ["--no-config", "--no-messages", "--no-ignore-global", "--no-ignore-parent", "--no-require-git", "--files", "--null"] + (includeHiddenFiles ? ["--hidden"] : []) + ["."], directory: root.descriptor) { record in
                 guard let name = String(data: record, encoding: .utf8) else { throw FolderSearchFailure.enumerationFailed("unsupported file name") }
                 return try admit(name.hasPrefix("./") ? String(name.dropFirst(2)) : name)
             }
@@ -62,7 +66,7 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
             let prefix = base == "/" ? "/" : base + "/"
             let keys: [URLResourceKey] = [.isDirectoryKey]
             guard let iterator = FileManager.default.enumerator(at: root.url, includingPropertiesForKeys: keys,
-                options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in skipped += 1; return true }) else {
+                options: includeHiddenFiles ? [.skipsPackageDescendants] : [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in skipped += 1; return true }) else {
                 throw FolderSearchFailure.invalidRoot(folder.path)
             }
             for case let url as URL in iterator {
