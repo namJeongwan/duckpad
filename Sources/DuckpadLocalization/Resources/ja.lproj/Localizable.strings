@@ -1212,3 +1212,49 @@
 "Hide tab bar###HideTabBar" = "タブバーを隠す###HideTabBar";
 "Hold SHIFT to enable Docking window." = "Shiftを押しながらウィンドウをドッキングします。";
 "Click and drag to move or undock whole node." = "ドラッグしてグループ全体を移動または分離します。";
+"Scope" = "範囲";
+"Current document" = "現在の文書";
+"Use Find All or Replace All for all open documents." = "開いているすべての文書には「すべて検索」または「すべて置換」を使用してください。";
+"Replacing in open documents…" = "開いている文書で置換中…";
+"No changes needed" = "変更不要";
+"Skipped: read-only" = "スキップ: 読み取り専用";
+"Skipped: document unavailable" = "スキップ: 文書を使用できません";
+"Skipped: document changed" = "スキップ: 文書が変更されました";
+"Skipped: size or match limit" = "スキップ: サイズまたは一致数の上限";
+"Not processed: cancelled" = "未処理: キャンセル";
+"Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@" = "置換: %1$@ · 文書: %2$@ · スキップ: %3$@";
+"Cancelled · Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@" = "キャンセル · 置換: %1$@ · 文書: %2$@ · スキップ: %3$@";
+"Skipped: search timed out" = "スキップ: 検索タイムアウト";
+
+"Search Files" = "ファイルを検索";
+"Search Files…" = "ファイルを検索…";
+"Search files by name or path" = "ファイル名またはパスで検索";
+"Files" = "ファイル";
+"↑↓ Select · ↵ Open · Esc Close" = "↑↓ 選択 · ↵ 開く · Esc 閉じる";
+"Indexing file names…" = "ファイル名を収集中…";
+"No matching files" = "一致するファイルはありません";
+"Showing %1$@ files · Index limit reached · Skipped items: %2$@" = "%1$@ ファイルを表示 · 索引の上限に到達 · スキップした項目: %2$@";
+"Showing %1$@ files · Skipped items: %2$@" = "%1$@ ファイルを表示 · スキップした項目: %2$@";
+"Replace in Files" = "複数ファイルで置換";
+"Replace in Files…" = "複数ファイルで置換…";
+"Folder" = "フォルダ";
+"Type to search in files" = "検索語句を入力してください";
+"Changes stay unsaved in the editor. Undo is available in each document." = "変更はエディタに未保存のまま残ります。各文書で取り消せます。";
+"Double-click a result to open it. Searches use the same options as Find." = "結果をダブルクリックすると開きます。検索オプションは既存の検索と共通です。";
+"Match Preview" = "一致箇所のプレビュー";
+"Replace matches in %1$@ files?" = "%1$@ ファイルの一致箇所を置換しますか？";
+"Open" = "開く";
+"Open in Find Window" = "検索ウインドウで開く";
+"File mask:" = "ファイルマスク:";
+"Filename patterns separated by commas; * and ? are wildcards. Prefix ! to exclude." = "ファイル名のパターンをコンマで区切ります。* と ? はワイルドカードです。先頭の ! は除外を指定します。";
+"Changes stay unsaved." = "変更は未保存のままです。";
+"File mask: %1$@" = "ファイルマスク: %1$@";
+"Open in Right Split" = "右の分割で開く";
+
+/* Streaming folder search */
+"Searching… %1$@ matches in %2$@ files" = "検索中… %2$@ ファイルで %1$@ 件一致";
+"Matches: %1$@ · Files: %2$@ · Skipped: %3$@ · Showing first %4$@ matches" = "一致: %1$@ · ファイル: %2$@ · スキップ: %3$@ · 最初の %4$@ 件を表示";
+
+"All" = "すべて";
+
+"Workspace folders: %1$@" = "ワークスペースフォルダ: %1$@";

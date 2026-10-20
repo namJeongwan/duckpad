@@ -1212,3 +1212,49 @@
 "Hide tab bar###HideTabBar" = "Masquer la barre d’onglets###HideTabBar";
 "Hold SHIFT to enable Docking window." = "Maintenez Maj pour ancrer la fenêtre.";
 "Click and drag to move or undock whole node." = "Glissez pour déplacer ou détacher tout le groupe.";
+"Scope" = "Portée";
+"Current document" = "Document actuel";
+"Use Find All or Replace All for all open documents." = "Pour tous les documents ouverts, utilisez Tout rechercher ou Tout remplacer.";
+"Replacing in open documents…" = "Remplacement dans les documents ouverts…";
+"No changes needed" = "Aucune modification nécessaire";
+"Skipped: read-only" = "Ignoré : lecture seule";
+"Skipped: document unavailable" = "Ignoré : document indisponible";
+"Skipped: document changed" = "Ignoré : document modifié";
+"Skipped: size or match limit" = "Ignoré : limite de taille ou de résultats";
+"Not processed: cancelled" = "Non traité : annulé";
+"Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@" = "Remplacements : %1$@ · Documents : %2$@ · Ignorés : %3$@";
+"Cancelled · Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@" = "Annulé · Remplacements : %1$@ · Documents : %2$@ · Ignorés : %3$@";
+"Skipped: search timed out" = "Ignoré : délai de recherche dépassé";
+
+"Search Files" = "Rechercher des fichiers";
+"Search Files…" = "Rechercher des fichiers…";
+"Search files by name or path" = "Rechercher par nom de fichier ou chemin";
+"Files" = "Fichiers";
+"↑↓ Select · ↵ Open · Esc Close" = "↑↓ Sélectionner · ↵ Ouvrir · Esc Fermer";
+"Indexing file names…" = "Collecte des noms de fichiers…";
+"No matching files" = "Aucun fichier correspondant";
+"Showing %1$@ files · Index limit reached · Skipped items: %2$@" = "%1$@ fichiers affichés · Limite d’index atteinte · Éléments ignorés : %2$@";
+"Showing %1$@ files · Skipped items: %2$@" = "%1$@ fichiers affichés · Éléments ignorés : %2$@";
+"Replace in Files" = "Remplacer dans les fichiers";
+"Replace in Files…" = "Remplacer dans les fichiers…";
+"Folder" = "Dossier";
+"Type to search in files" = "Saisissez votre recherche";
+"Changes stay unsaved in the editor. Undo is available in each document." = "Les modifications restent non enregistrées dans l’éditeur. Vous pouvez les annuler dans chaque document.";
+"Double-click a result to open it. Searches use the same options as Find." = "Double-cliquez sur un résultat pour l’ouvrir. Les options sont communes avec Rechercher.";
+"Match Preview" = "Aperçu du résultat";
+"Replace matches in %1$@ files?" = "Remplacer les occurrences dans %1$@ fichiers ?";
+"Open" = "Ouvrir";
+"Open in Find Window" = "Ouvrir dans la fenêtre de recherche";
+"File mask:" = "Masque :";
+"Filename patterns separated by commas; * and ? are wildcards. Prefix ! to exclude." = "Séparez les motifs de noms par des virgules ; * et ? sont des jokers. Préfixez avec ! pour exclure.";
+"Changes stay unsaved." = "Modifications non enregistrées.";
+"File mask: %1$@" = "Masque : %1$@";
+"Open in Right Split" = "Ouvrir dans le volet droit";
+
+/* Streaming folder search */
+"Searching… %1$@ matches in %2$@ files" = "Recherche… %1$@ correspondances dans %2$@ fichiers";
+"Matches: %1$@ · Files: %2$@ · Skipped: %3$@ · Showing first %4$@ matches" = "Correspondances : %1$@ · Fichiers : %2$@ · Ignorés : %3$@ · Affichage des %4$@ premières correspondances";
+
+"All" = "Tout";
+
+"Workspace folders: %1$@" = "Dossiers de l’espace de travail : %1$@";

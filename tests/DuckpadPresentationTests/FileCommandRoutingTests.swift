@@ -503,21 +503,23 @@ private func descendant<T: NSView>(of type: T.Type, in root: NSView, identifier:
     defer { controller.close() }
     controller.start()
     await controller.waitForStartup()
-    controller.performShowFind()
-    // Search controls live in their own panel, independently of editor layout.
-    guard let field = descendant(of: NSSearchField.self, in: controller.searchPanel, identifier: "duckpad.search.find"),
-          let table = descendant(of: NSTableView.self, in: controller.searchPanel, identifier: "duckpad.search.results") else {
-        Issue.record("search controls unavailable")
+    controller.performFindInFolder()
+    let global = controller.searchExperience.multiPanel
+    guard let rootView = global.window?.contentView,
+          let table = descendant(of: NSTableView.self, in: rootView, identifier: "duckpad.multifile.results"),
+          let browse = descendant(of: NSButton.self, in: rootView, identifier: "duckpad.multifile.browse") else {
+        Issue.record("project search controls unavailable")
         return
     }
-    controller.performFindInFolder()
-    field.stringValue = "duck"
-    // The menu opens the folder tab; Return submits the user's query.
-    #expect(controller.searchPanel.control(field, textView: NSTextView(), doCommandBy: #selector(NSResponder.insertNewline(_:))))
-    for _ in 0..<2_000 where table.numberOfRows < 2 { await Task.yield() }
+    global.setQuery(.init(pattern: "duck"))
+    // With no workspace registered, Browse selects a folder for project search.
+    _ = NSApp.sendAction(browse.action!, to: browse.target, from: browse)
+    for _ in 0..<100 where global.folder == nil { try? await Task.sleep(for: .milliseconds(10)) }
+    global.searchPressed()
+    for _ in 0..<100 where table.numberOfRows < 1 { try? await Task.sleep(for: .milliseconds(10)) }
     #expect(panels.folderRequests == 1)
-    #expect(table.numberOfRows == 2)
-    table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+    #expect(table.numberOfRows == 1)
+    table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
     guard let action = table.doubleAction else {
         Issue.record("result action unavailable")
         return

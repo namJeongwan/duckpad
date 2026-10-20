@@ -276,9 +276,9 @@ public struct ScratchSession: Codable, Equatable, Sendable {
     }
 
     @discardableResult
-    public mutating func addFile(binding: FileBinding, title: String) throws -> TabID {
+    public mutating func addFile(binding: FileBinding, title: String, activate: Bool = true) throws -> TabID {
         if let existing = tabID(canonicalPath: binding.canonicalPath) {
-            try activate(tabID: existing)
+            if activate { try self.activate(tabID: existing) }
             return existing
         }
         var buffer = BufferMetadata()
@@ -289,8 +289,10 @@ public struct ScratchSession: Codable, Equatable, Sendable {
         documents[document.id] = document
         fileBindings[document.id] = binding
         tabs.append(tab)
-        activeTabID = tab.id
-        recordActivation(tab.id)
+        if activate || activeTabID == nil {
+            activeTabID = tab.id
+            recordActivation(tab.id)
+        }
         return tab.id
     }
 

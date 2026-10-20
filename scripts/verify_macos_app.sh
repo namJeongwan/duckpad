@@ -103,6 +103,32 @@ APP_TEAM="$(sed -n 's/^TeamIdentifier=//p' "$TEMP_ROOT/app-signature.txt")"
 XPC_TEAM="$(sed -n 's/^TeamIdentifier=//p' "$TEMP_ROOT/xpc-signature.txt")"
 [[ "$APP_TEAM" == "$XPC_TEAM" ]]
 
+SEARCH_HELPER="$APP/Contents/Helpers/rg"
+test -x "$SEARCH_HELPER"
+[[ "$(lipo -archs "$SEARCH_HELPER")" == "$APP_ARCHES" ]]
+codesign --verify --strict "$SEARCH_HELPER"
+codesign -dv --verbose=4 "$SEARCH_HELPER" 2> "$TEMP_ROOT/search-signature.txt"
+grep -Eq 'flags=.*runtime' "$TEMP_ROOT/search-signature.txt"
+[[ "$APP_TEAM" == "$(sed -n 's/^TeamIdentifier=//p' "$TEMP_ROOT/search-signature.txt")" ]]
+codesign -d --entitlements :- "$SEARCH_HELPER" > "$TEMP_ROOT/search-entitlements.plist" 2>/dev/null
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$TEMP_ROOT/search-entitlements.plist")" == "true" ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.inherit' "$TEMP_ROOT/search-entitlements.plist")" == "true" ]]
+python3 - "$APP" <<'PYRG'
+import hashlib,json,sys
+from pathlib import Path
+app=Path(sys.argv[1])
+manifest=json.loads((app/'Contents/Resources/ripgrep-version.json').read_text())
+root=app/'Contents/Resources/ThirdPartyLicenses/Ripgrep'
+index=json.loads((root/'index.json').read_text())
+assert manifest['version']==index['ripgrep_version']=='15.1.0'
+assert any(p['name']=='PCRE2' for p in index['packages'])
+for package in index['packages']:
+    assert package['notices']
+    for notice in package['notices']:
+        digest=notice['sha256']
+        assert hashlib.sha256((root/'texts'/(digest+'.txt')).read_bytes()).hexdigest()==digest
+PYRG
+
 codesign -d --entitlements :- "$TERMINAL" > "$TEMP_ROOT/terminal-entitlements.txt" 2>/dev/null
 if grep -q "com.apple.security.app-sandbox" "$TEMP_ROOT/terminal-entitlements.txt"; then
     echo "Terminal host must run outside App Sandbox" >&2; exit 1

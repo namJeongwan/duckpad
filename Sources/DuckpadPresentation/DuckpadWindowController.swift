@@ -28,6 +28,57 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let activeEditor: any EditorPort
     private let editorGroupRouter: (any EditorGroupRoutingPort)?
     let searchPanel = SearchPanelView(frame: .zero)
+    private var searchExperienceStorage: SearchExperienceCoordinator?
+    var searchExperience: SearchExperienceCoordinator {
+        if let searchExperienceStorage { return searchExperienceStorage }
+        let coordinator = SearchExperienceCoordinator(workspace: workspace, search: searchUseCase,
+            folderSearch: folderSearchUseCase, folderFileNames: folderFileNameIndex, files: fileUseCase, browser: workspaceBrowserUseCase, parent: window,
+            actionable: { [weak self] in self?.workspaceInteractionsAreActionable == true },
+            openWorkspace: { [weak self] entry in self?.routeOpenWorkspaceEntry(entry) },
+            activate: { [weak self] target in
+                switch target {
+                case .open(let match): self?.routeActivateSearchMatch(match)
+                case .folder(let document, let match): self?.routeActivateFolderSearchMatch(document: document, match: match)
+                case .document(let id): self?.performActivate(id)
+                }
+            },
+            onGesture: { [weak self] in self?.performSearchFiles() },
+            chooseFolder: { [weak self] window in await self?.filePanels?.chooseFolderURL(attachedTo: window) })
+        if editorGroupRouter != nil {
+            coordinator.prepareFileSplit = { [weak self] in
+                guard let self else { return nil }
+                let target = self.editorGroupLayout.snapshot.focusedGroup
+                return { [weak self] id in
+                    guard let self else { return }
+                    let layout = self.editorGroupLayout.snapshot
+                    guard layout.visibleGroups.contains(target),
+                          let source = layout.visibleGroups.first(where: { layout.tabIDs(in: $0).contains(id) }) else { return }
+                    self.performAdjacentGroupSplit(tabID: id, source: source, target: target, zone: .right, operation: .copy)
+                }
+            }
+        }
+        searchPanel.onFindProject = { [weak self] query, context in self?.routeProjectSearch(query, context: context, replace: false) }
+        searchPanel.onReplaceProject = { [weak self] query, context in self?.routeProjectSearch(query, context: context, replace: true) }
+        coordinator.onOpenResults = { [weak self] query, result in
+            guard let self else { return }
+            _ = self.searchWindowController
+            switch result {
+            case .combined(let result):
+                self.searchPanel.show(tab: .find)
+                self.searchPanel.setQuery(query); self.searchPanel.present(result)
+            case .open(let result):
+                self.searchPanel.show(tab: .find)
+                self.searchPanel.setQuery(query); self.searchPanel.present(result)
+            case .folder(let result):
+                self.searchPanel.show(tab: .folder)
+                self.searchPanel.setFolderURL(URL(fileURLWithPath: result.rootPath))
+                self.searchPanel.setQuery(query); self.searchPanel.present(result)
+            }
+            self.searchWindowController.present(in: self.window)
+        }
+        searchExperienceStorage = coordinator
+        return coordinator
+    }
     private lazy var searchWindowController = SearchWindowController(searchView: searchPanel)
     let liveFileBanner = LiveFileChangeBanner(frame: .zero)
     let commandBar = WindowCommandBarView(frame: .zero)
@@ -66,6 +117,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var searchHighlightBuffer: EditorBufferDescriptor?
     private var searchUseCase: SearchWorkspaceUseCase?
     private let folderSearchUseCase: FolderSearchUseCase?
+    private let folderFileNameIndex: (any FolderFileNameIndexing)?
     private var languageUseCase: LanguageWorkspaceUseCase?
     private let documentIntelligenceUseCase: DocumentIntelligenceUseCase?
     private let declarationProjectSearch: (any DeclarationProjectSearching)?
@@ -132,6 +184,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private var terminationRetrySaveTabID: TabID?
     private var searchTask: Task<Void, Never>?
     private var searchOperationID: UInt64 = 0
+    private var cancelledSearchOperationID: UInt64?
     private var languageValidated = false
     private var languageDetectionTask: Task<Void, Never>?
     private var documentIntelligenceTask: Task<Void, Never>?
@@ -190,6 +243,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         terminationCoordinator: ApplicationTerminationCoordinator? = nil,
         searchUseCase: SearchWorkspaceUseCase? = nil,
         folderSearchUseCase: FolderSearchUseCase? = nil,
+        folderFileNameIndex: (any FolderFileNameIndexing)? = nil,
         workspaceBrowserUseCase: WorkspaceBrowserUseCase? = nil,
         languageUseCase: LanguageWorkspaceUseCase? = nil,
         documentIntelligenceUseCase: DocumentIntelligenceUseCase? = nil,
@@ -249,6 +303,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         self.recoveryUseCase = recoveryUseCase
         self.searchUseCase = searchUseCase
         self.folderSearchUseCase = folderSearchUseCase
+        self.folderFileNameIndex = folderFileNameIndex
         self.workspaceBrowserUseCase = workspaceBrowserUseCase
         self.languageUseCase = languageUseCase
         self.documentIntelligenceUseCase = documentIntelligenceUseCase
@@ -317,10 +372,20 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         searchPanel.onIncrementalQuery = { [weak self] query in self?.routeFindAll(query, incremental: true) }
         searchPanel.onQueryInvalidated = { [weak self] in self?.cancelSearch() }
         searchPanel.onActivateMatch = { [weak self] match in self?.routeActivateSearchMatch(match) }
+        searchPanel.onActivateReplacementDocument = { [weak self] tabID in
+            guard let self, self.workspaceInteractionsAreActionable else { return }
+            let operation = self.beginSearchOperation()
+            self.searchTask = Task { [weak self] in
+                guard let self else { return }
+                defer { self.finishSearchOperation(operation) }
+                _ = await self.workspace.activate(tabID: tabID)
+                if self.searchOperationID == operation { self.activeEditor.focus() }
+            }
+        }
         searchPanel.onActivateFolderMatch = { [weak self] document, match in
             self?.routeActivateFolderSearchMatch(document: document, match: match)
         }
-        searchPanel.onCancel = { [weak self] in self?.cancelSearch() }
+        searchPanel.onCancel = { [weak self] in self?.cancelSearch(keepsReplacementSummary: true) }
         searchPanel.onClose = { [weak self] in self?.closeSearchPanel() }
         commandBar.onToggleWorkspace = { [weak self] in self?.performToggleWorkspaceSidebar() }
         workspaceSidebar.onClose = { [weak self] in self?.performToggleWorkspaceSidebar() }
@@ -494,6 +559,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         shortcutSuppressionMonitor = nil
         commandPalettePanel.dismiss()
         symbolOutlinePanel.dismiss()
+        searchExperienceStorage?.tearDown()
+        searchExperienceStorage = nil
         commandBar.tearDown()
         extensionUseCase?.onStateChange = nil
         workspaceBrowserUseCase?.onStateChange = nil
@@ -1286,6 +1353,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         terminalPanel?.refreshLocalization(catalog: catalog)
         commandBar.setWorkspaceVisible(workspaceSidebar.superview != nil, catalog: catalog)
         searchPanel.refreshLocalization(catalog: catalog)
+        searchExperienceStorage?.refreshLocalization(catalog: catalog)
         liveFileBanner.refreshLocalization(catalog: catalog)
         persistenceBanner.refreshLocalization(catalog: catalog)
         usageNotice.refreshLocalization(catalog: catalog)
@@ -1363,6 +1431,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func applicationMainMenuDidChange(_ menu: NSMenu) {
+        _ = searchExperience
         if let shortcutRegistry, keyboardShortcutsWindow.window?.isVisible == true {
             keyboardShortcutsWindow.refresh(registry: shortcutRegistry)
         }
@@ -1824,6 +1893,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func showSearchPanel(replace: Bool) {
+        searchExperienceStorage?.dismiss()
         let selectedText = appPreferences.fillFindWithSelection
             ? (activeEditor as? any EditorFindTextPort)?.selectedTextForFind(maximumUTF16Length: appPreferences.findSelectionMaximumCharacters)
             : nil
@@ -1853,6 +1923,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         routeFind(searchPanel.currentQuery(direction: .backward))
     }
     @objc public func performCloseFindPanel(_ sender: Any? = nil) {
+        if searchExperienceStorage?.dismissActivePanel() == true { activeEditor.focus(); return }
         closeSearchPanel()
     }
 
@@ -1891,11 +1962,31 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     @objc public func performFindInFolder(_ sender: Any? = nil) {
-        guard !terminationReviewInProgress else { return }
+        guard workspaceInteractionsAreActionable else { return }
         onUsageMetric?(.feature(.findInFolder))
-        showSearchPanel(replace: false)
-        searchPanel.show(tab: .folder)
-        searchWindowController.present(in: window)
+        showMultiFileSearch(replace: false)
+    }
+
+    @objc public func performReplaceInFiles(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable else { return }
+        showMultiFileSearch(replace: true)
+    }
+
+    @objc public func performSearchFiles(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable else { return }
+        cancelSearch()
+        searchWindowController.dismiss()
+        commandPalettePanel.dismiss()
+        searchExperience.showFiles()
+    }
+
+    private func showMultiFileSearch(replace: Bool) {
+        let selectedText = appPreferences.fillFindWithSelection
+            ? (activeEditor as? any EditorFindTextPort)?.selectedTextForFind(maximumUTF16Length: appPreferences.findSelectionMaximumCharacters) : nil
+        cancelSearch()
+        searchWindowController.dismiss()
+        commandPalettePanel.dismiss()
+        searchExperience.showContent(replace: replace, selectedText: selectedText)
     }
 
     @objc public func performUndo(_ sender: Any? = nil) { performEditorCommand(.undo) }
@@ -2254,7 +2345,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
              #selector(performShowReplace(_:)),
              #selector(performFindNext(_:)),
              #selector(performFindPrevious(_:)),
-             #selector(performFindInFolder(_:)):
+             #selector(performFindInFolder(_:)),
+             #selector(performReplaceInFiles(_:)),
+             #selector(performSearchFiles(_:)):
             return !terminationReviewInProgress
         case #selector(performGoToDeclaration(_:)), #selector(performFindReferences(_:)):
             return declarationNavigation.isAvailable
@@ -3041,6 +3134,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         guard !terminationReviewInProgress else { return false }
         guard terminalPanel?.confirmWindowClose() != false else { return false }
         terminationReviewInProgress = true
+        searchExperienceStorage?.dismiss()
         fileUseCase?.suspendLiveReload()
         documentIntelligenceTask?.cancel()
         documentIntelligenceTask = nil
@@ -4564,6 +4658,29 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    private func routeProjectSearch(_ query: SearchQuery, context: ProjectSearchContext, replace: Bool) {
+        guard workspaceInteractionsAreActionable, let searchUseCase, let folderSearchUseCase, let fileUseCase else { return }
+        let operation = beginSearchOperation()
+        searchTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.finishSearchOperation(operation) }
+            do {
+                let preview = try await ProjectSearchUseCase(workspace: self.workspace, search: searchUseCase, folderSearch: folderSearchUseCase)
+                    .find(query, scope: context.scope, roots: context.roots, folder: context.folder)
+                guard self.searchOperationID == operation, !Task.isCancelled else { return }
+                if replace {
+                    self.searchPanel.prepareOpenDocumentsReplacement()
+                    let result = try await ProjectDocumentsReplaceUseCase(workspace: self.workspace, files: fileUseCase, search: searchUseCase).replace(query, preview: preview)
+                    guard self.searchOperationID == operation || self.cancelledSearchOperationID == operation else { return }
+                    self.searchPanel.present(result)
+                } else { self.searchPanel.present(preview) }
+            } catch {
+                guard self.searchOperationID == operation else { return }
+                self.searchPanel.presentFailure(prefix: replace ? "Replace All failed: %1$@" : "Search failed: %1$@", error: error)
+            }
+        }
+    }
+
     private func routeFindInFolder(_ query: SearchQuery) {
         guard workspaceInteractionsAreActionable,
               !query.pattern.isEmpty,
@@ -4628,9 +4745,19 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         searchTask = Task { [weak self] in
             defer { self?.finishSearchOperation(operation) }
             do {
-                let count = try await searchUseCase.replaceAll(query)
-                guard self?.searchOperationID == operation else { return }
-                self?.searchPanel.presentStatus(key: "search.replaced", arguments: [count])
+                if query.options.scope == .allOpenDocuments {
+                    self?.searchPanel.prepareOpenDocumentsReplacement()
+                    let result = try await searchUseCase.replaceAllOpenDocuments(query) { [weak self] progress in
+                        guard self?.searchOperationID == operation else { return }
+                        self?.searchPanel.present(progress)
+                    }
+                    guard self?.searchOperationID == operation || self?.cancelledSearchOperationID == operation else { return }
+                    self?.searchPanel.present(result)
+                } else {
+                    let count = try await searchUseCase.replaceAll(query)
+                    guard self?.searchOperationID == operation else { return }
+                    self?.searchPanel.presentStatus(key: "search.replaced", arguments: [count])
+                }
             } catch SearchFailure.noSelection {
                 guard self?.searchOperationID == operation else { return }
                 self?.searchPanel.presentStatus(key: "Select a non-empty range to replace")
@@ -4723,6 +4850,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func beginSearchOperation() -> UInt64 {
+        cancelledSearchOperationID = nil
         searchTask?.cancel()
         searchOperationID &+= 1
         searchPanel.setSearchInProgress(true)
@@ -4734,7 +4862,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         searchPanel.setSearchInProgress(false)
     }
 
-    private func cancelSearch() {
+    private func cancelSearch(keepsReplacementSummary: Bool = false) {
+        cancelledSearchOperationID = keepsReplacementSummary ? searchOperationID : nil
         clearSearchHighlights()
         searchPanel.setSearchInProgress(false)
         searchTask?.cancel()

@@ -25,7 +25,7 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
 
     var onExecute: ((NSMenuItem, AnyObject) -> Void)?
     private let card = NSVisualEffectView()
-    private let search = NSTextField()
+    private let search = SearchInputField()
     private let searchIcon = NSImageView()
     private let clearButton = StatusBarButton()
     private let table = NSTableView()
@@ -60,15 +60,6 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
         card.layer?.borderWidth = 1
         updateAppearance()
         addSubview(card)
-        search.cell = CommandPaletteSearchCell(textCell: "")
-        search.isBordered = false
-        search.drawsBackground = false
-        search.focusRingType = .none
-        search.font = .systemFont(ofSize: 14)
-        search.isBezeled = false
-        search.isEditable = true
-        search.isSelectable = true
-        search.cell?.usesSingleLineMode = true
         searchIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)
         searchIcon.contentTintColor = .secondaryLabelColor
         searchIcon.setAccessibilityElement(false)
@@ -244,7 +235,7 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
         let top = min(max(16, bounds.height * 0.12), max(16, bounds.height - height - 16))
         card.frame = NSRect(x: (bounds.width - width) / 2, y: bounds.height - top - height, width: width, height: height)
         searchIcon.frame = NSRect(x: 16, y: height - 34, width: 18, height: 22)
-        search.frame = NSRect(x: 44, y: height - 34, width: max(0, width - 88), height: 22)
+        search.frame = NSRect(x: 44, y: height - 37, width: max(0, width - 88), height: SearchInputField.preferredHeight)
         clearButton.frame = NSRect(x: max(0, width - 36), y: height - 34, width: 20, height: 22)
         scroll.frame = NSRect(x: 6, y: 28, width: max(0, width - 12), height: max(0, height - 80))
         countLabel.frame = NSRect(x: 12, y: 7, width: max(0, width - 24), height: 14)
@@ -327,20 +318,4 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate, NSTableViewDataSour
         cell.apply(command, enabled: enabled, catalog: catalog)
         return cell
     }
-}
-
-/// Keep search edits separate from a text field that invoked the palette.
-/// Sharing NSWindow's default field editor would overwrite its text/selection.
-@MainActor
-private final class CommandPaletteSearchCell: NSTextFieldCell {
-    private let editor: NSTextView = {
-        let view = NSTextView()
-        view.isFieldEditor = true
-        view.isRichText = false
-        view.drawsBackground = false
-        view.allowsUndo = true
-        return view
-    }()
-
-    override func fieldEditor(for controlView: NSView) -> NSTextView? { editor }
 }

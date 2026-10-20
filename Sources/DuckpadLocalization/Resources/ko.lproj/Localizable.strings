@@ -1252,3 +1252,49 @@
 "Hide tab bar###HideTabBar" = "탭 표시줄 숨기기###HideTabBar";
 "Hold SHIFT to enable Docking window." = "Shift를 누른 채 창을 도킹하세요.";
 "Click and drag to move or undock whole node." = "드래그하여 전체 그룹을 이동하거나 분리하세요.";
+"Scope" = "범위";
+"Current document" = "현재 문서";
+"Use Find All or Replace All for all open documents." = "열린 문서 전체에는 모두 찾기 또는 모두 바꾸기를 사용하세요.";
+"Replacing in open documents…" = "열린 문서에서 바꾸는 중…";
+"No changes needed" = "변경할 내용 없음";
+"Skipped: read-only" = "건너뜀: 읽기 전용";
+"Skipped: document unavailable" = "건너뜀: 문서를 사용할 수 없음";
+"Skipped: document changed" = "건너뜀: 문서가 변경됨";
+"Skipped: size or match limit" = "건너뜀: 크기 또는 일치 항목 제한";
+"Not processed: cancelled" = "처리 안 됨: 취소됨";
+"Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@" = "바꾼 항목: %1$@ · 문서: %2$@ · 건너뜀: %3$@";
+"Cancelled · Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@" = "취소됨 · 바꾼 항목: %1$@ · 문서: %2$@ · 건너뜀: %3$@";
+"Skipped: search timed out" = "건너뜀: 검색 시간 초과";
+
+"Search Files" = "파일 검색";
+"Search Files…" = "파일 검색…";
+"Search files by name or path" = "파일명 또는 경로로 검색";
+"Files" = "파일";
+"↑↓ Select · ↵ Open · Esc Close" = "↑↓ 선택 · ↵ 열기 · Esc 닫기";
+"Indexing file names…" = "파일 이름을 수집하는 중…";
+"No matching files" = "일치하는 파일 없음";
+"Showing %1$@ files · Index limit reached · Skipped items: %2$@" = "파일 %1$@개 표시 · 색인 한도 도달 · 건너뛴 항목: %2$@";
+"Showing %1$@ files · Skipped items: %2$@" = "파일 %1$@개 표시 · 건너뛴 항목: %2$@";
+"Replace in Files" = "여러 파일에서 바꾸기";
+"Replace in Files…" = "여러 파일에서 바꾸기…";
+"Folder" = "폴더";
+"Type to search in files" = "검색어를 입력하세요";
+"Changes stay unsaved in the editor. Undo is available in each document." = "변경 사항은 편집기에 미저장 상태로 남습니다. 각 문서에서 실행 취소할 수 있습니다.";
+"Double-click a result to open it. Searches use the same options as Find." = "결과를 두 번 클릭하면 열립니다. 기존 찾기와 같은 검색 옵션을 사용합니다.";
+"Match Preview" = "일치 항목 미리보기";
+"Replace matches in %1$@ files?" = "파일 %1$@개의 일치 항목을 바꾸시겠습니까?";
+"Open" = "열기";
+"Open in Find Window" = "찾기 창에서 열기";
+"File mask:" = "파일 필터:";
+"Filename patterns separated by commas; * and ? are wildcards. Prefix ! to exclude." = "파일명 패턴을 쉼표로 구분합니다. *와 ?는 와일드카드이며, !로 시작하면 제외합니다.";
+"Changes stay unsaved." = "변경 내용은 미저장 상태로 남습니다.";
+"File mask: %1$@" = "파일 필터: %1$@";
+"Open in Right Split" = "오른쪽 분할에서 열기";
+
+/* Streaming folder search */
+"Searching… %1$@ matches in %2$@ files" = "검색 중… 파일 %2$@개에서 %1$@개 일치";
+"Matches: %1$@ · Files: %2$@ · Skipped: %3$@ · Showing first %4$@ matches" = "일치: %1$@ · 파일: %2$@ · 건너뜀: %3$@ · 처음 %4$@개 일치 항목 표시";
+
+"All" = "전체";
+
+"Workspace folders: %1$@" = "워크스페이스 폴더: %1$@";

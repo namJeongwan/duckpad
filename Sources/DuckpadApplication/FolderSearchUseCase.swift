@@ -32,6 +32,10 @@ public struct FolderSearchEnumeration: Equatable, Sendable {
 }
 
 public protocol FolderSearchFileStore: Sendable {
+    func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int, fileMask: SearchFileMask?) async throws(FolderSearchFailure) -> FolderSearchEnumeration
+    func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int,
+                                 fileMask: SearchFileMask?, excluding: FolderSearchExclusions) async throws(FolderSearchFailure) -> FolderSearchEnumeration
+    func previewFile(_ document: FolderSearchDocumentResult, maximumBytes: Int) async -> FolderSearchFile?
     func enumerateTextCandidates(
         rootPath: String,
         maximumFiles: Int,
@@ -40,22 +44,49 @@ public protocol FolderSearchFileStore: Sendable {
     ) async throws(FolderSearchFailure) -> FolderSearchEnumeration
 }
 
+public extension FolderSearchFileStore {
+    func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int, fileMask: SearchFileMask?) async throws(FolderSearchFailure) -> FolderSearchEnumeration {
+        let result = try await enumerateTextCandidates(rootPath: rootPath, maximumFiles: maximumFiles, maximumDocumentBytes: maximumDocumentBytes, maximumTotalBytes: maximumTotalBytes)
+        return .init(rootPath: result.rootPath, files: result.files.filter { fileMask?.matches($0.relativePath) ?? true }, isTruncated: result.isTruncated, skippedFileCount: result.skippedFileCount, totalBytes: result.totalBytes)
+    }
+    func enumerateTextCandidates(rootPath: String, maximumFiles: Int, maximumDocumentBytes: Int, maximumTotalBytes: Int,
+                                 fileMask: SearchFileMask?, excluding: FolderSearchExclusions) async throws(FolderSearchFailure) -> FolderSearchEnumeration {
+        let result = try await enumerateTextCandidates(rootPath: rootPath, maximumFiles: maximumFiles,
+            maximumDocumentBytes: maximumDocumentBytes, maximumTotalBytes: maximumTotalBytes, fileMask: fileMask)
+        return .init(rootPath: result.rootPath, files: result.files.filter { !excluding.contains($0.path) },
+            isTruncated: result.isTruncated, skippedFileCount: result.skippedFileCount, totalBytes: result.totalBytes)
+    }
+    func previewFile(_ document: FolderSearchDocumentResult, maximumBytes: Int) async -> FolderSearchFile? { nil }
+}
+
 public final class FolderSearchUseCase: Sendable {
     private let store: any FolderSearchFileStore
     private let regexEngine: any RegexEnginePort
+    private let backend: (any FolderSearchBackend)?
     public let limits: FolderSearchLimits
 
     public init(
         store: any FolderSearchFileStore,
         regexEngine: any RegexEnginePort,
-        limits: FolderSearchLimits = FolderSearchLimits()
+        limits: FolderSearchLimits = FolderSearchLimits(),
+        backend: (any FolderSearchBackend)? = nil
     ) {
         self.store = store
         self.regexEngine = regexEngine
-        self.limits = limits
+        self.limits = limits; self.backend = backend
     }
 
-    public func search(rootPath: String, query: SearchQuery) async throws(FolderSearchFailure) -> FolderSearchResultSet {
+    public func preview(document: FolderSearchDocumentResult, match: FolderSearchMatch) async -> SearchMatchPreview? {
+        guard let file = await store.previewFile(document, maximumBytes: 8 * 1_024 * 1_024), !Task.isCancelled else { return nil }
+        let worker = Task.detached(priority: .userInitiated) { () -> SearchMatchPreview? in
+            guard !Task.isCancelled, let decoded = try? TextFileCodec.decode(file.data) else { return nil }
+            return SearchMatchPreview.extract(utf8: Data(decoded.text.utf8), range: match.range, line: match.line)
+        }
+        return await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+    }
+
+    public func search(rootPath: String, query: SearchQuery, excluding: FolderSearchExclusions = .init(), budget: FolderSearchLimits? = nil, onProgress: FolderSearchProgress? = nil) async throws(FolderSearchFailure) -> FolderSearchResultSet {
+        let limits = budget ?? self.limits
         guard limits.maximumFiles > 0, limits.maximumFiles <= 100_000,
               limits.maximumDocumentBytes > 0,
               limits.maximumTotalBytes > 0,
@@ -81,13 +112,18 @@ public final class FolderSearchUseCase: Sendable {
             } catch let error { throw .search(error) }
         }
 
+        let fileMask: SearchFileMask?
+        do { if let source = query.fileMask { fileMask = try SearchFileMask(source) } else { fileMask = nil } }
+        catch { throw .search(error) }
+        if let backend {
+            return try await backend.search(rootPath: rootPath, query: query, limits: limits, excluding: excluding, onProgress: onProgress)
+        }
         let enumeration = try await store.enumerateTextCandidates(
             rootPath: rootPath,
             maximumFiles: limits.maximumFiles,
             maximumDocumentBytes: limits.maximumDocumentBytes,
-            maximumTotalBytes: limits.maximumTotalBytes
+            maximumTotalBytes: limits.maximumTotalBytes, fileMask: fileMask, excluding: excluding
         )
-        let limits = limits
         let regexEngine = regexEngine
         let task = Task.detached(priority: .userInitiated) {
             var documents: [FolderSearchDocumentResult] = []
@@ -111,13 +147,12 @@ public final class FolderSearchUseCase: Sendable {
                 if Task.isCancelled { throw FolderSearchFailure.search(.cancelled) }
                 let file = enumeration.files[fileIndex]
                 fileIndex += 1
-                let decoded: DecodedTextFile
-                do { decoded = try TextFileCodec.decode(file.data) }
+                let utf8: Data
+                do { utf8 = try Self.searchableUTF8(file.data) }
                 catch {
                     skipped += 1
                     continue
                 }
-                let utf8 = Data(decoded.text.utf8)
                 if query.options.mode == .regularExpression,
                    utf8.count > min(limits.maximumDocumentBytes, limits.maximumRegularExpressionBytes) {
                     skipped += 1
@@ -197,6 +232,22 @@ public final class FolderSearchUseCase: Sendable {
         catch let error as FolderSearchFailure { throw error }
         catch is CancellationError { throw .search(.cancelled) }
         catch { throw .enumerationFailed(String(describing: error)) }
+    }
+
+    /// Search needs validated UTF-8, not the save-format metadata calculated on open.
+    /// Keep UTF-16 BOM decoding and UTF-8 rejection identical to TextFileCodec.decode.
+    public static func searchableUTF8(_ data: Data) throws -> Data {
+        switch TextFileCodec.byteOrderMarkEncoding(in: data) {
+        case .utf16LittleEndian, .utf16BigEndian:
+            return Data(try TextFileCodec.decode(data).text.utf8)
+        case .utf8:
+            let payload = Data(data.dropFirst(3))
+            guard String(data: payload, encoding: .utf8) != nil else { throw TextFileCodecError.invalidUTF8 }
+            return payload
+        default:
+            guard String(data: data, encoding: .utf8) != nil else { throw TextFileCodecError.invalidUTF8 }
+            return data
+        }
     }
 
     private static func estimatedDocumentResultBytes(_ file: FolderSearchFile) -> Int {

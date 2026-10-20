@@ -81,4 +81,9 @@ DUCKPAD_EXTENSION_ISOLATION_SMOKE=1 "$APP/Contents/MacOS/Duckpad" \
     > "$TEMP_ROOT/xpc-isolation-stdout.log" 2> "$TEMP_ROOT/xpc-isolation-stderr.log"
 grep -q 'Duckpad XPC isolation smoke ready' "$TEMP_ROOT/xpc-isolation-stdout.log"
 
-echo "PASS: Finder/Open With, window resizing, and sandboxed XPC extension/isolation smokes"
+DUCKPAD_SECURITY_SCOPE_SMOKE_NAMESPACE="$SCOPE_NAMESPACE-rg" \
+DUCKPAD_RIPGREP_SMOKE=1 "$APP/Contents/MacOS/Duckpad" \
+    > "$TEMP_ROOT/rg-stdout.log" 2> "$TEMP_ROOT/rg-stderr.log"
+grep -q 'DUCKPAD_RIPGREP_READY' "$TEMP_ROOT/rg-stdout.log"
+
+echo "PASS: Finder/Open With, window resizing, sandboxed XPC extension/isolation, and ripgrep discovery smokes"

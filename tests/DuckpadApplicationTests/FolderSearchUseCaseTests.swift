@@ -229,3 +229,20 @@ private func folderIdentity(_ path: String, _ data: Data, serial: Int64) -> File
     #expect(result.matchCount < 200)
     #expect(result.isTruncated)
 }
+
+@Test func folderSearchUTF8FastDecodingPreservesBOMOffsetsAndRejectsInvalidBytes() async throws {
+    let payloads = [Data([0xEF, 0xBB, 0xBF]) + Data("한글 duck\r\nDUCK".utf8),
+                    Data("plain duck\rDUCK".utf8), Data([0xEF, 0xBB, 0xBF, 0xFF]), Data([0xFF, 0x80])]
+    let files = payloads.enumerated().map { index, data in
+        let path = "/tmp/project/\(index).txt"
+        return FolderSearchFile(path: path, relativePath: "\(index).txt", data: data,
+                                identity: folderIdentity(path, data, serial: Int64(index)))
+    }
+    let store = FolderStoreFake(.init(rootPath: "/tmp/project", files: files, isTruncated: false,
+        skippedFileCount: 0, totalBytes: payloads.reduce(0) { $0 + $1.count }))
+    let result = try await FolderSearchUseCase(store: store, regexEngine: ICURegexEngine()).search(rootPath: "/tmp/project", query: .init(pattern: "duck"))
+    #expect(result.matchCount == 4); #expect(result.skippedFileCount == 2)
+    #expect(result.documents[0].matches.map(\.range.location) == [7, 13])
+    #expect(result.documents[0].matches.map(\.line) == [1, 2])
+    #expect(result.documents[1].matches.map(\.line) == [1, 2])
+}

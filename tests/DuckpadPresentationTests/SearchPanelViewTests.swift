@@ -180,10 +180,10 @@ struct SearchPanelViewTests {
         #expect(panel.fittingSize.height <= 330)
         let views = descendants(panel)
         let replacement = try #require(views.first { $0.accessibilityIdentifier() == "duckpad.search.replace" })
-        let selection = try #require(views.first { $0.accessibilityIdentifier() == "duckpad.search.selection" })
+        let selection = try #require(views.first { $0.accessibilityIdentifier() == "duckpad.search.replace-scope" })
         let matchCase = try #require(views.first { $0.accessibilityIdentifier() == "duckpad.search.match-case" })
         let rect = selection.convert(selection.bounds, to: panel)
-        // Selection scope belongs just below the fields, above the match options.
+        // Scope stays below both labeled fields and above the native search options.
         #expect(rect.midY > matchCase.convert(matchCase.bounds, to: panel).midY)
         #expect(rect.midY < replacement.convert(replacement.bounds, to: panel).midY)
     }
@@ -229,13 +229,85 @@ struct SearchPanelViewTests {
         let selection = try #require(descendants(panel).first { $0.accessibilityIdentifier() == "duckpad.search.selection" } as? NSButton)
         var navigations = 0
         panel.onFind = { _ in navigations += 1 }
-        // NSSearchField can send its action when editing ends as a checkbox takes focus.
+        // Ending query editing must not dispatch navigation when an option takes focus.
         if let action = field.action { field.sendAction(action, to: field.target) }
         selection.performClick(nil)
         #expect(navigations == 0)
         #expect(panel.control(field, textView: NSTextView(), doCommandBy: #selector(NSResponder.insertNewline(_:))))
         #expect(navigations == 1)
         #expect(panel.currentQuery().options.scope == .selection)
+        panel.hide()
+    }
+
+    @Test(arguments: AppLanguage.allCases.filter { $0 != .system })
+    func replacementScopeAndSummaryFitAllLanguages(language: AppLanguage) throws {
+        let (window, panel) = host(width: 640, replace: true, language: language)
+        defer { panel.hide(); window.contentView = nil; window.close() }
+        let scope = try #require(descendants(panel).first { $0.accessibilityIdentifier() == "duckpad.search.replace-scope" } as? NSPopUpButton)
+        var queries: [SearchQuery] = []
+        panel.onReplaceAll = { queries.append($0) }
+        for index in 0..<3 {
+            scope.selectItem(at: index)
+            scope.sendAction(scope.action, to: scope.target)
+            #expect(panel.currentQuery().options.scope == [SearchScope.document, .selection, .allOpenDocuments][index])
+            let buttons = descendants(panel).compactMap { $0 as? NSButton }
+            let current = try #require(buttons.first { $0.accessibilityIdentifier() == "duckpad.search.replace-current" })
+            #expect(current.isEnabled == (index != 2))
+        }
+        let replaceAll = try #require(descendants(panel).compactMap { $0 as? NSButton }.first {
+            $0.action == NSSelectorFromString("replaceAllPressed")
+        })
+        replaceAll.performClick(nil)
+        #expect(queries.last?.options.scope == .allOpenDocuments)
+        panel.present(OpenDocumentsReplacementResult(documents: [
+            .init(tabID: TabID(), title: "한글_문서.txt", status: .replaced(12)),
+            .init(tabID: TabID(), title: "readonly.json", status: .readOnly),
+            .init(tabID: TabID(), title: "new 1", status: .noChanges)
+        ], wasCancelled: false))
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(panel.numberOfRows(in: NSTableView()) == 3)
+        let field = try #require(descendants(panel).first { $0.accessibilityIdentifier() == "duckpad.search.replace" } as? NSTextField)
+        let caption = try #require(descendants(panel).first { $0.accessibilityIdentifier() == "duckpad.search.label.Replace with" } as? NSTextField)
+        #expect(caption.stringValue == LocalizationCatalog(language: language).text("Replace with"))
+        #expect(caption.bounds.width >= caption.intrinsicContentSize.width)
+        #expect(field.bounds.width >= 100)
+        for control in descendants(panel).compactMap({ $0 as? NSControl }) where !control.isHiddenOrHasHiddenAncestor {
+            let rect = control.convert(control.bounds, to: panel)
+            #expect(rect.minX >= -1 && rect.maxX <= panel.bounds.width + 1)
+        }
+        if let directory = ProcessInfo.processInfo.environment["DUCKPAD_REPLACE_SNAPSHOTS"] {
+            window.setContentSize(NSSize(width: 640, height: panel.fittingSize.height))
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.makeKeyAndOrderFront(nil)
+            window.displayIfNeeded()
+            let url = URL(fileURLWithPath: directory).appendingPathComponent("replace-\(language.rawValue).png")
+            let capture = Process()
+            capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), url.path]
+            try capture.run(); capture.waitUntilExit()
+            #expect(capture.terminationStatus == 0)
+        }
+    }
+
+    @Test func replacementProgressSurvivesEditorRefreshAndCancellation() async throws {
+        let panel = SearchPanelView(frame: .zero)
+        panel.refreshLocalization(catalog: LocalizationCatalog(language: .english))
+        panel.show(replace: true, selectedText: "duck")
+        panel.setSearchInProgress(true)
+        panel.present(OpenDocumentsReplacementResult(documents: [
+            .init(tabID: TabID(), title: "new 1", status: .replaced(2))
+        ], wasCancelled: false))
+        var refreshes = 0
+        panel.onIncrementalQuery = { _ in refreshes += 1 }
+        panel.refreshMatchesAfterDocumentChange()
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(refreshes == 0)
+        let cancel = try #require(descendants(panel).first { $0.accessibilityIdentifier() == "duckpad.search.cancel" } as? NSButton)
+        cancel.performClick(nil)
+        let status = try #require(descendants(panel).first { $0.accessibilityIdentifier() == "duckpad.search.status" } as? NSTextField)
+        #expect(status.stringValue.contains("Cancelled"))
+        #expect(status.stringValue.contains("Replacements: 2"))
+        #expect(panel.numberOfRows(in: NSTableView()) == 1)
         panel.hide()
     }
 

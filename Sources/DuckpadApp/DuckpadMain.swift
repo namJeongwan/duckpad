@@ -209,7 +209,18 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             }
         }
 
-        if environment["DUCKPAD_PERFORMANCE_LAUNCH_SMOKE"] == "1" {
+        if environment["DUCKPAD_RIPGREP_SMOKE"] == "1", securityScopeSmokeNamespace != nil {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                do {
+                    try await RipgrepPackagedSmoke.run()
+                    fflush(stdout); Darwin._exit(0)
+                } catch {
+                    FileHandle.standardError.write(Data("Duckpad packaged ripgrep smoke failed: \(error)\n".utf8))
+                    Darwin._exit(1)
+                }
+            }
+        } else if environment["DUCKPAD_PERFORMANCE_LAUNCH_SMOKE"] == "1" {
             Task { @MainActor in
                 await controller.waitForStartup()
                 precondition(systemRecentDocumentReadCount == 0, "performance launch read system recent documents")
@@ -880,7 +891,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         )
         let folderSearchUseCase = FolderSearchUseCase(
             store: folderSearchStore,
-            regexEngine: ICURegexEngine()
+            regexEngine: ICURegexEngine(),
+            backend: RipgrepFolderSearchBackend.bundledExecutable.map { RipgrepFolderSearchBackend(executable: $0) }
         )
         let workspaceBrowserUseCase = WorkspaceBrowserUseCase(store: workspaceRootStore)
         let languageUseCase = LanguageWorkspaceUseCase(
@@ -935,6 +947,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             terminationCoordinator: terminationCoordinator,
             searchUseCase: searchUseCase,
             folderSearchUseCase: folderSearchUseCase,
+            folderFileNameIndex: LocalFolderFileNameIndex(),
             workspaceBrowserUseCase: workspaceBrowserUseCase,
             languageUseCase: languageUseCase,
             documentIntelligenceUseCase: documentIntelligenceUseCase,

@@ -1252,3 +1252,49 @@
 "Hide tab bar###HideTabBar" = "Hide tab bar###HideTabBar";
 "Hold SHIFT to enable Docking window." = "Hold SHIFT to enable Docking window.";
 "Click and drag to move or undock whole node." = "Click and drag to move or undock whole node.";
+"Scope" = "Scope";
+"Current document" = "Current document";
+"Use Find All or Replace All for all open documents." = "Use Find All or Replace All for all open documents.";
+"Replacing in open documents…" = "Replacing in open documents…";
+"No changes needed" = "No changes needed";
+"Skipped: read-only" = "Skipped: read-only";
+"Skipped: document unavailable" = "Skipped: document unavailable";
+"Skipped: document changed" = "Skipped: document changed";
+"Skipped: size or match limit" = "Skipped: size or match limit";
+"Not processed: cancelled" = "Not processed: cancelled";
+"Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@" = "Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@";
+"Cancelled · Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@" = "Cancelled · Replacements: %1$@ · Documents: %2$@ · Skipped: %3$@";
+"Skipped: search timed out" = "Skipped: search timed out";
+
+"Search Files" = "Search Files";
+"Search Files…" = "Search Files…";
+"Search files by name or path" = "Search files by name or path";
+"Files" = "Files";
+"↑↓ Select · ↵ Open · Esc Close" = "↑↓ Select · ↵ Open · Esc Close";
+"Indexing file names…" = "Indexing file names…";
+"No matching files" = "No matching files";
+"Showing %1$@ files · Index limit reached · Skipped items: %2$@" = "Showing %1$@ files · Index limit reached · Skipped items: %2$@";
+"Showing %1$@ files · Skipped items: %2$@" = "Showing %1$@ files · Skipped items: %2$@";
+"Replace in Files" = "Replace in Files";
+"Replace in Files…" = "Replace in Files…";
+"Folder" = "Folder";
+"Type to search in files" = "Type to search in files";
+"Changes stay unsaved in the editor. Undo is available in each document." = "Changes stay unsaved in the editor. Undo is available in each document.";
+"Double-click a result to open it. Searches use the same options as Find." = "Double-click a result to open it. Searches use the same options as Find.";
+"Match Preview" = "Match Preview";
+"Replace matches in %1$@ files?" = "Replace matches in %1$@ files?";
+"Open" = "Open";
+"Open in Find Window" = "Open in Find Window";
+"File mask:" = "File mask:";
+"Filename patterns separated by commas; * and ? are wildcards. Prefix ! to exclude." = "Filename patterns separated by commas; * and ? are wildcards. Prefix ! to exclude.";
+"Changes stay unsaved." = "Changes stay unsaved.";
+"File mask: %1$@" = "File mask: %1$@";
+"Open in Right Split" = "Open in Right Split";
+
+/* Streaming folder search */
+"Searching… %1$@ matches in %2$@ files" = "Searching… %1$@ matches in %2$@ files";
+"Matches: %1$@ · Files: %2$@ · Skipped: %3$@ · Showing first %4$@ matches" = "Matches: %1$@ · Files: %2$@ · Skipped: %3$@ · Showing first %4$@ matches";
+
+"All" = "All";
+
+"Workspace folders: %1$@" = "Workspace folders: %1$@";

@@ -267,7 +267,6 @@ public enum SearchEngine {
         guard let text = String(data: snapshot.utf8, encoding: .utf8) else { throw .invalidUTF8Range }
         let searchData = try SearchPatternCodec.patternData(for: query)
         guard let pattern = String(data: searchData, encoding: .utf8) else { throw .invalidUTF8Range }
-        let source = query.options.mode == .regularExpression ? pattern : escapedRegex(pattern)
         let literalReplacement = query.options.mode == .regularExpression
             ? nil
             : try SearchPatternCodec.replacementData(for: query)
@@ -277,7 +276,14 @@ public enum SearchEngine {
                 pattern: searchData, utf8: snapshot.utf8,
                 restrictTo: restriction, maximumMatches: limit
             )
+        } else if query.options.mode != .regularExpression, !query.options.matchCase,
+                  let foldedPattern = ASCIISearchFold.folded(searchData),
+                  let foldedText = ASCIISearchFold.folded(snapshot.utf8) {
+            rawMatches = try literalMatches(pattern: foldedPattern, utf8: foldedText,
+                restrictTo: restriction, maximumMatches: limit)
         } else {
+            guard !Task.isCancelled else { throw .cancelled }
+            let source = query.options.mode == .regularExpression ? pattern : escapedRegex(pattern)
             rawMatches = try regexEngine.matches(
                 pattern: source, utf8: snapshot.utf8,
                 matchCase: query.options.matchCase,
@@ -459,23 +465,28 @@ private struct SearchLineCursor {
 
     mutating func location(at offset: Int) -> (line: Int, column: Int, snippet: String) {
         let safe = min(max(0, offset), utf8.count)
-        while scannedOffset < safe {
-            if utf8[scannedOffset] == 0x0D {
-                if scannedOffset + 1 < safe, utf8[scannedOffset + 1] == 0x0A { scannedOffset += 1 }
-                lineNumber += 1
-                lineStart = scannedOffset + 1
-            } else if utf8[scannedOffset] == 0x0A {
-                lineNumber += 1
-                lineStart = scannedOffset + 1
+        // Scan one pinned buffer rather than calling Data's checked subscript for every byte.
+        let state = utf8.withUnsafeBytes { bytes in
+            var offset = scannedOffset, line = lineNumber, start = lineStart
+            while offset < safe {
+                if bytes[offset] == 0x0D {
+                    if offset + 1 < safe, bytes[offset + 1] == 0x0A { offset += 1 }
+                    line += 1; start = offset + 1
+                } else if bytes[offset] == 0x0A { line += 1; start = offset + 1 }
+                offset += 1
             }
-            scannedOffset += 1
+            return (offset, line, start)
         }
+        scannedOffset = state.0; lineNumber = state.1; lineStart = state.2
         let snippet: String
         if let cached = snippetCache[lineNumber] {
             snippet = cached
         } else {
-            var end = lineStart
-            while end < utf8.count, utf8[end] != 0x0A, utf8[end] != 0x0D { end += 1 }
+            let end = utf8.withUnsafeBytes { bytes in
+                var end = lineStart
+                while end < bytes.count, bytes[end] != 0x0A, bytes[end] != 0x0D { end += 1 }
+                return end
+            }
             snippet = Self.snippet(utf8[lineStart..<end])
             snippetCache[lineNumber] = snippet
         }
@@ -523,6 +534,8 @@ public final class SearchWorkspaceUseCase {
     private let generations = SearchGenerationCoordinator()
     private var scanTask: Task<SearchResultSet, any Error>?
     private var scanGeneration: UInt64?
+    private var openReplacementTask: Task<OpenDocumentsReplacementResult, any Error>?
+    private var openReplacementID: UUID?
     private var findTask: Task<SearchSelectionCandidate, any Error>?
     private var retainedSelection: RetainedSelection?
     private var lastFind: LastFind?
@@ -541,6 +554,7 @@ public final class SearchWorkspaceUseCase {
     }
 
     public func cancel() async {
+        openReplacementTask?.cancel()
         scanTask?.cancel()
         findTask?.cancel()
         scanTask = nil
@@ -553,6 +567,7 @@ public final class SearchWorkspaceUseCase {
         scanTask?.cancel()
         findTask?.cancel()
         let generation = await generations.begin()
+        guard try activeDocumentMatchesMask(query) else { return nil }
         let data = try SearchPatternCodec.patternData(for: query)
         guard data.count <= limits.maximumPatternBytes else {
             throw SearchFailure.patternTooLarge(actual: data.count, limit: limits.maximumPatternBytes)
@@ -669,7 +684,31 @@ public final class SearchWorkspaceUseCase {
         return found
     }
 
-    public func findAll(_ query: SearchQuery) async throws -> SearchResultSet {
+    func previewCapture(for match: SearchMatch) -> EditorRecoveryCapture? {
+        guard workspace.fileContext(tabID: match.tabID)?.buffer == .init(bufferID: match.bufferID, revision: match.revision),
+              let capture = editor.recoveryCapture(for: match.bufferID), capture.revision == match.revision else { return nil }
+        let limit = 8 * 1_024 * 1_024
+        var count = capture.baseUTF8.count
+        guard count <= limit else { return nil }
+        for delta in capture.deltas {
+            guard delta.range.location >= 0, delta.range.length >= 0, delta.range.location <= count,
+                  delta.range.length <= count - delta.range.location, delta.replacementUTF8.count <= limit else { return nil }
+            count = count - delta.range.length + delta.replacementUTF8.count
+            guard count <= limit else { return nil }
+        }
+        return capture
+    }
+
+    public func findAll(_ query: SearchQuery, only tabIDs: Set<TabID>? = nil, budget: FolderSearchLimits? = nil) async throws -> SearchResultSet {
+        var limits = self.limits
+        if let budget {
+            limits.maximumMatches = min(limits.maximumMatches, budget.maximumMatches)
+            limits.maximumDocumentBytes = min(limits.maximumDocumentBytes, budget.maximumDocumentBytes)
+            limits.maximumRegularExpressionBytes = min(limits.maximumRegularExpressionBytes, budget.maximumRegularExpressionBytes)
+            limits.maximumResultBytes = min(limits.maximumResultBytes, budget.maximumResultBytes)
+            limits.maximumPatternBytes = min(limits.maximumPatternBytes, budget.maximumPatternBytes)
+            guard budget.maximumFiles > 0, budget.maximumTotalBytes > 0 else { throw SearchFailure.invalidLimits }
+        }
         guard limits.maximumDocumentBytes > 0, limits.maximumMatches > 0,
               limits.maximumMatches <= 100_000, limits.maximumConcurrentDocuments > 0,
               limits.maximumConcurrentDocuments <= 16, limits.maximumPatternBytes > 0,
@@ -681,6 +720,7 @@ public final class SearchWorkspaceUseCase {
         guard patternBytes <= limits.maximumPatternBytes else {
             throw SearchFailure.patternTooLarge(actual: patternBytes, limit: limits.maximumPatternBytes)
         }
+        _ = try SearchPatternCodec.patternData(for: query)
         scanTask?.cancel()
         findTask?.cancel()
         let generation = await generations.begin()
@@ -689,33 +729,54 @@ public final class SearchWorkspaceUseCase {
         let tabs = query.options.scope == .allOpenDocuments
             ? workspaceSnapshot.tabs
             : workspaceSnapshot.tabs.filter(\.isActive)
+        let fileMask = try query.fileMask.map { try SearchFileMask($0) }
         var captures: [SearchCaptureDescriptor] = []
+        var missingCapture = false
         for tab in tabs {
-            guard let capture = editor.recoveryCapture(for: tab.buffer.bufferID) else { continue }
+            guard tabIDs?.contains(tab.id) ?? true else { continue }
+            guard fileMask?.matches(tab.fullPath ?? tab.title) ?? true else { continue }
+            guard let capture = editor.recoveryCapture(for: tab.buffer.bufferID) else { missingCapture = true; continue }
             captures.append(SearchCaptureDescriptor(
                 tabID: tab.id,
                 title: tab.title,
                 capture: capture, generatedTitle: tab.generatedTitle
             ))
         }
-        let limits = limits
+        let scanLimits = limits
+        let incompleteCaptures = missingCapture
         let regexEngine = regexEngine
         let task = Task.detached(priority: .userInitiated) {
+            if query.options.mode == .regularExpression {
+                _ = try regexEngine.matches(pattern: query.pattern, utf8: Data(), matchCase: query.options.matchCase,
+                    dotMatchesNewline: query.options.dotMatchesNewline, restrictTo: nil, maximumMatches: 1)
+            }
             var documents: [SearchDocumentResult] = []
-            var remaining = limits.maximumMatches
-            var searchedBytes = 0
-            var truncated = false
-            var remainingResultBytes = limits.maximumResultBytes
+            var remaining = scanLimits.maximumMatches
+            var searchedBytes = 0, searchedDocuments = 0
+            var truncated = budget != nil && (incompleteCaptures || scanLimits.maximumResultBytes < SearchResultBudget.baseBytes)
+            var remainingResultBytes = max(0, scanLimits.maximumResultBytes - (budget == nil ? 0 : SearchResultBudget.baseBytes))
             for (index, descriptor) in captures.enumerated() {
                 if Task.isCancelled { throw SearchFailure.cancelled }
+                if searchedDocuments >= (budget?.maximumFiles ?? Int.max) { truncated = true; break }
+                let availableBytes = min(scanLimits.maximumDocumentBytes, (budget?.maximumTotalBytes ?? Int.max) - searchedBytes)
+                var count = descriptor.capture.baseUTF8.count
+                var bounded = count <= availableBytes
+                for delta in descriptor.capture.deltas {
+                    guard bounded, delta.range.location >= 0, delta.range.length >= 0,
+                          delta.range.location <= count, delta.range.length <= count - delta.range.location else { bounded = false; break }
+                    count -= delta.range.length
+                    guard delta.replacementUTF8.count <= availableBytes - count else { bounded = false; break }
+                    count += delta.replacementUTF8.count
+                }
+                guard bounded else { truncated = true; continue }
                 let materialized = try descriptor.capture.materializedSnapshot()
-                if materialized.utf8.count > limits.maximumDocumentBytes
+                if materialized.utf8.count > scanLimits.maximumDocumentBytes
                     || (query.options.mode == .regularExpression
-                        && materialized.utf8.count > limits.maximumRegularExpressionBytes) {
+                        && materialized.utf8.count > scanLimits.maximumRegularExpressionBytes) {
                     truncated = true
                     continue
                 }
-                searchedBytes += materialized.utf8.count
+                searchedBytes += materialized.utf8.count; searchedDocuments += 1
                 let snapshot = SearchBufferSnapshot(
                     tabID: descriptor.tabID,
                     title: descriptor.title,
@@ -729,21 +790,30 @@ public final class SearchWorkspaceUseCase {
                     limit: remaining + 1, regexEngine: regexEngine,
                     maximumResultBytes: remainingResultBytes
                 )
-                remainingResultBytes -= min(remainingResultBytes, foundScan.resultBytes)
                 let found = foundScan.matches
-                let accepted = Array(found.prefix(remaining))
+                var accepted: [SearchMatch] = []
+                if budget != nil {
+                    for match in found.prefix(remaining) {
+                        let needed = SearchResultBudget.matchBytes(match) + (accepted.isEmpty ? SearchResultBudget.documentBytes(title: descriptor.title) : 0)
+                        guard needed <= remainingResultBytes else { truncated = true; break }
+                        accepted.append(match); remainingResultBytes -= needed
+                    }
+                } else {
+                    remainingResultBytes -= min(remainingResultBytes, foundScan.resultBytes)
+                    accepted = Array(found.prefix(remaining))
+                }
                 if !accepted.isEmpty {
                     documents.append(SearchDocumentResult(tabID: descriptor.tabID, title: descriptor.title, matches: accepted, generatedTitle: descriptor.generatedTitle))
                 }
                 remaining -= accepted.count
                 if !foundScan.isComplete || found.count > accepted.count || remaining == 0 {
-                    truncated = !foundScan.isComplete || found.count > accepted.count || index + 1 < captures.count
+                    truncated = truncated || !foundScan.isComplete || found.count > accepted.count || index + 1 < captures.count
                     break
                 }
             }
             return SearchResultSet(
                 generation: generation, documents: documents,
-                isTruncated: truncated, searchedByteCount: searchedBytes
+                isTruncated: truncated, searchedByteCount: searchedBytes, searchedDocumentCount: searchedDocuments
             )
         }
         scanTask = task
@@ -773,6 +843,7 @@ public final class SearchWorkspaceUseCase {
             throw SearchFailure.patternTooLarge(actual: query.replacement.utf8.count, limit: limits.maximumReplacementBytes)
         }
         await workspace.waitForPendingPersistence()
+        guard try activeDocumentMatchesMask(query) else { return nil }
         guard let active = workspace.snapshot().activeBuffer else { return nil }
         let fixedSelectionScope = try selectionRestriction(for: query)
         let selection = editor.activeSelectionUTF8Range()
@@ -848,12 +919,34 @@ public final class SearchWorkspaceUseCase {
         return try await find(query)
     }
 
+    public func replaceAllOpenDocuments(
+        _ query: SearchQuery,
+        only tabIDs: Set<TabID>? = nil,
+        expectedRevisions: [BufferID: UInt64]? = nil,
+        expectedDocuments: [SearchDocumentResult] = [],
+        expectedRanges: [BufferID: Set<SearchUTF8Range>]? = nil,
+        onProgress: ((OpenDocumentsReplacementResult) -> Void)? = nil
+    ) async throws -> OpenDocumentsReplacementResult {
+        openReplacementTask?.cancel()
+        let operation = UUID()
+        openReplacementID = operation
+        let useCase = OpenDocumentsReplaceUseCase(workspace: workspace, editor: editor,
+            regexEngine: regexEngine, limits: limits)
+        let task = Task { try await useCase.replaceAll(query, only: tabIDs, expectedRevisions: expectedRevisions, expectedDocuments: expectedDocuments, expectedRanges: expectedRanges, onProgress: onProgress) }
+        openReplacementTask = task
+        defer {
+            if openReplacementID == operation { openReplacementTask = nil; openReplacementID = nil }
+        }
+        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
+
     public func replaceAll(_ query: SearchQuery) async throws -> Int {
         guard query.options.scope != .allOpenDocuments else { throw SearchFailure.invalidLimits }
         guard query.replacement.utf8.count <= limits.maximumReplacementBytes else {
             throw SearchFailure.patternTooLarge(actual: query.replacement.utf8.count, limit: limits.maximumReplacementBytes)
         }
         await workspace.waitForPendingPersistence()
+        guard try activeDocumentMatchesMask(query) else { return 0 }
         guard let tab = workspace.snapshot().tabs.first(where: \.isActive),
               let capture = editor.recoveryCapture(for: tab.buffer.bufferID) else { return 0 }
         let snapshot = try await Task.detached(priority: .userInitiated) {
@@ -1003,6 +1096,13 @@ public final class SearchWorkspaceUseCase {
             }
         }
         return SearchResultSet(generation: generation, documents: documents, isTruncated: truncated, searchedByteCount: byteCount)
+    }
+
+    private func activeDocumentMatchesMask(_ query: SearchQuery) throws -> Bool {
+        guard let pattern = query.fileMask else { return true }
+        let mask = try SearchFileMask(pattern)
+        guard let tab = workspace.snapshot().tabs.first(where: \.isActive) else { return false }
+        return mask.matches(tab.fullPath ?? tab.title)
     }
 
     private func selectionRestriction(for query: SearchQuery) throws(SearchFailure) -> SearchUTF8Range? {
