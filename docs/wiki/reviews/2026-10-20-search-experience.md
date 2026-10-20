@@ -389,3 +389,23 @@ ad-hoc signed). Package build, verification and isolated smoke checks pass in
 `/tmp/duckpad-file-tabs-{package,verify,smoke}.log`; native save-panel automation is
 explicitly SKIP. The prior task app was normally quit and the corrected tab-style
 bundle launched. No commit, push or release was performed.
+
+
+## Release hold: long-result row clipping
+
+The user paused publication after PR #86 merged as `44d9a75`, before any v0.14.0 tag or release was published. The in-progress universal build was stopped. A follow-up lives on `fix/search-result-clipping`; publication remains paused.
+
+A native layout regression reproduces long highlighted JSON labels growing to 240 pt inside a 26 pt result row (`/tmp/duckpad-result-clipping-before.log`, failed). Both content and filename result cells now constrain their labels to 18 pt, use single-line cells, and clip each label layer. Display-only newline/tab separators become spaces; original tooltips, accessibility text, filenames, paths and search targets are retained. Attributed strings explicitly carry the appropriate tail/middle truncation paragraph style, so long text ends in an ellipsis rather than being abruptly cut off.
+
+The final focused run passes ten distinct functions across SearchResultLayoutTests, SearchOptionInteractionTests and FileNameSearchDesignTests (`/tmp/duckpad-result-clipping-verified.log`). Layout cases cover 420/720 pt content rows, long Korean/JSON strings, embedded separators and long filename/directory/project labels. Four light/dark raster captures are in `/tmp/duckpad-result-clipping-snapshots`; the 720 pt dark and 420 pt light views were inspected. An initial filename test used the cell as an unconstrained window content view and let AppKit grow the window; its fixture now uses fixed table-like row dimensions. This correction does not relax the boundary assertions.
+
+
+## Final discovery-budget follow-up and resumed release
+
+The user resumed release authorization after limiting this follow-up to search failures; structured error reporting and shared hidden-file options remain next tasks in the workflow roadmap. Usage-statistics behavior is unchanged and no server-receipt claim is made.
+
+The registered workspace currently emits 518,753 discovered filenames / 97,371,205 bytes with the pinned helper. A deterministic pre-fix regression failed with `enumerationFailed("ripgrep output limit exceeded")` (`/tmp/duckpad-discovery-budget-before.log`). The 32 MiB stream budget previously threw the same failure category that presentation mapped to an unavailable folder. The normal unmasked packaged workspace scan could also stop earlier at its input budget; this was not a claim that every search of this root fails.
+
+`RipgrepProcess` now returns a structured exit with an explicit discovery-limit flag. Crossing the output cap stops and reaps only that child, drains without retaining more data, and preserves records/matches already confirmed. Content and filename backends propagate the flag as `isTruncated`; the result list and existing replacement gates remain authoritative. Cancellation, deadlines, malformed records, genuine process failures and root-identity validation remain failures. Generic enumeration errors no longer falsely instruct the user to reselect an otherwise available root.
+
+The final focused run has terminal PASS for 30 distinct functions across eight suites (`/tmp/duckpad-search-release-final-tests.log`): content discovery/ignore rules/Unicode/ranges, bounded and retained results, cancellation/deadlines, filename authority, clipping/ellipsis, option state, completed-truncated replacement guards, and project scope/budget boundaries. The retained-match fixture gives the native matcher a valid file before exceeding the stream budget. The opt-in packaged workspace smoke uses a copied bookmark archive and isolated recovery namespace; it exercises ordinary and no-match-mask scans, asserting the masked scan has zero matches and, when requested, explicit truncation. Final universal artifact and actual-workspace smoke outcomes are recorded in the public release body after verification.

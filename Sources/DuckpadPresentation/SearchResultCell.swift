@@ -14,7 +14,15 @@ final class SearchResultCell: NSTableCellView {
         textField = title; imageView = icon
         title.font = .systemFont(ofSize: 13)
         for field in [directory, project] { field.font = .systemFont(ofSize: 12); field.textColor = .secondaryLabelColor }
-        for field in [title, directory, project] { field.lineBreakMode = .byTruncatingMiddle }
+        for field in [title, directory, project] {
+            field.maximumNumberOfLines = 1
+            field.cell?.usesSingleLineMode = true
+            field.cell?.wraps = false
+            field.lineBreakMode = .byTruncatingMiddle
+            field.wantsLayer = true
+            field.layer?.masksToBounds = true
+            field.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        }
         directory.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         project.alignment = .right
         for view in [title, directory, project, icon] { view.translatesAutoresizingMaskIntoConstraints = false; addSubview(view) }
@@ -35,8 +43,11 @@ final class SearchResultCell: NSTableCellView {
 
     func apply(title: String, detail: String, project: String? = nil, query: String = "") {
         filename = title; refreshIcon()
-        let text = NSMutableAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor])
-        let source = title as NSString
+        let displayTitle = String(title.map { $0.isNewline || $0 == "\t" ? " " : $0 })
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingMiddle
+        let text = NSMutableAttributedString(string: displayTitle, attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph])
+        let source = displayTitle as NSString
         for term in query.split(whereSeparator: \.isWhitespace) {
             var offset = 0
             while offset < source.length {

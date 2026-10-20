@@ -44,6 +44,21 @@ struct SearchStreamingTests {
         #expect(panel.rows.first?.title == "complete")
         #expect(apply.isEnabled)
     }
+    @Test func completedTruncatedResultsRemainVisibleWithoutEnablingReplacement() async throws {
+        _ = NSApplication.shared
+        let panel = MultiFileSearchController(); panel.present(replace: true, in: nil)
+        defer { panel.dismiss() }
+        panel.onSearch = { _, _ in result("bounded", incomplete: true) }
+        panel.setQuery(.init(pattern: "test")); panel.searchPressed()
+        let root = try #require(panel.window?.contentView)
+        let open = try #require(views(root).first { $0.accessibilityIdentifier() == "duckpad.multifile.openResults" } as? NSButton)
+        try await wait { open.isEnabled }
+        #expect(panel.rows.first?.title == "bounded")
+        for identifier in ["duckpad.multifile.apply", "duckpad.multifile.replaceOne"] {
+            let button = try #require(views(root).first { $0.accessibilityIdentifier() == identifier } as? NSButton)
+            #expect(!button.isEnabled)
+        }
+    }
     @Test func restartingTheSameQueryRejectsOldProgressAndClosingRejectsAllProgress() async throws {
         let panel = MultiFileSearchController()
         var callbacks: [MultiFileSearchController.Progress] = []

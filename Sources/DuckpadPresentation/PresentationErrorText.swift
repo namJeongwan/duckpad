@@ -28,7 +28,8 @@ enum PresentationErrorText {
             switch failure {
             case .search(let nested): return message(nested, catalog: catalog)
             case .accessDenied: return catalog.text("Permission denied. Open the file or folder again to restore access.")
-            case .invalidRoot, .enumerationFailed: return catalog.text("The folder is unavailable. Choose it again.")
+            case .invalidRoot: return catalog.text("The folder is unavailable. Choose it again.")
+            case .enumerationFailed: return catalog.text("The file or folder operation could not be completed.")
             case .invalidLimits: return catalog.text("The operation exceeds the supported size or complexity limit.")
             }
         case let failure as WorkspaceBrowserFailure:

@@ -52,7 +52,8 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
                 guard let name = String(data: record, encoding: .utf8) else { throw FolderSearchFailure.enumerationFailed("unsupported file name") }
                 return try admit(name.hasPrefix("./") ? String(name.dropFirst(2)) : name)
             }
-            guard status == 0 || status == 1 else { throw FolderSearchFailure.enumerationFailed("filename enumeration failed") }
+            if status.outputLimitReached { truncated = true }
+            guard status.status == 0 || status.status == 1 else { throw FolderSearchFailure.enumerationFailed("filename enumeration failed") }
         } else {
             // Foundation enumeration exposes /private/var even when URL normalization
             // presents the selected root as /var. Derive relative names from realpath.

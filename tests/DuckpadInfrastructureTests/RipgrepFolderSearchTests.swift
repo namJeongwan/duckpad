@@ -110,6 +110,39 @@ struct RipgrepFolderSearchTests {
         try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("link"), withDestinationURL: root)
         #expect(access.open("link/source.txt") == nil)
     }
+    @Test func discoveryOutputBudgetStopsNormallyInsteadOfFailingTheSearch() throws {
+        let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
+        let access = try FolderSearchRoot(path: root.path)
+        let process = RipgrepProcess(executable: URL(fileURLWithPath: "/usr/bin/printf"), timeout: .seconds(2))
+        let status = try process.run(arguments: [String(repeating: "entry\\0", count: 256)], directory: access.descriptor,
+                                     maximumOutputBytes: 64) { _ in true }
+        #expect(status.status == 0)
+        #expect(status.outputLimitReached)
+    }
+    @Test func maskedDiscoveryBudgetReturnsAnExplicitlyTruncatedResult() async throws {
+        let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
+        for index in 0..<100 { try Data("needle".utf8).write(to: root.appendingPathComponent("source-\(index).txt")) }
+        let backend = RipgrepFolderSearchBackend(executable: executable, maximumDiscoveryBytes: 64)
+        let result = try await FolderSearchUseCase(store: LocalFolderSearchFileStore(), regexEngine: ICURegexEngine(), backend: backend)
+            .search(rootPath: root.path, query: .init(pattern: "needle", fileMask: "*.absent"))
+        #expect(result.isTruncated)
+        #expect(result.matchCount == 0)
+        #expect(result.searchedFileCount == 0)
+    }
+    @Test func confirmedMatchesSurviveDiscoveryOutputTruncation() async throws {
+        let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
+        try Data("needle".utf8).write(to: root.appendingPathComponent("source.txt"))
+        let helper = root.appendingPathComponent("discovery.sh")
+        let script = "#!/bin/sh\nprintf 'source.txt\\0'\n/bin/sleep 0.05\nprintf '" + String(repeating: "source.txt\\0", count: 256) + "'\n"
+        try Data(script.utf8).write(to: helper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
+        let backend = RipgrepFolderSearchBackend(executable: helper, maximumDiscoveryBytes: 64)
+        let result = try await FolderSearchUseCase(store: LocalFolderSearchFileStore(), regexEngine: ICURegexEngine(), backend: backend)
+            .search(rootPath: root.path, query: .init(pattern: "needle"))
+        #expect(result.isTruncated)
+        #expect(result.matchCount == 1)
+        #expect(result.documents.map(\.relativePath) == ["source.txt"])
+    }
     @Test func deadlinesAndMalformedOutputFailWithoutHanging() throws {
         let root = try root(); defer { try? FileManager.default.removeItem(at: root) }
         let access = try FolderSearchRoot(path: root.path)
@@ -119,12 +152,8 @@ struct RipgrepFolderSearchTests {
         catch let failure as FolderSearchFailure { #expect(failure == .search(.timedOut)) }
         #expect(start.duration(to: .now) < .seconds(1))
         let bounded = RipgrepProcess(executable: URL(fileURLWithPath: "/usr/bin/printf"), timeout: .seconds(2))
-        do {
-            _ = try bounded.run(arguments: [String(repeating: "x", count: 4096)], directory: access.descriptor, maximumOutputBytes: 64) { _ in true }
-            Issue.record("expected output cap")
-        } catch let failure as FolderSearchFailure {
-            if case .enumerationFailed = failure {} else { Issue.record("unexpected failure") }
-        }
+        let exit = try bounded.run(arguments: [String(repeating: "x", count: 4096)], directory: access.descriptor, maximumOutputBytes: 64) { _ in true }
+        #expect(exit.status == 0 && exit.outputLimitReached)
         let malformed = RipgrepProcess(executable: URL(fileURLWithPath: "/usr/bin/printf"), timeout: .seconds(2))
         do { _ = try malformed.run(arguments: ["unterminated"], directory: access.descriptor) { _ in true }; Issue.record("expected incomplete record failure") }
         catch let failure as FolderSearchFailure { if case .enumerationFailed = failure {} else { Issue.record("unexpected failure") } }

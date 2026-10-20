@@ -93,3 +93,9 @@ refresh remains shared with the other search inputs.
 The filename popup keeps its original wide tab appearance for the four scopes:
 separate text tabs with hover feedback and a highlighted active tab. Project
 content search retains its compact selector; both use the same scope semantics.
+
+
+## Next tasks after 0.14.0
+
+- Add bounded, structured error diagnostics for search and other user-visible failures. Reuse the usage-sharing preference; send only stable error/feature codes and app/build versions, never document contents, search queries, filesystem paths, credentials or raw error descriptions. Make delivery state visible and verify version-change event delivery separately.
+- Add a persistent hidden-file visibility option shared by the workspace tree, folder content search and filename search. Define interaction with ignore files explicitly, refresh existing views/indexes on changes, and retain path, symlink, package and resource limits.

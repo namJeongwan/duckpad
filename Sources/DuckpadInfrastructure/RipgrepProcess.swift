@@ -5,6 +5,10 @@ import Foundation
 /// Each search owns its child PIDs. Signalling and reaping share one lock so a
 /// cancelled request can never signal a PID that has already been reused.
 final class RipgrepProcess: @unchecked Sendable {
+    struct Exit: Equatable {
+        let status: Int32
+        let outputLimitReached: Bool
+    }
     private let lock = NSLock()
     private var children: Set<pid_t> = []
     private var cancelled = false
@@ -43,7 +47,7 @@ final class RipgrepProcess: @unchecked Sendable {
     /// Returning false stops this child normally (for an explicit result/input cap).
     func run(arguments: [String], directory: Int32,
              maximumOutputBytes: Int = 32 * 1_024 * 1_024,
-             onRecord: (Data) throws -> Bool) throws -> Int32 {
+             onRecord: (Data) throws -> Bool) throws -> Exit {
         try check()
         var pipeFDs: [Int32] = [0, 0]
         guard pipe(&pipeFDs) == 0 else { throw FolderSearchFailure.enumerationFailed("ripgrep pipe unavailable") }
@@ -92,6 +96,7 @@ final class RipgrepProcess: @unchecked Sendable {
         }
         var pending = Data(), outputBytes = 0
         var buffer = [UInt8](repeating: 0, count: 16 * 1_024)
+        var outputLimitReached = false
         var stopped = false, stopTime: ContinuousClock.Instant?, eof = false
         while !eof {
             try check()
@@ -99,9 +104,14 @@ final class RipgrepProcess: @unchecked Sendable {
             _ = Darwin.poll(&pollFD, 1, 20)
             let count = buffer.withUnsafeMutableBytes { Darwin.read(pipeFDs[0], $0.baseAddress, $0.count) }
             if count > 0 {
-                outputBytes += count
-                guard outputBytes <= maximumOutputBytes else { throw FolderSearchFailure.enumerationFailed("ripgrep output limit exceeded") }
+                // A discovery budget yields incomplete results, not an I/O failure.
+                // After stopping, drain without retaining or counting child output.
+                if !stopped && count > maximumOutputBytes - outputBytes {
+                    outputLimitReached = true; stopped = true; stopTime = .now
+                    signal(pid, SIGTERM); pending.removeAll(keepingCapacity: false)
+                }
                 if !stopped {
+                    outputBytes += count
                     pending.append(buffer, count: count)
                     var start = pending.startIndex
                     while let end = pending[start...].firstIndex(of: 0) {
@@ -129,8 +139,8 @@ final class RipgrepProcess: @unchecked Sendable {
         reaped = true
         try check()
         guard stopped || pending.isEmpty else { throw FolderSearchFailure.enumerationFailed("ripgrep returned an incomplete path") }
-        if stopped { return 0 }
+        if stopped { return Exit(status: 0, outputLimitReached: outputLimitReached) }
         guard status & 0x7F == 0 else { throw FolderSearchFailure.enumerationFailed("ripgrep exited unexpectedly") }
-        return (status >> 8) & 0xFF
+        return Exit(status: (status >> 8) & 0xFF, outputLimitReached: false)
     }
 }
