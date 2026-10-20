@@ -58,5 +58,21 @@ enum RipgrepPackagedSmoke {
         }
         print("DUCKPAD_RIPGREP_READY signed sandbox discovery + ignore rules + native immutable reads + UTF-16 + ICU regex")
     }
+    static func runWorkspace(store: LocalWorkspaceRootStore, expectDiscoveryLimit: Bool) async throws {
+        let roots = try await store.loadRoots()
+        guard let helper = RipgrepFolderSearchBackend.bundledExecutable,
+              !roots.isEmpty, roots.allSatisfy(\.isAvailable) else { throw SmokeFailure.missingHelper }
+        let search = FolderSearchUseCase(store: LocalFolderSearchFileStore(), regexEngine: ICURegexEngine(),
+            backend: RipgrepFolderSearchBackend(executable: helper))
+        for root in roots {
+            for query in [SearchQuery(pattern: "desc"), SearchQuery(pattern: "desc", fileMask: "*.duckpad-missing-regression")] {
+                let result = try await search.search(rootPath: root.canonicalPath, query: query)
+                if query.fileMask != nil {
+                    guard result.matchCount == 0, !expectDiscoveryLimit || result.isTruncated else { throw SmokeFailure.incorrectResults }
+                }
+                print("DUCKPAD_RG_WORKSPACE_READY masked=\(query.fileMask != nil) matches=\(result.matchCount) files=\(result.searchedFileCount) truncated=\(result.isTruncated)")
+            }
+        }
+    }
     private enum SmokeFailure: Error { case missingHelper, incorrectResults }
 }

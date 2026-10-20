@@ -9,9 +9,11 @@ public struct RipgrepFolderSearchBackend: FolderSearchBackend {
     public let executable: URL
     private let regexEngine: any RegexEnginePort
     private let timeout: Duration
+    private let maximumDiscoveryBytes: Int
 
-    public init(executable: URL, regexEngine: any RegexEnginePort = ICURegexEngine(), timeout: Duration = .seconds(30)) {
+    public init(executable: URL, regexEngine: any RegexEnginePort = ICURegexEngine(), timeout: Duration = .seconds(30), maximumDiscoveryBytes: Int = 32 * 1_024 * 1_024) {
         self.executable = executable; self.regexEngine = regexEngine; self.timeout = timeout
+        self.maximumDiscoveryBytes = maximumDiscoveryBytes
     }
     public static var bundledExecutable: URL? {
         let url = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/rg")
@@ -20,6 +22,7 @@ public struct RipgrepFolderSearchBackend: FolderSearchBackend {
     }
     public func search(rootPath: String, query: SearchQuery, limits: FolderSearchLimits, excluding: FolderSearchExclusions,
                        onProgress: FolderSearchProgress?) async throws(FolderSearchFailure) -> FolderSearchResultSet {
+        guard maximumDiscoveryBytes > 0 else { throw .invalidLimits }
         let process = RipgrepProcess(executable: executable, timeout: timeout)
         let worker = Task.detached(priority: .userInitiated) {
             try self.searchBlocking(rootPath: rootPath, query: query, limits: limits, excluding: excluding, process: process, onProgress: onProgress)
@@ -82,7 +85,7 @@ public struct RipgrepFolderSearchBackend: FolderSearchBackend {
             progress()
         }
         if truncated { return result(incomplete: false) }
-        let status = try process.run(arguments: ["--no-config", "--no-messages", "--no-ignore-global", "--no-ignore-parent", "--no-require-git", "--files", "--null", "."], directory: root.descriptor) { record in
+        let status = try process.run(arguments: ["--no-config", "--no-messages", "--no-ignore-global", "--no-ignore-parent", "--no-require-git", "--files", "--null", "."], directory: root.descriptor, maximumOutputBytes: maximumDiscoveryBytes) { record in
             try process.check()
             guard let emitted = String(data: record, encoding: .utf8) else {
                 throw FolderSearchFailure.enumerationFailed("ripgrep returned an unsupported path")
@@ -105,7 +108,8 @@ public struct RipgrepFolderSearchBackend: FolderSearchBackend {
             try confirm(file)
             return !exhaustedResults
         }
-        if status != 0 && status != 1 { throw FolderSearchFailure.enumerationFailed("ripgrep could not enumerate the complete folder") }
+        if status.outputLimitReached { truncated = true }
+        if status.status != 0 && status.status != 1 { throw FolderSearchFailure.enumerationFailed("ripgrep could not enumerate the complete folder") }
         try root.validate(); try process.check()
         return result(incomplete: false)
     }

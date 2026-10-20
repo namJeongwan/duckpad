@@ -16,7 +16,17 @@ final class SearchResultLineCell: NSTableCellView {
         location.lineBreakMode = .byTruncatingMiddle
         location.alignment = .right
         textField = text
-        for view in [text, location] { view.translatesAutoresizingMaskIntoConstraints = false; addSubview(view) }
+        for field in [text, location] {
+            field.maximumNumberOfLines = 1
+            field.cell?.usesSingleLineMode = true
+            field.cell?.wraps = false
+            field.lineBreakMode = field === text ? .byTruncatingTail : .byTruncatingMiddle
+            field.wantsLayer = true
+            field.layer?.masksToBounds = true
+            field.heightAnchor.constraint(equalToConstant: 18).isActive = true
+            field.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(field)
+        }
         NSLayoutConstraint.activate([
             text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12), text.centerYAnchor.constraint(equalTo: centerYAnchor),
             text.trailingAnchor.constraint(lessThanOrEqualTo: location.leadingAnchor, constant: -18),
@@ -27,9 +37,13 @@ final class SearchResultLineCell: NSTableCellView {
     required init?(coder: NSCoder) { nil }
 
     func apply(title: String, detail: String, query: SearchQuery) {
-        let text = NSMutableAttributedString(string: title, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .foregroundColor: NSColor.labelColor])
+        // Snippets are display-only; keep embedded separators out of the row layout.
+        let displayTitle = String(title.map { $0.isNewline || $0 == "\t" ? " " : $0 })
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let text = NSMutableAttributedString(string: displayTitle, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph])
         if query.options.mode == .normal, !query.pattern.isEmpty {
-            let source = title as NSString
+            let source = displayTitle as NSString
             var position = 0
             while position < source.length {
                 let range = source.range(of: query.pattern, options: query.options.matchCase ? [] : .caseInsensitive,

@@ -214,6 +214,10 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 await controller.waitForStartup()
                 do {
                     try await RipgrepPackagedSmoke.run()
+                    if self.environment["DUCKPAD_RIPGREP_WORKSPACE_SMOKE"] == "1" {
+                        try await RipgrepPackagedSmoke.runWorkspace(store: self.workspaceRootStore,
+                            expectDiscoveryLimit: self.environment["DUCKPAD_RIPGREP_EXPECT_DISCOVERY_LIMIT"] == "1")
+                    }
                     fflush(stdout); Darwin._exit(0)
                 } catch {
                     FileHandle.standardError.write(Data("Duckpad packaged ripgrep smoke failed: \(error)\n".utf8))
