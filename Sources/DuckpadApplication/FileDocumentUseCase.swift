@@ -1274,6 +1274,7 @@ public final class FileDocumentUseCase {
                   workspace.fileContext(tabID: context.tabID)?.buffer == context.buffer else {
                 throw CancellationError()
             }
+            (editor as? any EditorSavePointPort)?.recordSavePoint(for: context.buffer.bufferID, revision: context.buffer.revision)
             conventionsUseCase?.documentOpened(context.buffer.bufferID)
             externalChanges.removeValue(forKey: context.tabID)
             onExternalChanges?()

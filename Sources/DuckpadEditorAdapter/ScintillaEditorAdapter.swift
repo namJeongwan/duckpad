@@ -66,7 +66,7 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
     }
     private var formatUndoActions: [BufferID: [Int: FormatUndoAction]] = [:]
     private var nextFormatUndoToken = 1
-    private var formatSavePoints = Set<BufferID>()
+    private var trustedSavePoints = Set<BufferID>()
 
     public func changeFileFormat(from: DocumentFileFormat, to: DocumentFileFormat,
                                  buffer: EditorBufferDescriptor, wasDirty: Bool) -> Bool {
@@ -76,7 +76,7 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
         let token = nextFormatUndoToken
         nextFormatUndoToken += 1
         formatUndoActions[buffer.bufferID, default: [:]][token] = .init(before: from, after: to)
-        if !wasDirty { formatSavePoints.insert(buffer.bufferID) }
+        if !wasDirty { trustedSavePoints.insert(buffer.bufferID) }
         guard editorView.addMetadataUndoAction(token, expectedRevision: buffer.revision) else {
             formatUndoActions[buffer.bufferID]?.removeValue(forKey: token)
             return false
@@ -235,16 +235,16 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
     }
 
     public func invalidateSavePoint(for bufferID: BufferID) {
-        formatSavePoints.remove(bufferID)
+        trustedSavePoints.remove(bufferID)
     }
 
     public func recordSavePoint(for bufferID: BufferID, revision: UInt64) {
         guard !isInvalidated else { return }
         guard currentRevision(for: bufferID) == revision else {
-            formatSavePoints.remove(bufferID)
+            trustedSavePoints.remove(bufferID)
             return
         }
-        if formatUndoActions[bufferID] != nil { formatSavePoints.insert(bufferID) }
+        trustedSavePoints.insert(bufferID)
         bufferViews[bufferID]?.recordSavePoint(atRevision: revision)
     }
 
@@ -572,7 +572,7 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
         guard !isInvalidated else { return }
         if !preservingUndo {
             formatUndoActions.removeValue(forKey: snapshot.bufferID)
-            formatSavePoints.remove(snapshot.bufferID)
+            trustedSavePoints.remove(snapshot.bufferID)
         }
         pendingTextLoads.removeValue(forKey: snapshot.bufferID)
         pendingBinaryViewStates.removeValue(forKey: snapshot.bufferID)
@@ -714,7 +714,7 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
 
     public func retire(bufferID: BufferID) {
         formatUndoActions.removeValue(forKey: bufferID)
-        formatSavePoints.remove(bufferID)
+        trustedSavePoints.remove(bufferID)
         if snippetBuffer == bufferID { cancelSnippet() }
         pendingTextLoads.removeValue(forKey: bufferID)
         binaryDocuments.removeValue(forKey: bufferID)
@@ -791,7 +791,7 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
 
     public func invalidate() {
         formatUndoActions.removeAll()
-        formatSavePoints.removeAll()
+        trustedSavePoints.removeAll()
         onFileFormatSavePointReached = nil
         cancelSnippet()
         guard !isInvalidated else { return }
@@ -2249,7 +2249,7 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
         editorView.onEdit = { [weak self] edit in self?.receive(edit, bufferID: bufferID) }
         editorView.onSavePointReached = { [weak self, weak editorView] in
             guard let self, let editorView, self.bufferViews[bufferID] === editorView,
-                  self.formatSavePoints.contains(bufferID), !self.isRecovering,
+                  self.trustedSavePoints.contains(bufferID), !self.isRecovering,
                   !self.pendingRecoveryBuffers.contains(bufferID) else { return }
             self.onFileFormatSavePointReached?(.init(bufferID: bufferID, revision: editorView.revision))
         }

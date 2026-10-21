@@ -26,10 +26,18 @@ public struct FolderFileNameIndex: Sendable {
 public protocol FolderFileNameIndexing: Sendable {
     func index(in folder: URL, maximumEntries: Int) async throws -> FolderFileNameIndex
     func index(in folder: URL, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex
+    func search(in folder: URL, query: String, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex
     func readFile(in folder: URL, root: FolderFileNameRoot, relativePath: String) async throws -> WorkspaceFileRead
 }
 
 public extension FolderFileNameIndexing {
+    func search(in folder: URL, query: String, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex {
+        let result = try await index(in: folder, maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles)
+        let pattern = FileNameQuery(query)
+        return .init(root: result.root, relativePaths: result.relativePaths.filter {
+            pattern.rank(name: URL(fileURLWithPath: $0).lastPathComponent, path: result.rootPath + "/" + $0) != nil
+        }, isTruncated: result.isTruncated, skippedCount: result.skippedCount)
+    }
     func index(in folder: URL, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex {
         try await index(in: folder, maximumEntries: maximumEntries)
     }

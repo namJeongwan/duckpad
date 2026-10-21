@@ -9,6 +9,8 @@ await build({ entryPoints: [path.join(root, 'clipboard.mjs')], bundle: true, for
   outfile: path.join(output, 'clipboard.js'), legalComments: 'eof' });
 await build({ entryPoints: [path.join(root, 'preview.mjs')], bundle: true, format: 'iife', target: 'safari16', minify: true,
   outfile: path.join(output, 'preview.js'), legalComments: 'eof' });
+await build({ entryPoints: [path.join(root, 'mermaid.mjs')], bundle: true, format: 'iife', target: 'safari16', minify: true,
+  outfile: path.join(output, 'mermaid.js'), legalComments: 'eof' });
 await cp(path.join(root, 'node_modules/katex/dist/fonts'), path.join(output, 'fonts'), { recursive: true });
 await cp(path.join(root, 'node_modules/katex/dist/katex.min.css'), path.join(output, 'katex.css'));
 await cp(path.join(root, 'node_modules/highlight.js/styles/github.css'), path.join(output, 'highlight.css'));

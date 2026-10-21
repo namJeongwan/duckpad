@@ -12,6 +12,7 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
     private let status = NSTextField(labelWithString: "")
     private let selectedPath = NSTextField(labelWithString: "")
     var onLoadRequest: ((ProjectSearchScope, URL?) async throws -> (entries: [FileNameSearchEntry], truncated: Bool, skipped: Int))?
+    var onSearchRequest: ((ProjectSearchScope, URL?, String) async throws -> (entries: [FileNameSearchEntry], truncated: Bool, skipped: Int))?
     var onChooseFolder: (() async -> URL?)?
     private let scope = NSStackView()
     private let scopeTabs = ProjectSearchScope.allCases.map { _ in SearchOptionButton() }
@@ -27,6 +28,7 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
     private let scroll = NSScrollView()
     private let dismissal = SearchPopupDismissal()
     private var task: Task<Void, Never>?
+    private var queryTask: Task<Void, Never>?
     private var filterTask: Task<Void, Never>?
     private var filterGeneration = UUID()
     private var generation = UUID()
@@ -153,9 +155,10 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
         path.hasPrefix(root == "/" ? "/" : root + "/")
     }
     func refreshIndex() { reloadScope() }
-    private func reloadScope() {
+    private func reloadScope(keepingResults: Bool = false) {
+        queryTask?.cancel(); queryTask = nil
         task?.cancel(); generation = UUID()
-        let selected = selectedScope, selectedFolder = folder
+        let selected = selectedScope, selectedFolder = folder, searchText = query.stringValue
         let folderPath = selectedFolder?.resolvingSymlinksInPath().standardizedFileURL.path
         let seed = initialEntries.filter { entry in
             switch selected {
@@ -165,7 +168,8 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
             case .folder: return folderPath.map { includes(entry.path, under: $0) } ?? false
             }
         }
-        entries = seed; truncated = false; skipped = 0
+        if !keepingResults { entries = seed }
+        truncated = false; skipped = 0
         loading = selected != .openDocuments && (selected != .folder || selectedFolder != nil)
         updateContext(); refilter()
         guard loading else { return }
@@ -174,7 +178,8 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
             guard let self else { return }
             do {
                 let indexed: (entries: [FileNameSearchEntry], truncated: Bool, skipped: Int)?
-                if let request = self.onLoadRequest { indexed = try await request(selected, selected == .folder ? selectedFolder : nil) }
+                if let request = self.onSearchRequest { indexed = try await request(selected, selected == .folder ? selectedFolder : nil, searchText) }
+                else if let request = self.onLoadRequest { indexed = try await request(selected, selected == .folder ? selectedFolder : nil) }
                 else if selected != .folder { indexed = try await self.onLoad?() }
                 else { indexed = nil }
                 guard !Task.isCancelled, self.generation == token else { return }
@@ -199,6 +204,7 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
     func dismiss(restoreFocus: Bool = true) {
         dismissal.stop()
         task?.cancel(); task = nil; generation = UUID()
+        queryTask?.cancel(); queryTask = nil
         filterTask?.cancel(); filterTask = nil; filterGeneration = UUID()
         guard let window else { return }
         let parent = window.parent
@@ -225,7 +231,17 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
         updateContext()
         updateStatus()
     }
-    func setQuery(_ value: String) { query.stringValue = value; refilter() }
+    func setQuery(_ value: String) { query.stringValue = value; queryChanged() }
+    private func queryChanged() {
+        refilter()
+        guard onSearchRequest != nil, selectedScope != .openDocuments else { return }
+        task?.cancel(); generation = UUID(); queryTask?.cancel()
+        queryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
+            guard !Task.isCancelled else { return }
+            self?.reloadScope(keepingResults: true)
+        }
+    }
     private func refilter() {
         filterTask?.cancel(); filterGeneration = UUID()
         let sourceEntries = entries
@@ -293,7 +309,7 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
         splitButton.isHidden = onOpenInSplit == nil; splitButton.isEnabled = selected != nil
     }
     func tableViewSelectionDidChange(_ notification: Notification) { updateSelection() }
-    @objc private func clearQuery() { query.stringValue = ""; refilter(); window?.makeFirstResponder(query) }
+    @objc private func clearQuery() { setQuery(""); window?.makeFirstResponder(query) }
     @objc private func activateInSplit() {
         guard results.indices.contains(table.selectedRow), let onOpenInSplit else { return }
         let entry = results[table.selectedRow]; dismiss(); onOpenInSplit(entry)
@@ -302,7 +318,7 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
         guard results.indices.contains(table.selectedRow) else { return }
         let result = results[table.selectedRow]; dismiss(); onOpen?(result)
     }
-    func controlTextDidChange(_ obj: Notification) { refilter() }
+    func controlTextDidChange(_ obj: Notification) { queryChanged() }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
         case #selector(NSResponder.moveDown(_:)), #selector(NSResponder.moveUp(_:)):

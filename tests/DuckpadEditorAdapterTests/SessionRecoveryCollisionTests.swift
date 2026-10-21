@@ -8,6 +8,28 @@ import Testing
 
 @Suite @MainActor
 struct SessionRecoveryCollisionTests {
+    @Test(arguments: [false, true])
+    func textUndoPreservesTheRecoveredBaselinesDirtyState(dirty: Bool) async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (_, firstEditor, first) = writer(root: root)
+        defer { firstEditor.invalidate() }
+        #expect(await first.start() == .saved)
+        if dirty { try #require(firstEditor.activeScintillaView).insertCommittedText("unsaved baseline") }
+        guard case .saved = await first.flush() else { Issue.record("recovery write failed"); return }
+        let (workspace, editor, recovery) = writer(root: root)
+        defer { editor.invalidate() }
+        #expect(await recovery.start() == .saved)
+        #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == dirty)
+        let view = try #require(editor.activeScintillaView)
+        view.beginGroupedUndo(); view.insertCommittedText("new edit "); view.endGroupedUndo()
+        #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == true)
+        view.undo()
+        #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == dirty)
+        view.redo()
+        #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == true)
+    }
     private func writer(root: URL) -> (ScratchWorkspaceUseCase, ScintillaEditorAdapter, SessionRecoveryUseCase) {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         let editor = ScintillaEditorAdapter()

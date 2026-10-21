@@ -393,6 +393,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceSidebar.onAddRoot = { [weak self] in self?.performAddWorkspaceFolder(nil) }
         workspaceSidebar.onRemoveRoot = { [weak self] id in self?.routeRemoveWorkspaceRoot(id) }
         workspaceSidebar.onOpenFile = { [weak self] entry in self?.routeOpenWorkspaceEntry(entry) }
+        workspaceSidebar.search.onLoad = { [weak self] query in
+            guard let self, self.workspaceInteractionsAreActionable, let browser = self.workspaceBrowserUseCase else { throw CancellationError() }
+            return try await browser.fileNameIndex(maximumEntries: 1_000, query: query)
+        }
         workspaceSidebar.onLoadChildren = { [weak self] rootID, path in
             self?.routeLoadWorkspaceChildren(rootID: rootID, relativeDirectory: path)
         }
@@ -561,6 +565,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         commandPalettePanel.dismiss()
         symbolOutlinePanel.dismiss()
         searchExperienceStorage?.tearDown()
+        workspaceSidebar.search.stop()
         searchExperienceStorage = nil
         commandBar.tearDown()
         extensionUseCase?.onStateChange = nil
@@ -1321,6 +1326,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             let navigation = workspaceSidebar.invalidateChildren()
             if case .ready = workspaceBrowserUseCase?.state { renderWorkspaceBrowser(.ready(navigation)) }
             else if let state = workspaceBrowserUseCase?.state { renderWorkspaceBrowser(state) }
+            workspaceSidebar.search.refresh()
         }
         fileUseCase?.setLiveReloadEnabled(settings.liveFileReloadEnabled)
         fileUseCase?.conventionsUseCase?.settingsDidChange(settings)
@@ -3921,6 +3927,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case .ready(let roots):
             workspaceSidebar.setInteractionsEnabled(workspaceInteractionsAreActionable)
             guard workspaceSidebar.apply(roots: roots) else { return }
+            workspaceSidebar.search.refresh()
             workspaceRestoreTask?.cancel()
             workspaceRestoreTask = Task { @MainActor [weak self] in
                 guard let self, let useCase = self.workspaceBrowserUseCase else { return }

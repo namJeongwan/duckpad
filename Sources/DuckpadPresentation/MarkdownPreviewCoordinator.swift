@@ -62,6 +62,7 @@ import DuckpadLocalization
         let nextBuffer = context.buffer
         let nextPath = context.binding?.canonicalPath
         guard buffer != nextBuffer || documentPath != nextPath else { return true }
+        let isInitialDocument = buffer?.bufferID != nextBuffer.bufferID
         documentPath = nextPath
         if buffer?.bufferID != nextBuffer.bufferID { panel.showMessage(L10n.text("Rendering preview…")) }
         buffer = nextBuffer
@@ -71,7 +72,9 @@ import DuckpadLocalization
             return true
         }
         task = Task { [weak self, weak panel] in
-            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            if !isInitialDocument {
+                do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            }
             guard let self, let panel, self.panel === panel,
                   self.workspace.activeFileContext()?.buffer == nextBuffer else { return }
             guard let capture = self.editor.recoveryCapture(for: nextBuffer.bufferID),

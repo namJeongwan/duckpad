@@ -137,7 +137,7 @@ final class MarkdownPreviewPanel: NSView, WKNavigationDelegate {
             // The async overload retains the receiver while JavaScript runs. A weak callback
             // lets closing the panel destroy its WKWebView even during a slow render.
             self.webView.callAsyncJavaScript(
-                "await window.duckpadRender(source, documentURL, plain); return true;",
+                "await window.duckpadRender(source, documentURL, plain, true); return true;",
                 arguments: ["source": source ?? L10n.text("Markdown preview could not be rendered."),
                             "documentURL": request.documentURL?.absoluteString ?? "",
                             "plain": request.plain || source == nil], in: nil, in: .page

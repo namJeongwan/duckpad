@@ -374,7 +374,8 @@ private final class FileEditorFake: EditorSavePointPort, EditorSelectionPort {
     let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
     workspace.onChange = { binding.render($0) }
     _ = await workspace.start()
-    editor.display(workspace.snapshot().activeBuffer!)
+    let initialBuffer = workspace.snapshot().activeBuffer!
+    editor.display(initialBuffer)
     _ = binding
     editor.replaceWith("저장🙂\r\n")
     let files = FileStoreFake()
@@ -385,7 +386,7 @@ private final class FileEditorFake: EditorSavePointPort, EditorSelectionPort {
     #expect(workspace.snapshot().tabs[0].title == url.lastPathComponent)
     #expect(workspace.snapshot().tabs[0].isDirty == false)
     #expect(await files.text(at: url) == "저장🙂\r\n")
-    #expect(editor.savePoints == [workspace.snapshot().activeBuffer!])
+    #expect(editor.savePoints == [initialBuffer, workspace.snapshot().activeBuffer!])
 }
 
 @Test @MainActor func externalModificationRequiresExplicitResolutionAndDoesNotOverwrite() async {
@@ -1166,7 +1167,8 @@ private actor FileSessionStoreFake: SessionStore {
     let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
     workspace.onChange = { binding.render($0) }
     _ = await workspace.start()
-    editor.display(workspace.snapshot().activeBuffer!)
+    let initialBuffer = workspace.snapshot().activeBuffer!
+    editor.display(initialBuffer)
     _ = binding
     editor.replaceWith("저장🙂\r\n")
     let files = FileStoreFake()
@@ -1179,7 +1181,7 @@ private actor FileSessionStoreFake: SessionStore {
     #expect(workspace.snapshot().tabs[0].isDirty == false)
     #expect(await files.text(at: url) == "저장🙂\r\n")
     #expect(editor.snapshotCount == 0)
-    #expect(editor.savePoints == [workspace.snapshot().activeBuffer!])
+    #expect(editor.savePoints == [initialBuffer, workspace.snapshot().activeBuffer!])
 }
 
 @Test @MainActor func legacyEncodingReopenSaveAndReloadKeepFileSemantics() async throws {

@@ -67,11 +67,11 @@ final class SearchExperienceCoordinator {
     var filePanel: FileNameSearchController {
         if let filePanelStorage { return filePanelStorage }
         let panel = FileNameSearchController()
-        panel.onLoadRequest = { [weak self] scope, folder in
+        panel.onSearchRequest = { [weak self] scope, folder, query in
             guard let self, self.actionable() else { throw CancellationError() }
             if scope == .folder {
                 guard let folder, let indexer = self.folderFileNames else { throw SearchFailure.invalidLimits }
-                let index = try await indexer.index(in: folder, maximumEntries: 20_000, includeHiddenFiles: self.preferences.showHiddenFiles)
+                let index = try await indexer.search(in: folder, query: query, maximumEntries: 20_000, includeHiddenFiles: self.preferences.showHiddenFiles)
                 try Task.checkCancellation()
                 guard self.actionable() else { throw CancellationError() }
                 let worker = Task.detached(priority: .userInitiated) {
@@ -87,7 +87,7 @@ final class SearchExperienceCoordinator {
             }
             guard scope != .openDocuments, let browser = self.browser else { return ([], false, 0) }
             let originalRoots = browser.roots
-            let index = try await browser.fileNameIndex()
+            let index = try await browser.fileNameIndex(query: query)
             guard self.actionable(), browser.roots == originalRoots else { throw CancellationError() }
             let roots = Dictionary(uniqueKeysWithValues: browser.roots.map { ($0.id, $0.canonicalPath) })
             let worker = Task.detached(priority: .userInitiated) {
@@ -98,6 +98,10 @@ final class SearchExperienceCoordinator {
             }
             let entries = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
             return (entries, index.isTruncated, index.skippedDirectoryCount)
+        }
+        panel.onLoadRequest = { [weak panel] scope, folder in
+            guard let search = panel?.onSearchRequest else { throw CancellationError() }
+            return try await search(scope, folder, "")
         }
         panel.onChooseFolder = { [weak self, weak panel] in await self?.chooseFolder(panel?.window) }
         if prepareFileSplit != nil {

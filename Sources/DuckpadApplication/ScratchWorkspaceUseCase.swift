@@ -1286,6 +1286,7 @@ public final class ScratchWorkspaceUseCase {
 public final class EditorBindingUseCase {
     private let workspace: ScratchWorkspaceUseCase
     private weak var editor: (any EditorPort)?
+    private var initializedCleanSavePoints: Set<BufferID> = []
 
     public init(workspace: ScratchWorkspaceUseCase, editor: any EditorPort) {
         self.workspace = workspace
@@ -1330,6 +1331,13 @@ public final class EditorBindingUseCase {
         for tab in snapshot.tabs { editor?.setReadOnly(tab.isReadOnly, for: tab.buffer.bufferID) }
         editor?.setInputEnabled(snapshot.startup == .ready)
         if let activeBuffer = snapshot.activeBuffer { editor?.display(activeBuffer) }
+        initializedCleanSavePoints.formIntersection(snapshot.tabs.map { $0.buffer.bufferID })
+        if let tab = snapshot.tabs.first(where: \.isActive), !tab.isDirty,
+           initializedCleanSavePoints.insert(tab.buffer.bufferID).inserted {
+            // Trust only explicitly clean session metadata, never a dirty
+            // recovery capture that happens to start at Scintilla's undo base.
+            (editor as? any EditorSavePointPort)?.recordSavePoint(for: tab.buffer.bufferID, revision: tab.buffer.revision)
+        }
         if requestFocus, snapshot.startup == .ready { editor?.focus() }
     }
 
