@@ -3,43 +3,44 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.14.2</title>
-            <pubDate>Wed, 21 Oct 2026 11:26:44 +0900</pubDate>
-            <sparkle:version>64</sparkle:version>
-            <sparkle:shortVersionString>0.14.2</sparkle:shortVersionString>
+            <title>0.14.3</title>
+            <pubDate>Wed, 21 Oct 2026 14:35:39 +0900</pubDate>
+            <sparkle:version>65</sparkle:version>
+            <sparkle:shortVersionString>0.14.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.14.2
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.14.3
 
-See filename-search results as they are discovered, without waiting for a large workspace to finish scanning.
+Open and dismiss the Workspace filter from the keyboard, with tighter sidebar spacing and faster search-result rendering.
 
-- Double-Shift filename search now streams validated results immediately and refreshes them approximately every 50 ms as discovery continues. All, Workspace and Folder scopes use the same progressive path. Bundled `rg --files` discovers names; Duckpad performs literal case/diacritic-insensitive matching and ranking without reading file contents.
-- Reduce the filename-input debounce from 120 ms to 20 ms. Keep usable rows visible while the complete result set is ranked in the background. Rows outside a newly selected scope or query disappear immediately.
-- Preserve keyboard and mouse selection across progress updates, including selections changed while asynchronous ranking is running. New queries, scope changes, dismissal and changed workspace roots reject stale results.
-- Avoid repeated URL construction while mapping names. Cache directory package classification only within each search and within bounded memory; path-component open/no-follow/fstat checks, root identity checks, hidden-file preferences and ignore rules remain in force. File opening revalidates access.
+- In the Workspace tree, Control-F toggles the filter below the header. The normal Find command does the same while the Workspace owns focus. Escape closes the filter from either its input or the tree, cancels pending searches and restores the previous tree navigation. Document and terminal Find retain their existing behavior outside the sidebar.
+- Hide the filter by default and remove its reserved empty space. Align the search icon and input, tighten header and tree rows, and show search status only when there is status text.
+- Preserve the sidebar width selected through the split divider across layout, window resizing and hiding/reopening the sidebar, instead of allowing control priorities to force the minimum width.
+- Remove implicit folder expand/collapse animations. Measure row widths once after batch expansion/restoration, reuse immutable filename measurements and resolve loaded nodes by path components. This avoids repeated full-tree work while rendering or dismissing search results.
+- Preserve Korean composition behavior when dismissing the filter, and reject search completions arriving after dismissal or a newer query.
 
-App and helpers: **0.14.2 (64)**, upgrading **0.14.1 (63)**. Requires **macOS 13 or later**. The universal distribution supports Apple Silicon and Intel. Existing settings, recovery data, encodings, Undo history and the native plugin ABI remain compatible. No new dependencies or user-facing strings are added.
+App and helpers: **0.14.3 (65)**, upgrading **0.14.2 (64)**. Requires **macOS 13 or later**. The universal distribution supports Apple Silicon and Intel. Existing settings, recovery data, encodings, Undo history and the native plugin ABI remain compatible. No new dependencies or user-facing strings are added.
 
 ## Installation
 
-Download `Duckpad-0.14.2-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.14.2-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Existing installations can use Check for Updates after the signed update feed is published.
+Download `Duckpad-0.14.3-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.14.3-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Existing installations can use Check for Updates after the signed update feed is published.
 
 ## Validation and limitations
 
-Focused validation passed **66 related Swift test functions** across presentation, infrastructure and application. Coverage includes progress before a held search completion, continuously updated rows, selection changes during asynchronous ranking, large scope transitions, stale queries, Korean composition notifications, filename ranking/design, workspace access, ignore/hidden-file behavior and symlink rejection. Independent review found no remaining Blocker, Major or Minor issues. The final universal app is verified and exercised with isolated packaged smoke checks before publication.
+Focused Release validation passed **36 related Swift test functions** and **2 explicit performance tests**, followed by independent code review. Coverage includes contextual Find, filter toggling and Escape, cancellation and stale results, Korean marked-text dismissal, horizontal extent after navigation restoration, divider-width retention, animation suppression, filename-search progress and selection, and layout at 160, 220 and 380 points across all eight supported languages. Native app key-event checks confirmed Control-F open/close and Escape dismissal. English and Korean sidebar snapshots were inspected visually.
 
-One local debug-backend measurement on a workspace containing approximately 379,000 discovered names delivered the first `util` result in **14.13 ms**, followed by 120 progress snapshots and all 4,383 matches in 6.25 seconds without truncation. Previously, no results were returned until completion at 7.34 seconds. These are individual warm-filesystem backend observations, not guaranteed end-to-end UI or cold-filesystem latency. Large directory traversal can still take seconds while results remain usable.
+On one Apple M4 Pro running macOS 27.0.1, a generated fixture with 20,000 loaded files and 1,000 directories measured first filter opening at **19.5 ms**, rendering 1,000 dispersed matches at **35.0 ms** warm p95, and restoration of 50 expanded directories at **39.0 ms** warm p95. Result rendering previously took **9.26 seconds** at warm p95 on this fixture. The UI gate checks the first sample plus the nearest-rank p95 of 11 subsequent samples, equivalent to the warm maximum, against **50 ms**. Additional asynchronous `rg`-backed result application measured **35.6-44.5 ms**. These are wall-clock action/callback-to-layout/display measurements, not hardware input-to-photon guarantees.
 
-Filename search retains at most 20,000 matching names and displays up to 100 ranked results. Discovery retains existing time and stream limits; progress delivery keeps only the latest pending snapshot. Workspace roots are visited in their existing order. Incomplete results retain the existing truncation indication.
+Complete searches over the generated 20,000-file filesystem fixture took **374-412 ms**, including the existing 120 ms Workspace-filter debounce, filesystem enumeration and UI delivery. Complete directory searches are not covered by the 50 ms UI-processing claim. Tests use generated, cache-warm fixtures and retain the existing 1,000-match Workspace filter limit.
 
-The full repository test suite, physical Korean keyboard interaction, full manual inspection in all eight languages, Intel hardware and macOS 13 runtime were not exercised. Native Save-panel automation is explicitly skipped by the isolated smoke script.
+The final universal app is verified and exercised with isolated packaged smoke checks before publication. Smoke settings, workspace roots and extension directories are separated from user state, in addition to the existing isolated recovery/bookmark sessions. Native Save-panel automation is explicitly skipped by the smoke script.
 
-The distribution is ad-hoc signed, without Developer ID signing or Apple notarization. No separately installed ripgrep, Node or Ghostty application is required.
+The full repository suite, physical divider dragging and Korean keyboard interaction, full manual inspection in all eight languages, Intel hardware and macOS 13 runtime were not validated. The distribution is ad-hoc signed, without Developer ID signing or Apple notarization. No separately installed ripgrep, Node or Ghostty application is required.
 
-## Verified distribution
+## Release artifact validation
 
-Universal app and all three helpers are 0.14.2 (64), with arm64 and x86_64 executables. Bundle/resources/signature verification and isolated Finder/Open With, layout, XPC isolation and bundled ripgrep smokes passed. Native Save-panel automation was skipped. Source: `a2179c950753f9277a71202aa265c5dcd5557c17`; merged PR: https://github.com/namJeongwan/duckpad/pull/92.
+The universal app and all three helpers are **0.14.3 (65)**, each with arm64 and x86_64 executables. Bundle, resources, signature verification and isolated Finder/Open With, layout, XPC extension/isolation and bundled ripgrep smokes passed. Native Save-panel automation was skipped. DMG and ZIP integrity and SHA-256 checks are verified before publication. Source: `b2b2f7d17b2f2e0625cec5e52576d3d5d5bf9aeb`; merged PR: https://github.com/namJeongwan/duckpad/pull/94.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.14.2/Duckpad-0.14.2-universal.zip" length="49376419" type="application/octet-stream" sparkle:edSignature="kleFSZQykiqH1WDAHDeDOENmP4mc3k+zVA4PsTJZrCNWLhna36K2oPhk3ALUAR20+WBCM0E8jrRaLYTSf+k4Cw=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.14.3/Duckpad-0.14.3-universal.zip" length="49394870" type="application/octet-stream" sparkle:edSignature="3fYWm1Nig5KvYzoGlQnsugra/gWqCopVTk34q2h5gYA6FFmo04qr/tPa3WGlkKDUrP4CAy3MloozjFO04csqDw=="/>
         </item>
     </channel>
 </rss>
