@@ -7,14 +7,35 @@ if [[ $# -ne 1 ]] || [[ "$1" != /* ]] || [[ "${1##*.}" != "app" ]]; then
 fi
 APP="$1"
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/duckpad-app-smoke.XXXXXX")"
-trap 'rm -rf "$TEMP_ROOT"' EXIT
+STATE_ROOT=""
+cleanup() {
+    rm -rf "$TEMP_ROOT"
+    if [[ -n "$STATE_ROOT" ]]; then rm -rf "$STATE_ROOT"; fi
+}
+trap cleanup EXIT
+# LaunchServices does not inherit arbitrary caller environment variables. Pass
+# isolated settings explicitly to both open(1) launches and direct invocations.
+STATE_PARENT="$HOME/Library/Containers/com.namjeongwan.duckpad/Data/Library/Application Support/Duckpad/SecurityScopeSmoke"
+mkdir -p "$STATE_PARENT"
+STATE_ROOT="$(mktemp -d "$STATE_PARENT/release.XXXXXX")"
+export DUCKPAD_SETTINGS_FILE="$STATE_ROOT/settings.json"
+export DUCKPAD_WORKSPACE_ROOTS_FILE="$STATE_ROOT/workspace-roots.json"
+export DUCKPAD_EXTENSIONS_ROOT="$STATE_ROOT/extensions"
+export DUCKPAD_EXTENSION_POLICY_ROOT="$STATE_ROOT/extension-policy"
+mkdir -p "$DUCKPAD_EXTENSIONS_ROOT" "$DUCKPAD_EXTENSION_POLICY_ROOT"
+OPEN_ENV=(
+    --env "DUCKPAD_SETTINGS_FILE=$DUCKPAD_SETTINGS_FILE"
+    --env "DUCKPAD_WORKSPACE_ROOTS_FILE=$DUCKPAD_WORKSPACE_ROOTS_FILE"
+    --env "DUCKPAD_EXTENSIONS_ROOT=$DUCKPAD_EXTENSIONS_ROOT"
+    --env "DUCKPAD_EXTENSION_POLICY_ROOT=$DUCKPAD_EXTENSION_POLICY_ROOT"
+)
 DOCUMENT="$(mktemp "$TEMP_ROOT/Finder-Open-With.XXXXXX.txt")"
 SCOPE_DOCUMENT="$(mktemp "$TEMP_ROOT/Security-Scope.XXXXXX.txt")"
 SCOPE_NAMESPACE="smoke-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 FINDER_STDOUT="$TEMP_ROOT/finder-stdout.log"
 FINDER_STDERR="$TEMP_ROOT/finder-stderr.log"
 
-open -n -W -g -a "$APP" \
+open -n -W -g -a "$APP" "${OPEN_ENV[@]}" \
     --env "DUCKPAD_SECURITY_SCOPE_SMOKE_NAMESPACE=$SCOPE_NAMESPACE-finder" \
     --env "DUCKPAD_FINDER_SMOKE_EXPECT=$DOCUMENT" \
     --stdout "$FINDER_STDOUT" \
@@ -22,7 +43,7 @@ open -n -W -g -a "$APP" \
     "$DOCUMENT"
 grep -q 'Duckpad Finder smoke ready' "$FINDER_STDOUT"
 
-open -n -W -g -a "$APP" \
+open -n -W -g -a "$APP" "${OPEN_ENV[@]}" \
     --env "DUCKPAD_SECURITY_SCOPE_SMOKE_NAMESPACE=$SCOPE_NAMESPACE" \
     --env "DUCKPAD_SECURITY_SCOPE_SMOKE_WRITE=$SCOPE_DOCUMENT" \
     --stdout "$TEMP_ROOT/scope-write-stdout.log" \
