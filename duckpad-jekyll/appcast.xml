@@ -3,46 +3,43 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.14.1</title>
-            <pubDate>Wed, 21 Oct 2026 09:56:37 +0900</pubDate>
-            <sparkle:version>63</sparkle:version>
-            <sparkle:shortVersionString>0.14.1</sparkle:shortVersionString>
+            <title>0.14.2</title>
+            <pubDate>Wed, 21 Oct 2026 11:26:44 +0900</pubDate>
+            <sparkle:version>64</sparkle:version>
+            <sparkle:shortVersionString>0.14.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.14.1
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.14.2
 
-Find deeply nested files reliably, filter the Workspace tree, and return to a clean document after Undo. Markdown preview opens sooner and keeps newer text responsive while diagrams render.
+See filename-search results as they are discovered, without waiting for a large workspace to finish scanning.
 
-- Fix filename search filtering only the first 20,000 indexed entries. Double-Shift searches now pass the query into background discovery before limiting retained results. Workspace and Folder scopes retain hidden-file preferences, ignore rules, cancellation and root/symlink checks. ASCII paths use a cheaper matching path while Unicode case/diacritic matching remains available.
-- Add a search field inside the Workspace sidebar. Matching files appear with their parent folders. Clearing search restores normal selection and expansion; hidden-file refreshes and workspace folder additions/removals preserve the current root list. Search navigation does not overwrite normal persisted navigation.
-- Fix modified indicators remaining active after ordinary text Undo reaches the loaded or saved baseline. Redo marks the document modified again. Dirty recovery buffers and invalidated savepoints after failed or stale saves remain protected.
-- Remove the initial Markdown-preview debounce and reduce the debounce for subsequent edits. Load the bundled Mermaid engine only when diagrams are present; initial JavaScript is approximately 1.50 MB instead of 6.76 MB. New text updates no longer wait for stale diagram enhancement; diagram work is bounded to one active and one latest pending request, and unchanged sanitized diagrams can be reused within bounded memory.
-- Attempt enabled usage-statistics lifecycle delivery asynchronously at startup instead of waiting five minutes. Existing sharing controls, retry limits and success-only acknowledgement remain. An update event already acknowledged by another same-version installation is not replayed; structured error reporting remains deferred.
+- Double-Shift filename search now streams validated results immediately and refreshes them approximately every 50 ms as discovery continues. All, Workspace and Folder scopes use the same progressive path. Bundled `rg --files` discovers names; Duckpad performs literal case/diacritic-insensitive matching and ranking without reading file contents.
+- Reduce the filename-input debounce from 120 ms to 20 ms. Keep usable rows visible while the complete result set is ranked in the background. Rows outside a newly selected scope or query disappear immediately.
+- Preserve keyboard and mouse selection across progress updates, including selections changed while asynchronous ranking is running. New queries, scope changes, dismissal and changed workspace roots reject stale results.
+- Avoid repeated URL construction while mapping names. Cache directory package classification only within each search and within bounded memory; path-component open/no-follow/fstat checks, root identity checks, hidden-file preferences and ignore rules remain in force. File opening revalidates access.
 
-App and helpers: **0.14.1 (63)**, upgrading **0.14.0 (62)**. Requires **macOS 13 or later**. The universal distribution supports Apple Silicon and Intel. Existing settings, recovery data, encodings and native plugin ABI remain compatible.
+App and helpers: **0.14.2 (64)**, upgrading **0.14.1 (63)**. Requires **macOS 13 or later**. The universal distribution supports Apple Silicon and Intel. Existing settings, recovery data, encodings, Undo history and the native plugin ABI remain compatible. No new dependencies or user-facing strings are added.
 
 ## Installation
 
-Download `Duckpad-0.14.1-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.14.1-universal.zip`. Verify downloads against `SHA256SUMS.txt`.
+Download `Duckpad-0.14.2-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.14.2-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Existing installations can use Check for Updates after the signed update feed is published.
 
 ## Validation and limitations
 
-Final focused validation passed **159 related Swift test functions**, covering filename-query discovery, literal and Unicode matching, stale request rejection, workspace navigation restoration across hidden-file and root changes, ordinary text Undo/Redo, dirty recovery and save races, Markdown sanitization, lazy diagrams, latest-text rendering, runtime teardown, usage delivery and localization catalogs. This includes the 81-function application file/session/recovery regression set. Markdown parser tests passed all four Node tests. Independent reviewers checked the final search, Undo and preview changes. Packaged verification and isolated smoke results are included in the published release.
+Focused validation passed **66 related Swift test functions** across presentation, infrastructure and application. Coverage includes progress before a held search completion, continuously updated rows, selection changes during asynchronous ranking, large scope transitions, stale queries, Korean composition notifications, filename ranking/design, workspace access, ignore/hidden-file behavior and symlink rejection. Independent review found no remaining Blocker, Major or Minor issues. The final universal app is verified and exercised with isolated packaged smoke checks before publication.
 
-One signed sandbox-app measurement found 666 `utils.ts` files without truncation in 2.92 seconds, compared with 11.62 seconds before the path-matching optimization. These are individual local measurements, not a general latency guarantee. A separate panel-direct plain-Markdown measurement changed from 342 ms to 268 ms; this excludes the removed initial coordinator debounce.
+One local debug-backend measurement on a workspace containing approximately 379,000 discovered names delivered the first `util` result in **14.13 ms**, followed by 120 progress snapshots and all 4,383 matches in 6.25 seconds without truncation. Previously, no results were returned until completion at 7.34 seconds. These are individual warm-filesystem backend observations, not guaranteed end-to-end UI or cold-filesystem latency. Large directory traversal can still take seconds while results remain usable.
 
-Filename search retains at most 20,000 matching names and displays up to 100 results. The sidebar displays up to 1,000 files with ancestors; empty directories are not filename results. Native discovery has time and stream limits, and incomplete results are marked. Markdown still parses the full source on updates; this is not a fully incremental renderer. SVG reuse is bounded to 16 entries / 4 MiB. Closing preview continues to release its WebKit runtime.
+Filename search retains at most 20,000 matching names and displays up to 100 ranked results. Discovery retains existing time and stream limits; progress delivery keeps only the latest pending snapshot. Workspace roots are visited in their existing order. Incomplete results retain the existing truncation indication.
 
-The full repository test suite, physical Korean keyboard interaction, full manual inspection in all eight languages, Intel hardware and macOS 13 were not exercised. Native Save-panel automation is explicitly skipped by the isolated smoke script. Actual analytics dashboard ingestion is not verified, and no synthetic production events were sent.
+The full repository test suite, physical Korean keyboard interaction, full manual inspection in all eight languages, Intel hardware and macOS 13 runtime were not exercised. Native Save-panel automation is explicitly skipped by the isolated smoke script.
 
-The distribution is ad-hoc signed, without Developer ID signing or Apple notarization. No separately installed ripgrep, Mermaid, Node or Ghostty application is required.
+The distribution is ad-hoc signed, without Developer ID signing or Apple notarization. No separately installed ripgrep, Node or Ghostty application is required.
 
 ## Verified distribution
 
-The universal app, all three helpers and bundled ripgrep contain both arm64 and x86_64. The app and helpers report 0.14.1 (63). Package/signature verification and isolated Finder/Open With, resize, sandboxed extension/isolation and ripgrep smokes passed. The packaged Markdown preview opened and closed three times with Rust highlighting, KaTeX fonts and lazily loaded Mermaid while preserving source and revision. Native Save-panel automation explicitly reported SKIP.
-
-The DMG passes `hdiutil verify`; the ZIP passes `unzip -tq`. SHA-256 checksums are provided in `SHA256SUMS.txt`. This is an ad-hoc signed distribution, not Developer ID signed or Apple notarized.
+Universal app and all three helpers are 0.14.2 (64), with arm64 and x86_64 executables. Bundle/resources/signature verification and isolated Finder/Open With, layout, XPC isolation and bundled ripgrep smokes passed. Native Save-panel automation was skipped. Source: `a2179c950753f9277a71202aa265c5dcd5557c17`; merged PR: https://github.com/namJeongwan/duckpad/pull/92.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.14.1/Duckpad-0.14.1-universal.zip" length="49281058" type="application/octet-stream" sparkle:edSignature="atVO8F/OS0/EchDY5tjIFKwIYdWRYjWLsKjue7iG27jVk0R+8wTCoVv003NN5hB3AnILw/grbSgOKXNWXDtNCw=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.14.2/Duckpad-0.14.2-universal.zip" length="49376419" type="application/octet-stream" sparkle:edSignature="kleFSZQykiqH1WDAHDeDOENmP4mc3k+zVA4PsTJZrCNWLhna36K2oPhk3ALUAR20+WBCM0E8jrRaLYTSf+k4Cw=="/>
         </item>
     </channel>
 </rss>
