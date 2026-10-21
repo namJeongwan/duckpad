@@ -2,8 +2,16 @@
 
 The app bundles the generated assets under
 `Sources/DuckpadPresentation/Resources/MarkdownPreview/`. They are generated from
-`parser.mjs` and `preview.mjs` by `build.mjs`; do not hand-edit generated JavaScript.
+`parser.mjs`, `preview.mjs` and `mermaid.mjs` by `build.mjs`; do not hand-edit generated JavaScript.
 The app requires neither Node nor a CDN at runtime.
+
+The initial preview bundle excludes Mermaid. Its separate bundled `mermaid.js`
+loads only when a diagram is present. Text updates do not wait for diagram
+enhancement; generations discard stale results. Only one diagram request runs
+at a time; a single latest pending request replaces older pending work before
+calling Mermaid's internal render queue. Sanitized diagrams are retained in a
+per-preview cache bounded to 16 entries and 4 MiB. The native preview closes
+and releases the WebKit runtime as before.
 
 `clipboard.mjs` also builds `clipboard.js` from the same pinned markdown-it
 dependency for synchronous JavaScriptCore clipboard export. It renders headings,

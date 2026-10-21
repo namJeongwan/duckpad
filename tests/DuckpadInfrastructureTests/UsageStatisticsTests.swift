@@ -22,6 +22,38 @@ private func makeUsage(_ defaults: UserDefaults, recorder: UsageRecorder,
         languages: languages, sender: { await recorder.send($0) }, clock: clock)
 }
 
+@Test @MainActor func usageAutomaticallyDeliversFirstObservationWithoutWaitingForTimer() async throws {
+    let suite = "usage-tests-" + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let recorder = UsageRecorder()
+    let usage = makeUsage(defaults, recorder: recorder)
+    defer { usage.setEnabled(false) }
+    usage.setEnabled(true)
+    await usage.waitForDelivery()
+    let batch = try #require(await recorder.batches.first)
+    #expect(batch.contains { $0.eventName == "app_first_observed" })
+    #expect(defaults.string(forKey: "usage.version") == "0.12.0")
+}
+
+@Test @MainActor func usageAutomaticallyDeliversVersionChangeWithoutWaitingForTimer() async throws {
+    let suite = "usage-tests-" + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    defaults.set(true, forKey: "usage.hasObserved")
+    defaults.set("0.11.0", forKey: "usage.version")
+    let recorder = UsageRecorder()
+    let usage = makeUsage(defaults, recorder: recorder)
+    defer { usage.setEnabled(false) }
+    usage.setEnabled(true)
+    await usage.waitForDelivery()
+    let batch = try #require(await recorder.batches.first)
+    let event = try #require(batch.first { $0.eventName == "app_version_changed" })
+    #expect(event.props.dimension == "0.11.0")
+    #expect(event.systemProps.appVersion == "0.12.0")
+    #expect(defaults.string(forKey: "usage.version") == "0.12.0")
+}
+
 @Test @MainActor func usageRequiresEnabledCollectorAndConfiguration() async {
     let suite = "usage-tests-" + UUID().uuidString
     let defaults = UserDefaults(suiteName: suite)!

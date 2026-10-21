@@ -14,10 +14,18 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
     }
 
     public func index(in folder: URL, maximumEntries: Int = 20_000, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex {
+        try await search(in: folder, query: "", maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles)
+    }
+
+    public func search(in folder: URL, query: String, maximumEntries: Int = 20_000, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex {
+        try await search(in: folder, query: query, maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles, expectedRoot: nil)
+    }
+
+    func search(in folder: URL, query: String, maximumEntries: Int, includeHiddenFiles: Bool, expectedRoot: FolderFileNameRoot?) async throws -> FolderFileNameIndex {
         guard maximumEntries > 0, maximumEntries <= 100_000 else { throw WorkspaceBrowserFailure.entryLimitExceeded(maximumEntries) }
         let process = executable.map { RipgrepProcess(executable: $0, timeout: .seconds(30)) }
         let worker = Task.detached(priority: .userInitiated) {
-            try self.indexBlocking(folder: folder, maximumEntries: maximumEntries, process: process, includeHiddenFiles: includeHiddenFiles)
+            try self.indexBlocking(folder: folder, query: FileNameQuery(query), maximumEntries: maximumEntries, process: process, includeHiddenFiles: includeHiddenFiles, expectedRoot: expectedRoot)
         }
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel(); process?.cancel() }
     }
@@ -39,11 +47,18 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
     }
 
-    private func indexBlocking(folder: URL, maximumEntries: Int, process: RipgrepProcess?, includeHiddenFiles: Bool) throws -> FolderFileNameIndex {
+    private func indexBlocking(folder: URL, query: FileNameQuery, maximumEntries: Int, process: RipgrepProcess?, includeHiddenFiles: Bool, expectedRoot: FolderFileNameRoot?) throws -> FolderFileNameIndex {
         let root = try FolderSearchRoot(path: folder.path)
+        let deadline = ContinuousClock.now + .seconds(30)
+        let pathPrefix = root.url.path + "/"
+        guard expectedRoot == nil || root.fileNameRoot == expectedRoot else { throw FolderSearchFailure.invalidRoot(folder.path) }
         var paths: [String] = [], skipped = 0, observed = 0, nameBytes = 0, truncated = false
         func admit(_ relative: String) throws -> Bool {
             try Task.checkCancellation(); try process?.check()
+            guard ContinuousClock.now < deadline else { throw FolderSearchFailure.search(.timedOut) }
+            // Nonmatching names do not consume the retained-result budget. A deep
+            // match must not disappear because 20,000 unrelated names came first.
+            guard query.matches(path: pathPrefix + relative) else { return true }
             guard observed < maximumEntries, relative.utf8.count <= 16 * 1_024 * 1_024 - nameBytes else { truncated = true; return false }
             observed += 1; nameBytes += relative.utf8.count
             guard let file = root.open(relative, includeHiddenFiles: includeHiddenFiles) else { skipped += 1; return true }
@@ -52,7 +67,8 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
             return true
         }
         if let process {
-            let status = try process.run(arguments: ["--no-config", "--no-messages", "--no-ignore-global", "--no-ignore-parent", "--no-require-git", "--files", "--null"] + (includeHiddenFiles ? ["--hidden"] : []) + ["."], directory: root.descriptor) { record in
+            let status = try process.run(arguments: ["--no-config", "--no-messages", "--no-ignore-global", "--no-ignore-parent", "--no-require-git", "--files", "--null"] + (includeHiddenFiles ? ["--hidden"] : []) + ["."], directory: root.descriptor,
+                maximumOutputBytes: query.isEmpty ? 32 * 1_024 * 1_024 : 256 * 1_024 * 1_024) { record in
                 guard let name = String(data: record, encoding: .utf8) else { throw FolderSearchFailure.enumerationFailed("unsupported file name") }
                 return try admit(name.hasPrefix("./") ? String(name.dropFirst(2)) : name)
             }
@@ -71,9 +87,10 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
             }
             for case let url as URL in iterator {
                 try Task.checkCancellation()
+                guard ContinuousClock.now < deadline else { throw FolderSearchFailure.search(.timedOut) }
                 guard observed < maximumEntries else { truncated = true; break }
                 let values = try url.resourceValues(forKeys: Set(keys))
-                if values.isDirectory == true { observed += 1; continue }
+                if values.isDirectory == true { if query.isEmpty { observed += 1 }; continue }
                 guard url.path.hasPrefix(prefix) else { skipped += 1; continue }
                 let relative = String(url.path.dropFirst(prefix.count))
                 if try !admit(relative) { break }

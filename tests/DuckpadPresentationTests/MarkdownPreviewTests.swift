@@ -7,8 +7,95 @@ import DuckpadLocalization
 import Testing
 import WebKit
 
+private struct MarkdownTimingReader: PreviewResourceReading {
+    func open(_ url: URL) async throws -> any PreviewResourceStream {
+        let override = ProcessInfo.processInfo.environment["DUCKPAD_MARKDOWN_BENCHMARK_ASSET"]
+        let source = url.lastPathComponent == "preview.js" ? override.map { URL(fileURLWithPath: $0) } ?? url : url
+        return try await LocalPreviewResourceReader().open(source)
+    }
+}
+
 @Suite(.serialized)
 struct MarkdownPreviewTests {
+    @Test @MainActor func repeatedEditsKeepOnlyOneActiveAndTheLatestPendingDiagram() async throws {
+        let panel = MarkdownPreviewPanel(frame: .zero, resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess())
+        defer { panel.invalidate() }
+        let web = try #require(panel.subviews.compactMap { $0 as? WKWebView }.first)
+        try await wait(web, expression: "typeof window.duckpadRender === 'function'")
+        _ = try await web.evaluateJavaScript("""
+            window.diagramSources = [];
+            window.duckpadMermaid = { render: async (id, source) => {
+              window.diagramSources.push(source.trim());
+              if (window.diagramSources.length === 1) {
+                await new Promise(resolve => { window.releaseActiveDiagram = resolve; });
+              }
+              return {svg:'<svg xmlns="http://www.w3.org/2000/svg"><text>Latest diagram</text></svg>'};
+            } }; true;
+            """)
+        _ = try await web.callAsyncJavaScript("""
+            await window.duckpadRender('```mermaid\\ngraph TD; A-->First\\n```', '', false, true);
+            for (let i = 0; i < 50; i++) {
+              await window.duckpadRender('# Latest ' + i + '\\n\\n```mermaid\\ngraph TD; A-->N' + i + '\\n```', '', false, true);
+            }
+            return true;
+            """, arguments: [:], in: nil, contentWorld: .page)
+        #expect(try await web.evaluateJavaScript("window.diagramSources.length") as? Int == 1)
+        #expect(try await web.evaluateJavaScript("document.querySelector('h1').textContent") as? String == "Latest 49")
+        _ = try await web.evaluateJavaScript("window.releaseActiveDiagram(); true;")
+        try await wait(web, expression: "window.diagramSources.length === 2 && !!document.querySelector('.mermaid-diagram')")
+        #expect(try await web.evaluateJavaScript("window.diagramSources[1]") as? String == "graph TD; A-->N49")
+    }
+    @Test @MainActor func plainMarkdownDoesNotLoadOptionalDiagramRuntime() async throws {
+        let started = ContinuousClock.now
+        let panel = MarkdownPreviewPanel(frame: .zero, resourceReader: MarkdownTimingReader(), imageAccess: TestMarkdownImageAccess())
+        defer { panel.invalidate() }
+        let web = try #require(panel.subviews.compactMap { $0 as? WKWebView }.first)
+        panel.update(source: "# Plain preview\n\nRegular **Markdown** text.")
+        try await wait(web, expression: "document.querySelector('h1')?.textContent === 'Plain preview'")
+        #expect(try await web.evaluateJavaScript("typeof window.duckpadMermaid === 'undefined' && !document.querySelector('script[src*=\"mermaid.js\"]')") as? Bool == true)
+        print("MARKDOWN_PLAIN_READY: \(started.duration(to: .now))")
+    }
+
+    @Test @MainActor func latestTextRendersWhileAnOldDiagramIsStillPending() async throws {
+        let panel = MarkdownPreviewPanel(frame: .zero, resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess())
+        defer { panel.invalidate() }
+        let web = try #require(panel.subviews.compactMap { $0 as? WKWebView }.first)
+        try await wait(web, expression: "typeof window.duckpadRender === 'function'")
+        _ = try await web.evaluateJavaScript("""
+            window.duckpadMermaid = { render: async () => {
+              window.diagramStarted = true;
+              await new Promise(resolve => { window.releaseDiagram = resolve; });
+              return { svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>Old</text></svg>' };
+            } }; true;
+            """)
+        panel.update(source: "```mermaid\ngraph TD; A-->B\n```\n\n# Older")
+        try await wait(web, expression: "window.diagramStarted === true")
+        panel.update(source: "# Latest")
+        try await wait(web, expression: "document.querySelector('h1')?.textContent === 'Latest'")
+        _ = try await web.evaluateJavaScript("window.releaseDiagram(); true;")
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(try await web.evaluateJavaScript("document.querySelector('h1').textContent === 'Latest' && !document.querySelector('.mermaid-diagram')") as? Bool == true)
+    }
+
+    @Test @MainActor func unchangedDiagramSourceReusesSanitizedSVGAcrossTextEdits() async throws {
+        let panel = MarkdownPreviewPanel(frame: .zero, resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess())
+        defer { panel.invalidate() }
+        let web = try #require(panel.subviews.compactMap { $0 as? WKWebView }.first)
+        try await wait(web, expression: "typeof window.duckpadRender === 'function'")
+        _ = try await web.evaluateJavaScript("""
+            window.diagramCalls = 0;
+            window.duckpadMermaid = { render: async () => {
+              window.diagramCalls++;
+              return {svg:'<svg xmlns="http://www.w3.org/2000/svg" onload="window.injected=true"><text>Diagram</text></svg>'};
+            } }; true;
+            """)
+        for heading in ["Before", "After"] {
+            _ = try await web.callAsyncJavaScript("await window.duckpadRender(source, '', false); return true;",
+                arguments: ["source": "# \(heading)\n\n```mermaid\ngraph TD; A-->B\n```"], in: nil, contentWorld: .page)
+        }
+        #expect(try await web.evaluateJavaScript("window.diagramCalls") as? Int == 1)
+        #expect(try await web.evaluateJavaScript("typeof window.injected === 'undefined' && !document.querySelector('svg[onload]')") as? Bool == true)
+    }
     @Test @MainActor func largeDiagramsRemainRenderableAndAllowNextRender() async throws {
         let panel = MarkdownPreviewPanel(frame: .zero, resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess())
         defer { panel.invalidate() }

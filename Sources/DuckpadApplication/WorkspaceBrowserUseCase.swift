@@ -89,6 +89,7 @@ public enum WorkspaceBrowserFailure: Error, Equatable, Sendable, LocalizedError 
 }
 
 public protocol WorkspaceRootStore: Sendable {
+    func fileNameIndex(rootID: WorkspaceRootID, query: String, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> WorkspaceFileNameIndex
     func loadRoots() async throws(WorkspaceBrowserFailure) -> [WorkspaceRoot]
     func addRoot(_ url: URL) async throws(WorkspaceBrowserFailure) -> WorkspaceRoot
     func removeRoot(_ id: WorkspaceRootID) async throws(WorkspaceBrowserFailure)
@@ -227,6 +228,11 @@ public final class WorkspaceBrowserUseCase {
     public func children(rootID: WorkspaceRootID, relativeDirectory: String) async throws(WorkspaceBrowserFailure) -> [WorkspaceBrowserEntry] {
         guard roots.contains(where: { $0.id == rootID }) else { throw .unknownRoot(rootID) }
         return try await store.children(rootID: rootID, relativeDirectory: relativeDirectory, includeHiddenFiles: showHiddenFiles)
+    }
+
+    func searchFileNames(rootID: WorkspaceRootID, query: String, maximumEntries: Int) async throws -> WorkspaceFileNameIndex {
+        guard roots.contains(where: { $0.id == rootID && $0.isAvailable }) else { throw WorkspaceBrowserFailure.unknownRoot(rootID) }
+        return try await store.fileNameIndex(rootID: rootID, query: query, maximumEntries: maximumEntries, includeHiddenFiles: showHiddenFiles)
     }
 
     public func readFile(_ entry: WorkspaceBrowserEntry) async throws(WorkspaceBrowserFailure) -> WorkspaceFileRead {

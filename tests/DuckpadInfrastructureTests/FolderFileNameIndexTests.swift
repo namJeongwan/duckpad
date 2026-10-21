@@ -4,6 +4,20 @@ import Foundation
 import Testing
 
 struct FolderFileNameIndexTests {
+    @Test(arguments: [false, true])
+    func queryFindsDeepNamesAfterUnrelatedEntriesExhaustTheInitialIndex(usingRipgrep: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("zz/deep"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for i in 0..<200 { try Data().write(to: root.appendingPathComponent("unrelated-\(i).txt")) }
+        try Data().write(to: root.appendingPathComponent("zz/deep/utils.ts"))
+        let indexer = LocalFolderFileNameIndex(executable: usingRipgrep ? executable : nil)
+        let result = try await indexer.search(in: root, query: "UTILS.ts", maximumEntries: 10, includeHiddenFiles: false)
+        #expect(result.relativePaths == ["zz/deep/utils.ts"])
+        #expect(!result.isTruncated)
+        let literal = try await indexer.search(in: root, query: "[utils]*", maximumEntries: 10, includeHiddenFiles: false)
+        #expect(literal.relativePaths.isEmpty)
+    }
     private var executable: URL {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent(".build/ripgrep/15.1.0/native/rg")

@@ -13,6 +13,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     var onNavigationChange: ((WorkspaceRootID, [String], String?) -> Void)?
     var onDropFolder: ((URL) -> Void)?
     var onRevealPath: ((String) -> Void)?
+    let search = WorkspaceTreeSearchField(frame: .zero)
 
     private let header = NSView(frame: .zero)
     private let title = NSTextField(labelWithString: L10n.text("Workspace"))
@@ -25,6 +26,9 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     private let emptyLabel = NSTextField(wrappingLabelWithString: L10n.text("Add a folder to browse files here."))
     private var roots: [WorkspaceRoot] = []
     private var rootNodes: [WorkspaceSidebarNode] = []
+    private var searchNodes: [WorkspaceSidebarNode]?
+    private var savedSearchNavigation: [WorkspaceRoot] = []
+    private var visibleRoots: [WorkspaceSidebarNode] { searchNodes ?? rootNodes }
     private var isRestoringNavigation = false
     private var interactionsEnabled = true
     private var contextNode: WorkspaceSidebarNode?
@@ -101,7 +105,9 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         scroll.drawsBackground = true
         scroll.translatesAutoresizingMaskIntoConstraints = false
         addSubview(header)
+        addSubview(search)
         addSubview(scroll)
+        search.onResults = { [weak self] in self?.applySearch($0) }
 
         emptyLabel.alignment = .center
         emptyLabel.textColor = .secondaryLabelColor
@@ -128,7 +134,9 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             closeButton.widthAnchor.constraint(equalToConstant: 24),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
+            search.leadingAnchor.constraint(equalTo: leadingAnchor), search.trailingAnchor.constraint(equalTo: trailingAnchor),
+            search.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scroll.topAnchor.constraint(equalTo: search.bottomAnchor),
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             emptyLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
             emptyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
@@ -151,7 +159,13 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     required init?(coder: NSCoder) { nil }
 
     func invalidateChildren() -> [WorkspaceRoot] {
-        let navigation = roots.map { root in
+        let navigation = searchNodes == nil ? captureNavigation() : currentSearchNavigation()
+        roots = []; rootNodes = []; outline.reloadData()
+        return navigation
+    }
+
+    private func captureNavigation() -> [WorkspaceRoot] {
+        roots.map { root in
             var expanded: [String] = []
             if let node = rootNodes.first(where: { $0.rootID == root.id }) {
                 traverse(node) { if outline.isItemExpanded($0) { expanded.append($0.relativePath) } }
@@ -160,8 +174,15 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
                 isAvailable: root.isAvailable, expandedRelativePaths: expanded,
                 selectedRelativePath: selectedNode?.rootID == root.id ? selectedNode?.relativePath : root.selectedRelativePath)
         }
-        roots = []; rootNodes = []; outline.reloadData()
-        return navigation
+    }
+
+    private func currentSearchNavigation() -> [WorkspaceRoot] {
+        roots.map { root in
+            guard let saved = savedSearchNavigation.first(where: { $0.id == root.id && $0.canonicalPath == root.canonicalPath }) else { return root }
+            return .init(id: root.id, canonicalPath: root.canonicalPath, displayName: root.displayName,
+                isAvailable: root.isAvailable, expandedRelativePaths: saved.expandedRelativePaths,
+                selectedRelativePath: saved.selectedRelativePath)
+        }
     }
 
     @discardableResult
@@ -204,7 +225,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
                    (node.kind == .directory) == (entry.kind == .directory) { return node }
                 return WorkspaceSidebarNode(entry: entry, parent: parent)
             }
-            outline.reloadItem(parent, reloadChildren: true)
+            if searchNodes == nil { outline.reloadItem(parent, reloadChildren: true) }
         }
     }
 
@@ -220,12 +241,13 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         parent.children = nil
         title.stringValue = localizationCatalog.text("Workspace ⚠")
         title.toolTip = PresentationErrorText.message(failure, catalog: localizationCatalog)
-        outline.reloadItem(parent, reloadChildren: true)
+        if searchNodes == nil { outline.reloadItem(parent, reloadChildren: true) }
         updateContentWidth()
     }
 
     func setInteractionsEnabled(_ enabled: Bool) {
         interactionsEnabled = enabled
+        search.setEnabled(enabled)
         outline.isEnabled = enabled
         addButton.isEnabled = enabled
         updateRemoveButton()
@@ -245,6 +267,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
 
     func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
         localizationCatalog = catalog
+        search.refreshLocalization(catalog: catalog)
         for row in 0..<outline.numberOfRows {
             guard let node = outline.item(atRow: row) as? WorkspaceSidebarNode,
                   let failure = node.failure,
@@ -273,8 +296,10 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     }
 
     func restoreNavigation(for root: WorkspaceRoot) {
+        guard searchNodes == nil else { return }
+        let wasRestoring = isRestoringNavigation
         isRestoringNavigation = true
-        defer { isRestoringNavigation = false }
+        defer { isRestoringNavigation = wasRestoring }
         for path in root.expandedRelativePaths.sorted(by: Self.pathDepthOrder) {
             if let node = node(rootID: root.id, relativePath: path) { outline.expandItem(node) }
         }
@@ -295,12 +320,12 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     }
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-        guard let item = item as? WorkspaceSidebarNode else { return rootNodes.count }
+        guard let item = item as? WorkspaceSidebarNode else { return visibleRoots.count }
         return item.children?.count ?? 0
     }
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-        guard let item = item as? WorkspaceSidebarNode else { return rootNodes[index] }
+        guard let item = item as? WorkspaceSidebarNode else { return visibleRoots[index] }
         return item.children![index]
     }
 
@@ -367,7 +392,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     }
 
     func outlineViewItemWillExpand(_ notification: Notification) {
-        guard interactionsEnabled, !isRestoringNavigation,
+        guard interactionsEnabled, searchNodes == nil, !isRestoringNavigation,
               let node = notification.userInfo?["NSObject"] as? WorkspaceSidebarNode,
               node.isExpandable, node.children == nil, !node.isLoading else { return }
         node.isLoading = true
@@ -533,13 +558,32 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     }
 
     private func publishNavigation(rootID: WorkspaceRootID) {
-        guard !isRestoringNavigation else { return }
+        guard !isRestoringNavigation, searchNodes == nil else { return }
         var expanded: [String] = []
         traverse(rootNodes.first(where: { $0.rootID == rootID })) { node in
             if node.isExpandable, outline.isItemExpanded(node) { expanded.append(node.relativePath) }
         }
         let selectedPath = selectedNode?.rootID == rootID ? selectedNode?.relativePath : nil
         onNavigationChange?(rootID, expanded, selectedPath)
+    }
+
+    private func applySearch(_ result: WorkspaceFileNameIndex?) {
+        guard result != nil || searchNodes != nil else { return }
+        if result != nil, searchNodes == nil {
+            savedSearchNavigation = captureNavigation()
+        }
+        let restoring = isRestoringNavigation
+        isRestoringNavigation = true
+        defer { isRestoringNavigation = restoring }
+        searchNodes = result.map { WorkspaceSidebarSearchTree.build(roots: roots, files: $0.files) }
+        outline.reloadData()
+        if let searchNodes {
+            for root in searchNodes { outline.expandItem(root, expandChildren: true) }
+        } else {
+            for root in currentSearchNavigation() { restoreNavigation(for: root) }
+            savedSearchNavigation = []
+        }
+        updateRemoveButton(); updateContentWidth()
     }
 
     private func traverse(_ node: WorkspaceSidebarNode?, visit: (WorkspaceSidebarNode) -> Void) {

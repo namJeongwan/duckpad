@@ -63,6 +63,10 @@ enum RipgrepPackagedSmoke {
             guard result.matchCount == (visible ? 1 : 0), !result.isTruncated else { throw SmokeFailure.incorrectResults }
         }
         let indexer = LocalFolderFileNameIndex(executable: helper)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Sources/deep"), withIntermediateDirectories: true)
+        try Data().write(to: root.appendingPathComponent("Sources/deep/utils.ts"))
+        let queryNames = try await indexer.search(in: root, query: "utils.ts", maximumEntries: 1, includeHiddenFiles: false)
+        guard queryNames.relativePaths == ["Sources/deep/utils.ts"], !queryNames.isTruncated else { throw SmokeFailure.incorrectResults }
         let names = try await indexer.index(in: root, includeHiddenFiles: true)
         guard names.relativePaths.contains(".hidden.txt"),
               try await indexer.readFile(in: root, root: names.root, relativePath: ".hidden.txt").result.data == Data("hiddenNeedle".utf8) else {
@@ -77,6 +81,13 @@ enum RipgrepPackagedSmoke {
         let search = FolderSearchUseCase(store: LocalFolderSearchFileStore(), regexEngine: ICURegexEngine(),
             backend: RipgrepFolderSearchBackend(executable: helper))
         for root in roots {
+            if let query = ProcessInfo.processInfo.environment["DUCKPAD_RIPGREP_NAME_QUERY"], !query.isEmpty {
+                let start = ContinuousClock.now
+                let names = try await store.fileNameIndex(rootID: root.id, query: query, maximumEntries: 20_000, includeHiddenFiles: false)
+                guard !names.files.isEmpty else { throw SmokeFailure.incorrectResults }
+                print("DUCKPAD_WORKSPACE_NAMES_READY matches=\(names.files.count) total_ms=\(milliseconds(start.duration(to: .now))) truncated=\(names.isTruncated)")
+                continue
+            }
             for query in [SearchQuery(pattern: "desc"), SearchQuery(pattern: "desc", fileMask: "*.duckpad-missing-regression")] {
                 let result = try await search.search(rootPath: root.canonicalPath, query: query)
                 if query.fileMask != nil {

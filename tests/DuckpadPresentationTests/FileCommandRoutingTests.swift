@@ -2584,6 +2584,36 @@ struct FileLifecycleTests {
     #expect(!controller.validateMenuItem(invalid))
 }
 
+@Test(arguments: [false, true]) @MainActor
+func ordinaryTextUndoClearsDirtyAtTheLoadedOrSavedBaseline(saveFirst: Bool) async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore()), editor = ScintillaEditorAdapter()
+    let store = RoutingFileStore(), url = URL(fileURLWithPath: "/tmp/duckpad-text-undo-\(saveFirst).txt")
+    await store.seed("first\nsecond", at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    let controller = DuckpadWindowController(workspace: workspace,
+        previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
+        editorAdapter: editor, editorView: editor.view, fileUseCase: files, automaticallyStarts: false)
+    defer { controller.close(); editor.invalidate() }
+    controller.start(); await controller.waitForStartup()
+    guard case .opened = await files.open(url) else { Issue.record("open failed"); return }
+    let view = try #require(editor.activeScintillaView)
+    if saveFirst {
+        view.insertCommittedText("saved ")
+        guard case .saved = await files.saveActive() else { Issue.record("save failed"); return }
+    }
+    let baseline = await store.text(at: url)
+    view.beginGroupedUndo(); view.insertCommittedText("edit "); view.endGroupedUndo()
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == true)
+    view.undo()
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == false)
+    view.redo()
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == true)
+    view.undo()
+    #expect(workspace.snapshot().tabs.first(where: \.isActive)?.isDirty == false)
+    #expect(await store.text(at: url) == baseline)
+}
+
 @Test @MainActor func pendingFormatSaveDuringUndoRetainsUnsavedFormatAndInvalidatesOldSavePoint() async throws {
     _ = NSApplication.shared
     let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())

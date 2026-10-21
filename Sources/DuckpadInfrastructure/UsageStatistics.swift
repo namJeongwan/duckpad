@@ -66,6 +66,9 @@ public final class UsageStatistics {
         }
         recordActivity()
         if automaticFlush {
+            // Observe installs and upgrades even when the app runs for less than
+            // five minutes. Delivery remains asynchronous and opt-out cancellable.
+            flush()
             timer = Task { [weak self] in
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(300)) } catch { return }

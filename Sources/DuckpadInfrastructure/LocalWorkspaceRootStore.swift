@@ -250,6 +250,19 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
         try await readFile(entry, maximumBytes: nil)
     }
 
+    public func fileNameIndex(rootID: WorkspaceRootID, query: String, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> WorkspaceFileNameIndex {
+        try loadIfNeeded()
+        let access = try availableRoot(rootID)
+        let expected = FolderFileNameRoot(canonicalPath: access.url.path, device: access.identity.device, inode: access.identity.inode)
+        let result = try await LocalFolderFileNameIndex().search(in: access.url, query: query,
+            maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles, expectedRoot: expected)
+        let current = try availableRoot(rootID)
+        guard current.identity == access.identity, current.url == access.url else { throw WorkspaceBrowserFailure.unavailableRoot(rootID) }
+        return .init(files: result.relativePaths.map {
+            .init(rootID: rootID, relativePath: $0, name: URL(fileURLWithPath: $0).lastPathComponent, kind: .file)
+        }, isTruncated: result.isTruncated, skippedDirectoryCount: result.skippedCount)
+    }
+
     /// Bounded reads for on-demand source navigation; preserves root/symlink checks.
     public func readFile(_ entry: WorkspaceBrowserEntry, maximumBytes: UInt64?) async throws(WorkspaceBrowserFailure) -> WorkspaceFileRead {
         try loadIfNeeded()
