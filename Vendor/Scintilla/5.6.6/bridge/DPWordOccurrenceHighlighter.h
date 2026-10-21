@@ -8,7 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) NSIndexSet *matchOffsets;
 @property(nonatomic, readonly) NSUInteger matchedByteLength;
 - (void)addView:(ScintillaView *)view onChange:(void (^)(void))onChange;
-- (void)scheduleForView:(ScintillaView *)view enabled:(BOOL)enabled selectionChanged:(BOOL)selectionChanged;
+- (void)scheduleForView:(ScintillaView *)view enabled:(BOOL)enabled caretWordEnabled:(BOOL)caretWordEnabled selectionChanged:(BOOL)selectionChanged;
 - (void)removeView:(ScintillaView *)view;
 - (void)documentChanged;
 + (void)applyAppearanceToView:(ScintillaView *)view dark:(BOOL)dark highContrast:(BOOL)highContrast;

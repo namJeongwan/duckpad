@@ -516,8 +516,10 @@ these documented integration patches remain repository-owned follow-up changes.
 ## Automatic word and selection occurrence highlighting
 
 The Duckpad-owned `DPWordOccurrenceHighlighter` shares indicator 10 across panes
-of a document. A caret matches case-sensitive whole words (including Unicode
-letters/marks and underscores); an explicit single-line selection matches literal
+of a document. By default, only explicit selections trigger matching. The persisted
+`highlightWordAtCaret` preference opts each pane into case-sensitive whole-word
+matching at the caret (including Unicode letters/marks and underscores). An
+explicit single-line selection matches literal
 substrings, so selecting `ap` also highlights it within `apple` and `pineapple`.
 Whitespace-only, multiline, rectangular, and over-256-byte selections are skipped.
 Text, selections, Undo, search indicator 8 and declaration indicator 9 stay intact.
@@ -532,7 +534,10 @@ There are no document snapshots; binary/progressive loads and IME composition
 suppress occurrence decorations.
 
 Occurrence offsets use the existing scrollbar overview layout, wrapping/folding
-mapping, marker drawing and click navigation. Explicit search results take
+mapping, marker drawing and click navigation. Body indicators fill incrementally,
+but scrollbar/minimap offsets expose an immutable snapshot only after the bounded
+scan completes. Query changes and edits clear the snapshot; paint/layout and
+clearing Find results cannot expose unfinished offsets. Explicit search results take
 precedence while installed; clearing them restores occurrence markers. Clicking
 an occurrence marker selects the matching substring to preserve the query.
 Each shared pane registers a weak callback, so closing a pane does not retain it

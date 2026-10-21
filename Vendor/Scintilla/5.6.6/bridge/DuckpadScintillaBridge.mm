@@ -235,6 +235,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     NSUInteger _declarationHoverPosition;
     NSRange _declarationHoverRange;
     BOOL _binaryDocument;
+    BOOL _caretWordHighlightEnabled;
     BOOL _loadingText;
     NSUInteger _loadingTextTotal;
     BOOL _loadingTextHasEOL;
@@ -1179,6 +1180,13 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (NSInteger)editorLeftPadding { return [_scintilla message:SCI_GETMARGINLEFT]; }
 - (NSInteger)editorRightPadding { return _baseRightPadding; }
+- (BOOL)isCaretWordHighlightEnabled { return _caretWordHighlightEnabled; }
+- (void)setCaretWordHighlightEnabled:(BOOL)value {
+    if (_caretWordHighlightEnabled == value) return;
+    _caretWordHighlightEnabled = value;
+    [self scheduleWordHighlights:YES];
+}
+
 - (BOOL)isMinimapVisible { return _minimapVisible; }
 - (void)setMinimapVisible:(BOOL)visible {
     _minimapVisible = visible;
@@ -1562,7 +1570,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)scheduleWordHighlights:(BOOL)selectionChanged {
     if (!_scintilla) return;
-    [_wordHighlighter scheduleForView:_scintilla enabled:!_binaryDocument && !_loadingText selectionChanged:selectionChanged];
+    [_wordHighlighter scheduleForView:_scintilla enabled:!_binaryDocument && !_loadingText
+        caretWordEnabled:_caretWordHighlightEnabled selectionChanged:selectionChanged];
 }
 
 - (BOOL)isWordHighlightedAtUTF8Position:(NSUInteger)position {

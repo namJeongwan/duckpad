@@ -1260,3 +1260,5 @@
 "Workspace folders: %1$@" = "工作区文件夹：%1$@";
 "Show hidden files" = "显示隐藏文件";
 "Show hidden files in the workspace and file searches. Search ignore rules still apply." = "在工作区和文件搜索中显示隐藏文件。搜索忽略规则仍然适用。";
+
+"Highlight matching words at the caret" = "高亮显示光标处单词的所有匹配项";

@@ -334,6 +334,31 @@ struct LanguageEditorAdapterTests {
         #expect(primary.contentUTF8 == Data("base".utf8))
     }
 
+    @Test @MainActor func caretHighlightPreferenceReachesExistingAndNewClonesWithoutEditing() throws {
+        let adapter = ScintillaEditorAdapter()
+        defer { adapter.invalidate() }
+        let buffer = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+        adapter.install(.init(bufferID: buffer.bufferID, revision: 0, text: "apple apple"))
+        adapter.display(buffer)
+        let primary = try #require(adapter.activeScintillaView)
+        #expect(!primary.isCaretWordHighlightEnabled)
+        adapter.applyPreferences(AppSettings(highlightWordAtCaret: true))
+        #expect(primary.isCaretWordHighlightEnabled)
+        adapter.setEditorGroupOrientation(.sideBySide)
+        let group = EditorGroupID()
+        adapter.assign(buffer, from: .primary, to: group, cloning: true)
+        adapter.display(buffer, in: group)
+        adapter.activateEditorGroup(group)
+        let clone = try #require(adapter.activeScintillaView)
+        #expect(clone.isCaretWordHighlightEnabled)
+        adapter.applyPreferences(.defaults)
+        #expect(!primary.isCaretWordHighlightEnabled)
+        #expect(!clone.isCaretWordHighlightEnabled)
+        #expect(primary.contentUTF8 == Data("apple apple".utf8))
+        #expect(primary.revision == 0)
+        #expect(!primary.canUndo)
+    }
+
     @Test @MainActor func lineNumberMarginGrowsAcrossDigitBoundaryInEveryPane() throws {
         let adapter = ScintillaEditorAdapter()
         defer { adapter.invalidate() }

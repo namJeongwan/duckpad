@@ -182,3 +182,17 @@ private final class AppSettingsStoreFake: AppSettingsStore {
     #expect(await useCase.updateMinimapVisible(true) == .failed(.writeFailed("fixture")))
     #expect(!useCase.state.settings.minimapVisible)
 }
+
+@Test @MainActor func caretWordHighlightPreferencePersistsAndOlderSettingsDisableIt() async throws {
+    let defaults = try JSONEncoder().encode(AppSettings.defaults)
+    var legacy = try #require(JSONSerialization.jsonObject(with: defaults) as? [String: Any])
+    legacy.removeValue(forKey: "highlightWordAtCaret")
+    let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONSerialization.data(withJSONObject: legacy))
+    #expect(!decoded.highlightWordAtCaret)
+    let store = AppSettingsStoreFake()
+    let useCase = AppSettingsUseCase(store: store)
+    _ = await useCase.update(AppSettings(highlightWordAtCaret: true))
+    #expect(store.saved.last?.highlightWordAtCaret == true)
+    let data = try JSONEncoder().encode(useCase.state.settings)
+    #expect(try JSONDecoder().decode(AppSettings.self, from: data).highlightWordAtCaret)
+}

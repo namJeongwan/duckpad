@@ -4,6 +4,8 @@
 #include <cstring>
 #include <string>
 
+static constexpr NSUInteger DPWordHighlightEnabled = 1 << 0;
+static constexpr NSUInteger DPCaretWordHighlightEnabled = 1 << 1;
 static constexpr int DPWordIndicator = 10;
 static constexpr sptr_t DPWordScanBudget = 64 * 1024;
 static constexpr NSUInteger DPWordMatchLimit = 100000;
@@ -15,12 +17,11 @@ static constexpr NSUInteger DPWordMatchLimit = 100000;
     NSUInteger _inspectedByteCount;
     NSMapTable<ScintillaView *, void (^)(void)> *_callbacks;
     NSMutableIndexSet *_matchOffsets;
+    NSIndexSet *_publishedOffsets;
     NSData *_pattern;
     BOOL _wholeWord;
     NSUInteger _generation;
     sptr_t _scanPosition;
-    CFAbsoluteTime _lastPublished;
-
 }
 
 - (instancetype)init {
@@ -28,6 +29,7 @@ static constexpr NSUInteger DPWordMatchLimit = 100000;
         _views = [NSMapTable weakToStrongObjectsMapTable];
         _callbacks = [NSMapTable weakToStrongObjectsMapTable];
         _matchOffsets = [NSMutableIndexSet indexSet];
+        _publishedOffsets = [NSIndexSet indexSet];
     }
     return self;
 }
@@ -46,7 +48,7 @@ static constexpr NSUInteger DPWordMatchLimit = 100000;
 }
 
 - (NSUInteger)inspectedByteCount { return _inspectedByteCount; }
-- (NSIndexSet *)matchOffsets { return _matchOffsets; }
+- (NSIndexSet *)matchOffsets { return _publishedOffsets; }
 - (NSUInteger)matchedByteLength { return _pattern.length; }
 
 - (void)addView:(ScintillaView *)view onChange:(void (^)(void))onChange {
@@ -54,12 +56,13 @@ static constexpr NSUInteger DPWordMatchLimit = 100000;
 }
 
 - (void)publish {
-    _lastPublished = CFAbsoluteTimeGetCurrent();
     for (void (^callback)(void) in _callbacks.objectEnumerator) callback();
 }
 
-- (void)scheduleForView:(ScintillaView *)view enabled:(BOOL)enabled selectionChanged:(BOOL)selectionChanged {
-    [_views setObject:@(enabled) forKey:view];
+- (void)scheduleForView:(ScintillaView *)view enabled:(BOOL)enabled caretWordEnabled:(BOOL)caretWordEnabled selectionChanged:(BOOL)selectionChanged {
+    const NSUInteger options = (enabled ? DPWordHighlightEnabled : 0)
+        | (caretWordEnabled ? DPCaretWordHighlightEnabled : 0);
+    [_views setObject:@(options) forKey:view];
     if (!_active || (selectionChanged && (view.window.firstResponder == view.content
         || !_active.window || !_active.window.isVisible))) _active = view;
     if (_scheduled) return;
@@ -95,6 +98,7 @@ static constexpr NSUInteger DPWordMatchLimit = 100000;
     _pattern = nil;
     [self clear];
     [_matchOffsets removeAllIndexes];
+    _publishedOffsets = [NSIndexSet indexSet];
     [self publish];
 }
 
@@ -116,6 +120,7 @@ static constexpr NSUInteger DPWordMatchLimit = 100000;
             || memchr(selected.data(), 0, selected.size() - 1)) return nil;
         return [text dataUsingEncoding:NSUTF8StringEncoding];
     }
+    if (!([[_views objectForKey:view] unsignedIntegerValue] & DPCaretWordHighlightEnabled)) return nil;
     sptr_t lower = caret, upper = caret;
     for (NSUInteger index = 0; index < 256; index++) {
         if (lower > 0) lower = [view message:SCI_POSITIONBEFORE wParam:lower];
@@ -149,7 +154,7 @@ static constexpr NSUInteger DPWordMatchLimit = 100000;
 
 - (void)refresh {
     ScintillaView *view = _active;
-    NSData *word = view && [[_views objectForKey:view] boolValue] && ![view.content hasMarkedText]
+    NSData *word = view && ([[_views objectForKey:view] unsignedIntegerValue] & DPWordHighlightEnabled) && ![view.content hasMarkedText]
         ? [self wordInView:view] : nil;
     const BOOL wholeWord = [view message:SCI_GETCURRENTPOS] == [view message:SCI_GETANCHOR];
     if ((!_pattern && !word) || ([_pattern isEqualToData:word] && _wholeWord == wholeWord)) return;
@@ -193,7 +198,11 @@ static constexpr NSUInteger DPWordMatchLimit = 100000;
     [view message:SCI_SETINDICATORCURRENT wParam:previous];
     [view message:SCI_SETINDICATORVALUE wParam:previousValue];
     const BOOL finished = _scanPosition >= length || _matchOffsets.count >= DPWordMatchLimit;
-    if (finished || CFAbsoluteTimeGetCurrent() - _lastPublished >= 0.1) [self publish];
+    if (finished) {
+        // Paint may request offsets between chunks: expose only a completed snapshot.
+        _publishedOffsets = [_matchOffsets copy];
+        [self publish];
+    }
     if (!finished) {
         __weak DPWordOccurrenceHighlighter *weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_MSEC), dispatch_get_main_queue(), ^{

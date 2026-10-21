@@ -1260,3 +1260,5 @@
 "Workspace folders: %1$@" = "ワークスペースフォルダ: %1$@";
 "Show hidden files" = "隠しファイルを表示";
 "Show hidden files in the workspace and file searches. Search ignore rules still apply." = "ワークスペースとファイル検索に隠しファイルを表示します。検索の除外ルールは引き続き適用されます。";
+
+"Highlight matching words at the caret" = "カーソル位置の単語と一致する単語を強調表示";

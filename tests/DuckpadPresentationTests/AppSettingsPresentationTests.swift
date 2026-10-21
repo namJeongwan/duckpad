@@ -1,6 +1,7 @@
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
+import DuckpadLocalization
 @testable import DuckpadPresentation
 import Testing
 
@@ -610,4 +611,31 @@ private func findView(in root: NSView, identifier: String) -> NSView? {
     #expect(!restored.minimapVisible)
     #expect(restored.appearanceMode == .dark)
     #expect(restored.editorFontSize == 19)
+}
+
+@Test @MainActor func caretHighlightCheckboxPersistsAndFitsAllLocalizedTitles() async throws {
+    _ = NSApplication.shared
+    let controller = DuckpadSettingsWindowController()
+    defer { controller.close() }
+    var saved = AppSettings.defaults
+    var updateTask: Task<Void, Never>?
+    controller.onUpdateTaskStarted = { updateTask = $0 }
+    controller.configure(settings: saved) { saved = $0; return .saved($0) }
+    controller.selectCategory("Editing")
+    let root = try #require(controller.window?.contentView)
+    func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+    for language in AppLanguage.allCases where language != .system {
+        let catalog = LocalizationCatalog(language: language)
+        controller.refreshLocalization(catalog: catalog)
+        root.layoutSubtreeIfNeeded()
+        let title = catalog.text("Highlight matching words at the caret")
+        let checkbox = try #require(descendants(root).compactMap { $0 as? NSButton }.first { $0.title == title })
+        #expect(checkbox.accessibilityLabel() == title)
+        #expect(checkbox.state == (saved.highlightWordAtCaret ? .on : .off))
+        #expect(checkbox.frame.width >= checkbox.intrinsicContentSize.width - 1)
+        #expect(checkbox.convert(checkbox.bounds, to: root).maxX <= root.bounds.maxX + 1)
+        checkbox.performClick(nil)
+        await updateTask?.value
+        #expect(saved.highlightWordAtCaret == (checkbox.state == .on))
+    }
 }

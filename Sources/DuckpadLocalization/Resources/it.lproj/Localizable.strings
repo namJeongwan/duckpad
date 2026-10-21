@@ -1260,3 +1260,5 @@
 "Workspace folders: %1$@" = "Cartelle dello spazio di lavoro: %1$@";
 "Show hidden files" = "Mostra file nascosti";
 "Show hidden files in the workspace and file searches. Search ignore rules still apply." = "Mostra i file nascosti nell’area di lavoro e nelle ricerche di file. Le regole di esclusione restano applicate.";
+
+"Highlight matching words at the caret" = "Evidenzia le parole uguali a quella sotto il cursore";

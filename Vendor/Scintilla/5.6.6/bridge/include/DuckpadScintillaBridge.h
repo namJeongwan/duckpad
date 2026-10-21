@@ -109,6 +109,7 @@ typedef NS_ENUM(NSInteger, DPScintillaSelectionCommand) {
 @property(nonatomic, readonly) NSInteger editorLeftPadding;
 @property(nonatomic, readonly) NSInteger editorRightPadding;
 @property(nonatomic, getter=isMinimapVisible) BOOL minimapVisible;
+@property(nonatomic, getter=isCaretWordHighlightEnabled) BOOL caretWordHighlightEnabled;
 @property(nonatomic, copy) NSString *minimapNavigationLabel;
 @property(nonatomic, readonly) NSInteger editorLineSpacing;
 - (void)configureTextLayoutWithLeftPadding:(NSInteger)leftPadding
