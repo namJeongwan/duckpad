@@ -8,6 +8,13 @@ final class EditorWindow: NSWindow {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if routeTerminalShortcut(event) { return true }
+        // Control-F remains native text/terminal input outside the Workspace pane.
+        let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        if event.type == .keyDown, flags == .control,
+           event.charactersIgnoringModifiers?.lowercased() == "f" || event.keyCode == 3,
+           attachedSheet == nil, NSApp.modalWindow == nil,
+           !event.isARepeat,
+           (windowController as? DuckpadWindowController)?.toggleWorkspaceFilterIfNeeded() == true { return true }
         return super.performKeyEquivalent(with: event)
     }
 

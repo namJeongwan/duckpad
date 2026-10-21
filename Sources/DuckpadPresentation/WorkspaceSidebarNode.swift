@@ -15,6 +15,12 @@ final class WorkspaceSidebarNode: NSObject {
     var children: [WorkspaceSidebarNode]?
     var isLoading = false
     var failure: WorkspaceBrowserFailure?
+    // Node names and the tree's 12pt typography are immutable. Reuse this across
+    // filtering/restoration instead of asking the text engine on every reflow.
+    lazy var nameWidth: CGFloat = {
+        let font = NSFont.systemFont(ofSize: 12, weight: kind == .root ? .semibold : .regular)
+        return (name as NSString).size(withAttributes: [.font: font]).width
+    }()
 
     init(root: WorkspaceRoot) {
         rootID = root.id

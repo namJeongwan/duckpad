@@ -23,6 +23,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     private var contentWidth: CGFloat = 0
     private let outline = WorkspaceOutlineView(frame: .zero)
     private let scroll = NSScrollView(frame: .zero)
+    private var contentTop: NSLayoutConstraint!
     private let emptyLabel = NSTextField(wrappingLabelWithString: L10n.text("Add a folder to browse files here."))
     private var roots: [WorkspaceRoot] = []
     private var rootNodes: [WorkspaceSidebarNode] = []
@@ -81,7 +82,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         column.maxWidth = .greatestFiniteMagnitude
         outline.columnAutoresizingStyle = .noColumnAutoresizing
         outline.style = .plain
-        outline.rowHeight = 26
+        outline.rowHeight = 24
         outline.intercellSpacing = NSSize(width: 0, height: 0)
         outline.usesAutomaticRowHeights = false
         outline.indentationPerLevel = 14
@@ -90,6 +91,10 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         outline.target = self
         outline.doubleAction = #selector(openSelected)
         outline.onPressReturn = { [weak self] in self?.openSelected() }
+        outline.onCancel = { [weak self] in
+            guard let self, !self.search.isHidden else { return }
+            self.hideFilter()
+        }
         let contextMenu = NSMenu(title: L10n.text("Workspace"))
         contextMenu.delegate = self
         outline.menu = contextMenu
@@ -107,7 +112,11 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         addSubview(header)
         addSubview(search)
         addSubview(scroll)
+        search.isHidden = true
+        contentTop = scroll.topAnchor.constraint(equalTo: header.bottomAnchor)
+        contentTop.isActive = true
         search.onResults = { [weak self] in self?.applySearch($0) }
+        search.onCancel = { [weak self] in self?.hideFilter() }
 
         emptyLabel.alignment = .center
         emptyLabel.textColor = .secondaryLabelColor
@@ -119,7 +128,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
             header.topAnchor.constraint(equalTo: topAnchor),
-            header.heightAnchor.constraint(equalToConstant: 34),
+            header.heightAnchor.constraint(equalToConstant: 32),
             title.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 9),
             title.trailingAnchor.constraint(lessThanOrEqualTo: removeButton.leadingAnchor, constant: -6),
             title.centerYAnchor.constraint(equalTo: header.centerYAnchor),
@@ -136,7 +145,6 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             search.leadingAnchor.constraint(equalTo: leadingAnchor), search.trailingAnchor.constraint(equalTo: trailingAnchor),
             search.topAnchor.constraint(equalTo: header.bottomAnchor),
-            scroll.topAnchor.constraint(equalTo: search.bottomAnchor),
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             emptyLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
             emptyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
@@ -157,6 +165,33 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
+
+    @discardableResult
+    func toggleFilter() -> Bool {
+        guard interactionsEnabled, window != nil else { return false }
+        if !search.isHidden {
+            hideFilter()
+            return true
+        }
+        search.isHidden = false
+        contentTop.isActive = false
+        contentTop = scroll.topAnchor.constraint(equalTo: search.bottomAnchor)
+        contentTop.isActive = true
+        layoutSubtreeIfNeeded()
+        return search.focus()
+    }
+
+    private func hideFilter() {
+        // End editing first so an IME commit cannot restart the filter after clearing it.
+        window?.makeFirstResponder(outline)
+        // Clearing also cancels pending searches and restores the normal tree navigation.
+        search.setQuery("")
+        search.isHidden = true
+        contentTop.isActive = false
+        contentTop = scroll.topAnchor.constraint(equalTo: header.bottomAnchor)
+        contentTop.isActive = true
+        layoutSubtreeIfNeeded()
+    }
 
     func invalidateChildren() -> [WorkspaceRoot] {
         let navigation = searchNodes == nil ? captureNavigation() : currentSearchNavigation()
@@ -299,7 +334,10 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         guard searchNodes == nil else { return }
         let wasRestoring = isRestoringNavigation
         isRestoringNavigation = true
-        defer { isRestoringNavigation = wasRestoring }
+        defer {
+            isRestoringNavigation = wasRestoring
+            if !wasRestoring { updateContentWidth() }
+        }
         for path in root.expandedRelativePaths.sorted(by: Self.pathDepthOrder) {
             if let node = node(rootID: root.id, relativePath: path) { outline.expandItem(node) }
         }
@@ -400,13 +438,16 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     }
 
     func outlineViewItemDidExpand(_ notification: Notification) {
-        guard let node = notification.userInfo?["NSObject"] as? WorkspaceSidebarNode else { return }
+        // Batch search expansion/restoration measures once after all rows are ready.
+        guard !isRestoringNavigation,
+              let node = notification.userInfo?["NSObject"] as? WorkspaceSidebarNode else { return }
         updateContentWidth()
         publishNavigation(rootID: node.rootID)
     }
 
     func outlineViewItemDidCollapse(_ notification: Notification) {
-        guard let node = notification.userInfo?["NSObject"] as? WorkspaceSidebarNode else { return }
+        guard !isRestoringNavigation,
+              let node = notification.userInfo?["NSObject"] as? WorkspaceSidebarNode else { return }
         updateContentWidth()
         publishNavigation(rootID: node.rootID)
     }
@@ -531,10 +572,8 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         contentWidth = 0
         for row in 0..<outline.numberOfRows {
             guard let node = outline.item(atRow: row) as? WorkspaceSidebarNode else { continue }
-            let font = NSFont.systemFont(ofSize: 12, weight: node.kind == .root ? .semibold : .regular)
-            let textWidth = (node.name as NSString).size(withAttributes: [.font: font]).width
             let indent = CGFloat(outline.level(forItem: node) + 1) * outline.indentationPerLevel
-            contentWidth = max(contentWidth, ceil(textWidth) + indent + 44)
+            contentWidth = max(contentWidth, ceil(node.nameWidth) + indent + 44)
         }
         fitColumnWidth()
     }
@@ -595,9 +634,12 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     private func node(rootID: WorkspaceRootID, relativePath: String) -> WorkspaceSidebarNode? {
         guard let root = rootNodes.first(where: { $0.rootID == rootID }) else { return nil }
         if relativePath.isEmpty { return root }
-        var result: WorkspaceSidebarNode?
-        traverse(root) {
-            if $0.relativePath == relativePath { result = $0 }
+        var result = root, prefix = ""
+        for part in relativePath.split(separator: "/", omittingEmptySubsequences: false) {
+            guard !part.isEmpty else { return nil }
+            prefix = prefix.isEmpty ? String(part) : prefix + "/" + part
+            guard let child = result.children?.first(where: { $0.relativePath == prefix }) else { return nil }
+            result = child
         }
         return result
     }

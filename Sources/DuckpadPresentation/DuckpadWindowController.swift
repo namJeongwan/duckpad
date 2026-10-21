@@ -1728,6 +1728,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             workspaceSidebar.removeFromSuperview()
         } else {
             workspaceContentSplit.insertArrangedSubview(workspaceSidebar, at: 0)
+            // Keep the user's divider position above the sidebar controls' hugging
+            // priorities; otherwise native live layout snaps it to its minimum.
+            workspaceContentSplit.setHoldingPriority(.init(260), forSubviewAt: 0)
             workspaceContentSplit.setPosition(workspaceSidebarWidth, ofDividerAt: 0)
         }
         commandBar.setWorkspaceVisible(workspaceSidebar.superview != nil)
@@ -1919,8 +1922,16 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         searchWindowController.present(in: window)
     }
 
+    /// Contextual Find uses the sidebar filter only while that pane owns focus.
+    func toggleWorkspaceFilterIfNeeded() -> Bool {
+        guard !hasTornDownWindow, !terminationReviewInProgress,
+              PluginPanelFocus.ownsKeyboardFocus(workspaceSidebar, in: workspaceContentSplit) else { return false }
+        return workspaceSidebar.toggleFilter()
+    }
+
     @objc public func performShowFind(_ sender: Any? = nil) {
         guard !terminationReviewInProgress else { return }
+        if toggleWorkspaceFilterIfNeeded() { return }
         onUsageMetric?(.feature(.find))
         showSearchPanel(replace: false)
     }
