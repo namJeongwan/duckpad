@@ -2,8 +2,11 @@ import Foundation
 import DuckpadApplication
 import DuckpadDomain
 
+typealias FileNameSearchResult = (entries: [FileNameSearchEntry], truncated: Bool, skipped: Int)
+typealias FileNameSearchProgress = @MainActor @Sendable (FileNameSearchResult) -> Void
+
 struct FileNameSearchEntry: Sendable {
-    enum Target: Sendable { case tab(TabID); case workspace(WorkspaceBrowserEntry); case folder(root: URL, authority: FolderFileNameRoot, relativePath: String) }
+    enum Target: Hashable, Sendable { case tab(TabID); case workspace(WorkspaceBrowserEntry); case folder(root: URL, authority: FolderFileNameRoot, relativePath: String) }
     let name: String
     let path: String
     let target: Target

@@ -68,36 +68,12 @@ final class SearchExperienceCoordinator {
         if let filePanelStorage { return filePanelStorage }
         let panel = FileNameSearchController()
         panel.onSearchRequest = { [weak self] scope, folder, query in
-            guard let self, self.actionable() else { throw CancellationError() }
-            if scope == .folder {
-                guard let folder, let indexer = self.folderFileNames else { throw SearchFailure.invalidLimits }
-                let index = try await indexer.search(in: folder, query: query, maximumEntries: 20_000, includeHiddenFiles: self.preferences.showHiddenFiles)
-                try Task.checkCancellation()
-                guard self.actionable() else { throw CancellationError() }
-                let worker = Task.detached(priority: .userInitiated) {
-                    index.relativePaths.compactMap { relative -> FileNameSearchEntry? in
-                        guard !Task.isCancelled else { return nil }
-                        return FileNameSearchEntry(name: URL(fileURLWithPath: relative).lastPathComponent,
-                            path: URL(fileURLWithPath: index.rootPath).appendingPathComponent(relative).path,
-                            target: .folder(root: folder, authority: index.root, relativePath: relative), project: folder.lastPathComponent)
-                    }
-                }
-                let entries = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
-                return (entries, index.isTruncated, index.skippedCount)
-            }
-            guard scope != .openDocuments, let browser = self.browser else { return ([], false, 0) }
-            let originalRoots = browser.roots
-            let index = try await browser.fileNameIndex(query: query)
-            guard self.actionable(), browser.roots == originalRoots else { throw CancellationError() }
-            let roots = Dictionary(uniqueKeysWithValues: browser.roots.map { ($0.id, $0.canonicalPath) })
-            let worker = Task.detached(priority: .userInitiated) {
-                index.files.compactMap { entry -> FileNameSearchEntry? in
-                    guard !Task.isCancelled, let root = roots[entry.rootID] else { return nil }
-                    return .init(name: entry.name, path: URL(fileURLWithPath: root).appendingPathComponent(entry.relativePath).path, target: .workspace(entry), project: URL(fileURLWithPath: root).lastPathComponent)
-                }
-            }
-            let entries = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
-            return (entries, index.isTruncated, index.skippedDirectoryCount)
+            guard let self else { throw CancellationError() }
+            return try await self.loadFileNames(scope: scope, folder: folder, query: query, maximumEntries: 20_000)
+        }
+        panel.onProgressSearchRequest = { [weak self] scope, folder, query, progress in
+            guard let self else { throw CancellationError() }
+            return try await self.loadFileNames(scope: scope, folder: folder, query: query, maximumEntries: 20_000, onProgress: progress)
         }
         panel.onLoadRequest = { [weak panel] scope, folder in
             guard let search = panel?.onSearchRequest else { throw CancellationError() }
@@ -112,6 +88,67 @@ final class SearchExperienceCoordinator {
         }
         panel.onOpen = { [weak self] entry in self?.openFile(entry, split: nil) }
         filePanelStorage = panel; return panel
+    }
+
+    private func loadFileNames(scope: ProjectSearchScope, folder: URL?, query: String, maximumEntries: Int, onProgress: FileNameSearchProgress? = nil) async throws -> FileNameSearchResult {
+        guard self.actionable() else { throw CancellationError() }
+        if scope == .folder {
+            guard let folder, let indexer = self.folderFileNames else { throw SearchFailure.invalidLimits }
+            let index: FolderFileNameIndex
+            if let onProgress {
+                index = try await indexer.search(in: folder, query: query, maximumEntries: maximumEntries, includeHiddenFiles: self.preferences.showHiddenFiles) { partial in
+                    let update = await Self.folderFileNameEntries(partial, folder: folder)
+                    guard !Task.isCancelled else { return }
+                    await onProgress(update)
+                }
+            } else {
+                index = try await indexer.search(in: folder, query: query, maximumEntries: maximumEntries, includeHiddenFiles: self.preferences.showHiddenFiles)
+            }
+            try Task.checkCancellation()
+            guard self.actionable() else { throw CancellationError() }
+            return await Self.folderFileNameEntries(index, folder: folder)
+        }
+        guard scope != .openDocuments, let browser = self.browser else { return ([], false, 0) }
+        let originalRoots = browser.roots
+        let roots = Dictionary(uniqueKeysWithValues: originalRoots.map { ($0.id, $0.canonicalPath) })
+        // The worker serially awaits UI delivery, so progress cannot build an unbounded queue.
+        let progress: (@MainActor @Sendable (WorkspaceFileNameIndex) async -> Void)?
+        if let onProgress {
+            progress = { [weak self] partial in
+                let update = await Self.workspaceFileNameEntries(partial, roots: roots)
+                guard !Task.isCancelled, let self, self.actionable(), browser.roots == originalRoots else { return }
+                onProgress(update)
+            }
+        } else { progress = nil }
+        let index = try await browser.fileNameIndex(maximumEntries: maximumEntries, query: query, onProgress: progress)
+        guard self.actionable(), browser.roots == originalRoots else { throw CancellationError() }
+        return await Self.workspaceFileNameEntries(index, roots: roots)
+    }
+
+    private nonisolated static func folderFileNameEntries(_ index: FolderFileNameIndex, folder: URL) async -> FileNameSearchResult {
+        let worker = Task.detached(priority: .userInitiated) {
+            let prefix = index.rootPath == "/" ? "/" : index.rootPath + "/", project = folder.lastPathComponent
+            let entries = index.relativePaths.compactMap { relative -> FileNameSearchEntry? in
+                guard !Task.isCancelled else { return nil }
+                return .init(name: String(relative.split(separator: "/").last ?? ""), path: prefix + relative,
+                    target: .folder(root: folder, authority: index.root, relativePath: relative), project: project)
+            }
+            return (entries, index.isTruncated, index.skippedCount)
+        }
+        return await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+    }
+
+    private nonisolated static func workspaceFileNameEntries(_ index: WorkspaceFileNameIndex, roots: [WorkspaceRootID: String]) async -> FileNameSearchResult {
+        let worker = Task.detached(priority: .userInitiated) {
+            let projects = roots.mapValues { URL(fileURLWithPath: $0).lastPathComponent }
+            let entries = index.files.compactMap { entry -> FileNameSearchEntry? in
+                guard !Task.isCancelled, let root = roots[entry.rootID] else { return nil }
+                return .init(name: entry.name, path: (root == "/" ? "/" : root + "/") + entry.relativePath,
+                    target: .workspace(entry), project: projects[entry.rootID])
+            }
+            return (entries, index.isTruncated, index.skippedDirectoryCount)
+        }
+        return await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
     }
 
     /// Filename opens share one request lifetime, including normal → split and split → normal.

@@ -13,6 +13,7 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
     private let selectedPath = NSTextField(labelWithString: "")
     var onLoadRequest: ((ProjectSearchScope, URL?) async throws -> (entries: [FileNameSearchEntry], truncated: Bool, skipped: Int))?
     var onSearchRequest: ((ProjectSearchScope, URL?, String) async throws -> (entries: [FileNameSearchEntry], truncated: Bool, skipped: Int))?
+    var onProgressSearchRequest: ((ProjectSearchScope, URL?, String, @escaping FileNameSearchProgress) async throws -> FileNameSearchResult)?
     var onChooseFolder: (() async -> URL?)?
     private let scope = NSStackView()
     private let scopeTabs = ProjectSearchScope.allCases.map { _ in SearchOptionButton() }
@@ -178,27 +179,38 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
             guard let self else { return }
             do {
                 let indexed: (entries: [FileNameSearchEntry], truncated: Bool, skipped: Int)?
-                if let request = self.onSearchRequest { indexed = try await request(selected, selected == .folder ? selectedFolder : nil, searchText) }
+                if let request = self.onProgressSearchRequest {
+                    indexed = try await request(selected, selected == .folder ? selectedFolder : nil, searchText) { [weak self] update in
+                        guard let self, !Task.isCancelled, self.generation == token else { return }
+                        self.applyIndex(update, seed: seed)
+                        self.refilter(preservingSelection: true)
+                    }
+                }
+                else if let request = self.onSearchRequest { indexed = try await request(selected, selected == .folder ? selectedFolder : nil, searchText) }
                 else if let request = self.onLoadRequest { indexed = try await request(selected, selected == .folder ? selectedFolder : nil) }
                 else if selected != .folder { indexed = try await self.onLoad?() }
                 else { indexed = nil }
                 guard !Task.isCancelled, self.generation == token else { return }
                 if let indexed {
-                    var paths = Set<String>()
-                    self.entries = (seed + indexed.entries).filter { entry in
-                        let key: String
-                        if case .tab(let id) = entry.target, !entry.path.hasPrefix("/") { key = "tab:" + id.rawValue.uuidString }
-                        else { key = entry.path }
-                        return paths.insert(key).inserted
-                    }
-                    self.truncated = indexed.truncated; self.skipped = indexed.skipped
+                    self.applyIndex(indexed, seed: seed)
                 }
             } catch {
                 guard !Task.isCancelled, self.generation == token else { return }
                 self.skipped += 1
             }
-            self.loading = false; self.refilter()
+            self.loading = false; self.refilter(preservingSelection: true)
         }
+    }
+
+    private func applyIndex(_ indexed: (entries: [FileNameSearchEntry], truncated: Bool, skipped: Int), seed: [FileNameSearchEntry]) {
+        var paths = Set<String>()
+        entries = (seed + indexed.entries).filter { entry in
+            let key: String
+            if case .tab(let id) = entry.target, !entry.path.hasPrefix("/") { key = "tab:" + id.rawValue.uuidString }
+            else { key = entry.path }
+            return paths.insert(key).inserted
+        }
+        truncated = indexed.truncated; skipped = indexed.skipped
     }
 
     func dismiss(restoreFocus: Bool = true) {
@@ -234,35 +246,47 @@ final class FileNameSearchController: NSWindowController, NSWindowDelegate, NSTe
     func setQuery(_ value: String) { query.stringValue = value; queryChanged() }
     private func queryChanged() {
         refilter()
-        guard onSearchRequest != nil, selectedScope != .openDocuments else { return }
+        guard onSearchRequest != nil || onProgressSearchRequest != nil, selectedScope != .openDocuments else { return }
         task?.cancel(); generation = UUID(); queryTask?.cancel()
         queryTask = Task { [weak self] in
-            do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
+            do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
             guard !Task.isCancelled else { return }
             self?.reloadScope(keepingResults: true)
         }
     }
-    private func refilter() {
+    private func refilter(preservingSelection: Bool = false) {
+        let selection = preservingSelection ? selectedResultPath : nil
         filterTask?.cancel(); filterGeneration = UUID()
         let sourceEntries = entries
         clear.isHidden = query.stringValue.isEmpty
         if sourceEntries.count > 500 {
             let token = filterGeneration, source = sourceEntries, text = query.stringValue
-            results = []; reloadResults()
+            // Keep usable first-page matches visible while ranking the full set.
+            // A new query still removes rows that no longer match immediately.
+            let allowed = Set(sourceEntries.map(\.target))
+            results = FileNameSearchEntry.matching(results.filter { allowed.contains($0.target) }, query: text)
+            reloadResults(preservingPath: selection)
             filterTask = Task { [weak self] in
                 let worker = Task.detached(priority: .userInitiated) { FileNameSearchEntry.matching(source, query: text) }
                 let filtered = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
                 guard !Task.isCancelled, let self, self.filterGeneration == token else { return }
-                self.results = filtered; self.reloadResults()
+                let currentSelection = self.selectedResultPath
+                self.results = filtered; self.reloadResults(preservingPath: currentSelection)
             }
             return
         }
         results = FileNameSearchEntry.matching(sourceEntries, query: query.stringValue)
-        reloadResults()
+        reloadResults(preservingPath: selection)
     }
-    private func reloadResults() {
+    private var selectedResultPath: String? {
+        results.indices.contains(table.selectedRow) ? results[table.selectedRow].path : nil
+    }
+    private func reloadResults(preservingPath path: String? = nil) {
         table.reloadData()
-        if !results.isEmpty { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }
+        if !results.isEmpty {
+            let selected = path.flatMap { path in results.firstIndex { $0.path == path } } ?? 0
+            table.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
+        }
         updateStatus(); updateSelection()
     }
     private func updateStatus() {

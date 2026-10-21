@@ -21,13 +21,29 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
         try await search(in: folder, query: query, maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles, expectedRoot: nil)
     }
 
-    func search(in folder: URL, query: String, maximumEntries: Int, includeHiddenFiles: Bool, expectedRoot: FolderFileNameRoot?) async throws -> FolderFileNameIndex {
+    public func search(in folder: URL, query: String, maximumEntries: Int, includeHiddenFiles: Bool,
+                       onProgress: @escaping @Sendable (FolderFileNameIndex) async -> Void) async throws -> FolderFileNameIndex {
+        try await search(in: folder, query: query, maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles,
+            expectedRoot: nil, onProgress: onProgress)
+    }
+
+    func search(in folder: URL, query: String, maximumEntries: Int, includeHiddenFiles: Bool, expectedRoot: FolderFileNameRoot?, onProgress: (@Sendable (FolderFileNameIndex) async -> Void)? = nil) async throws -> FolderFileNameIndex {
         guard maximumEntries > 0, maximumEntries <= 100_000 else { throw WorkspaceBrowserFailure.entryLimitExceeded(maximumEntries) }
         let process = executable.map { RipgrepProcess(executable: $0, timeout: .seconds(30)) }
+        // Only the latest snapshot is retained if UI processing trails discovery.
+        let (updates, continuation) = AsyncStream<FolderFileNameIndex>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let worker = Task.detached(priority: .userInitiated) {
-            try self.indexBlocking(folder: folder, query: FileNameQuery(query), maximumEntries: maximumEntries, process: process, includeHiddenFiles: includeHiddenFiles, expectedRoot: expectedRoot)
+            defer { continuation.finish() }
+            return try self.indexBlocking(folder: folder, query: FileNameQuery(query), maximumEntries: maximumEntries, process: process, includeHiddenFiles: includeHiddenFiles, expectedRoot: expectedRoot,
+                onProgress: onProgress == nil ? nil : { continuation.yield($0) })
         }
-        return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel(); process?.cancel() }
+        return try await withTaskCancellationHandler {
+            for await update in updates {
+                try Task.checkCancellation()
+                await onProgress?(update)
+            }
+            return try await worker.value
+        } onCancel: { worker.cancel(); process?.cancel() }
     }
 
     public func readFile(in folder: URL, root expected: FolderFileNameRoot, relativePath: String) async throws -> WorkspaceFileRead {
@@ -47,12 +63,20 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
     }
 
-    private func indexBlocking(folder: URL, query: FileNameQuery, maximumEntries: Int, process: RipgrepProcess?, includeHiddenFiles: Bool, expectedRoot: FolderFileNameRoot?) throws -> FolderFileNameIndex {
+    private func indexBlocking(folder: URL, query: FileNameQuery, maximumEntries: Int, process: RipgrepProcess?, includeHiddenFiles: Bool, expectedRoot: FolderFileNameRoot?, onProgress: ((FolderFileNameIndex) -> Void)?) throws -> FolderFileNameIndex {
         let root = try FolderSearchRoot(path: folder.path)
         let deadline = ContinuousClock.now + .seconds(30)
         let pathPrefix = root.url.path + "/"
         guard expectedRoot == nil || root.fileNameRoot == expectedRoot else { throw FolderSearchFailure.invalidRoot(folder.path) }
         var paths: [String] = [], skipped = 0, observed = 0, nameBytes = 0, truncated = false
+        var lastProgress = ContinuousClock.now, publishedCount = 0
+        func publishProgress() throws {
+            guard let onProgress, paths.count != publishedCount,
+                  publishedCount == 0 || lastProgress.duration(to: .now) >= .milliseconds(50) else { return }
+            try root.validate(); try Task.checkCancellation()
+            onProgress(.init(root: root.fileNameRoot, relativePaths: paths, isTruncated: true, skippedCount: skipped))
+            lastProgress = .now; publishedCount = paths.count
+        }
         func admit(_ relative: String) throws -> Bool {
             try Task.checkCancellation(); try process?.check()
             guard ContinuousClock.now < deadline else { throw FolderSearchFailure.search(.timedOut) }
@@ -61,9 +85,10 @@ public struct LocalFolderFileNameIndex: FolderFileNameIndexing {
             guard query.matches(path: pathPrefix + relative) else { return true }
             guard observed < maximumEntries, relative.utf8.count <= 16 * 1_024 * 1_024 - nameBytes else { truncated = true; return false }
             observed += 1; nameBytes += relative.utf8.count
-            guard let file = root.open(relative, includeHiddenFiles: includeHiddenFiles) else { skipped += 1; return true }
+            guard let file = root.open(relative, includeHiddenFiles: includeHiddenFiles, cacheDirectoryPackages: true) else { skipped += 1; return true }
             Darwin.close(file.descriptor)
             paths.append(relative)
+            try publishProgress()
             return true
         }
         if let process {

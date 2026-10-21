@@ -251,15 +251,40 @@ public actor LocalWorkspaceRootStore: WorkspaceRootStore {
     }
 
     public func fileNameIndex(rootID: WorkspaceRootID, query: String, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> WorkspaceFileNameIndex {
+        try await searchFileNames(rootID: rootID, query: query, maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles, onProgress: nil)
+    }
+
+    public func fileNameIndex(rootID: WorkspaceRootID, query: String, maximumEntries: Int, includeHiddenFiles: Bool,
+                              onProgress: @escaping @Sendable (WorkspaceFileNameIndex) async -> Void) async throws -> WorkspaceFileNameIndex {
+        try await searchFileNames(rootID: rootID, query: query, maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles, onProgress: onProgress)
+    }
+
+    private func searchFileNames(rootID: WorkspaceRootID, query: String, maximumEntries: Int, includeHiddenFiles: Bool,
+                                 onProgress: (@Sendable (WorkspaceFileNameIndex) async -> Void)?) async throws -> WorkspaceFileNameIndex {
         try loadIfNeeded()
         let access = try availableRoot(rootID)
         let expected = FolderFileNameRoot(canonicalPath: access.url.path, device: access.identity.device, inode: access.identity.inode)
+        let progress: (@Sendable (FolderFileNameIndex) async -> Void)?
+        if let onProgress {
+            progress = { [weak self] partial in
+                guard let self, await self.isCurrentFileNameAccess(access), !Task.isCancelled else { return }
+                await onProgress(Self.workspaceNames(partial, rootID: rootID))
+            }
+        } else { progress = nil }
         let result = try await LocalFolderFileNameIndex().search(in: access.url, query: query,
-            maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles, expectedRoot: expected)
-        let current = try availableRoot(rootID)
-        guard current.identity == access.identity, current.url == access.url else { throw WorkspaceBrowserFailure.unavailableRoot(rootID) }
-        return .init(files: result.relativePaths.map {
-            .init(rootID: rootID, relativePath: $0, name: URL(fileURLWithPath: $0).lastPathComponent, kind: .file)
+            maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles, expectedRoot: expected, onProgress: progress)
+        guard isCurrentFileNameAccess(access) else { throw WorkspaceBrowserFailure.unavailableRoot(rootID) }
+        return Self.workspaceNames(result, rootID: rootID)
+    }
+
+    private func isCurrentFileNameAccess(_ access: RootAccess) -> Bool {
+        guard let current = try? availableRoot(access.id) else { return false }
+        return current.identity == access.identity && current.url == access.url
+    }
+
+    private nonisolated static func workspaceNames(_ result: FolderFileNameIndex, rootID: WorkspaceRootID) -> WorkspaceFileNameIndex {
+        .init(files: result.relativePaths.map {
+            .init(rootID: rootID, relativePath: $0, name: String($0.split(separator: "/").last ?? ""), kind: .file)
         }, isTruncated: result.isTruncated, skippedDirectoryCount: result.skippedCount)
     }
 

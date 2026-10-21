@@ -17,6 +17,9 @@ final class FolderSearchRoot {
     private let scoped: URL
     private let hasScope: Bool
     private let info: stat
+    // Per-discovery metadata cache; descriptors and fstat are still checked every time.
+    private var packages: [String: (stat, Bool)] = [:]
+    private var packageKeyBytes = 0
 
     init(path: String) throws {
         scoped = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
@@ -46,20 +49,20 @@ final class FolderSearchRoot {
         }
     }
 
-    func open(_ relative: String, includeHiddenFiles: Bool = false) -> File? {
+    func open(_ relative: String, includeHiddenFiles: Bool = false, cacheDirectoryPackages: Bool = false) -> File? {
         let components = relative.split(separator: "/", omittingEmptySubsequences: false)
         guard !components.isEmpty, !relative.utf8.contains(0), components.count <= 257,
               components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && (includeHiddenFiles || !$0.hasPrefix(".")) }) else { return nil }
         var parent = descriptor
         defer { if parent != descriptor { Darwin.close(parent) } }
-        var display = url
+        var display = url.path
         for part in components.dropLast() {
-            display.appendPathComponent(String(part))
+            display += (display == "/" ? "" : "/") + part
             let next = Darwin.openat(parent, String(part), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
             guard next >= 0 else { return nil }
             var status = stat()
             guard fstat(next, &status) == 0, (includeHiddenFiles || status.st_flags & UInt32(UF_HIDDEN) == 0),
-                  !LocalFolderSearchFileStore.isPackageDirectory(name: String(part), displayPath: display.path) else {
+                  !isPackageDirectory(name: String(part), path: display, info: status, cached: cacheDirectoryPackages) else {
                 Darwin.close(next); return nil
             }
             if parent != descriptor { Darwin.close(parent) }
@@ -71,6 +74,18 @@ final class FolderSearchRoot {
         guard fstat(leaf, &status) == 0, LocalFolderSearchFileStore.fileType(status) == S_IFREG,
               (includeHiddenFiles || status.st_flags & UInt32(UF_HIDDEN) == 0), status.st_size >= 0 else { Darwin.close(leaf); return nil }
         return .init(descriptor: leaf, relativePath: relative, info: status)
+    }
+
+    private func isPackageDirectory(name: String, path: String, info: stat, cached: Bool) -> Bool {
+        if cached, let (previous, value) = packages[path], LocalFolderSearchFileStore.sameSnapshot(previous, info) {
+            return value
+        }
+        let value = LocalFolderSearchFileStore.isPackageDirectory(name: name, displayPath: path)
+        if cached, packages.count < 2_048, packageKeyBytes + path.utf8.count <= 256 * 1_024 {
+            if packages[path] == nil { packageKeyBytes += path.utf8.count }
+            packages[path] = (info, value)
+        }
+        return value
     }
 
     func read(_ file: File, maximumBytes: Int) throws -> FolderSearchFile? {

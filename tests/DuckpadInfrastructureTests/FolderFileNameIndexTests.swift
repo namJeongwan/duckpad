@@ -1,6 +1,7 @@
 import DuckpadApplication
-import DuckpadInfrastructure
+@testable import DuckpadInfrastructure
 import Foundation
+import Darwin
 import Testing
 
 struct FolderFileNameIndexTests {
@@ -18,6 +19,23 @@ struct FolderFileNameIndexTests {
         let literal = try await indexer.search(in: root, query: "[utils]*", maximumEntries: 10, includeHiddenFiles: false)
         #expect(literal.relativePaths.isEmpty)
     }
+    @Test func cachedDirectoryMetadataNeverAllowsAReplacedSymlink() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = base.appendingPathComponent("selected"), child = root.appendingPathComponent("child")
+        let outside = base.appendingPathComponent("outside")
+        for directory in [child, outside] { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
+        defer { try? FileManager.default.removeItem(at: base) }
+        for directory in [child, outside] { try Data().write(to: directory.appendingPathComponent("util.ts")) }
+        let access = try FolderSearchRoot(path: root.path)
+        let first = try #require(access.open("child/util.ts", cacheDirectoryPackages: true))
+        Darwin.close(first.descriptor)
+        try FileManager.default.removeItem(at: child)
+        try FileManager.default.createSymbolicLink(at: child, withDestinationURL: outside)
+        let replaced = access.open("child/util.ts", cacheDirectoryPackages: true)
+        if let replaced { Darwin.close(replaced.descriptor) }
+        #expect(replaced == nil)
+    }
+
     private var executable: URL {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent(".build/ripgrep/15.1.0/native/rg")
