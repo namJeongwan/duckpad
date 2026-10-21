@@ -1,6 +1,6 @@
 import Foundation
 
-public struct FolderFileNameRoot: Equatable, Sendable {
+public struct FolderFileNameRoot: Hashable, Sendable {
     public let canonicalPath: String
     public let device: UInt64
     public let inode: UInt64
@@ -27,10 +27,20 @@ public protocol FolderFileNameIndexing: Sendable {
     func index(in folder: URL, maximumEntries: Int) async throws -> FolderFileNameIndex
     func index(in folder: URL, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex
     func search(in folder: URL, query: String, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex
+    func search(in folder: URL, query: String, maximumEntries: Int, includeHiddenFiles: Bool,
+                onProgress: @escaping @Sendable (FolderFileNameIndex) async -> Void) async throws -> FolderFileNameIndex
     func readFile(in folder: URL, root: FolderFileNameRoot, relativePath: String) async throws -> WorkspaceFileRead
 }
 
 public extension FolderFileNameIndexing {
+    func search(in folder: URL, query: String, maximumEntries: Int, includeHiddenFiles: Bool,
+                onProgress: @escaping @Sendable (FolderFileNameIndex) async -> Void) async throws -> FolderFileNameIndex {
+        let result = try await search(in: folder, query: query, maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles)
+        try Task.checkCancellation()
+        await onProgress(result)
+        return result
+    }
+
     func search(in folder: URL, query: String, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> FolderFileNameIndex {
         let result = try await index(in: folder, maximumEntries: maximumEntries, includeHiddenFiles: includeHiddenFiles)
         let pattern = FileNameQuery(query)

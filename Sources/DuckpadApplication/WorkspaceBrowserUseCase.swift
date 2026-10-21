@@ -90,6 +90,8 @@ public enum WorkspaceBrowserFailure: Error, Equatable, Sendable, LocalizedError 
 
 public protocol WorkspaceRootStore: Sendable {
     func fileNameIndex(rootID: WorkspaceRootID, query: String, maximumEntries: Int, includeHiddenFiles: Bool) async throws -> WorkspaceFileNameIndex
+    func fileNameIndex(rootID: WorkspaceRootID, query: String, maximumEntries: Int, includeHiddenFiles: Bool,
+                       onProgress: @escaping @Sendable (WorkspaceFileNameIndex) async -> Void) async throws -> WorkspaceFileNameIndex
     func loadRoots() async throws(WorkspaceBrowserFailure) -> [WorkspaceRoot]
     func addRoot(_ url: URL) async throws(WorkspaceBrowserFailure) -> WorkspaceRoot
     func removeRoot(_ id: WorkspaceRootID) async throws(WorkspaceBrowserFailure)
@@ -230,8 +232,12 @@ public final class WorkspaceBrowserUseCase {
         return try await store.children(rootID: rootID, relativeDirectory: relativeDirectory, includeHiddenFiles: showHiddenFiles)
     }
 
-    func searchFileNames(rootID: WorkspaceRootID, query: String, maximumEntries: Int) async throws -> WorkspaceFileNameIndex {
+    func searchFileNames(rootID: WorkspaceRootID, query: String, maximumEntries: Int, onProgress: (@Sendable (WorkspaceFileNameIndex) async -> Void)? = nil) async throws -> WorkspaceFileNameIndex {
         guard roots.contains(where: { $0.id == rootID && $0.isAvailable }) else { throw WorkspaceBrowserFailure.unknownRoot(rootID) }
+        if let onProgress {
+            return try await store.fileNameIndex(rootID: rootID, query: query, maximumEntries: maximumEntries,
+                includeHiddenFiles: showHiddenFiles, onProgress: onProgress)
+        }
         return try await store.fileNameIndex(rootID: rootID, query: query, maximumEntries: maximumEntries, includeHiddenFiles: showHiddenFiles)
     }
 
