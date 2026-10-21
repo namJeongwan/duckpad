@@ -37,6 +37,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var minimapVisible: Bool
     public var lineNumbersVisible: Bool
     public var bookmarkMarginVisible: Bool
+    public var highlightWordAtCaret: Bool
     public var highlightCurrentLine: Bool
     public var caretWidth: Int
     public var caretBlinkPeriod: Int
@@ -91,6 +92,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         minimapVisible: Bool = true,
         lineNumbersVisible: Bool = true,
         bookmarkMarginVisible: Bool = true,
+        highlightWordAtCaret: Bool = false,
         highlightCurrentLine: Bool = true,
         caretWidth: Int = 1,
         caretBlinkPeriod: Int = 500,
@@ -141,6 +143,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.minimapVisible = minimapVisible
         self.lineNumbersVisible = lineNumbersVisible
         self.bookmarkMarginVisible = bookmarkMarginVisible
+        self.highlightWordAtCaret = highlightWordAtCaret
         self.highlightCurrentLine = highlightCurrentLine
         self.caretWidth = caretWidth
         self.caretBlinkPeriod = caretBlinkPeriod
@@ -194,6 +197,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         minimapVisible = try values.decodeIfPresent(Bool.self, forKey: .minimapVisible) ?? true
         lineNumbersVisible = try values.decodeIfPresent(Bool.self, forKey: .lineNumbersVisible) ?? true
         bookmarkMarginVisible = try values.decodeIfPresent(Bool.self, forKey: .bookmarkMarginVisible) ?? true
+        highlightWordAtCaret = try values.decodeIfPresent(Bool.self, forKey: .highlightWordAtCaret) ?? false
         highlightCurrentLine = try values.decodeIfPresent(Bool.self, forKey: .highlightCurrentLine) ?? true
         caretWidth = try values.decodeIfPresent(Int.self, forKey: .caretWidth) ?? 1
         caretBlinkPeriod = try values.decodeIfPresent(Int.self, forKey: .caretBlinkPeriod) ?? 500

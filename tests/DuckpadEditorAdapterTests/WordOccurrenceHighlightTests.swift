@@ -7,11 +7,82 @@ struct WordOccurrenceHighlightTests {
     private func editor(_ text: String) throws -> DPScintillaEditorView {
         _ = NSApplication.shared
         let view = DPScintillaEditorView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+        view.isCaretWordHighlightEnabled = true
         try view.loadUTF8(Data(text.utf8), revision: 7)
         return view
     }
 
     private func settle() async throws { try await Task.sleep(for: .milliseconds(180)) }
+
+    @Test func caretOnlyHighlightsAreDisabledByDefaultButSelectionStillHighlights() async throws {
+        _ = NSApplication.shared
+        let view = DPScintillaEditorView(frame: .init(x: 0, y: 0, width: 600, height: 300))
+        defer { view.invalidate() }
+        try view.loadUTF8(Data("apple orange apple".utf8), revision: 7)
+        view.setPrimarySelectionUTF8Range(.init(location: 2, length: 0))
+        try await settle()
+        #expect(!view.isWordHighlighted(atUTF8Position: 0))
+        #expect(view.searchOverviewPositions.isEmpty)
+        view.setPrimarySelectionUTF8Range(.init(location: 0, length: 5))
+        try await settle()
+        #expect(view.isWordHighlighted(atUTF8Position: 13))
+        #expect(view.searchOverviewPositions.count == 2)
+    }
+
+    @Test func caretHighlightPreferenceCanChangeWithoutMovingTheCaret() async throws {
+        let view = try editor("apple orange apple")
+        defer { view.invalidate() }
+        view.setPrimarySelectionUTF8Range(.init(location: 2, length: 0))
+        try await settle()
+        #expect(view.searchOverviewPositions.count == 2)
+        view.isCaretWordHighlightEnabled = false
+        try await settle()
+        #expect(view.searchOverviewPositions.isEmpty)
+        #expect(!view.isWordHighlighted(atUTF8Position: 0))
+        view.isCaretWordHighlightEnabled = true
+        try await settle()
+        #expect(view.searchOverviewPositions.count == 2)
+        #expect(view.isWordHighlighted(atUTF8Position: 13))
+        #expect(view.caretUTF8Position == 2)
+        #expect(!view.canUndo)
+    }
+
+    @Test func overviewPublishesOnlyCompleteOccurrenceSetsAcrossSharedPanes() async throws {
+        let padding = String(repeating: String(repeating: ".", count: 1023) + "\n", count: 8_192)
+        let source = "ap\n" + padding + "ap\n" + padding + "ap"
+        let view = try editor(source)
+        view.isWordWrapEnabled = false
+        let clone = DPScintillaEditorView(frame: view.frame)
+        clone.isWordWrapEnabled = false
+        clone.shareDocument(with: view)
+        defer { clone.invalidate(); view.invalidate() }
+        view.setPrimarySelectionUTF8Range(.init(location: 0, length: 2))
+        var partialCounts = Set<Int>(), checkedPendingSearchPrecedence = false
+        let deadline = ContinuousClock.now + .seconds(10)
+        while ContinuousClock.now < deadline {
+            for pane in [view, clone] {
+                let count = pane.searchOverviewPositions.count
+                if count != 0 && count != 3 { partialCounts.insert(count) }
+            }
+            if view.searchOverviewPositions.count == 3 && clone.searchOverviewPositions.count == 3 { break }
+            if !checkedPendingSearchPrecedence, view.isWordHighlighted(atUTF8Position: 0) {
+                checkedPendingSearchPrecedence = true
+                #expect(view.setSearchHighlights([NSValue(range: .init(location: 3, length: 1))], revision: 7))
+                #expect(view.searchOverviewPositions.count == 1)
+                view.clearSearchHighlights()
+                let count = view.searchOverviewPositions.count
+                if count != 0 && count != 3 { partialCounts.insert(count) }
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(checkedPendingSearchPrecedence)
+        #expect(partialCounts.isEmpty, "Scrollbar exposed unfinished occurrence counts: \(partialCounts)")
+        #expect(view.searchOverviewPositions.count == 3)
+        #expect(clone.searchOverviewPositions.count == 3)
+        #expect(view.isWordHighlighted(atUTF8Position: UInt(source.utf8.count - 2)))
+        #expect(view.wordHighlightInspectedByteCount <= 64 * 1024 + 256)
+        #expect(!view.canUndo)
+    }
 
     @Test func partialSelectionHighlightsSubstringsAndPublishesScrollbarTicks() async throws {
         let view = try editor("apple orange apple pineapple Apple\nap apricot")
@@ -181,6 +252,7 @@ struct WordOccurrenceHighlightTests {
     @Test func multipleSelectionsAndSharedPanesKeepSelectionsIntact() async throws {
         let view = try editor("apple orange apple orange")
         let clone = DPScintillaEditorView(frame: view.frame)
+        clone.isCaretWordHighlightEnabled = true
         clone.shareDocument(with: view)
         defer { clone.invalidate(); view.invalidate() }
         view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: 5))

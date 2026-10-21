@@ -360,6 +360,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         (pages["Editing"] as? NSStackView)?.addArrangedSubview(fontSizeRow)
         checkbox("Automatically reload files changed on disk", \.liveFileReloadEnabled, "General")
         checkbox("Highlight current line", \.highlightCurrentLine, "Editing")
+        checkbox("Highlight matching words at the caret", \.highlightWordAtCaret, "Editing")
         choices("Caret width", \.caretWidth, [("1", 1), ("2", 2), ("3", 3)], "Editing")
         choices("Caret blink rate", \.caretBlinkPeriod, [("Fast", 250), ("Normal", 500), ("Slow", 1000), ("No blinking", 0)], "Editing")
         choices("Line wrap", \.wrapIndentMode, [("Default", 0), ("Aligned", 1), ("Indent", 2)], "Editing")

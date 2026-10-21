@@ -1005,6 +1005,7 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
             RichClipboardWriter.addRepresentations(presentation, tabWidth: Int(view.configuredTabWidth), to: pasteboard)
         }
         view.isMinimapVisible = settings.minimapVisible
+        view.isCaretWordHighlightEnabled = settings.highlightWordAtCaret
         view.minimapNavigationLabel = L10n.text("Minimap — click or drag to scroll")
         view.configureEditorFont(settings.editorFontName, size: settings.editorFontSize)
         view.configureTextLayout(withLeftPadding: settings.editorLeftPadding,

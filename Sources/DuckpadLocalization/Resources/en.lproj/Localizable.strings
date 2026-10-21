@@ -1300,3 +1300,5 @@
 "Workspace folders: %1$@" = "Workspace folders: %1$@";
 "Show hidden files" = "Show hidden files";
 "Show hidden files in the workspace and file searches. Search ignore rules still apply." = "Show hidden files in the workspace and file searches. Search ignore rules still apply.";
+
+"Highlight matching words at the caret" = "Highlight matching words at the caret";
