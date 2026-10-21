@@ -1,10 +1,10 @@
 ---
-version: 0.14.0
-date: October 20, 2026
+version: 0.14.1
+date: October 21, 2026
 minimum_macos: '13'
-dmg_size: 48.1 MB
-zip_size: 49.1 MB
-url: https://github.com/namJeongwan/duckpad/releases/tag/v0.14.0
-dmg: https://github.com/namJeongwan/duckpad/releases/download/v0.14.0/Duckpad-0.14.0-universal.dmg
-zip: https://github.com/namJeongwan/duckpad/releases/download/v0.14.0/Duckpad-0.14.0-universal.zip
-checksums: https://github.com/namJeongwan/duckpad/releases/download/v0.14.0/SHA256SUMS.txt
+dmg_size: 48.2 MB
+zip_size: 49.3 MB
+url: https://github.com/namJeongwan/duckpad/releases/tag/v0.14.1
+dmg: https://github.com/namJeongwan/duckpad/releases/download/v0.14.1/Duckpad-0.14.1-universal.dmg
+zip: https://github.com/namJeongwan/duckpad/releases/download/v0.14.1/Duckpad-0.14.1-universal.zip
+checksums: https://github.com/namJeongwan/duckpad/releases/download/v0.14.1/SHA256SUMS.txt
