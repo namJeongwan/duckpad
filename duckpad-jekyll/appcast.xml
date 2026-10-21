@@ -3,52 +3,46 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.14.0</title>
-            <pubDate>Tue, 20 Oct 2026 17:00:06 +0900</pubDate>
-            <sparkle:version>62</sparkle:version>
-            <sparkle:shortVersionString>0.14.0</sparkle:shortVersionString>
+            <title>0.14.1</title>
+            <pubDate>Wed, 21 Oct 2026 09:56:37 +0900</pubDate>
+            <sparkle:version>63</sparkle:version>
+            <sparkle:shortVersionString>0.14.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.14.0
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.14.1
 
-Search file contents across open documents and directories, replace matches without automatically saving files, and find files by name with two taps of Shift.
+Find deeply nested files reliably, filter the Workspace tree, and return to a clean document after Undo. Markdown preview opens sooner and keeps newer text responsive while diagrams render.
 
-- Use Command-Shift-F / Command-Shift-R for Find / Replace in Files. Compact match rows show filenames and line numbers above a resizable, syntax-coloured context preview. Search supports case matching, whole words, Normal / Extended / Regex modes, and filename masks.
-- Choose All, Open Documents, Workspace, or Folder in both project search and filename search. Open buffers take precedence over duplicate disk paths. A separately chosen Folder does not become a workspace root.
-- Tap Shift twice to search filenames and paths. Open a result normally or in a right split. Unsaved tabs are included in Open Documents and All.
-- Replace one selected match or confirm Replace All after a completed, nontruncated search. Changes remain unsaved, preserve per-document Undo, and are checked against the searched revision and file identity. Changed, read-only, composing, cancelled and over-limit targets are reported.
-- Folder discovery uses bundled ripgrep 15.1.0 and respects its ignore rules; Duckpad's existing matcher determines final text matches and replacement semantics. No separate ripgrep installation is required.
-- Preferences > General > Show hidden files includes dotfiles, hidden directories and macOS hidden attributes in the workspace tree, filename search and folder content search. The setting defaults off, persists across launches and refreshes existing lists. Search ignore rules, package/symlink exclusions and resource limits still apply; already-open tabs remain available.
-- Command-R opens Replace and switches an active classic Find dialog to Replace without changing its query, replacement, mask or options. Command-Shift-R continues to open Replace in Files; customized shortcut bindings remain authoritative.
-- Classic Command-F / Command-R retain the familiar Notepad++ style Find / Replace dialog. Shared colours, controls and input alignment connect the search windows, while Korean marked-text edits update search without a trailing space or backspace.
-- Keep long highlighted search results on one row with proper ellipsis truncation. Reaching the bounded filename-discovery budget returns explicitly incomplete results instead of reporting an unavailable folder; incomplete results cannot trigger Replace All.
-- Remove the repository's unused deployment/telemetry configuration. This does not remove the application's existing usage-statistics controls.
+- Fix filename search filtering only the first 20,000 indexed entries. Double-Shift searches now pass the query into background discovery before limiting retained results. Workspace and Folder scopes retain hidden-file preferences, ignore rules, cancellation and root/symlink checks. ASCII paths use a cheaper matching path while Unicode case/diacritic matching remains available.
+- Add a search field inside the Workspace sidebar. Matching files appear with their parent folders. Clearing search restores normal selection and expansion; hidden-file refreshes and workspace folder additions/removals preserve the current root list. Search navigation does not overwrite normal persisted navigation.
+- Fix modified indicators remaining active after ordinary text Undo reaches the loaded or saved baseline. Redo marks the document modified again. Dirty recovery buffers and invalidated savepoints after failed or stale saves remain protected.
+- Remove the initial Markdown-preview debounce and reduce the debounce for subsequent edits. Load the bundled Mermaid engine only when diagrams are present; initial JavaScript is approximately 1.50 MB instead of 6.76 MB. New text updates no longer wait for stale diagram enhancement; diagram work is bounded to one active and one latest pending request, and unchanged sanitized diagrams can be reused within bounded memory.
+- Attempt enabled usage-statistics lifecycle delivery asynchronously at startup instead of waiting five minutes. Existing sharing controls, retry limits and success-only acknowledgement remain. An update event already acknowledged by another same-version installation is not replayed; structured error reporting remains deferred.
 
-App and helpers: **0.14.0 (62)**, upgrading **0.13.0 (61)**. Requires **macOS 13 or later**. Universal binaries support Apple Silicon and Intel. Existing settings, recovery data, encodings and native plugin ABI remain compatible.
+App and helpers: **0.14.1 (63)**, upgrading **0.14.0 (62)**. Requires **macOS 13 or later**. The universal distribution supports Apple Silicon and Intel. Existing settings, recovery data, encodings and native plugin ABI remain compatible.
 
 ## Installation
 
-Download `Duckpad-0.14.0-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.14.0-universal.zip`. Verify downloads against `SHA256SUMS.txt`.
+Download `Duckpad-0.14.1-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.14.1-universal.zip`. Verify downloads against `SHA256SUMS.txt`.
 
 ## Validation and limitations
 
-Final pre-release validation passed **136 related test functions across 18 suites**, covering search and replacement budgets, retained partial results, scope precedence, root/symlink authority, hidden-file discovery and settings migration, expanded-tree and live-index refresh, stale search/confirmation cancellation, native Command-R routing, shortcut customization, Korean IME, and result-row layout. All eight localization catalogs pass key and format validation (1,182 strings and four plural entries). Layout checks include all eight languages; selected English dark and Korean light result views were visually inspected. Packaged artifact verification and isolated launch smoke results are recorded with the published release.
+Final focused validation passed **159 related Swift test functions**, covering filename-query discovery, literal and Unicode matching, stale request rejection, workspace navigation restoration across hidden-file and root changes, ordinary text Undo/Redo, dirty recovery and save races, Markdown sanitization, lazy diagrams, latest-text rendering, runtime teardown, usage delivery and localization catalogs. This includes the 81-function application file/session/recovery regression set. Markdown parser tests passed all four Node tests. Independent reviewers checked the final search, Undo and preview changes. Packaged verification and isolated smoke results are included in the published release.
 
-Filename indexing is bounded to 20,000 entries and displays up to 100 results. Project search displays up to 5,000 match rows and reports truncation. Replace All is disabled for incomplete or truncated results; folder replacement prepares at most 200 files per operation. Undo is per document, not a single transaction across files. Context previews are bounded excerpts, not a full before/after diff. Gold match-row highlights are provided for Normal literal searches; exact context highlighting is available when the native preview can be prepared. Folder content search does not decode every legacy encoding supported by manually opened documents.
+One signed sandbox-app measurement found 666 `utils.ts` files without truncation in 2.92 seconds, compared with 11.62 seconds before the path-matching optimization. These are individual local measurements, not a general latency guarantee. A separate panel-direct plain-Markdown measurement changed from 342 ms to 268 ms; this excludes the removed initial coordinator debounce.
 
-The full repository test suite, physical Korean keyboard interaction, full manual inspection in all eight languages, Intel hardware and macOS 13 were not exercised. The native Save panel automation is skipped by the isolated smoke script. No universal sub-50-ms search latency guarantee is made.
+Filename search retains at most 20,000 matching names and displays up to 100 results. The sidebar displays up to 1,000 files with ancestors; empty directories are not filename results. Native discovery has time and stream limits, and incomplete results are marked. Markdown still parses the full source on updates; this is not a fully incremental renderer. SVG reuse is bounded to 16 entries / 4 MiB. Closing preview continues to release its WebKit runtime.
 
-The distribution is ad-hoc signed, without Developer ID signing or Apple notarization. Bundled ripgrep attribution and dependency notices are included in the app.
+The full repository test suite, physical Korean keyboard interaction, full manual inspection in all eight languages, Intel hardware and macOS 13 were not exercised. Native Save-panel automation is explicitly skipped by the isolated smoke script. Actual analytics dashboard ingestion is not verified, and no synthetic production events were sent.
 
+The distribution is ad-hoc signed, without Developer ID signing or Apple notarization. No separately installed ripgrep, Mermaid, Node or Ghostty application is required.
 
 ## Verified distribution
 
-Source commit: `112ea30ee61aadfd7f5e8ef9a18d2cf096df79a8`; reviewed source tree: `fe11a64ce950a97922ce7635a34dee5237a93daa`. Changes were integrated through [#86](https://github.com/namJeongwan/duckpad/pull/86), [#87](https://github.com/namJeongwan/duckpad/pull/87), and [#88](https://github.com/namJeongwan/duckpad/pull/88).
+The universal app, all three helpers and bundled ripgrep contain both arm64 and x86_64. The app and helpers report 0.14.1 (63). Package/signature verification and isolated Finder/Open With, resize, sandboxed extension/isolation and ripgrep smokes passed. The packaged Markdown preview opened and closed three times with Rust highlighting, KaTeX fonts and lazily loaded Mermaid while preserving source and revision. Native Save-panel automation explicitly reported SKIP.
 
-The app, three helpers and bundled ripgrep contain both arm64 and x86_64 slices. App/helper versions are 0.14.0 (62). Bundle/resource/signature verification and isolated Finder/Open With, window resizing, sandboxed XPC and signed ripgrep smokes passed. The helper smoke also confirmed hidden-file opt-in and a validated hidden-file read. A separate copied-bookmark workspace smoke passed both normal search and a no-match scan exceeding the 32 MiB filename stream budget, returning explicit truncation. Native Save panel automation was skipped.
-
-The DMG passed `hdiutil verify`; the ZIP passed `unzip -tq`. SHA-256 hashes are supplied in `SHA256SUMS.txt`. These are ad-hoc signed universal artifacts without Apple notarization; Intel hardware and macOS 13 execution were not tested.
+The DMG passes `hdiutil verify`; the ZIP passes `unzip -tq`. SHA-256 checksums are provided in `SHA256SUMS.txt`. This is an ad-hoc signed distribution, not Developer ID signed or Apple notarized.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.14.0/Duckpad-0.14.0-universal.zip" length="49125863" type="application/octet-stream" sparkle:edSignature="9g3O3jGui8FkoXs0T8esq8qCec9MgKhPk7oWYyOlPzh7bFmQSN64LJpjyVLujF6x6n1pjdgO1ZE8l7ZacCG8Bg=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.14.1/Duckpad-0.14.1-universal.zip" length="49281058" type="application/octet-stream" sparkle:edSignature="atVO8F/OS0/EchDY5tjIFKwIYdWRYjWLsKjue7iG27jVk0R+8wTCoVv003NN5hB3AnILw/grbSgOKXNWXDtNCw=="/>
         </item>
     </channel>
 </rss>
