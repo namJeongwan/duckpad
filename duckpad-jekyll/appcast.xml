@@ -3,44 +3,67 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.14.3</title>
-            <pubDate>Wed, 21 Oct 2026 14:35:39 +0900</pubDate>
-            <sparkle:version>65</sparkle:version>
-            <sparkle:shortVersionString>0.14.3</sparkle:shortVersionString>
+            <title>0.15.0</title>
+            <pubDate>Thu, 22 Oct 2026 15:43:21 +0900</pubDate>
+            <sparkle:version>66</sparkle:version>
+            <sparkle:shortVersionString>0.15.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.14.3
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.15.0
 
-Open and dismiss the Workspace filter from the keyboard, with tighter sidebar spacing and faster search-result rendering.
+**Remote SSH File** and **Log Tail Viewer** bring read-only server files and live logs into Duckpad, alongside faster Find input and consistent native controls.
 
-- In the Workspace tree, Control-F toggles the filter below the header. The normal Find command does the same while the Workspace owns focus. Escape closes the filter from either its input or the tree, cancels pending searches and restores the previous tree navigation. Document and terminal Find retain their existing behavior outside the sidebar.
-- Hide the filter by default and remove its reserved empty space. Align the search icon and input, tighten header and tree rows, and show search status only when there is status text.
-- Preserve the sidebar width selected through the split divider across layout, window resizing and hiding/reopening the sidebar, instead of allowing control priorities to force the minimum width.
-- Remove implicit folder expand/collapse animations. Measure row widths once after batch expansion/restoration, reuse immutable filename measurements and resolve loaded nodes by path components. This avoids repeated full-tree work while rendering or dismissing search results.
-- Preserve Korean composition behavior when dismissing the filter, and reject search completions arriving after dismissal or a newer query.
+## Remote SSH File
 
-App and helpers: **0.14.3 (65)**, upgrading **0.14.2 (64)**. Requires **macOS 13 or later**. The universal distribution supports Apple Silicon and Intel. Existing settings, recovery data, encodings, Undo history and the native plugin ABI remain compatible. No new dependencies or user-facing strings are added.
+- Choose **File → Open Remote File…** (**Control-Command-O**) to browse servers using macOS OpenSSH configuration, SSH keys and the agent. Search configured/recent hosts, navigate folders, show hidden files, preview contents and open multiple files without closing the browser.
+- Reuse one SSH connection for browsing, previews and files on the same host. Transport failures receive three bounded retries, followed by a manual Retry action when needed. Cancelling one request preserves other files using the connection.
+- Use **Command-L** for the remote path, **Shift-Command-L** for the host, **Command-R** to refresh, **Command-Up** for the parent folder and **Command-W** to close the browser. These commands stay in the browser while it has focus.
+- Long remote paths expand with the window. Inputs, dropdown rows, navigation and action buttons share Duckpad's themes, neutral hover/focus feedback and aligned icon controls.
+
+## Log Tail Viewer
+
+- Open a saved local file and choose **View → Tail Mode**, or enable **Follow file changes (Tail)** when opening a remote file. New output follows the end until you scroll up; collection continues while following is paused. Follow End returns to the newest output, with an unread-line count while paused.
+- Follow file rotation and truncation, retain incomplete UTF-8 characters until the next read, and preserve each split pane's selection and viewport. Clear Output clears only the viewer; it never deletes the source log. Stop exits observation without writing to the source.
+- Automatically recognize common log files and highlight timestamps, severity fields and stack-trace headers. The shared Log language also displays supported ANSI SGR colours and text attributes while retaining the original bytes. Choose Plain Text to reveal raw escape sequences.
+
+## Other improvements
+
+- Keep English and Korean Find input responsive when large wrapped files with word-occurrence markers remain open in other tabs. Incremental match counts avoid building hidden Find All result rows and unnecessary dialog resizing.
+- Workspace folders offer **Reveal in Terminal** and **Reveal in Embedded Terminal**. Embedded Terminal opens a new session in that folder and preserves existing shells.
+- Reuse common search/action/icon components for hover, pressed and disabled states. Correct native icon alignment insets so Tail toolbar hover areas stay centered inside the bar.
+- Localize the new commands, controls, status messages and errors in all eight supported languages.
+
+App and helpers: **0.15.0 (66)**, upgrading **0.14.3 (65)**. Requires **macOS 13 or later**. The universal distribution supports Apple Silicon and Intel. Existing settings, recovery data, encodings, Undo history and the native plugin ABI remain compatible. No new dependencies or separately installed Ghostty or ripgrep application are required.
 
 ## Installation
 
-Download `Duckpad-0.14.3-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.14.3-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Existing installations can use Check for Updates after the signed update feed is published.
+Download `Duckpad-0.15.0-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.15.0-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Existing installations can use Check for Updates after the signed update feed is published.
 
 ## Validation and limitations
 
-Focused Release validation passed **36 related Swift test functions** and **2 explicit performance tests**, followed by independent code review. Coverage includes contextual Find, filter toggling and Escape, cancellation and stale results, Korean marked-text dismissal, horizontal extent after navigation restoration, divider-width retention, animation suppression, filename-search progress and selection, and layout at 160, 220 and 380 points across all eight supported languages. Native app key-event checks confirmed Control-F open/close and Escape dismissal. English and Korean sidebar snapshots were inspected visually.
+**188 distinct focused Release test functions completed**, including two opt-in real SSH tests and three explicitly enabled performance checks. Coverage includes SSH protocol/path quoting, shared connections and cancellation, bounded retry, UTF-8 boundaries, file rotation, read-only restrictions and recovery, native log/ANSI styling, Find and Korean composition, terminal routing, and control geometry across eight languages. Native light/dark snapshots verify dropdown hover, long paths and centered Tail controls. The final universal package is verified and exercised with isolated packaged smoke checks before publication. Native Save-panel automation is skipped.
 
-On one Apple M4 Pro running macOS 27.0.1, a generated fixture with 20,000 loaded files and 1,000 directories measured first filter opening at **19.5 ms**, rendering 1,000 dispersed matches at **35.0 ms** warm p95, and restoration of 50 expanded directories at **39.0 ms** warm p95. Result rendering previously took **9.26 seconds** at warm p95 on this fixture. The UI gate checks the first sample plus the nearest-rank p95 of 11 subsequent samples, equivalent to the warm maximum, against **50 ms**. Additional asynchronous `rg`-backed result application measured **35.6-44.5 ms**. These are wall-clock action/callback-to-layout/display measurements, not hardware input-to-photon guarantees.
 
-Complete searches over the generated 20,000-file filesystem fixture took **374-412 ms**, including the existing 120 ms Workspace-filter debounce, filesystem enumeration and UI delivery. Complete directory searches are not covered by the 50 ms UI-processing claim. Tests use generated, cache-warm fixtures and retain the existing 1,000-match Workspace filter limit.
+On the local Apple Silicon validation machine, 48,000-byte appends on a 17.5 MB shared document measured **4.10 ms maximum** over 12 samples. Find input with three cached 8 MB wrapped documents and 100,000 markers each measured **6.47 ms maximum** over seven marked-text updates. Immediate append/layout/display for the shared, wrapped 8.44 MB ANSI fixture measured **2.67 ms maximum** over six appends; subsequent asynchronous colouring is outside that measurement. Network time is excluded.
 
-The final universal app is verified and exercised with isolated packaged smoke checks before publication. Smoke settings, workspace roots and extension directories are separated from user state, in addition to the existing isolated recovery/bookmark sessions. Native Save-panel automation is explicitly skipped by the smoke script.
+One existing asynchronous browser test process exits with code 0 before its completion marker; its cause is undiagnosed and it is not counted as passed. A standalone native harness owning `NSApp.run` separately completed the same bounded-preview, multiple-open and stale-navigation workflow. The remaining affected UI checks completed in individual runs.
 
-The full repository suite, physical divider dragging and Korean keyboard interaction, full manual inspection in all eight languages, Intel hardware and macOS 13 runtime were not validated. The distribution is ad-hoc signed, without Developer ID signing or Apple notarization. No separately installed ripgrep, Node or Ghostty application is required.
+Remote access is read-only and UTF-8 only. Password prompts are not supported; use SSH configuration, keys or an agent, and trust a new host in Terminal before connecting. Duckpad does not automatically accept unknown host keys. Servers need a POSIX shell, `stat` (GNU or BSD), `tail` and `head`. Remote snapshots are limited to 64 MiB; Tail starts with the latest 1 MiB and allows 64 MiB of growth before Clear Output is required. Polling defaults to 250 ms locally and one second remotely; network latency is separate. Copy-truncate followed by regrowth beyond the old cursor between polls cannot be distinguished from an append. Restored Tail tabs start paused and reconnect on request.
 
-## Release artifact validation
+Log detection and ANSI interpretation are bounded, generic highlighting rather than a terminal emulator or a complete grammar for every log library. Unsupported escape families remain raw text. Explicit source RGB colours can have poor contrast. There is no universal 50 ms rendering guarantee: an 18.9 MB single-line Unicode ANSI fixture previously measured 53.8–66.1 ms for first colour layout, and publishing 100,000 search highlights measured approximately 51.8 ms. These known stress limits are retained; network time and initial whole-file loading are separate from incremental append measurements.
 
-The universal app and all three helpers are **0.14.3 (65)**, each with arm64 and x86_64 executables. Bundle, resources, signature verification and isolated Finder/Open With, layout, XPC extension/isolation and bundled ripgrep smokes passed. Native Save-panel automation was skipped. DMG and ZIP integrity and SHA-256 checks are verified before publication. Source: `b2b2f7d17b2f2e0625cec5e52576d3d5d5bf9aeb`; merged PR: https://github.com/namJeongwan/duckpad/pull/94.
+Intel hardware, macOS 13 runtime, Linux server execution, external production SSH servers, physical Korean keyboard interaction and the full repository test suite are not validated. The distribution is ad-hoc signed, without Developer ID signing or Apple notarization.
+
+
+## Published distribution validation
+
+- Source: `52d4b8a878b50ab8b318547590cbcda99b99f2de` from [PR #97](https://github.com/namJeongwan/duckpad/pull/97); the clean build tree matches the merged main tree.
+- Universal app and all three Duckpad helpers: **0.15.0 (66)** with **arm64 + x86_64** slices; bundle/resource/signature verification passed.
+- Isolated final-package checks passed: Finder/Open With, saved access after relaunch, window resizing, sandboxed extension/XPC isolation, bundled ripgrep, native languages and Log/ANSI styling.
+- Final sandboxed SSH check passed through the authenticated helper: aliases, directory browsing, bounded preview, multiple files and split-byte Korean/emoji Tail used exactly **one** authenticated SSH transport. No fixture SSH clients survived app exit.
+- DMG verification and ZIP integrity checks passed. SHA-256 checksums are attached.
+- Native Save-panel automation was skipped. Intel hardware, macOS 13 runtime, external/Linux servers, physical Korean keyboard interaction and the full test suite remain unvalidated. Ad-hoc signed; not Apple notarized.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.14.3/Duckpad-0.14.3-universal.zip" length="49394870" type="application/octet-stream" sparkle:edSignature="3fYWm1Nig5KvYzoGlQnsugra/gWqCopVTk34q2h5gYA6FFmo04qr/tPa3WGlkKDUrP4CAy3MloozjFO04csqDw=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.15.0/Duckpad-0.15.0-universal.zip" length="52787991" type="application/octet-stream" sparkle:edSignature="IvtJSFexIEW43t2Tf8oaHxViqS6fhmG5YmwX91D7aIhv1RLwwAiYklU8GNNLZzxg58qmqP9VbbSGHMPBXMRpBw=="/>
         </item>
     </channel>
 </rss>
