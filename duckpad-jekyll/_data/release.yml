@@ -1,10 +1,10 @@
 ---
-version: 0.15.0
+version: 0.15.1
 date: October 22, 2026
 minimum_macos: '13'
 dmg_size: 51.7 MB
 zip_size: 52.8 MB
-url: https://github.com/namJeongwan/duckpad/releases/tag/v0.15.0
-dmg: https://github.com/namJeongwan/duckpad/releases/download/v0.15.0/Duckpad-0.15.0-universal.dmg
-zip: https://github.com/namJeongwan/duckpad/releases/download/v0.15.0/Duckpad-0.15.0-universal.zip
-checksums: https://github.com/namJeongwan/duckpad/releases/download/v0.15.0/SHA256SUMS.txt
+url: https://github.com/namJeongwan/duckpad/releases/tag/v0.15.1
+dmg: https://github.com/namJeongwan/duckpad/releases/download/v0.15.1/Duckpad-0.15.1-universal.dmg
+zip: https://github.com/namJeongwan/duckpad/releases/download/v0.15.1/Duckpad-0.15.1-universal.zip
+checksums: https://github.com/namJeongwan/duckpad/releases/download/v0.15.1/SHA256SUMS.txt
