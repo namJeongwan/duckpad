@@ -64,6 +64,40 @@ struct SearchPanelViewTests {
         #expect(layouts == 0)
     }
 
+    @Test func classicReplaceKeepsNeutralFocusAndNativeEditing() throws {
+        let (window, panel) = host(width: 640, replace: true, language: .english)
+        defer { panel.hide(); window.contentView = nil; window.close() }
+        let fields = descendants(panel).compactMap { $0 as? NSTextField }
+        let find = try #require(fields.first { $0.accessibilityIdentifier() == "duckpad.search.find" })
+        let replacement = try #require(fields.first { $0.accessibilityIdentifier() == "duckpad.search.replace" })
+        for field in [find, replacement] {
+            #expect(field.focusRingType == .none)
+            #expect(field.cell?.focusRingType == NSFocusRingType.none)
+        }
+        #expect(abs(find.frame.height - replacement.frame.height) <= 1)
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(find)
+        let findEditor = try #require(find.currentEditor() as? NSTextView)
+        #expect(panel.control(find, textView: findEditor, doCommandBy: #selector(NSResponder.insertTab(_:))))
+        let editor = try #require(replacement.currentEditor() as? NSTextView)
+        #expect(editor !== findEditor)
+        #expect(window.firstResponder === editor)
+        editor.insertText("ad", replacementRange: NSRange(location: 0, length: 0))
+        let undo = try #require(editor.undoManager)
+        undo.removeAllActions(); undo.beginUndoGrouping()
+        editor.setMarkedText("유후", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: 0, length: 2))
+        editor.setMarkedText("유휴", selectedRange: NSRange(location: 2, length: 0), replacementRange: editor.markedRange())
+        #expect(editor.hasMarkedText())
+        editor.insertText("유휴", replacementRange: editor.markedRange())
+        undo.endUndoGrouping()
+        #expect(panel.currentQuery().replacement == "유휴")
+        #expect(undo.canUndo); undo.undo(); #expect(editor.string == "ad")
+        #expect(undo.canRedo); undo.redo(); #expect(editor.string == "유휴")
+        #expect(panel.control(replacement, textView: editor, doCommandBy: #selector(NSResponder.insertBacktab(_:))))
+        #expect(window.firstResponder === find.currentEditor())
+        #expect(panel.currentQuery().pattern == "duck")
+    }
+
     @Test func folderRowsAreClearedBeforeHiddenIncrementalPresentation() throws {
         let (window, panel) = host(width: 640, replace: false, language: .english)
         defer { panel.hide(); window.contentView = nil; window.close() }

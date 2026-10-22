@@ -1363,3 +1363,9 @@
 "Could not open Terminal" = "Impossibile aprire il Terminale";
 
 "Could not open %1$@ in Terminal." = "Impossibile aprire %1$@ nel Terminale.";
+
+"Loading folder…" = "Caricamento della cartella…";
+
+"The remote folder is unavailable. Check the path and permissions." = "La cartella remota non è disponibile. Controlla il percorso e i permessi.";
+
+"Connected · Folder unavailable. Check the remote path and permissions." = "Connesso · Cartella non disponibile. Controlla il percorso remoto e i permessi.";

@@ -14,6 +14,10 @@ change the normal editable file-open or Save behavior.
 - Choose **File → Open Remote File…**, select a recent/configured SSH host or
   enter a destination, then Connect. The reusable browser opens the remote home
   directory unless a path was entered or a recent folder was remembered.
+  Connect establishes the host connection before trying that path. An invalid,
+  missing or inaccessible folder leaves the host connected, preserves the input
+  and last usable listing, and reports a folder error without reconnect retries.
+  Correct the path and use Return or Refresh to continue on the shared connection.
 - Double-click folders, use Parent/Refresh, or enter an absolute path. Folder
   completion uses the loaded directory. Toggle hidden files in the browser.
   Select a file for a bounded preview, or select multiple files and Open.

@@ -16,7 +16,7 @@ public struct SSHDirectoryReader: Sendable {
         func quote(_ text: String) -> String { "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         let script = """
         LC_ALL=C; export LC_ALL
-        cd -P \(path.map(quote) ?? "\"$HOME\"") || exit 1
+        cd -P \(path.map(quote) ?? "\"$HOME\"") 2>/dev/null || { printf 'DUCKPADDIRERROR1\\000'; exit 0; }
         printf 'DUCKPADDIR1\\000%s\\000' "$PWD"
         count=0
         for name in .[!.]* ..?* *; do
@@ -31,6 +31,9 @@ public struct SSHDirectoryReader: Sendable {
         return "/bin/sh -c " + quote(script)
     }
     static func parse(_ data: Data) throws -> RemoteDirectoryListing {
+        // A remote shell reporting a bad directory proves the SSH transport
+        // worked. Do not classify it as a connection failure and reconnect.
+        if data == Data("DUCKPADDIRERROR1\0".utf8) { throw FileObservationError.directoryUnavailable }
         guard data.count <= 2 * 1_024 * 1_024, data.last == 0 else { throw FileObservationError.invalidResponse }
         let fields = data.split(separator: 0, omittingEmptySubsequences: false)
         guard fields.count >= 4, String(data: fields[0], encoding: .utf8) == "DUCKPADDIR1",

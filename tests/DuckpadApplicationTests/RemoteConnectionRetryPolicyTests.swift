@@ -26,7 +26,7 @@ struct RemoteConnectionRetryPolicyTests {
         }
         #expect(await offline.calls == 4)
     }
-    @Test(arguments: [FileObservationError.cancelled, .invalidUTF8, .tooLarge, .invalidResponse, .persistence])
+    @Test(arguments: [FileObservationError.cancelled, .directoryUnavailable, .invalidUTF8, .tooLarge, .invalidResponse, .persistence])
     func permanentFailuresNeverRetry(_ error: FileObservationError) async {
         let counter = RetryCounter()
         await #expect(throws: error) {

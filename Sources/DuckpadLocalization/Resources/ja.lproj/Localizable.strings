@@ -1363,3 +1363,9 @@
 "Could not open Terminal" = "ターミナルを開けません";
 
 "Could not open %1$@ in Terminal." = "ターミナルで %1$@ を開けませんでした。";
+
+"Loading folder…" = "フォルダを読み込み中…";
+
+"The remote folder is unavailable. Check the path and permissions." = "リモートフォルダを開けません。パスとアクセス権を確認してください。";
+
+"Connected · Folder unavailable. Check the remote path and permissions." = "接続済み · フォルダを開けません。リモートパスとアクセス権を確認してください。";

@@ -194,9 +194,11 @@ import DuckpadLocalization
             cancelOperations(); connectedHost = nil; listing = nil; path.setSuggestions([])
             if hadListing { path.stringValue = "" }
             failed = false; filterEntries()
-        } else if notification.object as? NSControl === path, loading {
-            // A late response must not replace a path the user is still typing.
-            cancelOperations()
+        } else if notification.object as? NSControl === path {
+            // Typing a destination supersedes an older row selection; a later
+            // explicit row click still opens from the displayed listing.
+            if loading { cancelOperations() }
+            clearSelectionAndPreview()
         }
         updateControls()
     }
@@ -204,7 +206,7 @@ import DuckpadLocalization
         let valid = RemoteFileLocation(host: destination, path: "/") != nil
         connect.isEnabled = valid && !loading && !opening
         cancel.isEnabled = loading || opening || previewTask != nil
-        up.isEnabled = connectedHost == destination && !loading && !opening
+        up.isEnabled = connectedHost == destination && listing != nil && !loading && !opening
         refresh.isEnabled = valid && !loading && !opening
         open.isEnabled = !loading && !opening && valid && (table.selectedRow >= 0 || RemoteFileLocation(host: destination, path: path.stringValue) != nil)
         host.isEnabled = !opening; path.isEnabled = !opening
@@ -213,46 +215,86 @@ import DuckpadLocalization
     }
     @objc private func connectHost() {
         let remembered = (defaults.dictionary(forKey: "remoteFile.directories") as? [String: String])?[destination]
-        browse(path: path.stringValue.isEmpty ? remembered : path.stringValue)
+        browse(path: path.stringValue.isEmpty ? remembered : path.stringValue, connectFirst: true)
     }
     @objc private func navigatePath() { browse(path: path.stringValue.isEmpty ? nil : path.stringValue) }
     @objc private func parentDirectory() {
         guard let listing else { return }
         browse(path: (listing.path as NSString).deletingLastPathComponent.isEmpty ? "/" : (listing.path as NSString).deletingLastPathComponent)
     }
-    private func browse(path requestedPath: String?) {
-        guard let port, RemoteFileLocation(host: destination, path: requestedPath ?? "/") != nil else { return }
+    private func browse(path requestedPath: String?, connectFirst: Bool = false) {
+        guard let port, RemoteFileLocation(host: destination, path: "/") != nil else { return }
         browseTask?.cancel(); previewTask?.cancel(); previewTask = nil
         let id = UUID(), requestedHost = destination, retryPolicy = retryPolicy
+        let needsConnection = connectFirst || connectedHost != requestedHost
         generation = id; loading = true; failed = false
-        status.stringValue = catalog.text("Connecting…"); status.textColor = .secondaryLabelColor
+        status.stringValue = catalog.text(needsConnection ? "Connecting…" : "Loading folder…"); status.textColor = .secondaryLabelColor
         updateControls()
         browseTask = Task { [weak self] in
             do {
-                let result = try await retryPolicy.run(operation: {
-                    try await port.directory(host: requestedHost, path: requestedPath)
-                }, onRetry: { [weak self] attempt, total in
+                let onRetry: @Sendable (Int, Int) async -> Void = { [weak self] attempt, total in
                     await MainActor.run {
                         guard let self, self.generation == id, self.panel != nil, !Task.isCancelled else { return }
                         self.status.stringValue = self.catalog.text("Reconnecting… (%1$@/%2$@)", arguments: [String(attempt), String(total)])
                     }
-                })
+                }
+                var result: RemoteDirectoryListing?
+                if needsConnection {
+                    // Authenticate and establish a usable connection before
+                    // considering a typed or remembered path, even an invalid one.
+                    do {
+                        result = try await retryPolicy.run(operation: {
+                            try await port.directory(host: requestedHost, path: nil)
+                        }, onRetry: onRetry)
+                    } catch FileObservationError.directoryUnavailable {
+                        // The remote error confirms authentication even when
+                        // HOME is inaccessible. Still try an explicit path.
+                        guard !Task.isCancelled, let self, self.generation == id, self.panel != nil else { return }
+                        if self.connectedHost != requestedHost { self.listing = nil }
+                        self.connectedHost = requestedHost
+                        if requestedPath == nil { throw FileObservationError.directoryUnavailable }
+                    }
+                    guard !Task.isCancelled, let self, self.generation == id, self.panel != nil else { return }
+                    if let result { self.presentListing(result, host: requestedHost, updatePath: false) }
+                }
+                if result == nil || requestedPath != nil && requestedPath != result?.path {
+                    guard RemoteFileLocation(host: requestedHost, path: requestedPath ?? "/") != nil else {
+                        throw FileObservationError.directoryUnavailable
+                    }
+                    if let self { self.status.stringValue = self.catalog.text("Loading folder…") }
+                    result = try await retryPolicy.run(operation: {
+                        try await port.directory(host: requestedHost, path: requestedPath)
+                    }, onRetry: onRetry)
+                }
                 guard !Task.isCancelled, let self, self.generation == id, self.panel != nil else { return }
-                self.connectedHost = requestedHost; self.listing = result; self.path.stringValue = result.path
-                self.path.setSuggestions(result.entries.filter(\.isDirectory).map { self.join(result.path, $0.name) })
+                guard let result else { throw FileObservationError.invalidResponse }
                 self.loading = false; self.browseTask = nil
-                self.filterEntries()
+                self.presentListing(result, host: requestedHost, updatePath: true)
                 self.status.stringValue = self.catalog.text(result.isTruncated ? "Connected · Showing the first 5,000 entries" : "Connected · SSH connection shared across files")
-                self.remember(host: requestedHost, directory: result.path)
             } catch {
                 guard let self, self.generation == id, self.panel != nil else { return }
-                self.loading = false; self.browseTask = nil; self.failed = true
-                self.status.stringValue = error is CancellationError ? self.catalog.text("Cancelled") : self.catalog.text("%1$@ Select Retry to reconnect.", arguments: [((error as? FileObservationError) ?? .unavailable).localizedObservationMessage])
+                self.loading = false; self.browseTask = nil
+                if error as? FileObservationError == .directoryUnavailable {
+                    if self.connectedHost != requestedHost { self.listing = nil }
+                    self.connectedHost = requestedHost; self.failed = false
+                    self.filterEntries()
+                    self.status.stringValue = self.catalog.text("Connected · Folder unavailable. Check the remote path and permissions.")
+                } else {
+                    self.connectedHost = nil; self.listing = nil; self.failed = true
+                    self.filterEntries()
+                    self.status.stringValue = error is CancellationError ? self.catalog.text("Cancelled") : self.catalog.text("%1$@ Select Retry to reconnect.", arguments: [((error as? FileObservationError) ?? .unavailable).localizedObservationMessage])
+                }
                 self.status.textColor = .systemOrange
-                self.connect.title = self.catalog.text("Retry")
             }
             self?.updateControls()
         }
+    }
+    private func presentListing(_ result: RemoteDirectoryListing, host: String, updatePath: Bool) {
+        connectedHost = host; listing = result
+        if updatePath { path.stringValue = result.path }
+        path.setSuggestions(result.entries.filter(\.isDirectory).map { join(result.path, $0.name) })
+        filterEntries()
+        remember(host: host, directory: result.path)
     }
     private func performShortcut(_ shortcut: String) -> Bool {
         switch shortcut {
@@ -273,11 +315,14 @@ import DuckpadLocalization
         defaults.set(directories, forKey: "remoteFile.directories")
     }
     @objc func filterEntries() {
-        previewTask?.cancel(); previewTask = nil; previewGeneration = UUID()
         entries = listing?.entries.filter { hidden.state == .on || !$0.name.hasPrefix(".") } ?? []
-        table.deselectAll(nil); table.reloadData()
-        preview.string = catalog.text("Select a file to preview its contents.")
+        clearSelectionAndPreview(); table.reloadData()
         updateControls()
+    }
+    private func clearSelectionAndPreview() {
+        previewTask?.cancel(); previewTask = nil; previewGeneration = UUID()
+        table.deselectAll(nil)
+        preview.string = catalog.text("Select a file to preview its contents.")
     }
     func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { WorkspaceSidebarRowView() }
@@ -342,7 +387,7 @@ import DuckpadLocalization
     @objc private func openSelection() {
         guard !loading, !opening, let onOpen else { return }
         var files = [RemoteFileLocation]()
-        if connectedHost == destination, let listing, listing.path == path.stringValue {
+        if connectedHost == destination, let listing {
             let selected = table.selectedRowIndexes.compactMap { entries.indices.contains($0) ? entries[$0] : nil }
             if selected.count == 1, selected[0].isDirectory { browse(path: join(listing.path, selected[0].name)); return }
             files = selected.filter { !$0.isDirectory }.compactMap { RemoteFileLocation(host: destination, path: join(listing.path, $0.name)) }

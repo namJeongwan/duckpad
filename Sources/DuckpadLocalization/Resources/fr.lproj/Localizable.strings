@@ -1363,3 +1363,9 @@
 "Could not open Terminal" = "Impossible d’ouvrir le Terminal";
 
 "Could not open %1$@ in Terminal." = "Impossible d’ouvrir %1$@ dans le Terminal.";
+
+"Loading folder…" = "Chargement du dossier…";
+
+"The remote folder is unavailable. Check the path and permissions." = "Le dossier distant est indisponible. Vérifiez le chemin et les autorisations.";
+
+"Connected · Folder unavailable. Check the remote path and permissions." = "Connecté · Dossier indisponible. Vérifiez le chemin distant et les autorisations.";

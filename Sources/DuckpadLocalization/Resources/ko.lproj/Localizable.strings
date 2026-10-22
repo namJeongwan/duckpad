@@ -1403,3 +1403,9 @@
 "Could not open Terminal" = "터미널을 열 수 없음";
 
 "Could not open %1$@ in Terminal." = "터미널에서 %1$@을(를) 열 수 없습니다.";
+
+"Loading folder…" = "폴더 불러오는 중…";
+
+"The remote folder is unavailable. Check the path and permissions." = "원격 폴더를 열 수 없습니다. 경로와 접근 권한을 확인하세요.";
+
+"Connected · Folder unavailable. Check the remote path and permissions." = "연결됨 · 폴더를 열 수 없습니다. 원격 경로와 접근 권한을 확인하세요.";

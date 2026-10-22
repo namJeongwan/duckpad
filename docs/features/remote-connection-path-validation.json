@@ -1,0 +1,34 @@
+{
+  "validatedAt": "2026-10-22T08:09:12.200862+00:00",
+  "scope": "Separate SSH connection establishment from remote-directory errors; includes classic Replace focus and single-line remote path fixes.",
+  "sourceState": "Pre-review native validation snapshot on fix/remote-ssh-connection, based on ae3decb67dd5008b8796b5edee90c455d9364cd7. See docs/releases/0.15.1-validation.json for final source validation.",
+  "negativeControl": "Before the change, a nonexistent remote folder was reported as FileObservationError.unavailable, which entered transport retry policy.",
+  "focusedCompletedTestFunctions": 57,
+  "individualReruns": 16,
+  "runnerLimit": "Combined presentation run exited before some completion markers; all 16 missing functions completed in individual runs. Cause remains undiagnosed.",
+  "optInTestsNotRun": [
+    "SSHSessionTests.realSSHReusesTransportLimitsChannelsAndIsolatesCancellation",
+    "SSHSessionTests.shutdownWaitsForMasterAlreadyRetiredByIdleExpiry"
+  ],
+  "localization": "1237 strings and 5 plural entries validated across all 8 languages.",
+  "pathCases": [
+    "nonexistent directory",
+    "file used as directory",
+    "relative path"
+  ],
+  "nativeShellProtocolChecks": [
+    "/bin/sh",
+    "/bin/zsh"
+  ],
+  "realHostChecks": {
+    "hostCount": 2,
+    "remoteWrites": false,
+    "typedDirectoryError": "PASS",
+    "sameSSHTransportAfterCorrection": "PASS",
+    "sandboxedBrowserAndXPC": "PASS",
+    "inputAndHomeListingPreserved": "PASS"
+  },
+  "distributionChecks": "Native preview app built, verified with verify_macos_app.sh and launched in an isolated session. Universal package and release validation not performed.",
+  "releaseValidation": "../releases/0.15.1-validation.json",
+  "countingCorrection": "Removed three test-run summary lines that had been mistaken for completed function markers."
+}

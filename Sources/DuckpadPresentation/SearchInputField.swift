@@ -15,12 +15,17 @@ final class SearchInputField: NSTextField {
         cell = SearchInputCell(textCell: "")
         font = .systemFont(ofSize: fontSize)
         isEditable = true; isSelectable = true; usesSingleLineMode = true
+        // usesSingleLineMode only affects cell drawing. Scrolling also tells
+        // AppKit's field editor to grow horizontally instead of wrapping.
+        cell?.wraps = false; cell?.isScrollable = true; lineBreakMode = .byClipping
         isBordered = false; isBezeled = false; drawsBackground = false; focusRingType = .none
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     }
     required init?(coder: NSCoder) { nil }
     override var intrinsicContentSize: NSSize {
-        var size = super.intrinsicContentSize; size.height = Self.preferredHeight; return size
+        var size = super.intrinsicContentSize
+        if !isBezeled { size.height = Self.preferredHeight }
+        return size
     }
     override var isEnabled: Bool { didSet { synchronizeHover() } }
     override func updateTrackingAreas() {
@@ -46,14 +51,16 @@ final class SearchInputField: NSTextField {
     override func textDidEndEditing(_ notification: Notification) { super.textDidEndEditing(notification); needsDisplay = true }
     override func draw(_ dirtyRect: NSRect) {
         let focused = isEnabled && currentEditor() != nil && window?.isKeyWindow == true
+        let outline = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+        if showsInteractionChrome && isEnabled && hovered {
+            NSColor.labelColor.withAlphaComponent(0.045).setFill(); outline.fill()
+        }
+        super.draw(dirtyRect)
         if showsInteractionChrome && isEnabled && (hovered || focused) {
-            let outline = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
-            if hovered { NSColor.labelColor.withAlphaComponent(0.045).setFill(); outline.fill() }
             NSColor.labelColor.withAlphaComponent(focused ? 0.28 : 0.16).setStroke()
             outline.lineWidth = 1
             outline.stroke()
         }
-        super.draw(dirtyRect)
         guard showsUnderline else { return }
         (focused ? NSColor.labelColor.withAlphaComponent(0.28) : NSColor.separatorColor).setFill()
         NSRect(x: 0, y: isFlipped ? bounds.height - 1 : 0, width: bounds.width, height: 1).fill()

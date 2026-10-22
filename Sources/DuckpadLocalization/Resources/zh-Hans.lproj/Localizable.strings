@@ -1363,3 +1363,9 @@
 "Could not open Terminal" = "无法打开终端";
 
 "Could not open %1$@ in Terminal." = "无法在终端中打开 %1$@。";
+
+"Loading folder…" = "正在加载文件夹…";
+
+"The remote folder is unavailable. Check the path and permissions." = "无法打开远程文件夹。请检查路径和访问权限。";
+
+"Connected · Folder unavailable. Check the remote path and permissions." = "已连接 · 无法打开文件夹。请检查远程路径和访问权限。";

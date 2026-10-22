@@ -44,7 +44,7 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     let appearanceOptions = SearchWindowAppearanceView(frame: .zero)
     private let tabs = NSSegmentedControl(labels: ["", "", "", ""], trackingMode: .selectOne, target: nil, action: nil)
     private let findField = NSSearchField()
-    private let replaceField = NSTextField()
+    private let replaceField = SearchInputField(fontSize: 13)
     private let directoryField = NSTextField(labelWithString: "")
     private let replacementRow = NSStackView()
     private let directoryRow = NSStackView()
@@ -102,9 +102,10 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
         tabs.action = #selector(tabChanged)
         tabs.setAccessibilityIdentifier("duckpad.search.tabs")
         findField.cell = SearchFindCell(textCell: "")
-        replaceField.cell = SearchInputCell(textCell: "")
         for field in [findField as NSTextField, replaceField] {
             field.isBezeled = true; field.isEditable = true; field.isSelectable = true
+            field.bezelStyle = .roundedBezel; field.drawsBackground = true
+            field.focusRingType = .none
             field.usesSingleLineMode = true; field.font = .systemFont(ofSize: 13)
         }
         findField.delegate = self
