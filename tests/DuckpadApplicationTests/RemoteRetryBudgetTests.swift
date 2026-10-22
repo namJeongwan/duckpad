@@ -22,17 +22,17 @@ import Testing
     func followObservedFileEnd(in id: BufferID) { followRequests += 1 }
 }
 @MainActor private final class TailBudgetReader: FileObservationReading {
-    var remaining = 0, calls = 0, failures = 0, injectedFailure = false
+    var size = 0, calls = 0, failures = 0, injectedFailure = false
     func read(_ source: FileObservationSource, after cursor: FileObservationCursor?, maximumBytes: Int) async throws -> FileObservationRead {
         calls += 1
-        guard let cursor else { return .init(data: Data(), cursor: .init(identity: "1:2", offset: 0), sourceSize: 0, reset: false) }
+        guard let cursor else { return .init(data: Data(repeating: 65, count: min(size, maximumBytes)), cursor: .init(identity: "1:2", offset: UInt64(min(size, maximumBytes))), sourceSize: UInt64(size), reset: false) }
         if !injectedFailure, cursor.offset >= UInt64(TailFileUseCase.maximumGrowthBytes - 64 * 1_024) {
             injectedFailure = true; failures = 4
         }
         if failures > 0 { failures -= 1; throw FileObservationError.unavailable }
-        let count = min(maximumBytes, remaining); remaining -= count
+        let count = min(maximumBytes, size - Int(cursor.offset))
         return .init(data: Data(repeating: 65, count: count), cursor: .init(identity: "1:2", offset: cursor.offset + UInt64(count)),
-            sourceSize: cursor.offset + UInt64(count + remaining), reset: false)
+            sourceSize: UInt64(size), reset: false)
     }
 }
 @MainActor struct RemoteRetryBudgetTests {
@@ -43,12 +43,12 @@ import Testing
         }
         #expect(predicate())
     }
-    @Test func manualRetryCannotResetObservationGrowthLimit() async throws {
+    @Test func manualRetryReplacesBoundedSnapshotAndStillEnforcesGrowthLimit() async throws {
         let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
         _ = await workspace.start()
         let editor = TailBudgetEditor(), reader = TailBudgetReader()
         let tab = try await RemoteFileUseCase(workspace: workspace, editor: editor, reader: reader).open(RemoteFileLocation(host: "fixture", path: "/log")!)
-        reader.remaining = TailFileUseCase.maximumGrowthBytes + 1_024
+        reader.size = TailFileUseCase.maximumGrowthBytes + 1_024
         let tail = TailFileUseCase(workspace: workspace, editor: editor, reader: reader,
             retryPolicy: .init(delays: [.zero, .zero, .zero]))
         defer { tail.cancelAll() }
@@ -56,9 +56,13 @@ import Testing
         try await wait { tail.states[tab] == .failed(.unavailable) }
         #expect(editor.bytes > TailFileUseCase.maximumGrowthBytes - 128 * 1_024)
         tail.retry(tabID: tab)
+        try await wait { tail.states[tab] == .following && editor.bytes <= 64 * 1_024 }
+        #expect(editor.bytes == 64 * 1_024 - 4)
+        #expect(editor.followRequests == 2)
+        reader.size += TailFileUseCase.maximumGrowthBytes + 1_024
         try await wait { tail.states[tab] == .failed(.tooLarge) }
         #expect(editor.bytes <= TailFileUseCase.maximumGrowthBytes)
-        #expect(editor.followRequests == 1 && !tail.canRetry(tabID: tab))
+        #expect(editor.followRequests == 2 && !tail.canRetry(tabID: tab))
         let calls = reader.calls
         tail.retry(tabID: tab)
         try await Task.sleep(for: .milliseconds(30))
