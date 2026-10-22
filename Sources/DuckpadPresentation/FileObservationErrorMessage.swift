@@ -5,6 +5,7 @@ extension FileObservationError {
     var localizedObservationMessage: String {
         switch self {
         case .authentication: L10n.text("SSH connection failed. Check your host, SSH key, and known_hosts entry.")
+        case .directoryUnavailable: L10n.text("The remote folder is unavailable. Check the path and permissions.")
         case .dirtyDocument: L10n.text("Save or discard your changes before starting Tail mode.")
         case .unsupportedEncoding, .invalidUTF8: L10n.text("Tail and remote viewing currently require a UTF-8 text file.")
         case .tooLarge: L10n.text("Tail paused after 64 MiB of new output. Clear Tail Output to continue.")

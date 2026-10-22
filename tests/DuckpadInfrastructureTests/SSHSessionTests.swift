@@ -69,6 +69,13 @@ private final class MasterLifetime: @unchecked Sendable {
         #expect(throws: FileObservationError.self) { _ = try SSHDirectoryReader.parse(Data("DUCKPADDIR1\0/log\0F\0bad\0".utf8)) }
         let truncated = try SSHDirectoryReader.parse(Data("DUCKPADDIR1\0/log\0F\0a\0T\0".utf8))
         #expect(truncated.isTruncated)
+        for path in [folder.appendingPathComponent("missing").path, folder.appendingPathComponent("quote'file").path] {
+            let command = SSHDirectoryReader.command(path: path)
+            let response = try await Task.detached {
+                try SSHReadProcess().run(executable: URL(fileURLWithPath: shell), arguments: ["-c", command], maximumOutput: 1_024)
+            }.value
+            #expect(throws: FileObservationError.directoryUnavailable) { _ = try SSHDirectoryReader.parse(response) }
+        }
     }
     @Test(.enabled(if: ProcessInfo.processInfo.environment["DUCKPAD_TEST_SSH_CONFIGURATION"] != nil))
     func realSSHReusesTransportLimitsChannelsAndIsolatesCancellation() async throws {

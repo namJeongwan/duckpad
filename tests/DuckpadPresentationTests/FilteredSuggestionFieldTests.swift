@@ -25,6 +25,38 @@ import Testing
         editor.insertText(value, replacementRange: .init(location: 0, length: editor.string.utf16.count))
         return editor
     }
+    @Test func longRemotePathsStayOnOneLineWhileEditingAndResizing() throws {
+        let (window, field) = hosted(); defer { field.dismissSuggestions(); window.close() }
+        field.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        let path = "/var/log/" + String(repeating: "한글 folder 🦆/", count: 25) + "app.log"
+        field.stringValue = path
+        field.focus()
+        let editor = try #require(field.input.currentEditor() as? NSTextView)
+        func checkLine() throws {
+            let manager = try #require(editor.layoutManager), container = try #require(editor.textContainer)
+            manager.ensureLayout(for: container)
+            var lines = 0
+            manager.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: manager.numberOfGlyphs)) { _, _, _, _, _ in lines += 1 }
+            #expect(lines == 1)
+            #expect(editor.frame.height <= field.bounds.height)
+            #expect(editor.string == path && field.stringValue == path)
+        }
+        try checkLine() // Restored or selected paths also stay on one line.
+        for width: CGFloat in [180, 600, 330] {
+            field.setFrameSize(NSSize(width: width, height: 28))
+            window.contentView?.layoutSubtreeIfNeeded()
+            editor.insertText(path, replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+            try checkLine() // Includes a long paste, spaces, Korean and emoji.
+            for location in [0, path.utf16.count] {
+                editor.setSelectedRange(NSRange(location: location, length: 0))
+                editor.scrollRangeToVisible(editor.selectedRange())
+                try checkLine()
+            }
+        }
+        window.makeFirstResponder(nil); field.focus()
+        #expect(field.input.currentEditor() === editor)
+        try checkLine()
+    }
     @Test func typingFiltersBySubstringWithoutCompletingOrRejectingCustomHosts() throws {
         let (window, field) = hosted(); defer { field.dismissSuggestions(); window.close() }
         field.stringValue = "stage"

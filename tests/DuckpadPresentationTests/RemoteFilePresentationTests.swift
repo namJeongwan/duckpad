@@ -9,15 +9,19 @@ import Testing
 
 @MainActor private final class BrowserFixture: RemoteFileBrowsing {
     var readLimits = [Int]()
+    var readSources = [FileObservationSource]()
     var directoryAttempts = 0, directoryFailures = 0
     var directoryError = FileObservationError.unavailable
+    var directoryPaths = [String?]()
     var slowEntered = false, slowCompleted = false
     var slowGate: CheckedContinuation<Void, Never>?
     func releaseSlow() { slowGate?.resume(); slowGate = nil }
     func configuredHosts() async throws -> [String] { ["fixture", "second"] }
     func directory(host: String, path: String?) async throws -> RemoteDirectoryListing {
         directoryAttempts += 1
+        directoryPaths.append(path)
         if directoryFailures > 0 { directoryFailures -= 1; throw directoryError }
+        if path == "/missing" || path == "/file.log" { throw FileObservationError.directoryUnavailable }
         if path == "/slow" {
             slowEntered = true
             await withCheckedContinuation { slowGate = $0 }
@@ -28,6 +32,7 @@ import Testing
     }
     func read(_ source: FileObservationSource, after cursor: FileObservationCursor?, maximumBytes: Int) async throws -> FileObservationRead {
         readLimits.append(maximumBytes)
+        readSources.append(source)
         let data = Data("INFO 한글 🦆\n".utf8)
         return .init(data: data, cursor: .init(identity: "1:2", offset: UInt64(data.count)), sourceSize: UInt64(data.count), reset: false)
     }
@@ -40,6 +45,77 @@ import Testing
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(condition())
+    }
+    @Test func inaccessibleHomeStillAllowsExplicitDirectoryOnFirstConnect() async throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 900, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let presenter = RemoteFilePanel(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            retryPolicy: .init(delays: [.zero, .zero, .zero]))
+        let browser = BrowserFixture()
+        browser.directoryFailures = 1; browser.directoryError = .directoryUnavailable
+        defer { presenter.dismiss(); window.close() }
+        presenter.refreshLocalization(catalog: .init(language: .english))
+        presenter.show(attachedTo: window, browser: browser, showHiddenFiles: false) { _, _ in }
+        presenter.host.stringValue = "fixture"; presenter.path.stringValue = "/var/log"
+        _ = presenter.host.sendAction(presenter.host.action!, to: presenter.host.target)
+        try await wait { presenter.listing?.path == "/var/log" }
+        #expect(browser.directoryPaths.count == 2)
+        #expect(browser.directoryPaths[0] == nil && browser.directoryPaths[1] == "/var/log")
+        #expect(presenter.path.stringValue == "/var/log")
+        #expect(presenter.status.stringValue.contains("Connected · SSH connection shared"))
+    }
+    @Test func retainedListingSelectionAndEditedPathOpenTheirExplicitTargets() async throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 900, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let presenter = RemoteFilePanel(defaults: UserDefaults(suiteName: UUID().uuidString)!), browser = BrowserFixture()
+        var opened = [RemoteFileLocation]()
+        defer { presenter.dismiss(); window.close() }
+        presenter.refreshLocalization(catalog: .init(language: .english))
+        presenter.show(attachedTo: window, browser: browser, showHiddenFiles: false) { files, _ in opened += files }
+        presenter.host.stringValue = "fixture"; presenter.path.stringValue = "/missing"
+        _ = presenter.host.sendAction(presenter.host.action!, to: presenter.host.target)
+        try await wait { presenter.status.stringValue.contains("Connected · Folder unavailable") }
+        presenter.table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        try await wait { presenter.preview.string.contains("INFO") }
+        let selected = try #require(RemoteFileLocation(host: "fixture", path: "/logs/a.log"))
+        #expect(browser.readSources.last == .ssh(selected))
+        presenter.open.performClick(nil)
+        try await wait { opened == [selected] }
+        presenter.path.stringValue = "/direct.log"
+        presenter.controlTextDidChange(.init(name: NSControl.textDidChangeNotification, object: presenter.path))
+        #expect(presenter.table.selectedRow == -1)
+        #expect(!presenter.preview.string.contains("INFO"))
+        presenter.open.performClick(nil)
+        try await wait { opened.count == 2 }
+        #expect(opened.last?.path == "/direct.log")
+    }
+    @Test(arguments: ["/missing", "/file.log", "relative-path"])
+    func connectSucceedsBeforeReportingBadPathsWithoutReconnects(path: String) async throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 900, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let presenter = RemoteFilePanel(defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            retryPolicy: .init(delays: [.zero, .zero, .zero]))
+        let browser = BrowserFixture()
+        defer { presenter.dismiss(); window.close() }
+        presenter.refreshLocalization(catalog: .init(language: .english))
+        presenter.show(attachedTo: window, browser: browser, showHiddenFiles: false) { _, _ in }
+        presenter.host.stringValue = "fixture"; presenter.path.stringValue = path
+        _ = presenter.host.sendAction(presenter.host.action!, to: presenter.host.target)
+        try await wait { presenter.status.stringValue.contains("Connected · Folder unavailable") }
+        #expect(presenter.listing?.path == "/logs")
+        #expect(presenter.path.stringValue == path)
+        #expect(presenter.recentHosts == ["fixture"])
+        #expect(browser.directoryPaths[0] == nil)
+        #expect(browser.directoryPaths.compactMap { $0 } == (path.hasPrefix("/") ? [path] : []))
+        presenter.path.stringValue = "/good"
+        _ = presenter.path.sendAction(presenter.path.action!, to: presenter.path.target)
+        try await wait { presenter.listing?.path == "/good" }
+        #expect(browser.directoryPaths.filter { $0 == nil }.count == 1)
+        #expect(browser.directoryPaths.last == "/good")
+        #expect(!presenter.status.stringValue.contains("Retry"))
     }
     @Test func browserFitsLocalizedControlsAndClosesWithoutOpening() async throws {
         _ = NSApplication.shared

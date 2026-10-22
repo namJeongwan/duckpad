@@ -1403,3 +1403,9 @@
 "Could not open Terminal" = "Could not open Terminal";
 
 "Could not open %1$@ in Terminal." = "Could not open %1$@ in Terminal.";
+
+"Loading folder…" = "Loading folder…";
+
+"The remote folder is unavailable. Check the path and permissions." = "The remote folder is unavailable. Check the path and permissions.";
+
+"Connected · Folder unavailable. Check the remote path and permissions." = "Connected · Folder unavailable. Check the remote path and permissions.";

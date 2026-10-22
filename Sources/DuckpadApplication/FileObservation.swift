@@ -26,6 +26,7 @@ public struct FileObservationRead: Codable, Equatable, Sendable {
 public enum FileObservationError: Error, Codable, Equatable, Sendable {
     case unavailable
     case authentication
+    case directoryUnavailable
     case invalidResponse
     case invalidUTF8
     case tooLarge
