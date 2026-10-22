@@ -1,0 +1,160 @@
+{
+  "baseline_commit": "26c5f13d55508d74110898752655ba8b4bff8e43",
+  "phase1": {
+    "validated_at_utc": "2026-10-21T12:02:35.785380+00:00",
+    "baseline_commit": "26c5f13d55508d74110898752655ba8b4bff8e43",
+    "architecture": "arm64",
+    "signing": "ad-hoc",
+    "notarized": false,
+    "focused_tests": {
+      "passed": true,
+      "test_functions": 17,
+      "parameter_cases": [
+        "cancelled and successful large load with navigation",
+        "failed load retry and close/restore",
+        "POSIX sh and zsh path quoting"
+      ]
+    },
+    "regressions": {
+      "passed": true,
+      "test_functions": 9,
+      "includes": [
+        "Tail performance",
+        "live file reload",
+        "binary read-only",
+        "session recovery collisions"
+      ]
+    },
+    "tail_performance": {
+      "document_bytes": 17500000,
+      "append_bytes": 48000,
+      "samples": 12,
+      "first_ms": 2.994541,
+      "maximum_ms": 3.576292,
+      "budget_ms": 50,
+      "split_panes": true,
+      "minimap": true,
+      "whole_document_snapshot_reads": 0,
+      "user_edits_reported": 0,
+      "scope": "native append, layout and display; excludes SSH/network latency"
+    },
+    "localizations": {
+      "languages": 8,
+      "string_keys": 1209,
+      "plural_entries": 4,
+      "resource_validation_passed": true,
+      "new_ui_geometry_passed": true
+    },
+    "package": {
+      "bundle_verification_passed": true,
+      "general_smoke_passed": true,
+      "save_panel_automation": "skipped"
+    },
+    "ssh_package": {
+      "server": "isolated localhost OpenSSH on macOS",
+      "temporary_config_key_and_known_hosts": true,
+      "user_ssh_files_modified": false,
+      "read_only_open_passed": true,
+      "split_byte_utf8_tail_passed": true,
+      "invalid_key_rejected": true,
+      "disconnect_during_blocked_ssh_passed": true,
+      "ssh_children_after_disconnect": 0
+    },
+    "not_verified": [
+      "Intel hardware",
+      "external production SSH servers",
+      "Linux server execution",
+      "physical Korean IME interaction"
+    ]
+  },
+  "phase2": {
+    "validated_at_utc": "2026-10-22T01:05:41.739064+00:00",
+    "architecture": "arm64",
+    "signing": "ad-hoc",
+    "notarized": false,
+    "version": "0.14.3",
+    "build": 65,
+    "preview_app": "build/tail-phase2-final/Duckpad.app",
+    "executable_sha256": "eca5988792821296f92f5aff1d1a0e1568a195b14e66b0734869afcce64d2b9d",
+    "focused_tests": {
+      "passed": true,
+      "unique_test_functions": 24,
+      "runs": [
+        {
+          "test_functions": 23,
+          "scope": "browser, Tail/remote/native load, protocol, decoder, admission, native performance; all passed"
+        },
+        {
+          "test_functions": 8,
+          "scope": "final SSH backend, including already-retired shutdown gate; seven overlap prior run; all passed"
+        }
+      ],
+      "real_ssh_opt_in_tests_executed": true,
+      "includes": [
+        "one transport shared by directory/read/multiple snapshots",
+        "12 concurrent commands with eight-channel limit",
+        "individual cancellation preserves peers",
+        "idle expiry reconnects",
+        "shutdown waits for already-retiring master",
+        "closed pool rejects new work",
+        "native snapshot finishes before termination review",
+        "late browse response cannot overwrite typed path",
+        "Tail unread count and rotation reset"
+      ]
+    },
+    "tail_performance": {
+      "document_bytes": 17500000,
+      "append_bytes": 48000,
+      "samples": 12,
+      "first_ms": 2.686667,
+      "maximum_ms": 3.992375,
+      "budget_ms": 50,
+      "split_panes": true,
+      "minimap": true,
+      "whole_document_snapshot_reads": 0,
+      "user_edits_reported": 0,
+      "scope": "native append/layout/display; excludes SSH/network latency"
+    },
+    "localizations": {
+      "languages": 8,
+      "string_keys": 1223,
+      "plural_entries": 5,
+      "resource_validation_passed": true,
+      "browser_and_tail_bar_native_geometry_passed": true
+    },
+    "package": {
+      "bundle_verification_passed": true,
+      "general_smoke_passed": true,
+      "save_panel_automation": "skipped",
+      "initial_concurrent_general_smoke": "extension-isolation cancellation assertion failed; serial final package run passed; no extension runtime source changed"
+    },
+    "ssh_package": {
+      "server": "isolated localhost OpenSSH on macOS",
+      "temporary_config_key_and_known_hosts": true,
+      "user_ssh_files_modified": false,
+      "aliases_directory_preview_multiple_snapshots_and_split_byte_tail_passed": true,
+      "authenticated_transports_for_complete_flow": 1,
+      "ssh_children_after_normal_app_disconnect": 0,
+      "invalid_key_rejected": true,
+      "disconnect_during_blocked_ssh_passed": true,
+      "ssh_children_after_blocked_disconnect": 0,
+      "ssh_children_after_direct_unit_tests": 0
+    },
+    "independent_source_review": {
+      "approved": true,
+      "remaining_blocker_or_major": 0
+    },
+    "not_verified": [
+      "Intel hardware",
+      "external production SSH servers",
+      "Linux server execution",
+      "physical Korean IME interaction",
+      "manual screenshot inspection: computer-use onboarding unavailable"
+    ],
+    "deferred": [
+      "ANSI colors",
+      "log-level highlighting",
+      "automatic log-format detection"
+    ]
+  }
+}

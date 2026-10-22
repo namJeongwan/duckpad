@@ -179,7 +179,7 @@ public final class FileDocumentUseCase {
         let ids = Set(tabs.map(\.id))
         externalChanges = externalChanges.filter { ids.contains($0.key) }
         guard liveReloadEnabled, !liveReloadSuspended, workspace.snapshot().startup == .ready else { return }
-        changeMonitor?.watch(paths: Set(tabs.compactMap { workspace.fileContext(tabID: $0.id)?.binding?.canonicalPath }))
+        changeMonitor?.watch(paths: Set(tabs.compactMap { workspace.fileContext(tabID: $0.id)?.binding.flatMap { $0.remoteFile == nil && $0.tailMode != true ? $0.canonicalPath : nil } }))
     }
 
     public func dismissExternalChange(for tabID: TabID) {
@@ -215,7 +215,7 @@ public final class FileDocumentUseCase {
     public func refreshFromDisk(tabID: TabID, discardingRevision: UInt64? = nil) async {
         await acquireOperation()
         defer { releaseOperation() }
-        guard !Task.isCancelled, !liveReloadSuspended, let context = workspace.fileContext(tabID: tabID), let binding = context.binding else { return }
+        guard !Task.isCancelled, !liveReloadSuspended, let context = workspace.fileContext(tabID: tabID), let binding = context.binding, binding.remoteFile == nil else { return }
         loadingProgress = FileLoadingProgress(path: binding.canonicalPath, loadedByteCount: 0, totalByteCount: nil)
         defer { loadingProgress = nil }
         do {
@@ -225,7 +225,7 @@ public final class FileDocumentUseCase {
                 throw TextFileStoreError.io("\(url.path): incomplete file read")
             }
             guard !Task.isCancelled, !liveReloadSuspended, let current = workspace.fileContext(tabID: tabID), current.binding == binding else { return }
-            if read.identity == binding.observedIdentity, !needsBinaryContent(context) {
+            if read.identity == binding.observedIdentity, binding.tailMode != true, !needsBinaryContent(context) {
                 externalChanges.removeValue(forKey: tabID)
                 onExternalChanges?()
                 return
@@ -235,6 +235,11 @@ public final class FileDocumentUseCase {
                 externalChanges[tabID] = .conflict
                 onExternalChanges?()
                 return
+            }
+            // A producer may stop between UTF-8 bytes. Preserve the readable
+            // snapshot when leaving Tail instead of switching it to binary mode.
+            if binding.tailMode == true {
+                guard !read.data.contains(0), String(data: read.data, encoding: .utf8) != nil else { throw FileObservationError.invalidUTF8 }
             }
             let contents = try await prepareContents(read.data,
                 assuming: binding.isReadOnly ? nil : binding.encoding,
@@ -275,7 +280,7 @@ public final class FileDocumentUseCase {
         var failures: [String] = []
         for tab in workspace.snapshot().tabs {
             guard let context = workspace.fileContext(tabID: tab.id),
-                  let binding = context.binding else { continue }
+                  let binding = context.binding, binding.remoteFile == nil else { continue }
             do {
                 let updated = try await store.restoreSecurityScopedAccess(
                     for: binding,
@@ -327,7 +332,7 @@ public final class FileDocumentUseCase {
     }
 
     private func needsBinaryContent(_ context: FileWorkspaceContext) -> Bool {
-        guard context.binding?.isReadOnly == true, let binaryEditor = editor as? any BinaryEditorPort else { return false }
+        guard context.binding?.binaryByteCount != nil, let binaryEditor = editor as? any BinaryEditorPort else { return false }
         return !binaryEditor.hasBinaryContent(for: context.buffer.bufferID)
     }
 
@@ -812,6 +817,7 @@ public final class FileDocumentUseCase {
         defer { releaseOperation() }
         guard !Task.isCancelled, workspace.activeFileContext() == expectedContext else { return .failed(.comparisonInvalidated) }
         guard let old = expectedContext.binding else { return .requiresDestination(expectedContext.tabID) }
+        guard old.remoteFile == nil, old.tailMode != true else { return .failed(.readOnly) }
         var destination: URL?
         let grantOwner = UUID()
         if case .move(let url) = operation {

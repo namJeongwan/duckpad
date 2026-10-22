@@ -88,10 +88,13 @@ public struct FileBinding: Codable, Equatable, Sendable {
     public var securityScopedBookmark: Data?
     /// Nil for editable text. Optional so older recovery archives remain readable.
     public var binaryByteCount: Int?
-    public var isReadOnly: Bool { binaryByteCount != nil }
+    public var remoteFile: RemoteFileLocation?
+    public var tailMode: Bool?
+    public var isReadOnly: Bool { binaryByteCount != nil || remoteFile != nil || tailMode == true }
 
     private enum CodingKeys: String, CodingKey {
         case canonicalPath, encoding, byteOrderMark, lineEnding, observedIdentity, securityScopedBookmark
+        case remoteFile, tailMode
         case binaryByteCount = "binaryPreviewByteCount"
     }
 
@@ -102,7 +105,9 @@ public struct FileBinding: Codable, Equatable, Sendable {
         lineEnding: LineEnding,
         observedIdentity: FileIdentity,
         securityScopedBookmark: Data? = nil,
-        binaryByteCount: Int? = nil
+        binaryByteCount: Int? = nil,
+        remoteFile: RemoteFileLocation? = nil,
+        tailMode: Bool? = nil
     ) {
         self.canonicalPath = canonicalPath
         self.encoding = encoding
@@ -111,5 +116,7 @@ public struct FileBinding: Codable, Equatable, Sendable {
         self.observedIdentity = observedIdentity
         self.securityScopedBookmark = securityScopedBookmark
         self.binaryByteCount = binaryByteCount
+        self.remoteFile = remoteFile
+        self.tailMode = tailMode
     }
 }

@@ -1262,3 +1262,104 @@
 "Show hidden files in the workspace and file searches. Search ignore rules still apply." = "ワークスペースとファイル検索に隠しファイルを表示します。検索の除外ルールは引き続き適用されます。";
 
 "Highlight matching words at the caret" = "カーソル位置の単語と一致する単語を強調表示";
+
+"Open Remote File" = "リモートファイルを開く";
+
+"Open Remote File…" = "リモートファイルを開く…";
+
+"SSH host" = "SSH ホスト";
+
+"Remote path" = "リモートパス";
+
+"Follow file changes (Tail)" = "ファイルの変更を追跡 (Tail)";
+
+"Uses your SSH configuration and key authentication. Remote files open read-only. Connect once in Terminal to trust a new host. Tail starts with the latest 1 MiB." = "SSH 設定と鍵認証を使用します。リモートファイルは読み取り専用です。新しいホストは先にターミナルで接続して信頼を確認してください。Tail は末尾の 1 MiB から表示します。";
+
+"Tail Mode" = "Tail モード";
+
+"Follow End" = "末尾を追跡";
+
+"Clear Tail Output" = "Tail の出力を消去";
+
+"Stop Tail Mode" = "Tail モードを停止";
+
+"Tail · Following" = "Tail · 追跡中";
+
+"Tail · Scrolling paused" = "Tail · スクロール追跡を一時停止";
+
+"Tail · Paused" = "Tail · 一時停止";
+
+"Remote files are read-only." = "リモートファイルは読み取り専用です。";
+
+"Stop Tail mode to edit this file." = "編集するには Tail モードを停止してください。";
+
+"Could not open or follow the file" = "ファイルを開くか追跡できません";
+
+"SSH connection failed. Check your host, SSH key, and known_hosts entry." = "SSH 接続に失敗しました。ホスト、SSH 鍵、known_hosts の登録を確認してください。";
+
+"Save or discard your changes before starting Tail mode." = "Tail モードの開始前に変更を保存または破棄してください。";
+
+"Tail and remote viewing currently require a UTF-8 text file." = "現在、Tail とリモート表示は UTF-8 テキストファイルに対応しています。";
+
+"Tail paused after 64 MiB of new output. Clear Tail Output to continue." = "新しい出力が 64 MiB に達したため Tail を停止しました。出力を消去すると続行できます。";
+
+"The file is larger than 64 MiB. Enable Tail to open its recent output." = "ファイルが 64 MiB を超えています。Tail を有効にして最新の出力を開いてください。";
+
+"The SSH request timed out." = "SSH リクエストがタイムアウトしました。";
+
+"Could not save the document state. Try again." = "文書の状態を保存できませんでした。再試行してください。";
+
+"This document is not available for Tail mode." = "この文書では Tail モードを使用できません。";
+
+"The file is unavailable." = "ファイルを利用できません。";
+
+"The server returned an invalid file response." = "サーバーが無効なファイル応答を返しました。";
+
+"Connect" = "接続";
+
+"Reconnect" = "再接続";
+
+"Connecting…" = "接続中…";
+
+"Parent folder" = "親フォルダ";
+
+"Refresh" = "更新";
+
+"File preview" = "ファイルのプレビュー";
+
+"Remote files" = "リモートファイル";
+
+"SSH keys · Read-only · Select multiple files to open · Tail starts with the latest 1 MiB." = "SSHキー · 読み取り専用 · 複数ファイルを選択可能 · Tailは最新1 MiBから開始します。";
+
+"Choose an SSH host or enter one to connect." = "接続するSSHホストを選択または入力してください。";
+
+"Select a file to preview its contents." = "ファイルを選択して内容をプレビューします。";
+
+"Loading preview…" = "プレビューを読み込み中…";
+
+"Connected · Showing the first 5,000 entries" = "接続済み · 最初の5,000項目を表示";
+
+"Connected · SSH connection shared across files" = "接続済み · ファイル間でSSH接続を共有";
+
+"Opened in the editor. Select another file to continue." = "エディタで開きました。続けて別のファイルを選択できます。";
+"Log" = "ログ";
+
+"Show suggestions" = "候補を表示";
+
+"Suggestions for %1$@" = "%1$@の候補";
+
+"Filter hosts" = "ホストを絞り込み";
+
+"Filter folders" = "フォルダを絞り込み";
+
+"Reconnecting… (%1$@/%2$@)" = "再接続中… (%1$@/%2$@)";
+
+"%1$@ Select Retry to reconnect." = "%1$@ 再接続するには「再試行」を選択してください。";
+
+"Reveal in Terminal" = "ターミナルで開く";
+
+"Reveal in Embedded Terminal" = "内蔵ターミナルで開く";
+
+"Could not open Terminal" = "ターミナルを開けません";
+
+"Could not open %1$@ in Terminal." = "ターミナルで %1$@ を開けませんでした。";

@@ -77,7 +77,8 @@ final class SearchWindowController: NSWindowController, NSWindowDelegate {
         window.title = searchView.windowTitle
         let size = searchView.fittingSize
         let contentSize = NSSize(width: max(640, size.width), height: size.height)
-        guard contentSize.height > 0 else { return }
+        guard contentSize.height > 0,
+              window.contentRect(forFrameRect: window.frame).size != contentSize else { return }
         window.setContentSize(contentSize)
         window.contentView?.layoutSubtreeIfNeeded()
     }

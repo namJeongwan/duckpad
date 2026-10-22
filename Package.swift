@@ -35,7 +35,7 @@ let package = Package(
                 .linkedFramework("CoreText"), .linkedFramework("Carbon"), .linkedFramework("IOSurface"),
             ]
         ),
-        .executableTarget(name: "DuckpadTerminalHost", dependencies: ["DuckpadPluginSupport", "DuckpadTerminalBridge"]),
+        .executableTarget(name: "DuckpadTerminalHost", dependencies: ["DuckpadPluginSupport", "DuckpadTerminalBridge", "DuckpadInfrastructure"]),
         .target(name: "DuckpadArchiveBridge", publicHeadersPath: "include", linkerSettings: [.linkedLibrary("z")]),
         .target(name: "DuckpadNativeABI", path: "SDK/DuckpadNative", exclude: ["Swift", "overview.md"], sources: ["empty.c"], publicHeadersPath: "include"),
         .target(
@@ -65,6 +65,7 @@ let package = Package(
                 "bridge/DPScintillaBinaryDocument.mm",
                 "bridge/DPSearchOverviewView.mm",
                 "bridge/DPPlantUMLLexer.cxx",
+                "bridge/DPLogLexer.mm",
                 "bridge/DPAsyncLexer.mm",
                 "bridge/DPColorPreviewView.mm",
                 "bridge/DPWordOccurrenceHighlighter.mm",

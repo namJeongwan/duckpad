@@ -10,6 +10,7 @@ public struct LanguageID: RawRepresentable, Codable, Hashable, Sendable, Compara
 
     public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
     public static let plainText = Self(rawValue: "text")
+    public static let log = Self(rawValue: "log")
 }
 
 public enum LanguageDetectionConfidence: Int, Codable, Sendable, Comparable {

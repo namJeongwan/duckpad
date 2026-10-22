@@ -136,6 +136,7 @@ struct LanguageHighlightingTests {
     private static let samples: [String: String] = [
         "plantuml": "@startuml\nactor \"고객\" as Customer\nCustomer -> Service: hello\nskinparam NoteBackgroundColor #FFF7DC\n@enduml\n",
         "text": "plain text 한글🦆",
+        "log": "2026-10-22 10:00:01 INFO hello 한글\n2026-10-22 10:00:02 ERROR failed\n",
         "csv": "name,count\nDuck,42\n",
         "c": "int n = 42; const char *s = \"한글\"; // comment\n",
         "cpp": "class Duck { int n = 42; }; // comment\nconst char *s = \"한글\";\n",

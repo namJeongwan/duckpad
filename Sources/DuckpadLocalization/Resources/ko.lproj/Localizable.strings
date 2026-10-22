@@ -1302,3 +1302,104 @@
 "Show hidden files in the workspace and file searches. Search ignore rules still apply." = "워크스페이스와 파일 검색에 숨김 파일을 표시합니다. 검색 제외 규칙은 계속 적용됩니다.";
 
 "Highlight matching words at the caret" = "입력 커서의 단어와 일치하는 단어 강조";
+
+"Open Remote File" = "원격 파일 열기";
+
+"Open Remote File…" = "원격 파일 열기…";
+
+"SSH host" = "SSH 호스트";
+
+"Remote path" = "원격 경로";
+
+"Follow file changes (Tail)" = "파일 변경 따라가기 (Tail)";
+
+"Uses your SSH configuration and key authentication. Remote files open read-only. Connect once in Terminal to trust a new host. Tail starts with the latest 1 MiB." = "SSH 설정과 키 인증을 사용합니다. 원격 파일은 읽기 전용입니다. 새 호스트는 터미널에서 먼저 연결해 신뢰를 확인하세요. Tail은 마지막 1 MiB부터 표시합니다.";
+
+"Tail Mode" = "Tail 모드";
+
+"Follow End" = "끝 따라가기";
+
+"Clear Tail Output" = "Tail 출력 비우기";
+
+"Stop Tail Mode" = "Tail 모드 중지";
+
+"Tail · Following" = "Tail · 따라가는 중";
+
+"Tail · Scrolling paused" = "Tail · 스크롤 따라가기 일시정지";
+
+"Tail · Paused" = "Tail · 일시정지";
+
+"Remote files are read-only." = "원격 파일은 읽기 전용입니다.";
+
+"Stop Tail mode to edit this file." = "파일을 편집하려면 Tail 모드를 중지하세요.";
+
+"Could not open or follow the file" = "파일을 열거나 따라갈 수 없습니다";
+
+"SSH connection failed. Check your host, SSH key, and known_hosts entry." = "SSH 연결에 실패했습니다. 호스트, SSH 키 및 known_hosts 항목을 확인하세요.";
+
+"Save or discard your changes before starting Tail mode." = "Tail 모드를 시작하기 전에 변경 사항을 저장하거나 버리세요.";
+
+"Tail and remote viewing currently require a UTF-8 text file." = "현재 Tail과 원격 보기는 UTF-8 텍스트 파일을 지원합니다.";
+
+"Tail paused after 64 MiB of new output. Clear Tail Output to continue." = "새 출력이 64 MiB에 도달해 Tail을 멈췄습니다. 계속하려면 Tail 출력을 비우세요.";
+
+"The file is larger than 64 MiB. Enable Tail to open its recent output." = "파일이 64 MiB보다 큽니다. Tail을 켜서 최근 출력을 여세요.";
+
+"The SSH request timed out." = "SSH 요청 시간이 초과되었습니다.";
+
+"Could not save the document state. Try again." = "문서 상태를 저장하지 못했습니다. 다시 시도하세요.";
+
+"This document is not available for Tail mode." = "이 문서는 Tail 모드를 사용할 수 없습니다.";
+
+"The file is unavailable." = "파일을 사용할 수 없습니다.";
+
+"The server returned an invalid file response." = "서버에서 잘못된 파일 응답을 반환했습니다.";
+
+"Connect" = "연결";
+
+"Reconnect" = "다시 연결";
+
+"Connecting…" = "연결 중…";
+
+"Parent folder" = "상위 폴더";
+
+"Refresh" = "새로 고침";
+
+"File preview" = "파일 미리보기";
+
+"Remote files" = "원격 파일";
+
+"SSH keys · Read-only · Select multiple files to open · Tail starts with the latest 1 MiB." = "SSH 키 · 읽기 전용 · 여러 파일 선택 가능 · Tail은 마지막 1 MiB부터 시작합니다.";
+
+"Choose an SSH host or enter one to connect." = "연결할 SSH 호스트를 선택하거나 입력하세요.";
+
+"Select a file to preview its contents." = "미리 볼 파일을 선택하세요.";
+
+"Loading preview…" = "미리보기 불러오는 중…";
+
+"Connected · Showing the first 5,000 entries" = "연결됨 · 처음 5,000개 항목 표시";
+
+"Connected · SSH connection shared across files" = "연결됨 · 여러 파일이 SSH 연결을 공유합니다";
+
+"Opened in the editor. Select another file to continue." = "편집기에 열었습니다. 다른 파일을 계속 선택할 수 있습니다.";
+"Log" = "로그";
+
+"Show suggestions" = "추천 목록 표시";
+
+"Suggestions for %1$@" = "%1$@ 추천 목록";
+
+"Filter hosts" = "서버 필터";
+
+"Filter folders" = "폴더 필터";
+
+"Reconnecting… (%1$@/%2$@)" = "재연결 중… (%1$@/%2$@)";
+
+"%1$@ Select Retry to reconnect." = "%1$@ 다시 연결하려면 재시도를 선택하세요.";
+
+"Reveal in Terminal" = "터미널에서 열기";
+
+"Reveal in Embedded Terminal" = "내장 터미널에서 열기";
+
+"Could not open Terminal" = "터미널을 열 수 없음";
+
+"Could not open %1$@ in Terminal." = "터미널에서 %1$@을(를) 열 수 없습니다.";

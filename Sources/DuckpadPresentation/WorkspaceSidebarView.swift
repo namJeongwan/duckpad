@@ -13,6 +13,8 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     var onNavigationChange: ((WorkspaceRootID, [String], String?) -> Void)?
     var onDropFolder: ((URL) -> Void)?
     var onRevealPath: ((String) -> Void)?
+    var onRevealInTerminal: ((URL) -> Void)?
+    var onRevealInEmbeddedTerminal: ((URL) -> Void)?
     let search = WorkspaceTreeSearchField(frame: .zero)
 
     private let header = NSView(frame: .zero)
@@ -96,6 +98,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             self.hideFilter()
         }
         let contextMenu = NSMenu(title: L10n.text("Workspace"))
+        contextMenu.autoenablesItems = false
         contextMenu.delegate = self
         outline.menu = contextMenu
         outline.setAccessibilityLabel(L10n.text("Workspace files"))
@@ -475,6 +478,15 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         let reveal = menu.addItem(withTitle: localizationCatalog.text("Reveal in Finder"), action: #selector(revealContextPath), keyEquivalent: "")
         reveal.target = self
         reveal.isEnabled = contextNode.isAvailable
+        if contextNode.kind != .file {
+            for (title, action) in [("Reveal in Terminal", #selector(revealContextInTerminal)),
+                                    ("Reveal in Embedded Terminal", #selector(revealContextInEmbeddedTerminal))] {
+                let item = menu.addItem(withTitle: localizationCatalog.text(title), action: action, keyEquivalent: "")
+                item.target = self
+                item.image = NSImage(systemSymbolName: action == #selector(revealContextInTerminal) ? "macwindow" : "terminal", accessibilityDescription: nil)
+                item.isEnabled = contextDirectory != nil
+            }
+        }
         menu.addItem(.separator())
         let remove = menu.addItem(
             withTitle: localizationCatalog.text("Remove Folder from Workspace"),
@@ -514,6 +526,17 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
                 .appendingPathComponent(node.relativePath).path
         onRevealPath?(path)
     }
+
+    private var contextDirectory: URL? {
+        guard interactionsEnabled, let node = contextNode, node.isAvailable, node.kind != .file,
+              let root = roots.first(where: { $0.id == node.rootID }), root.isAvailable else { return nil }
+        let rootURL = URL(fileURLWithPath: root.canonicalPath, isDirectory: true).standardizedFileURL
+        let directory = node.relativePath.isEmpty ? rootURL : rootURL.appendingPathComponent(node.relativePath, isDirectory: true).standardizedFileURL
+        guard directory.path == rootURL.path || directory.path.hasPrefix(rootURL.path == "/" ? "/" : rootURL.path + "/") else { return nil }
+        return directory
+    }
+    @objc private func revealContextInTerminal() { if let directory = contextDirectory { onRevealInTerminal?(directory) } }
+    @objc private func revealContextInEmbeddedTerminal() { if let directory = contextDirectory { onRevealInEmbeddedTerminal?(directory) } }
 
     @objc private func removeContextRoot() {
         guard interactionsEnabled, let rootID = contextNode?.rootID else { return }

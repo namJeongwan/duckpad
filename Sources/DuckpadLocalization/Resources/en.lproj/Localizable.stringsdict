@@ -66,5 +66,21 @@
 			<string>Save changes to %ld documents before closing?</string>
 		</dict>
 	</dict>
+	<key>tail.unreadLines</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>ld</string>
+			<key>one</key>
+			<string>Tail · %ld new line</string>
+			<key>other</key>
+			<string>Tail · %ld new lines</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

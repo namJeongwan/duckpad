@@ -1302,3 +1302,104 @@
 "Show hidden files in the workspace and file searches. Search ignore rules still apply." = "Show hidden files in the workspace and file searches. Search ignore rules still apply.";
 
 "Highlight matching words at the caret" = "Highlight matching words at the caret";
+
+"Open Remote File" = "Open Remote File";
+
+"Open Remote File…" = "Open Remote File…";
+
+"SSH host" = "SSH host";
+
+"Remote path" = "Remote path";
+
+"Follow file changes (Tail)" = "Follow file changes (Tail)";
+
+"Uses your SSH configuration and key authentication. Remote files open read-only. Connect once in Terminal to trust a new host. Tail starts with the latest 1 MiB." = "Uses your SSH configuration and key authentication. Remote files open read-only. Connect once in Terminal to trust a new host. Tail starts with the latest 1 MiB.";
+
+"Tail Mode" = "Tail Mode";
+
+"Follow End" = "Follow End";
+
+"Clear Tail Output" = "Clear Tail Output";
+
+"Stop Tail Mode" = "Stop Tail Mode";
+
+"Tail · Following" = "Tail · Following";
+
+"Tail · Scrolling paused" = "Tail · Scrolling paused";
+
+"Tail · Paused" = "Tail · Paused";
+
+"Remote files are read-only." = "Remote files are read-only.";
+
+"Stop Tail mode to edit this file." = "Stop Tail mode to edit this file.";
+
+"Could not open or follow the file" = "Could not open or follow the file";
+
+"SSH connection failed. Check your host, SSH key, and known_hosts entry." = "SSH connection failed. Check your host, SSH key, and known_hosts entry.";
+
+"Save or discard your changes before starting Tail mode." = "Save or discard your changes before starting Tail mode.";
+
+"Tail and remote viewing currently require a UTF-8 text file." = "Tail and remote viewing currently require a UTF-8 text file.";
+
+"Tail paused after 64 MiB of new output. Clear Tail Output to continue." = "Tail paused after 64 MiB of new output. Clear Tail Output to continue.";
+
+"The file is larger than 64 MiB. Enable Tail to open its recent output." = "The file is larger than 64 MiB. Enable Tail to open its recent output.";
+
+"The SSH request timed out." = "The SSH request timed out.";
+
+"Could not save the document state. Try again." = "Could not save the document state. Try again.";
+
+"This document is not available for Tail mode." = "This document is not available for Tail mode.";
+
+"The file is unavailable." = "The file is unavailable.";
+
+"The server returned an invalid file response." = "The server returned an invalid file response.";
+
+"Connect" = "Connect";
+
+"Reconnect" = "Reconnect";
+
+"Connecting…" = "Connecting…";
+
+"Parent folder" = "Parent folder";
+
+"Refresh" = "Refresh";
+
+"File preview" = "File preview";
+
+"Remote files" = "Remote files";
+
+"SSH keys · Read-only · Select multiple files to open · Tail starts with the latest 1 MiB." = "SSH keys · Read-only · Select multiple files to open · Tail starts with the latest 1 MiB.";
+
+"Choose an SSH host or enter one to connect." = "Choose an SSH host or enter one to connect.";
+
+"Select a file to preview its contents." = "Select a file to preview its contents.";
+
+"Loading preview…" = "Loading preview…";
+
+"Connected · Showing the first 5,000 entries" = "Connected · Showing the first 5,000 entries";
+
+"Connected · SSH connection shared across files" = "Connected · SSH connection shared across files";
+
+"Opened in the editor. Select another file to continue." = "Opened in the editor. Select another file to continue.";
+"Log" = "Log";
+
+"Show suggestions" = "Show suggestions";
+
+"Suggestions for %1$@" = "Suggestions for %1$@";
+
+"Filter hosts" = "Filter hosts";
+
+"Filter folders" = "Filter folders";
+
+"Reconnecting… (%1$@/%2$@)" = "Reconnecting… (%1$@/%2$@)";
+
+"%1$@ Select Retry to reconnect." = "%1$@ Select Retry to reconnect.";
+
+"Reveal in Terminal" = "Reveal in Terminal";
+
+"Reveal in Embedded Terminal" = "Reveal in Embedded Terminal";
+
+"Could not open Terminal" = "Could not open Terminal";
+
+"Could not open %1$@ in Terminal." = "Could not open %1$@ in Terminal.";

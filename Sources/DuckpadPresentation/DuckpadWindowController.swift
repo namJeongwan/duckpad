@@ -82,6 +82,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
     private lazy var searchWindowController = SearchWindowController(searchView: searchPanel)
     let liveFileBanner = LiveFileChangeBanner(frame: .zero)
+    let tailStatusBar = TailStatusBar(frame: .zero)
+    private let remoteFilePanel = RemoteFilePanel()
+    private let remoteFileUseCase: RemoteFileUseCase?
+    private let tailFileUseCase: TailFileUseCase?
     let commandBar = WindowCommandBarView(frame: .zero)
     private var updateAccessory: UpdateTitlebarAccessoryController?
     private var statusBarHeightConstraint: NSLayoutConstraint!
@@ -110,6 +114,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let workspaceContentSplit = WorkspaceSplitView(frame: .zero)
     let terminalWorkspaceSplit = TerminalWorkspaceSplitView(frame: .zero)
     public var terminalSurfaceFactory: ((ShellLaunchConfiguration) -> TerminalSurfaceView?)?
+    var externalTerminalOpener: @MainActor (URL, @escaping @MainActor (Bool) -> Void) -> Void = NativeExternalTerminal.open
     let terminalSessions = TerminalSessionStore()
     private(set) var terminalPanel: TerminalPanelView?
     var isTerminalVisible: Bool { terminalPanel?.superview === terminalWorkspaceSplit }
@@ -234,6 +239,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         editorGroupRouter: (any EditorGroupRoutingPort)? = nil,
         errorPresenter: (any PersistenceErrorPresenting)? = nil,
         fileUseCase: FileDocumentUseCase? = nil,
+        remoteFileUseCase: RemoteFileUseCase? = nil,
+        tailFileUseCase: TailFileUseCase? = nil,
         filePanels: (any FilePanelPresenting)? = nil,
         fileConflictPresenter: (any FileConflictPresenting)? = nil,
         openDocumentComparePresenter: (any OpenDocumentComparePresenting)? = nil,
@@ -289,6 +296,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         )
         editorGroupWorkspace.additionalEditorHostProvider = additionalEditorViewProvider
         self.fileUseCase = fileUseCase
+        self.remoteFileUseCase = remoteFileUseCase
+        self.tailFileUseCase = tailFileUseCase
         self.filePanels = filePanels
         self.fileConflictPresenter = fileConflictPresenter
         self.openDocumentComparePresenter = openDocumentComparePresenter
@@ -332,6 +341,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return URL(fileURLWithPath: path).deletingLastPathComponent()
         }
         self.errorPresenter = configureContent(injectedPresenter: errorPresenter)
+        tailFileUseCase?.onChange = { [weak self] in self?.refreshTailStatus() }
         let workspaceNotifications = NSWorkspace.shared.notificationCenter
         let accessibilityToken = workspaceNotifications.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
@@ -407,6 +417,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceSidebar.onRevealPath = { [weak self] path in
             self?.pathActionHandler.openContainingFolder(for: path)
         }
+        workspaceSidebar.onRevealInTerminal = { [weak self] directory in self?.revealWorkspaceFolderInTerminal(directory, embedded: false) }
+        workspaceSidebar.onRevealInEmbeddedTerminal = { [weak self] directory in self?.revealWorkspaceFolderInTerminal(directory, embedded: true) }
         workspace.onChange = { [weak self] change in self?.handle(change) }
         workspaceBrowserUseCase?.onStateChange = { [weak self] state in self?.renderWorkspaceBrowser(state) }
         languageUseCase?.onStateChange = { [weak self] state in self?.renderLanguageState(state) }
@@ -497,6 +509,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func tearDownWindow() {
         guard !hasTornDownWindow else { return }
         hasTornDownWindow = true
+        tailFileUseCase?.cancelAll()
+        remoteFilePanel.dismiss()
         declarationNavigation.cancel()
         terminalPanel?.shutdown()
         terminalPanel?.onNewSession = nil
@@ -549,6 +563,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         fileUseCase?.setLiveReloadEnabled(false)
         fileUseCase?.onExternalChanges = nil
         fileUseCase?.onLoadingProgress = nil
+        remoteFileUseCase?.onLoadingProgress = nil
         workspace.onChange = nil
         editorGroupRouter?.onEditorGroupFocus = nil
         activeEditor.onEdit = nil
@@ -1371,6 +1386,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         searchPanel.refreshLocalization(catalog: catalog)
         searchExperienceStorage?.refreshLocalization(catalog: catalog)
         liveFileBanner.refreshLocalization(catalog: catalog)
+        tailStatusBar.refreshLocalization(catalog: catalog)
+        remoteFilePanel.refreshLocalization(catalog: catalog)
+        refreshTailStatus()
         persistenceBanner.refreshLocalization(catalog: catalog)
         usageNotice.refreshLocalization(catalog: catalog)
         statusBar.refreshLocalization(catalog: catalog)
@@ -1546,6 +1564,124 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         moveActiveTab(by: 1)
     }
 
+    private func refreshTailStatus() {
+        guard let context = workspace.activeFileContext(), context.binding?.tailMode == true else {
+            tailStatusBar.show(nil); return
+        }
+        let state = tailFileUseCase?.states[context.tabID]
+        if case .failed(let error) = state {
+            let retryable = tailFileUseCase?.canRetry(tabID: context.tabID) == true
+            tailStatusBar.show(retryable ? L10n.text("%1$@ Select Retry to reconnect.", error.localizedObservationMessage) : error.localizedObservationMessage,
+                warning: true, canRetry: retryable)
+        } else if case .reconnecting(let attempt, let total) = state {
+            tailStatusBar.show(L10n.text("Reconnecting… (%1$@/%2$@)", String(attempt), String(total)), warning: true)
+        } else {
+            let following = state != nil && (activeEditor as? any ObservedFileEditorPort)?
+                .isObservedFileFollowingEnd(in: context.buffer.bufferID) == true
+            if following { tailFileUseCase?.markFollowed(context.tabID) }
+            let unread = tailFileUseCase?.unreadLineCounts[context.tabID] ?? 0
+            if !following, unread > 0 {
+                tailStatusBar.show(L10n.text("tail.unreadLines", unread))
+            } else {
+                tailStatusBar.show(L10n.text(state == nil ? "Tail · Paused" : following ? "Tail · Following" : "Tail · Scrolling paused"))
+            }
+        }
+    }
+
+    @objc public func performOpenRemoteFile(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, let window, let remote = remoteFileUseCase,
+              let browser = remote.browser, window.attachedSheet == nil else { return }
+        remoteFilePanel.show(attachedTo: window, browser: browser, showHiddenFiles: appPreferences.showHiddenFiles) { [weak self] files, follow in
+            try await self?.openRemoteFiles(files, follow: follow)
+        }
+    }
+
+    /// Register the full accepted operation with the termination barrier. Once a
+    /// snapshot is published its native load must finish even after cancellation.
+    func openRemoteFiles(_ files: [RemoteFileLocation], follow: Bool) async throws {
+        guard workspaceInteractionsAreActionable, let remote = remoteFileUseCase else { throw CancellationError() }
+        let token = UUID()
+        let operation = Task { @MainActor [weak self] in
+            for file in files {
+                try Task.checkCancellation()
+                guard let self, self.workspaceInteractionsAreActionable, !self.hasTornDownWindow else { throw CancellationError() }
+                let tab = try await remote.open(file, tail: follow)
+                try Task.checkCancellation()
+                if follow { try await self.tailFileUseCase?.start(tabID: tab) }
+            }
+        }
+        pendingFileCommandTasks[token] = Task { [weak self] in
+            defer { self?.pendingFileCommandTasks.removeValue(forKey: token) }
+            await withTaskCancellationHandler { _ = await operation.result } onCancel: { operation.cancel() }
+        }
+        try await withTaskCancellationHandler { try await operation.value } onCancel: { operation.cancel() }
+    }
+
+    @objc public func performToggleTailMode(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, let context = workspace.activeFileContext(), tailFileUseCase != nil else { return }
+        if context.binding?.tailMode == true { performStopTailMode(sender); return }
+        beginFileCommandTask { [weak self] in
+            guard let self else { return }
+            do { try await self.tailFileUseCase?.start(tabID: context.tabID) }
+            catch is CancellationError { }
+            catch { self.presentObservationFailure(error) }
+        }
+    }
+
+    @objc public func performStopTailMode(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, let context = workspace.activeFileContext(), context.binding?.tailMode == true else { return }
+        tailFileUseCase?.cancel(context.tabID)
+        beginFileCommandTask { [weak self] in
+            guard let self else { return }
+            if context.binding?.remoteFile == nil {
+                await self.fileUseCase?.refreshFromDisk(tabID: context.tabID)
+                // Only a complete, validated refresh can unlock local editing.
+                // On partial UTF-8 or unavailable source keep the Tail snapshot.
+                return
+            }
+            guard let current = self.workspace.fileContext(tabID: context.tabID), var binding = current.binding else { return }
+            if binding.tailMode == true {
+                binding.tailMode = nil
+                _ = await self.workspace.updateFileBindingIfCurrent(tabID: current.tabID, binding: binding, expectedBinding: current.binding!)
+            }
+        }
+    }
+
+    @objc public func performFollowFileEnd(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, let context = workspace.activeFileContext(), context.binding?.tailMode == true else { return }
+        if tailFileUseCase?.states[context.tabID] == nil {
+            beginFileCommandTask { [weak self] in
+                do { try await self?.tailFileUseCase?.start(tabID: context.tabID) }
+                catch { self?.presentObservationFailure(error) }
+            }
+        } else { (activeEditor as? any ObservedFileEditorPort)?.followObservedFileEnd(in: context.buffer.bufferID) }
+        refreshTailStatus()
+    }
+
+    @objc public func performRetryTailConnection(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, let context = workspace.activeFileContext(),
+              context.binding?.tailMode == true, context.binding?.remoteFile != nil,
+              case .failed = tailFileUseCase?.states[context.tabID] else { return }
+        tailFileUseCase?.retry(tabID: context.tabID)
+    }
+
+    @objc public func performClearTailOutput(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, let context = workspace.activeFileContext(), context.binding?.tailMode == true else { return }
+        beginFileCommandTask { [weak self] in
+            do { try await self?.tailFileUseCase?.clear(tabID: context.tabID) }
+            catch { self?.presentObservationFailure(error) }
+        }
+    }
+
+    private func presentObservationFailure(_ error: any Error) {
+        guard !hasTornDownWindow, !terminationReviewInProgress else { return }
+        let alert = NSAlert()
+        alert.messageText = L10n.text("Could not open or follow the file")
+        alert.informativeText = ((error as? FileObservationError) ?? .unavailable).localizedObservationMessage
+        alert.addButton(withTitle: L10n.text("OK"))
+        if let window, window.attachedSheet == nil { alert.beginSheetModal(for: window) }
+    }
+
     @objc public func performOpenFile(_ sender: Any? = nil) {
         guard workspaceInteractionsAreActionable else { return }
         beginFileCommandTask { [weak self] in await self?.routeOpenFile() }
@@ -1668,6 +1804,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     @objc public func performToggleTerminal(_ sender: Any? = nil) {
         guard !hasTornDownWindow, !terminationReviewInProgress, window?.attachedSheet == nil else { return }
         if isTerminalVisible { hideTerminal(); return }
+        showTerminal()
+    }
+
+    private func showTerminal(initialDirectory: URL? = nil) {
         onUsageMetric?(.feature(.terminal))
         if terminalPanel == nil {
             let panel = TerminalPanelView(sessions: terminalSessions, surfaceFactory: terminalSurfaceFactory)
@@ -1685,7 +1825,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
             terminalPanel = panel
             panel.applyPreferences(appPreferences)
-            createTerminalSession()
+            createTerminalSession(in: initialDirectory)
+        } else if let initialDirectory {
+            createTerminalSession(in: initialDirectory)
         }
         guard let terminalPanel else { return }
         window?.contentView?.layoutSubtreeIfNeeded()
@@ -1694,10 +1836,12 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         terminalPanel.focus()
     }
 
-    private func createTerminalSession() {
+    private func createTerminalSession(in requestedDirectory: URL? = nil) {
         guard !hasTornDownWindow, !terminationReviewInProgress, window?.attachedSheet == nil else { return }
         let directory: URL
-        if let current = terminalPanel?.currentWorkingDirectory {
+        if let requestedDirectory {
+            directory = requestedDirectory
+        } else if let current = terminalPanel?.currentWorkingDirectory {
             directory = current
         } else if let path = workspace.activeFileContext()?.binding?.canonicalPath {
             directory = URL(fileURLWithPath: path).deletingLastPathComponent()
@@ -1710,6 +1854,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         terminalSessions.create(configuration: .init(workingDirectory: directory))
         terminalPanel?.reload()
         terminalPanel?.focus()
+    }
+
+    func revealWorkspaceFolderInTerminal(_ directory: URL, embedded: Bool) {
+        guard !hasTornDownWindow, workspaceInteractionsAreActionable, window?.attachedSheet == nil,
+              directory.isFileURL else { return }
+        if embedded { showTerminal(initialDirectory: directory); return }
+        externalTerminalOpener(directory) { [weak self] succeeded in
+            guard !succeeded, let self, !self.hasTornDownWindow, !self.terminationReviewInProgress,
+                  let window = self.window, window.attachedSheet == nil else { return }
+            let alert = NSAlert()
+            alert.messageText = L10n.text("Could not open Terminal")
+            alert.informativeText = L10n.text("Could not open %1$@ in Terminal.", directory.path)
+            alert.addButton(withTitle: L10n.text("OK"))
+            alert.beginSheetModal(for: window)
+        }
     }
 
     private func hideTerminal() {
@@ -1770,7 +1929,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func beginFileLocationChange(renaming: Bool?) {
         guard workspaceInteractionsAreActionable, let context = workspace.activeFileContext(),
-              context.binding != nil, fileUseCase != nil, window?.attachedSheet == nil else { return }
+              context.binding != nil, context.binding?.remoteFile == nil, context.binding?.tailMode != true, fileUseCase != nil, window?.attachedSheet == nil else { return }
         beginFileCommandTask { [weak self] in
             await self?.routeFileLocationChange(renaming: renaming, expectedContext: context)
         }
@@ -1778,7 +1937,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     public func routeFileLocationChange(renaming: Bool?, expectedContext context: FileWorkspaceContext) async {
         guard !hasTornDownWindow, workspaceInteractionsAreActionable,
-              workspace.activeFileContext() == context, let binding = context.binding,
+              workspace.activeFileContext() == context, let binding = context.binding, binding.remoteFile == nil, binding.tailMode != true,
               let fileUseCase, let filePanels else { return }
         let source = URL(fileURLWithPath: binding.canonicalPath)
         let operation: FileLocationOperation
@@ -2253,6 +2412,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(performOpenRemoteFile(_:)) {
+            return workspaceInteractionsAreActionable && remoteFileUseCase != nil && window?.attachedSheet == nil
+        }
+        if menuItem.action == #selector(performToggleTailMode(_:)) {
+            let context = workspace.activeFileContext()
+            menuItem.state = context?.binding?.tailMode == true ? .on : .off
+            return workspaceInteractionsAreActionable && tailFileUseCase != nil && context?.binding != nil
+                && context?.binding?.binaryByteCount == nil && window?.attachedSheet == nil
+        }
+        if let action = menuItem.action, [#selector(performFollowFileEnd(_:)), #selector(performClearTailOutput(_:)), #selector(performStopTailMode(_:))].contains(action) {
+            return workspaceInteractionsAreActionable && workspace.activeFileContext()?.binding?.tailMode == true && window?.attachedSheet == nil
+        }
         if menuItem.action == #selector(performSnippets(_:)) {
             return workspaceInteractionsAreActionable && window?.attachedSheet == nil && activeEditor is any SnippetEditorPort
         }
@@ -2348,7 +2519,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 && workspace.activeFileContext()?.binding?.isReadOnly != true
         case #selector(performRenameFile(_:)), #selector(performMoveFile(_:)), #selector(performTrashFile(_:)):
             return workspaceInteractionsAreActionable && fileUseCase != nil
-                && workspace.activeFileContext()?.binding != nil && window?.attachedSheet == nil
+                && workspace.activeFileContext()?.binding != nil && workspace.activeFileContext()?.binding?.remoteFile == nil
+                && workspace.activeFileContext()?.binding?.tailMode != true && window?.attachedSheet == nil
         case #selector(performPrintDocument(_:)):
             return workspaceInteractionsAreActionable && workspace.activeFileContext() != nil
                 && workspace.activeFileContext()?.binding?.isReadOnly != true && window?.attachedSheet == nil
@@ -3166,6 +3338,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         terminationReviewInProgress = true
         searchExperienceStorage?.dismiss()
         fileUseCase?.suspendLiveReload()
+        tailFileUseCase?.cancelAll()
+        remoteFilePanel.dismiss()
         documentIntelligenceTask?.cancel()
         documentIntelligenceTask = nil
         documentIntelligenceUseCase?.cancel()
@@ -3427,7 +3601,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             to: menu
         ) { [self] definition in
             let item = NSMenuItem(
-                title: definition.displayName,
+                title: LanguageMenuBuilder.displayName(definition),
                 action: #selector(performChooseLanguage(_:)),
                 keyEquivalent: ""
             )
@@ -3457,12 +3631,22 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         root.view.addSubview(usageNotice)
         root.view.addSubview(commandBar)
         root.view.addSubview(liveFileBanner)
+        root.view.addSubview(tailStatusBar)
+        tailStatusBar.follow.target = self
+        tailStatusBar.follow.action = #selector(performFollowFileEnd(_:))
+        tailStatusBar.retry.target = self
+        tailStatusBar.retry.action = #selector(performRetryTailConnection(_:))
+        tailStatusBar.clear.target = self
+        tailStatusBar.clear.action = #selector(performClearTailOutput(_:))
+        tailStatusBar.stop.target = self
+        tailStatusBar.stop.action = #selector(performStopTailMode(_:))
         liveFileBanner.reload.target = self
         liveFileBanner.reload.action = #selector(performReloadExternalFile(_:))
         liveFileBanner.dismiss.target = self
         liveFileBanner.dismiss.action = #selector(performKeepEditingExternalFile(_:))
         fileUseCase?.onExternalChanges = { [weak self] in self?.refreshLiveFileBanner() }
         fileUseCase?.onLoadingProgress = { [weak self] in self?.renderEditorStatus() }
+        remoteFileUseCase?.onLoadingProgress = { [weak self] in self?.renderEditorStatus() }
         workspaceContentSplit.isVertical = true
         workspaceContentSplit.dividerStyle = .thin
         workspaceContentSplit.translatesAutoresizingMaskIntoConstraints = false
@@ -3522,7 +3706,10 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             liveFileBanner.topAnchor.constraint(equalTo: commandBar.bottomAnchor),
             liveFileBanner.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             liveFileBanner.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
-            terminalWorkspaceSplit.topAnchor.constraint(equalTo: liveFileBanner.bottomAnchor),
+            tailStatusBar.topAnchor.constraint(equalTo: liveFileBanner.bottomAnchor),
+            tailStatusBar.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
+            tailStatusBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
+            terminalWorkspaceSplit.topAnchor.constraint(equalTo: tailStatusBar.bottomAnchor),
             terminalWorkspaceSplit.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             statusBar.leadingAnchor.constraint(equalTo: root.view.leadingAnchor),
             statusBar.trailingAnchor.constraint(equalTo: root.view.trailingAnchor),
@@ -3984,6 +4171,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func handle(_ change: WorkspaceChange) {
         latestWorkspaceSnapshot = change.snapshot
+        tailFileUseCase?.reconcileTabs()
+        refreshTailStatus()
         switch change.kind {
         case .bufferEdited, .persistence, .activeTabChanged: break
         default: fileUseCase?.updateLiveReloadDocuments()
@@ -5065,8 +5254,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func renderEditorStatus() {
+        refreshTailStatus()
         scheduleMarkdownPreview()
-        statusBar.showLoading(fileUseCase?.loadingProgress ?? pendingWorkspaceFileReads.values.first)
+        statusBar.showLoading(remoteFileUseCase?.loadingProgress ?? fileUseCase?.loadingProgress ?? pendingWorkspaceFileReads.values.first)
         guard let status = (activeEditor as? any EditorStatusReportingPort)?.editorStatus else { return }
         let binding = workspace.activeFileContext()?.binding
         let binarySummary = binding?.binaryByteCount.map { count in
@@ -5082,7 +5272,16 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func renderFileFormatStatus() {
-        if workspace.activeFileContext()?.binding?.isReadOnly == true {
+        if let binding = workspace.activeFileContext()?.binding,
+           binding.remoteFile != nil || binding.tailMode == true {
+            setStatus(fileFormatStatus, text: binding.encoding.displayName, warning: false)
+            statusBar.lineEndingButton.title = L10n.text("Read-only")
+            statusBar.lineEndingButton.toolTip = L10n.text(binding.remoteFile != nil
+                ? "Remote files are read-only." : "Stop Tail mode to edit this file.")
+            fileFormatStatus.toolTip = statusBar.lineEndingButton.toolTip
+            return
+        }
+        if workspace.activeFileContext()?.binding?.binaryByteCount != nil {
             setStatus(fileFormatStatus, text: L10n.text("Binary"), warning: false)
             statusBar.lineEndingButton.title = L10n.text("Read-only")
             statusBar.lineEndingButton.toolTip = L10n.text("Binary files are read-only and cannot be saved.")
@@ -5128,7 +5327,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         languageState = state
         switch state {
         case .ready(let detection, let fallback):
-            let name = detection.languageID == .plainText ? L10n.text("Plain Text") : (languageUseCase?.registry[detection.languageID]?.displayName ?? detection.languageID.rawValue)
+            let name = detection.languageID == .plainText ? L10n.text("Plain Text") : (languageUseCase?.registry[detection.languageID].map(LanguageMenuBuilder.displayName) ?? detection.languageID.rawValue)
             let tier = languageUseCase?.registry[detection.languageID]?.supportTier
             let displayName = tier == .structural ? L10n.text("%1$@ · structural", name) : name
             setStatus(
@@ -5137,7 +5336,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 warning: false
             )
         case .unavailableManual(let requestedID, let fallbackID):
-            let fallbackName = fallbackID == .plainText ? L10n.text("Plain Text") : (languageUseCase?.registry[fallbackID]?.displayName ?? fallbackID.rawValue)
+            let fallbackName = fallbackID == .plainText ? L10n.text("Plain Text") : (languageUseCase?.registry[fallbackID].map(LanguageMenuBuilder.displayName) ?? fallbackID.rawValue)
             setStatus(
                 languageStatus,
                 text: L10n.text("Unavailable language: %1$@ · using %2$@", L10n.argument(requestedID.rawValue), L10n.argument(fallbackName)),

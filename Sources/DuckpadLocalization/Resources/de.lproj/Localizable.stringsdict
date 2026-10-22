@@ -66,5 +66,21 @@
 			<string>Änderungen an %ld Dokumenten vor dem Schließen speichern?</string>
 		</dict>
 	</dict>
+	<key>tail.unreadLines</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>ld</string>
+			<key>one</key>
+			<string>Tail · %ld neue Zeile</string>
+			<key>other</key>
+			<string>Tail · %ld neue Zeilen</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

@@ -594,3 +594,36 @@ no partial set is installed. Empty primary selections resolve word boundaries
 before native search, preventing zero-length search beside nonempty selections.
 Search target and flags are restored after preflight. These limits are in the
 Duckpad bridge; upstream core sources remain unchanged.
+
+Tail observation support (2026-10-21): the Duckpad-owned bridge exposes a
+bounded read-only UTF-8 append/reset operation, without document snapshots or
+user-edit callbacks. It advances the supplied revision, keeps all shared pane
+selections and scroll positions, follows the end only in panes already at the
+end, and invalidates the minimap. Observation updates have no user Undo history.
+Only `bridge/DuckpadScintillaBridge.mm` and its public header change; upstream
+Scintilla sources and generated files remain unchanged.
+
+## Duckpad log styling (2026-10-22)
+
+- Added the Duckpad-owned `bridge/DPLogLexer.mm/.h` and registered it in the
+  bridge/Swift package. Upstream Scintilla and Lexilla sources remain unchanged.
+- Common log headers and SGR colours/font attributes use byte-preserving styles
+  and two dedicated value-colour indicators (11/7). Hidden SGR uses style15;
+  log syntax/font combinations use64..143 (unformatted text keeps default0).
+  Other escape families are not run.
+- Bounded main-queue slices and sparse ANSI checkpoints support initial styling,
+  edits and Tail appends without whole-document snapshots. The bridge reports
+  mutations before offsets move, resets log decorations on language changes,
+  and exposes styling counters for regression/performance verification.
+  Log-only PAGE layout caching avoids reshaping long lines for colour-only
+  indicator work; other languages retain their existing cache setting.
+- Log files bypass the ordinary synchronous lexer size cutoff because their
+  own styling is incremental. Existing language lexer behaviour is retained.
+
+Find input latency (2026-10-22): the Duckpad bridge skips search-highlight
+clearing when no shared pane has active Find highlights. This preserves the
+existing word-occurrence ticks and avoids reprojecting their wrapped positions
+for every cached document on every Find/IME edit. Search range validation uses
+a single continuation-byte check per edge on already validated UTF-8 text
+(binary documents remain rejected); the general byte-navigation helper is
+unchanged. Only the Duckpad bridge changes; no upstream/generated files change.

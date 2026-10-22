@@ -5,6 +5,25 @@ final class StatusBarButton: NSButton {
     private var hoverTrackingArea: NSTrackingArea?
     private var isHovered = false
     private var isPressed = false
+    private var usesToolbarIconGeometry = false
+
+    func configureAsToolbarIcon(pointSize: CGFloat = 13) {
+        usesToolbarIconGeometry = true
+        bezelStyle = .inline
+        isBordered = false
+        controlSize = .small
+        imagePosition = .imageOnly
+        imageScaling = .scaleProportionallyDown
+        alignment = .center
+        symbolConfiguration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
+        contentTintColor = .secondaryLabelColor
+    }
+
+    override var alignmentRectInsets: NSEdgeInsets {
+        // Native button insets vary by symbol and bezel; toolbar hit/hover
+        // bounds must coincide with the explicitly sized layout rectangle.
+        usesToolbarIconGeometry ? NSEdgeInsetsZero : super.alignmentRectInsets
+    }
 
     private var textPadding: CGFloat {
         imagePosition == .noImage && alignment == .left ? 8 : 0

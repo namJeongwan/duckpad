@@ -1,8 +1,13 @@
 import AppKit
 import DuckpadDomain
+import DuckpadLocalization
 
 @MainActor
 enum LanguageMenuBuilder {
+    static func displayName(_ definition: LanguageDefinition) -> String {
+        definition.id == .log ? L10n.text("Log") : definition.displayName
+    }
+
     static func append(
         _ definitions: [LanguageDefinition],
         to menu: NSMenu,

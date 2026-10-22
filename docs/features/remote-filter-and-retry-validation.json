@@ -1,0 +1,433 @@
+{
+  "validated_at_utc": "2026-10-22T04:13:17.711761+00:00",
+  "baseline_commit": "26c5f13d55508d74110898752655ba8b4bff8e43",
+  "scope": [
+    "shared live host/directory filter",
+    "three bounded SSH retries plus manual reconnect"
+  ],
+  "focused_tests": {
+    "passed": true,
+    "distinct_test_functions": 26,
+    "suites": {
+      "FilteredSuggestionFieldTests": 6,
+      "RemoteFilePresentationTests": 4,
+      "RemoteReconnectTests": 3,
+      "TailRemoteIntegrationTests": 7,
+      "RemoteFileAdmissionTests": 2,
+      "RemoteConnectionRetryPolicyTests": 3,
+      "RemoteRetryBudgetTests": 1
+    },
+    "coverage": [
+      "substring filter without implicit completion",
+      "explicit selection and exact typed Return",
+      "late catalogue selection preservation",
+      "Korean marked-text filtering",
+      "popup focus/anchor/last-row visibility",
+      "server change clears old directories",
+      "three retries and recovery/exhaustion",
+      "manual reconnect",
+      "cancellation during backoff",
+      "non-connection errors do not retry",
+      "automatic partial UTF-8 preservation",
+      "manual retry re-reads incomplete UTF-8 from committed offset",
+      "manual retry preserves viewport/selection/unread count",
+      "manual retry cannot reset 64 MiB growth budget"
+    ],
+    "logs": [
+      "/tmp/duckpad-remote-retry-tests-2.log",
+      "/tmp/duckpad-retry-final-regressions.log",
+      "/tmp/duckpad-browser-retry-single.log",
+      "/tmp/duckpad-tail-retry-layout.log"
+    ],
+    "runner_note": "The combined AppKit run ended before all presentation tests completed despite a zero process exit; incomplete tests were not counted as passes. The retry and Tail bar cases were completed and verified in individual runs."
+  },
+  "localization": {
+    "languages": 8,
+    "string_keys": 1230,
+    "plural_entries": 5,
+    "resource_validation_passed": true,
+    "browser_and_tail_bar_geometry_passed": true
+  },
+  "ui": {
+    "native_light_dark_filter_snapshots_inspected": true,
+    "snapshot_directory": "/tmp/duckpad-remote-filter-snapshots-final",
+    "physical_ime_interaction": false,
+    "marked_text_automated_tests_passed": true
+  },
+  "package": {
+    "path": "build/tail-remote-filter-retry-preview/Duckpad.app",
+    "version": "0.14.3",
+    "build": "65",
+    "architecture": "arm64",
+    "signing": "ad-hoc",
+    "notarized": false,
+    "build_passed": true,
+    "bundle_verification_passed": true,
+    "general_smoke_passed": true,
+    "save_panel_automation": "skipped"
+  },
+  "independent_review": {
+    "approved": true,
+    "remaining_blocker_or_major": 0
+  },
+  "limits": [
+    "No external server outage or packet-loss test performed for this change; reconnect faults use deterministic reader fixtures. Earlier phase 2 real SSH connection-sharing/expiry validation remains historical.",
+    "Intel hardware and physical IME interaction not verified.",
+    "SSH exit 255 retains the existing authentication/transport error mapping and receives bounded retries without changing key/host verification."
+  ],
+  "git_integration_performed": false,
+  "release_published": false,
+  "taller_suggestions_followup": {
+    "validated_at_utc": "2026-10-22T04:23:44.002483+00:00",
+    "maximum_visible_rows": 12,
+    "row_height_points": 32,
+    "outer_padding_points": 6,
+    "screen_behavior": "Uses available space above/below the field and clamps the popup to the visible screen.",
+    "focused_test_functions_passed": 6,
+    "test_log": "/tmp/duckpad-taller-server-list-tests.log",
+    "light_dark_snapshots_inspected": "/tmp/duckpad-taller-server-list",
+    "snapshot_fixture_limit": "The tall-list snapshot assumes at least 300 points of space on the validation desktop; tiny displays were not physically tested.",
+    "package_path": "build/tail-taller-server-list-preview/Duckpad.app",
+    "native_build_passed": true,
+    "bundle_verification_passed": true,
+    "independent_review": "No Blocker/Major findings; snapshot fixture display-space assumption recorded.",
+    "launched": true,
+    "remote_file_window_opened": true,
+    "user_documents_modified": false,
+    "general_smoke": "Not repeated for this popup geometry change; previous preview smoke results remain historical."
+  },
+  "appearance_shortcuts_and_workspace_terminal_followup": {
+    "validated_at_utc": "2026-10-22T05:07:43.744729+00:00",
+    "scope": [
+      "Remote File shared panel/editor palette, neutral row selection and divider",
+      "Global Ctrl+Cmd+O plus window-local Cmd+L, Shift+Cmd+L, Cmd+R, Cmd+Up and Cmd+W",
+      "Workspace directory context menu for external Terminal and a new embedded session"
+    ],
+    "focused_verification": {
+      "individually_completed_test_functions": 16,
+      "individual_results": [
+        {
+          "test": "RemoteFilePresentationTests.browserFitsLocalizedControlsAndClosesWithoutOpening",
+          "passed": true,
+          "log": "/tmp/duckpad-ui-final-browserFitsLocalizedControlsAndClosesWithoutOpening.log"
+        },
+        {
+          "test": "RemoteFilePresentationTests.browserReusesConnectionContextForPreviewAndMultipleOpenAndIgnoresCancelledNavigation",
+          "passed": false,
+          "log": "/tmp/duckpad-ui-final-browserReusesConnectionContextForPreviewAndMultipleOpenAndIgnoresCancelledNavigation.log"
+        },
+        {
+          "test": "RemoteFilePresentationTests.connectionRetriesAreBoundedAndManualRetryAndCancellationWork",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-connectionRetriesAreBoundedAndManualRetryAndCancellationWork.log"
+        },
+        {
+          "test": "RemoteFilePresentationTests.remoteOpenShortcutIsUniqueAndCanBeRemapped",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-remoteOpenShortcutIsUniqueAndCanBeRemapped.log"
+        },
+        {
+          "test": "RemoteFilePresentationTests.browserShortcutsStayInTheBrowserAndCloseWithoutOpeningFiles",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-browserShortcutsStayInTheBrowserAndCloseWithoutOpeningFiles.log"
+        },
+        {
+          "test": "RemoteFilePresentationTests.nativeBrowserThemeSnapshots",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-nativeBrowserThemeSnapshots.log"
+        },
+        {
+          "test": "RemoteFilePresentationTests.tailBarKeepsControlsWithinMinimumWindowWidthInEveryLanguage",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-tailBarKeepsControlsWithinMinimumWindowWidthInEveryLanguage.log"
+        },
+        {
+          "test": "TerminalPanelTests.surfaceFactoryIsLazyAndSessionsOwnTheirProcesses",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-surfaceFactoryIsLazyAndSessionsOwnTheirProcesses.log"
+        },
+        {
+          "test": "TerminalPanelTests.openingIsLazyHidingPreservesSessionsAndClosingWindowClearsThem",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-openingIsLazyHidingPreservesSessionsAndClosingWindowClearsThem.log"
+        },
+        {
+          "test": "TerminalPanelTests.focusedCloseClosesTerminalWithoutClosingDocument",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-focusedCloseClosesTerminalWithoutClosingDocument.log"
+        },
+        {
+          "test": "TerminalPanelTests.closingLastSessionShowsEmptyStateAndReopeningDoesNotRecreateIt",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-closingLastSessionShowsEmptyStateAndReopeningDoesNotRecreateIt.log"
+        },
+        {
+          "test": "TerminalPanelTests.panelResizesBelowWorkspaceAndRestoresEditorArea",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-panelResizesBelowWorkspaceAndRestoresEditorArea.log"
+        },
+        {
+          "test": "TerminalPanelTests.menuExposesTerminalShortcutAndCheckedVisibility",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-menuExposesTerminalShortcutAndCheckedVisibility.log"
+        },
+        {
+          "test": "TerminalPanelTests.integratedWindowKeepsEditorAbovePanelAtMinimumSize",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-integratedWindowKeepsEditorAbovePanelAtMinimumSize.log"
+        },
+        {
+          "test": "TerminalPanelTests.allLocalesPreserveSessionAndRenderAtCompactWidths",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-allLocalesPreserveSessionAndRenderAtCompactWidths.log"
+        },
+        {
+          "test": "SearchShortcutTests.commandRBelongsOnlyToReplaceAndShiftRRemainsProjectReplace",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-commandRBelongsOnlyToReplaceAndShiftRRemainsProjectReplace.log"
+        },
+        {
+          "test": "SearchShortcutTests.nativeMenuCommandROpensReplaceAndPreservesAnActiveFindQuery",
+          "passed": true,
+          "status": "PASS",
+          "log": "/tmp/duckpad-ui-final-nativeMenuCommandROpensReplaceAndPreservesAnActiveFindQuery.log"
+        }
+      ],
+      "additional_critical_test_functions_completed": 3,
+      "critical_tests": [
+        "RemoteFilePresentationTests.appEventsRefreshAndCloseRemoteWindowWithoutReplacingOrClosingEditor",
+        "WorkspaceTerminalTests.folderMenuRoutesLiteralPathsAndExcludesFilesAndUnavailableRoots",
+        "WorkspaceTerminalTests.embeddedFolderOpensExactlyOneNewSessionWithoutChangingExistingShells"
+      ],
+      "critical_log": "/tmp/duckpad-remote-workspace-final-tests.log",
+      "incomplete_case": "browserReusesConnectionContextForPreviewAndMultipleOpenAndIgnoresCancelledNavigation exited without a completion marker despite exit 0, including when isolated. Not counted as passed. This AppKit helper limitation was observed before this follow-up.",
+      "regression_evidence": [
+        "Real NSApp events originally reached editor Replace/Close instead of the remote window; passed after adding a window-scoped local event monitor.",
+        "A delayed external terminal request after window teardown initially launched; passed after the explicit teardown guard."
+      ]
+    },
+    "ui": {
+      "light_dark_snapshots_inspected": true,
+      "snapshots": "/tmp/duckpad-remote-theme-snapshots",
+      "all_eight_language_geometry_tests_completed": true,
+      "global_ctrl_cmd_o_opened_packaged_remote_window": true,
+      "physical_ime_interaction": false,
+      "external_terminal_probe": {
+        "open_stdout": "OPEN_SUCCESS",
+        "exit_code": 0,
+        "new_shells": [],
+        "validation_context": "Production NativeExternalTerminal helper compiled into an unsandboxed standalone AppKit probe; context menu routing covered by automated tests, packaged UI invocation not verified.",
+        "fixture_shells": [
+          {
+            "pid": 49731,
+            "cwd": "/private/tmp/remote-theme-terminal-7b5425da53/한글 folder 'quotes' $(literal)",
+            "matches": true
+          }
+        ]
+      },
+      "packaged_context_menu_manual_invocation": "Not verified by accessibility automation; callbacks, unavailable roots, blocked/closed windows, special paths, first/existing sessions and existing shell preservation covered by automated tests."
+    },
+    "localization": {
+      "languages": 8,
+      "string_keys": 1234,
+      "plural_entries": 5,
+      "resource_validation_passed": true
+    },
+    "package": {
+      "path": "build/remote-theme-workspace-terminal-preview/Duckpad.app",
+      "version": "0.14.3",
+      "build": "65",
+      "architecture": "arm64",
+      "signing": "ad-hoc",
+      "notarized": false,
+      "build_passed": true,
+      "bundle_verification_passed": true,
+      "general_smoke_passed": true,
+      "save_panel_automation": "skipped",
+      "build_log": "/tmp/duckpad-remote-theme-workspace-build.log",
+      "verification_log": "/tmp/duckpad-remote-theme-workspace-verify.log",
+      "smoke_log": "/tmp/duckpad-remote-theme-workspace-smoke.log",
+      "launched_with_isolated_settings_and_recovery": true
+    },
+    "independent_review": {
+      "approved": true,
+      "remaining_blocker_or_major": 0
+    },
+    "limits": [
+      "External Terminal working directory verified through the production helper in an unsandboxed AppKit probe; packaged sandbox/UI end-to-end invocation not verified.",
+      "One existing asynchronous AppKit test did not complete; not represented as a pass.",
+      "Intel hardware and physical Korean IME not tested."
+    ],
+    "git_integration_performed": false,
+    "release_published": false
+  },
+  "shared_control_hover_followup": {
+    "scope": [
+      "Shared SearchInputField hover/focus chrome",
+      "Shared SearchActionButton hover/pressed chrome and enabled pointer cursor",
+      "Existing StatusBarButton used for remote up/refresh, suggestion disclosure and Tail actions"
+    ],
+    "focused_test_functions_completed": 12,
+    "logs": [
+      "/tmp/duckpad-common-hover-buttons-tests.log",
+      "/tmp/duckpad-hover-folder-scope-test.log",
+      "/tmp/duckpad-hover-popup-snapshot-test.log"
+    ],
+    "runner_note": "The combined run ended before folderResultsKeepTheirScopeWhenClassicFindReplaces completed; the isolated run completed successfully. The opt-in popup snapshot case was rerun with its environment enabled and completed.",
+    "native_snapshots_inspected": {
+      "search_input": "/tmp/duckpad-search-hover-preview",
+      "action_buttons": "/tmp/duckpad-action-hover-preview"
+    },
+    "appearance_coverage": [
+      "light",
+      "dark",
+      "normal",
+      "hover",
+      "pressed action button",
+      "disabled"
+    ],
+    "physical_pointer_and_ime_not_automated": true,
+    "new_user_visible_strings": 0,
+    "geometry_and_search_behavior": "Existing eight-locale layout, query/filter/marked-text, focus preservation and suggestion dismissal tests completed.",
+    "git_integration_performed": false,
+    "release_published": false,
+    "validated_at_utc": "2026-10-22T05:28:42.349794+00:00",
+    "package": {
+      "path": "build/shared-hover-controls-preview/Duckpad.app",
+      "native_build_passed": true,
+      "bundle_verification_passed": true,
+      "architecture": "arm64",
+      "signing": "ad-hoc",
+      "notarized": false,
+      "launched_with_isolated_settings_and_recovery": true,
+      "remote_file_window_opened": true,
+      "build_log": "/tmp/duckpad-shared-hover-controls-build.log",
+      "verification_log": "/tmp/duckpad-shared-hover-controls-verify.log",
+      "general_smoke": "Not repeated for this UI-only change; focused tests, bundle verification and actual launch completed."
+    }
+  },
+  "neutral_dropdown_and_tail_alignment_followup": {
+    "validated_at_utc": "2026-10-22T06:02:40.579301+00:00",
+    "scope": [
+      "Neutral common input focus border/underline",
+      "Full composite dropdown hover/focus chrome including disclosure arrow",
+      "Common toolbar icon configuration",
+      "Tail action hit areas 28x24 points, center-aligned in 28-point bar"
+    ],
+    "focused_test_functions_completed": 12,
+    "test_log": "/tmp/duckpad-neutral-dropdown-tail-tests.log",
+    "test_suites": {
+      "FilteredSuggestionFieldTests": 6,
+      "RemoteFilePresentationTests": 2,
+      "DocumentStatusBarTests": 4
+    },
+    "all_eight_locale_layout_checks_completed": true,
+    "popup_snapshot_fixture_enabled": true,
+    "new_user_visible_strings": 0,
+    "intermediate_check": "Earlier intermediate run was cancelled to incorporate the additional Tail toolbar request; it is not counted as a pass.",
+    "git_integration_performed": false,
+    "release_published": false,
+    "final_test_logs": [
+      "/tmp/duckpad-toolbar-icon-insets-tests.log",
+      "/tmp/duckpad-neutral-dropdown-final-tests.log"
+    ],
+    "final_test_functions_completed": 12,
+    "geometry_regression": [
+      {
+        "variant": "before",
+        "exit_code": 1,
+        "output": "arrow.down.to.line (10.0, -1.0, 28.0, 31.0) FAIL\narrow.clockwise (44.0, -0.5, 28.5, 31.0) FAIL\nclear (78.0, -0.5, 28.0, 29.0) FAIL\nstop.fill (112.0, 0.5, 28.5, 28.0) FAIL\n"
+      },
+      {
+        "variant": "after",
+        "exit_code": 0,
+        "output": "arrow.down.to.line (10.0, 2.0, 28.0, 24.0) PASS\narrow.clockwise (44.0, 2.0, 28.0, 24.0) PASS\nclear (78.0, 2.0, 28.0, 24.0) PASS\nstop.fill (112.0, 2.0, 28.0, 24.0) PASS\n"
+      }
+    ],
+    "native_geometry_probe": "Production StatusBarButton compiled with and without the alignment-inset override: all four original frames fail 28x24/centering checks; all four corrected frames pass.",
+    "final_composite_preview_log": "/tmp/duckpad-neutral-controls-preview-final.log",
+    "light_dark_snapshots_inspected": "/tmp/duckpad-neutral-controls-preview",
+    "physical_pointer_and_ime_not_automated": true,
+    "package": {
+      "path": "build/neutral-dropdown-tail-final-preview/Duckpad.app",
+      "version": "0.14.3",
+      "build": "65",
+      "architecture": "arm64",
+      "signing": "ad-hoc",
+      "notarized": false,
+      "native_build_passed": true,
+      "bundle_verification_passed": true,
+      "launched_with_isolated_settings_and_recovery": true,
+      "remote_file_window_opened": true,
+      "local_tail_preview_opened": true,
+      "build_log": "/tmp/duckpad-neutral-dropdown-tail-final-build.log",
+      "verification_log": "/tmp/duckpad-neutral-dropdown-tail-final-verify.log",
+      "general_smoke": "Not repeated for this UI-only change; focused tests, native geometry probes, bundle verification and actual launch completed."
+    }
+  },
+  "host_list_hover_and_long_path_followup": {
+    "validated_at_utc": "2026-10-22T06:10:17.028929+00:00",
+    "scope": [
+      "Shared suggestion row hover without changing input or keyboard selection",
+      "Host and Remote path fields fill their horizontal rows",
+      "Window resizing preserves aligned labels and fixed action buttons"
+    ],
+    "focused_test_functions_completed": 8,
+    "test_log": "/tmp/duckpad-dropdown-rows-long-path-tests.log",
+    "all_eight_language_geometry_completed": true,
+    "native_snapshots_inspected": "/tmp/duckpad-host-hover-path-preview",
+    "appearances": [
+      "light",
+      "dark"
+    ],
+    "native_probe_log": "/tmp/duckpad-host-hover-path-preview.log",
+    "path_width_measurements_points": [
+      {
+        "window": 720,
+        "path": 530.5
+      },
+      {
+        "window": 800,
+        "path": 610.5
+      },
+      {
+        "window": 1100,
+        "path": 910.5
+      }
+    ],
+    "hover_keeps_query_and_keyboard_selection": true,
+    "physical_pointer_and_ime_not_automated": true,
+    "new_user_visible_strings": 0,
+    "git_integration_performed": false,
+    "release_published": false,
+    "package": {
+      "path": "build/host-hover-long-path-preview/Duckpad.app",
+      "native_build_passed": true,
+      "bundle_verification_passed": true,
+      "version": "0.14.3",
+      "build": "65",
+      "architecture": "arm64",
+      "signing": "ad-hoc",
+      "notarized": false,
+      "isolated_preview_launched": true,
+      "remote_file_window_opened": true,
+      "build_log": "/tmp/duckpad-host-hover-long-path-build.log",
+      "verification_log": "/tmp/duckpad-host-hover-long-path-verify.log",
+      "general_smoke": "Not repeated for this UI-only follow-up; focused tests, native snapshots, resizing/input-selection probes, bundle verification and actual launch completed."
+    }
+  }
+}

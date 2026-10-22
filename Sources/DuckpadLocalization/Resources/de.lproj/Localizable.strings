@@ -1262,3 +1262,104 @@
 "Show hidden files in the workspace and file searches. Search ignore rules still apply." = "Versteckte Dateien im Arbeitsbereich und bei der Dateisuche anzeigen. Suchausschlussregeln gelten weiterhin.";
 
 "Highlight matching words at the caret" = "Übereinstimmende Wörter am Textcursor hervorheben";
+
+"Open Remote File" = "Remote-Datei öffnen";
+
+"Open Remote File…" = "Remote-Datei öffnen…";
+
+"SSH host" = "SSH-Host";
+
+"Remote path" = "Remote-Pfad";
+
+"Follow file changes (Tail)" = "Dateiänderungen verfolgen (Tail)";
+
+"Uses your SSH configuration and key authentication. Remote files open read-only. Connect once in Terminal to trust a new host. Tail starts with the latest 1 MiB." = "Verwendet Ihre SSH-Konfiguration und Schlüsselauthentifizierung. Remote-Dateien sind schreibgeschützt. Vertrauen Sie neuen Hosts zuerst im Terminal. Tail beginnt mit dem letzten 1 MiB.";
+
+"Tail Mode" = "Tail-Modus";
+
+"Follow End" = "Ende verfolgen";
+
+"Clear Tail Output" = "Tail-Ausgabe leeren";
+
+"Stop Tail Mode" = "Tail-Modus beenden";
+
+"Tail · Following" = "Tail · Verfolgen";
+
+"Tail · Scrolling paused" = "Tail · Scrollen pausiert";
+
+"Tail · Paused" = "Tail · Pausiert";
+
+"Remote files are read-only." = "Remote-Dateien sind schreibgeschützt.";
+
+"Stop Tail mode to edit this file." = "Beenden Sie zum Bearbeiten den Tail-Modus.";
+
+"Could not open or follow the file" = "Datei kann nicht geöffnet oder verfolgt werden";
+
+"SSH connection failed. Check your host, SSH key, and known_hosts entry." = "SSH-Verbindung fehlgeschlagen. Prüfen Sie Host, SSH-Schlüssel und known_hosts-Eintrag.";
+
+"Save or discard your changes before starting Tail mode." = "Speichern oder verwerfen Sie Änderungen vor dem Start des Tail-Modus.";
+
+"Tail and remote viewing currently require a UTF-8 text file." = "Tail und Remote-Ansicht benötigen derzeit eine UTF-8-Textdatei.";
+
+"Tail paused after 64 MiB of new output. Clear Tail Output to continue." = "Tail pausiert nach 64 MiB neuer Ausgabe. Leeren Sie die Tail-Ausgabe zum Fortsetzen.";
+
+"The file is larger than 64 MiB. Enable Tail to open its recent output." = "Die Datei ist größer als 64 MiB. Aktivieren Sie Tail für die aktuelle Ausgabe.";
+
+"The SSH request timed out." = "Zeitüberschreitung der SSH-Anfrage.";
+
+"Could not save the document state. Try again." = "Dokumentstatus konnte nicht gespeichert werden. Versuchen Sie es erneut.";
+
+"This document is not available for Tail mode." = "Dieses Dokument unterstützt den Tail-Modus nicht.";
+
+"The file is unavailable." = "Die Datei ist nicht verfügbar.";
+
+"The server returned an invalid file response." = "Der Server hat eine ungültige Dateiantwort zurückgegeben.";
+
+"Connect" = "Verbinden";
+
+"Reconnect" = "Erneut verbinden";
+
+"Connecting…" = "Verbindung wird hergestellt…";
+
+"Parent folder" = "Übergeordneter Ordner";
+
+"Refresh" = "Aktualisieren";
+
+"File preview" = "Dateivorschau";
+
+"Remote files" = "Remote-Dateien";
+
+"SSH keys · Read-only · Select multiple files to open · Tail starts with the latest 1 MiB." = "SSH-Schlüssel · Schreibgeschützt · Mehrere Dateien auswählbar · Tail beginnt mit dem letzten 1 MiB.";
+
+"Choose an SSH host or enter one to connect." = "SSH-Host auswählen oder eingeben.";
+
+"Select a file to preview its contents." = "Datei für die Vorschau auswählen.";
+
+"Loading preview…" = "Vorschau wird geladen…";
+
+"Connected · Showing the first 5,000 entries" = "Verbunden · Die ersten 5.000 Einträge werden angezeigt";
+
+"Connected · SSH connection shared across files" = "Verbunden · Dateien teilen sich die SSH-Verbindung";
+
+"Opened in the editor. Select another file to continue." = "Im Editor geöffnet. Weitere Datei zum Fortfahren auswählen.";
+"Log" = "Protokoll";
+
+"Show suggestions" = "Vorschläge anzeigen";
+
+"Suggestions for %1$@" = "Vorschläge für %1$@";
+
+"Filter hosts" = "Hosts filtern";
+
+"Filter folders" = "Ordner filtern";
+
+"Reconnecting… (%1$@/%2$@)" = "Verbindung wird wiederhergestellt… (%1$@/%2$@)";
+
+"%1$@ Select Retry to reconnect." = "%1$@ Wählen Sie „Erneut versuchen“, um die Verbindung wiederherzustellen.";
+
+"Reveal in Terminal" = "Im Terminal öffnen";
+
+"Reveal in Embedded Terminal" = "Im integrierten Terminal öffnen";
+
+"Could not open Terminal" = "Terminal konnte nicht geöffnet werden";
+
+"Could not open %1$@ in Terminal." = "%1$@ konnte nicht im Terminal geöffnet werden.";
