@@ -44,6 +44,7 @@ public enum DuckpadMainMenuFactory {
         add("New", #selector(DuckpadWindowController.performNewScratch(_:)), "n", target, to: fileMenu)
         add("New Window", #selector(DuckpadWindowController.performNewWindow(_:)), "n", target, modifiers: [.command, .shift], to: fileMenu)
         add("Open…", #selector(DuckpadWindowController.performOpenFile(_:)), "o", target, to: fileMenu)
+        add("Open Remote File…", #selector(DuckpadWindowController.performOpenRemoteFile(_:)), "o", target, modifiers: [.command, .control], to: fileMenu)
         add("Open Folder…", #selector(DuckpadWindowController.performAddWorkspaceFolder(_:)), "", target, modifiers: [], to: fileMenu)
         add("Remove Folder from Workspace", #selector(DuckpadWindowController.performRemoveWorkspaceFolder(_:)), "", target, modifiers: [], to: fileMenu)
         fileMenu.addItem(makeOpenRecentItem(
@@ -266,6 +267,10 @@ public enum DuckpadMainMenuFactory {
         foldingItem.submenu = foldingMenu
         viewMenu.addItem(foldingItem)
         viewMenu.addItem(.separator())
+        add("Tail Mode", #selector(DuckpadWindowController.performToggleTailMode(_:)), "", target, modifiers: [], to: viewMenu)
+        add("Follow End", #selector(DuckpadWindowController.performFollowFileEnd(_:)), "", target, modifiers: [], to: viewMenu)
+        add("Clear Tail Output", #selector(DuckpadWindowController.performClearTailOutput(_:)), "", target, modifiers: [], to: viewMenu)
+        viewMenu.addItem(.separator())
         add("Zoom In", #selector(DuckpadWindowController.performZoomIn(_:)), "+", target, to: viewMenu)
         add("Zoom Out", #selector(DuckpadWindowController.performZoomOut(_:)), "-", target, to: viewMenu)
         add("Actual Size", #selector(DuckpadWindowController.performResetZoom(_:)), "0", target, to: viewMenu)
@@ -431,7 +436,7 @@ public enum DuckpadMainMenuFactory {
             to: languageMenu
         ) { definition in
             let item = NSMenuItem(
-                title: definition.displayName,
+                title: LanguageMenuBuilder.displayName(definition),
                 action: #selector(DuckpadWindowController.performChooseLanguage(_:)),
                 keyEquivalent: ""
             )
@@ -758,6 +763,7 @@ public enum DuckpadMainMenuFactory {
         case "performNewScratch:": symbol = "doc.badge.plus"
         case "performNewWindow:": symbol = "macwindow.badge.plus"
         case "performOpenFile:": symbol = "folder"
+        case "performOpenRemoteFile:": symbol = "server.rack"
         case "performSaveFile:", "performSaveFileAs:": symbol = "square.and.arrow.down"
         case "performUndo:": symbol = "arrow.uturn.backward"
         case "performRedo:": symbol = "arrow.uturn.forward"

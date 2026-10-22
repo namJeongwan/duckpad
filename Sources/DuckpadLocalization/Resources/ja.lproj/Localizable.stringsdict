@@ -66,5 +66,21 @@
 			<string>閉じる前に%ld件の文書の変更を保存しますか？</string>
 		</dict>
 	</dict>
+	<key>tail.unreadLines</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>ld</string>
+			<key>one</key>
+			<string>Tail · 新しいログ %ld 行</string>
+			<key>other</key>
+			<string>Tail · 新しいログ %ld 行</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

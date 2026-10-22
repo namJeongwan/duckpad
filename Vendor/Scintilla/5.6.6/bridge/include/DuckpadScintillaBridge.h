@@ -149,6 +149,11 @@ typedef NS_ENUM(NSInteger, DPScintillaSelectionCommand) {
 @property(nonatomic, readonly) NSUInteger languageConfigurationCount;
 @property(nonatomic, readonly) NSUInteger commentCommandInspectedByteCount;
 @property(nonatomic, readonly) NSUInteger synchronouslyStyledByteCount;
+@property(nonatomic, readonly) NSUInteger logStyledByteCount;
+@property(nonatomic, readonly) NSUInteger maximumLogStyleSliceMicroseconds;
+- (NSInteger)ansiForegroundAtUTF8Position:(NSUInteger)position NS_SWIFT_NAME(ansiForeground(atUTF8Position:));
+- (NSInteger)ansiBackgroundAtUTF8Position:(NSUInteger)position NS_SWIFT_NAME(ansiBackground(atUTF8Position:));
+- (BOOL)isStyleVisible:(NSInteger)style NS_SWIFT_NAME(isStyleVisible(_:));
 /// True while a large-document syntax snapshot is queued, computed or applied.
 @property(nonatomic, readonly) BOOL asynchronousStylingPending;
 /// Also includes deferred fold commands; used by responsiveness instrumentation.
@@ -190,6 +195,11 @@ typedef NS_ENUM(NSInteger, DPScintillaSelectionCommand) {
                            error:(NSError * _Nullable * _Nullable)error
     __attribute__((swift_error(nonnull_error)))
     NS_SWIFT_NAME(appendBinaryDocumentChunk(_:maximumBytes:));
+/// Read-only observation update, not a user edit. Payloads are bounded to 64KiB.
+- (BOOL)applyObservedUTF8:(NSData *)data revision:(uint64_t)revision reset:(BOOL)reset;
+- (void)followObservedFileEnd;
+@property(nonatomic, readonly) BOOL isObservedFileFollowingEnd;
+
 - (BOOL)replaceUTF8Range:(NSRange)range
          withReplacement:(NSData *)replacement
         expectedRevision:(uint64_t)expectedRevision

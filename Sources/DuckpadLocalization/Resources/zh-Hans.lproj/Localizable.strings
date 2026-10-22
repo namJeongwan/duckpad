@@ -1262,3 +1262,104 @@
 "Show hidden files in the workspace and file searches. Search ignore rules still apply." = "在工作区和文件搜索中显示隐藏文件。搜索忽略规则仍然适用。";
 
 "Highlight matching words at the caret" = "高亮显示光标处单词的所有匹配项";
+
+"Open Remote File" = "打开远程文件";
+
+"Open Remote File…" = "打开远程文件…";
+
+"SSH host" = "SSH 主机";
+
+"Remote path" = "远程路径";
+
+"Follow file changes (Tail)" = "跟踪文件更改 (Tail)";
+
+"Uses your SSH configuration and key authentication. Remote files open read-only. Connect once in Terminal to trust a new host. Tail starts with the latest 1 MiB." = "使用 SSH 配置和密钥认证。远程文件以只读方式打开。请先在终端连接一次以信任新主机。Tail 从最后 1 MiB 开始显示。";
+
+"Tail Mode" = "Tail 模式";
+
+"Follow End" = "跟随末尾";
+
+"Clear Tail Output" = "清空 Tail 输出";
+
+"Stop Tail Mode" = "停止 Tail 模式";
+
+"Tail · Following" = "Tail · 正在跟随";
+
+"Tail · Scrolling paused" = "Tail · 滚动跟随已暂停";
+
+"Tail · Paused" = "Tail · 已暂停";
+
+"Remote files are read-only." = "远程文件为只读。";
+
+"Stop Tail mode to edit this file." = "请停止 Tail 模式以编辑此文件。";
+
+"Could not open or follow the file" = "无法打开或跟踪文件";
+
+"SSH connection failed. Check your host, SSH key, and known_hosts entry." = "SSH 连接失败。请检查主机、SSH 密钥和 known_hosts 条目。";
+
+"Save or discard your changes before starting Tail mode." = "启动 Tail 模式前请保存或放弃更改。";
+
+"Tail and remote viewing currently require a UTF-8 text file." = "Tail 和远程查看目前需要 UTF-8 文本文件。";
+
+"Tail paused after 64 MiB of new output. Clear Tail Output to continue." = "新增输出达到 64 MiB，Tail 已暂停。请清空 Tail 输出以继续。";
+
+"The file is larger than 64 MiB. Enable Tail to open its recent output." = "文件大于 64 MiB。请启用 Tail 以打开最近的输出。";
+
+"The SSH request timed out." = "SSH 请求超时。";
+
+"Could not save the document state. Try again." = "无法保存文档状态。请重试。";
+
+"This document is not available for Tail mode." = "此文档无法使用 Tail 模式。";
+
+"The file is unavailable." = "无法访问文件。";
+
+"The server returned an invalid file response." = "服务器返回了无效的文件响应。";
+
+"Connect" = "连接";
+
+"Reconnect" = "重新连接";
+
+"Connecting…" = "正在连接…";
+
+"Parent folder" = "上级文件夹";
+
+"Refresh" = "刷新";
+
+"File preview" = "文件预览";
+
+"Remote files" = "远程文件";
+
+"SSH keys · Read-only · Select multiple files to open · Tail starts with the latest 1 MiB." = "SSH 密钥 · 只读 · 可选择多个文件打开 · Tail 从最新的 1 MiB 开始。";
+
+"Choose an SSH host or enter one to connect." = "选择或输入 SSH 主机以连接。";
+
+"Select a file to preview its contents." = "选择文件以预览内容。";
+
+"Loading preview…" = "正在加载预览…";
+
+"Connected · Showing the first 5,000 entries" = "已连接 · 显示前 5,000 项";
+
+"Connected · SSH connection shared across files" = "已连接 · 多个文件共享 SSH 连接";
+
+"Opened in the editor. Select another file to continue." = "已在编辑器中打开。可继续选择其他文件。";
+"Log" = "日志";
+
+"Show suggestions" = "显示建议";
+
+"Suggestions for %1$@" = "%1$@的建议";
+
+"Filter hosts" = "筛选主机";
+
+"Filter folders" = "筛选文件夹";
+
+"Reconnecting… (%1$@/%2$@)" = "正在重新连接… (%1$@/%2$@)";
+
+"%1$@ Select Retry to reconnect." = "%1$@ 选择“重试”以重新连接。";
+
+"Reveal in Terminal" = "在终端中打开";
+
+"Reveal in Embedded Terminal" = "在内置终端中打开";
+
+"Could not open Terminal" = "无法打开终端";
+
+"Could not open %1$@ in Terminal." = "无法在终端中打开 %1$@。";

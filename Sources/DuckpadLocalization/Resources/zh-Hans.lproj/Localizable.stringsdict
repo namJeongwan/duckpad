@@ -66,5 +66,21 @@
 			<string>关闭前保存 %ld 个文档的更改？</string>
 		</dict>
 	</dict>
+	<key>tail.unreadLines</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>ld</string>
+			<key>one</key>
+			<string>Tail · %ld 行新日志</string>
+			<key>other</key>
+			<string>Tail · %ld 行新日志</string>
+		</dict>
+	</dict>
 </dict>
 </plist>

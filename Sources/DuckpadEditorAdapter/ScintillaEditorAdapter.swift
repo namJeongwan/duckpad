@@ -7,7 +7,7 @@ import DuckpadScintillaBridge
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
 @MainActor
-public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, ProgressiveTextEditorPort, FileOpeningPreviewEditorPort, OpenDocumentsReplacementEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, EditorCopyExportPort, BookmarkEditorPort, SplitEditorPort, DeclarationNavigationEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
+public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFormatPort, EditorSavePointPort, DeferredPasteEditorPort, FormattingEditorPort, BinaryEditorPort, ProgressiveTextEditorPort, FileOpeningPreviewEditorPort, OpenDocumentsReplacementEditorPort, SearchHighlightEditorPort, EditorFindTextPort, LanguageEditorPort, ExtensionEditorPort, EditorDefaultViewOptionsPort, EditorDisplayOptionsPort, EditorNavigationPort, EditorCommandPort, EditorCopyExportPort, BookmarkEditorPort, SplitEditorPort, DeclarationNavigationEditorPort, FoldingEditorPort, EditorGroupRoutingPort, EditorStatusReportingPort {
     var snippetSession: SnippetSession?
     var snippetBuffer: BufferID?
     var snippetKeyMonitor: Any?
@@ -631,6 +631,45 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
         if let ownerView = canonicalOwnerView(for: snapshot.bufferID) {
             restoreViewState(for: snapshot.bufferID, in: ownerView)
         }
+    }
+
+    public func observedByteCount(for bufferID: BufferID) -> Int? { recoveryBuffers[bufferID]?.byteCount }
+
+    public func isObservedFileFollowingEnd(in bufferID: BufferID) -> Bool {
+        let view = activeBuffer?.bufferID == bufferID ? activeScintillaView : canonicalOwnerView(for: bufferID)
+        return view?.isObservedFileFollowingEnd == true
+    }
+
+    public func followObservedFileEnd(in bufferID: BufferID) {
+        for view in allViews(for: bufferID) { view.followObservedFileEnd() }
+    }
+
+    public func applyObservedUTF8(_ data: Data, to buffer: EditorBufferDescriptor, reset: Bool) -> Bool {
+        guard !isInvalidated, data.count <= 64 * 1_024,
+              let owner = canonicalOwnerView(for: buffer.bufferID),
+              currentRevision(for: buffer.bufferID) < UInt64.max,
+              buffer.revision == currentRevision(for: buffer.bufferID) + 1,
+              let oldCount = recoveryBuffers[buffer.bufferID]?.byteCount,
+              let text = String(data: data, encoding: .utf8),
+              owner.applyObservedUTF8(data, revision: buffer.revision, reset: reset) else { return false }
+        let edit = EditorIncrementalEdit(bufferID: buffer.bufferID, expectedRevision: buffer.revision - 1,
+            range: .init(location: reset ? 0 : oldCount, length: reset ? oldCount : 0), replacement: text)
+        if reset {
+            snapshots[buffer.bufferID] = .init(bufferID: buffer.bufferID, revision: buffer.revision, text: text)
+            recoveryBuffers[buffer.bufferID] = RecoveryBuffer(baseRevision: buffer.revision,
+                revision: buffer.revision, checkpoint: EditorRecoveryCheckpoint(text: text), deltas: [], byteCount: data.count)
+            acceptedEdits[buffer.bufferID] = []
+        } else {
+            appendRecovery(edit, resultingRevision: buffer.revision, recordUsage: false)
+            acceptedEdits[buffer.bufferID, default: []].append(edit)
+        }
+        synchronizeRevision(buffer.revision, for: buffer.bufferID, excluding: owner)
+        updateDisplayedRevision(buffer.revision, for: buffer.bufferID)
+        if activeBuffer?.bufferID == buffer.bufferID { activeBuffer = buffer }
+        trustedSavePoints.insert(buffer.bufferID)
+        storeViewState(bufferID: buffer.bufferID)
+        onEditorStatusChange?()
+        return true
     }
 
     public func snapshot(for bufferID: BufferID) -> EditorTextSnapshot? {
@@ -1810,9 +1849,11 @@ public final class ScintillaEditorAdapter: EditorFileFormatPort, EditorSavePoint
         }
     }
 
-    private func appendRecovery(_ edit: EditorIncrementalEdit, resultingRevision: UInt64) {
-        onAcceptedEditLanguage?(languageConfigurations[edit.bufferID]?.languageID ?? .plainText)
-        updateSnippet(edit)
+    private func appendRecovery(_ edit: EditorIncrementalEdit, resultingRevision: UInt64, recordUsage: Bool = true) {
+        if recordUsage {
+            onAcceptedEditLanguage?(languageConfigurations[edit.bufferID]?.languageID ?? .plainText)
+            updateSnippet(edit)
+        }
         guard !isInvalidated,
               recoveryBuffers[edit.bufferID]?.revision == edit.expectedRevision,
               let byteCount = recoveryBuffers[edit.bufferID]?.byteCount,

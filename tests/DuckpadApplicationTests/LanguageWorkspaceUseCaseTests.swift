@@ -8,6 +8,7 @@ import Testing
 private final class LanguageEditorFake: LanguageEditorPort {
     var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
     var prefix = Data()
+    var prefixReads = 0
     var supported = Set<String>()
     var applications: [EditorLanguageConfiguration] = []
     var themes: [EditorThemePalette] = []
@@ -28,7 +29,7 @@ private final class LanguageEditorFake: LanguageEditorPort {
     func recoveryCapture(for bufferID: BufferID) -> EditorRecoveryCapture? { nil }
     func acknowledgeRecoverySnapshot(_ snapshot: EditorRecoverySnapshot) {}
     func installRecovery(_ snapshot: EditorRecoverySnapshot) {}
-    func detectionPrefix(maximumBytes: Int) -> Data { Data(prefix.prefix(maximumBytes)) }
+    func detectionPrefix(maximumBytes: Int) -> Data { prefixReads += 1; return Data(prefix.prefix(maximumBytes)) }
     func supportsLexer(named name: String) -> Bool { supported.contains(name) }
     func applyLanguage(_ configuration: EditorLanguageConfiguration) -> Bool {
         guard applyLanguageResult else { return false }
@@ -270,4 +271,54 @@ func failedLanguageApplicationDoesNotPublishReadyCommentCapability() async throw
     }
     #expect(service.toggleBlockComment() == nil)
     #expect(editor.blockCommentInvocations == 0)
+}
+
+@Test @MainActor
+func detectedLogsReuseTheirProbeAcrossTailRevisionsAndRespectPlainOverride() async throws {
+    let registry = try LanguageManifestLoader().loadBundled()
+    let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+    _ = await workspace.start()
+    let tabID = try #require(workspace.snapshot().tabs.first?.id)
+    let identity = FileIdentity(canonicalPath: "/tmp/log-probe.txt", device: 1, inode: 2, byteCount: 0, modifiedNanoseconds: 0, contentToken: "fixture")
+    var binding = FileBinding(canonicalPath: identity.canonicalPath, encoding: .utf8, byteOrderMark: .absent, lineEnding: .lf, observedIdentity: identity)
+    binding.tailMode = true
+    _ = await workspace.bindSavedFile(tabID: tabID, binding: binding, title: "log-probe.txt", savedRevision: 0)
+    let editor = LanguageEditorFake()
+    editor.supported = Set(registry.definitions.map(\.lexerName))
+    editor.prefix = Data("2026-10-22 10:20:30 INFO ready\n".utf8)
+    let service = LanguageWorkspaceUseCase(registry: registry, workspace: workspace, editor: editor)
+    _ = service.validateAndRefresh()
+    #expect(editor.activeLanguageID == .log)
+    let reads = editor.prefixReads, applications = editor.applications.count
+    editor.activeDocumentByteLength = 32 * 1_024 * 1_024
+    for _ in 0..<100 {
+        let context = try #require(workspace.fileContext(tabID: tabID))
+        #expect(workspace.applyObservedFileUpdate(tabID: tabID, expected: context, identity: identity, install: { _ in true }))
+        _ = service.refreshActive()
+    }
+    #expect(editor.prefixReads == reads && editor.applications.count == applications)
+    _ = await service.setOverride(.manual(.plainText))
+    #expect(editor.activeLanguageID == .plainText)
+    editor.prefix = Data("ordinary text".utf8)
+    _ = await service.setOverride(.automatic)
+    #expect(editor.activeLanguageID == .plainText)
+}
+
+@Test @MainActor
+func editableLogContentIsRedetectedAfterReplacement() async throws {
+    let registry = try LanguageManifestLoader().loadBundled()
+    let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+    _ = await workspace.start()
+    let editor = LanguageEditorFake()
+    editor.supported = Set(registry.definitions.map(\.lexerName))
+    editor.prefix = Data("ERROR:logger:initial\n".utf8)
+    let service = LanguageWorkspaceUseCase(registry: registry, workspace: workspace, editor: editor)
+    _ = service.validateAndRefresh()
+    #expect(editor.activeLanguageID == .log)
+    let buffer = try #require(workspace.snapshot().activeBuffer)
+    #expect(workspace.acceptEditorEdit(.init(bufferID: buffer.bufferID, expectedRevision: buffer.revision,
+        range: .init(location: 0, length: 0), replacement: "ordinary text")) == .accepted(newRevision: buffer.revision + 1))
+    editor.prefix = Data("ordinary text".utf8)
+    _ = service.refreshActive()
+    #expect(editor.activeLanguageID == .plainText)
 }

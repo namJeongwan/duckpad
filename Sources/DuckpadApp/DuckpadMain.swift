@@ -209,7 +209,44 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             }
         }
 
-        if environment["DUCKPAD_RIPGREP_SMOKE"] == "1", securityScopeSmokeNamespace != nil {
+        if let path = environment["DUCKPAD_SSH_SMOKE_PATH"],
+           let config = environment["DUCKPAD_SSH_SMOKE_CONFIG"], securityScopeSmokeNamespace != nil {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                do {
+                    let reader = XPCSSHFileObservationReader(configuration: URL(fileURLWithPath: config))
+                    let remote = RemoteFileUseCase(workspace: workspace, editor: editor, reader: reader)
+                    guard let location = RemoteFileLocation(host: "duckpad-smoke", path: path) else { throw FileObservationError.invalidResponse }
+                    let aliases = try await reader.configuredHosts()
+                    guard aliases.contains("duckpad-smoke") else { throw FileObservationError.invalidResponse }
+                    let directory = try await reader.directory(host: location.host, path: (path as NSString).deletingLastPathComponent)
+                    guard directory.entries.contains(where: { $0.name == "app.log" }) else { throw FileObservationError.invalidResponse }
+                    let preview = try await reader.read(.ssh(location), after: nil, maximumBytes: 16 * 1_024)
+                    guard preview.data == Data("Duckpad SSH fixture\n".utf8) else { throw FileObservationError.invalidResponse }
+                    // Multiple snapshots and Tail use the same authenticated helper session.
+                    let sibling = RemoteFileLocation(host: location.host, path: (path as NSString).deletingLastPathComponent + "/b.log")!
+                    _ = try await remote.open(sibling)
+                    let tab = try await remote.open(location, tail: true)
+                    let tail = TailFileUseCase(workspace: workspace, editor: editor, reader: reader)
+                    try await tail.start(tabID: tab)
+                    guard let view = editor.activeScintillaView, !view.isInputEnabled,
+                          view.contentUTF8 == Data("Duckpad SSH fixture\n".utf8) else { throw FileObservationError.invalidResponse }
+                    print("DUCKPAD_SSH_READY=1"); fflush(stdout)
+                    let deadline = ContinuousClock.now + .seconds(20)
+                    while view.contentUTF8 != Data("Duckpad SSH fixture\n한글 🦆\n".utf8), ContinuousClock.now < deadline {
+                        try await Task.sleep(for: .milliseconds(50))
+                    }
+                    tail.cancelAll()
+                    guard view.contentUTF8 == Data("Duckpad SSH fixture\n한글 🦆\n".utf8),
+                          workspace.snapshot().tabs.first(where: { $0.id == tab })?.isDirty == false else { throw FileObservationError.invalidResponse }
+                    print("Duckpad SSH smoke passed: sandboxed app -> authenticated helper -> key authentication -> aliases/directory/preview/multiple files -> bounded UTF-8 Tail")
+                    fflush(stdout); Darwin._exit(0)
+                } catch {
+                    FileHandle.standardError.write(Data("Duckpad SSH smoke failed: \(error)\n".utf8))
+                    Darwin._exit(1)
+                }
+            }
+        } else if environment["DUCKPAD_RIPGREP_SMOKE"] == "1", securityScopeSmokeNamespace != nil {
             Task { @MainActor in
                 await controller.waitForStartup()
                 do {
@@ -640,7 +677,22 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 guard editor.activeLanguageID.rawValue == "python", view.lexerName == "python" else {
                     preconditionFailure("Python lexer switch smoke failed")
                 }
-                print("Duckpad language smoke ready: Lexilla 5.5.3 Swift/JSON/Python + folding + block comments + closer dedent + dark palette")
+                _ = await languageUseCase.setOverride(.manual(.log))
+                let log = "2026-10-22 10:20:30 ERROR 한글\n\u{1b}[38;2;12;34;56mRGB\u{1b}[0m\n"
+                view.setPrimarySelectionUTF8Range(NSRange(location: 0, length: Int(view.documentByteLength)))
+                view.insertCommittedText(log)
+                for _ in 0..<1_000 where view.asynchronousStylingPending { try? await Task.sleep(for: .milliseconds(5)) }
+                let rgbRange = log.range(of: "RGB")!
+                let rgbPosition = UInt(log[..<rgbRange.lowerBound].utf8.count)
+                guard editor.activeLanguageID == .log, view.lexerName == "duckpadlog",
+                      view.contentUTF8 == Data(log.utf8), view.ansiForeground(atUTF8Position: rgbPosition) == 0x38220C else {
+                    preconditionFailure("Log/ANSI packaged styling smoke failed")
+                }
+                _ = await languageUseCase.setOverride(.manual(.plainText))
+                guard view.ansiForeground(atUTF8Position: rgbPosition) == -1, view.contentUTF8 == Data(log.utf8), view.isStyleVisible(15) else {
+                    preconditionFailure("Log to Plain Text did not preserve raw bytes and clear ANSI decorations")
+                }
+                print("Duckpad language smoke ready: Lexilla 5.5.3 Swift/JSON/Python + folding + block comments + closer dedent + dark palette + Log/ANSI")
                 fflush(stdout)
                 Darwin._exit(0)
             }
@@ -888,6 +940,9 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             store: recoveryStore
         )
         let fileUseCase = FileDocumentUseCase(workspace: workspace, editor: editor, store: fileStore, changeMonitor: LocalFileChangeMonitor())
+        let observationReader = FileObservationReader()
+        let remoteFileUseCase = RemoteFileUseCase(workspace: workspace, editor: editor, reader: observationReader)
+        let tailFileUseCase = TailFileUseCase(workspace: workspace, editor: editor, reader: observationReader)
         let searchUseCase = SearchWorkspaceUseCase(
             workspace: workspace,
             editor: editor,
@@ -944,6 +999,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             additionalEditorViewProvider: { [weak editor] group in editor?.editorGroupHost(for: group) ?? NSView() },
             editorGroupRouter: editor,
             fileUseCase: fileUseCase,
+            remoteFileUseCase: remoteFileUseCase,
+            tailFileUseCase: tailFileUseCase,
             filePanels: panels,
             fileConflictPresenter: panels,
             dirtyDecisionPresenter: panels,

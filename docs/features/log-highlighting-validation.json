@@ -1,0 +1,174 @@
+{
+  "date": "2026-10-22",
+  "phase": 3,
+  "feature": "common log and ANSI highlighting",
+  "baseline_commit": "26c5f13d55508d74110898752655ba8b4bff8e43",
+  "branch": "feature/tail-remote-files",
+  "source_state": "uncommitted phase1/2/3 worktree; no Git integration requested",
+  "preview": {
+    "path": "build/tail-phase3-preview/Duckpad.app",
+    "version": "0.14.3",
+    "build": 65,
+    "architecture": "native arm64",
+    "signing": "ad-hoc",
+    "notarized": false,
+    "status": "built and verified"
+  },
+  "functional": {
+    "status": "pass",
+    "executed_test_functions": 21,
+    "opt_in_performance_tests_skipped": 2,
+    "log": "/tmp/duckpad-phase3-functional-final.log",
+    "command": "DUCKPAD_LOG_SNAPSHOTS=/tmp/duckpad-phase3-snapshots-final swift test -c release --skip-build --filter \"LogHighlightingTests|LogFileDetectionTests|LanguageHighlightingTests|TailRemoteIntegrationTests|manualLanguageOverride|editableLogContent|detectedLogsReuse\""
+  },
+  "existing_editor_regressions": {
+    "status": "pass",
+    "test_functions": 84,
+    "log": "/tmp/duckpad-phase3-language-regressions.log",
+    "command": "swift test -c release --skip-build --filter LanguageEditorAdapterTests",
+    "initial_concurrent_stress_run": "Durable recovery metadata assertion failed under parallel large-log benchmark load; the isolated entire 84-function suite passes. No related source changed."
+  },
+  "shared_wrapped_ansi_tail": {
+    "status": "pass",
+    "metrics": {
+      "bytes": 8440000,
+      "append_bytes": 42200,
+      "max_ms": 1.436125,
+      "samples": 6,
+      "styled_bytes": 300188
+    },
+    "fixture": "40,000 log lines, repeated ANSI bold and resets, two shared visible views, wrap and minimap enabled",
+    "measurement": "6 append + immediate layout/display samples; later asynchronous colouring completion is awaited outside measurement",
+    "budget_ms": 50,
+    "log": "/tmp/duckpad-phase3-tests-final.log",
+    "network_time_included": false
+  },
+  "single_line_unicode_stress": {
+    "status": "fail",
+    "open_issue": "First ANSI layout exceeds 50 ms; this is not a passed performance gate.",
+    "budget_ms": 50,
+    "fixture": "18,900,005-byte single line, Korean and emoji, one cyan SGR; visible window, no wrapping",
+    "serial_runs": [
+      {
+        "bytes": 18900005,
+        "initial_ms": 0.824917,
+        "append_ms": 21.606083,
+        "append_bytes": 44000,
+        "styled_bytes": 53253,
+        "max_slice_us": 683,
+        "cold_plain_frame_ms": 8.518791,
+        "max_frame_ms": 53.796083,
+        "max_main_turn_gap_ms": 28.872667
+      },
+      {
+        "bytes": 18900005,
+        "initial_ms": 1.332792,
+        "append_ms": 18.680041,
+        "append_bytes": 44000,
+        "styled_bytes": 59397,
+        "max_slice_us": 2283,
+        "cold_plain_frame_ms": 8.386666,
+        "max_frame_ms": 66.077,
+        "max_main_turn_gap_ms": 29.821458
+      }
+    ],
+    "logs": [
+      "/tmp/duckpad-phase3-performance-3.log",
+      "/tmp/duckpad-phase3-performance-4.log"
+    ],
+    "concurrent_stress_run": {
+      "log": "/tmp/duckpad-phase3-tests-final.log",
+      "metrics": {
+        "bytes": 18900005,
+        "initial_ms": 0.811125,
+        "append_ms": 19.9145,
+        "append_bytes": 44000,
+        "styled_bytes": 53253,
+        "max_slice_us": 994,
+        "cold_plain_frame_ms": 4.350791,
+        "max_frame_ms": 55.520542,
+        "max_main_turn_gap_ms": 244.412708
+      },
+      "note": "Main-turn delay also includes other concurrent MainActor test suites; isolated serial runs are used for latency interpretation."
+    },
+    "improvement": "Retain native default style0 for unformatted bytes and cache Log page layouts; initial colouring now completes in about2.7s in serial runs, and a44KB append revisits only~53-59KB rather than remaining initial backlog.",
+    "network_time_included": false
+  },
+  "lifetime_regression": {
+    "status": "pass",
+    "negative_control": "ASan heap-use-after-free when escaping callback captures shared_ptr by const reference",
+    "fixed": "Capture shared_ptr by value; clear document and increment generation on lexer destruction",
+    "repetitions": 64,
+    "logs": [
+      "/tmp/duckpad-log-asan-before.log",
+      "/tmp/duckpad-log-asan-fixed.log"
+    ],
+    "swift_regression": "editUndoRotationAndPendingLexerReplacementCannotLeaveStaleANSI"
+  },
+  "visual": {
+    "status": "pass",
+    "method": "NSView native bitmap capture and visual inspection",
+    "palettes": [
+      "light",
+      "dark",
+      "highContrastLight",
+      "highContrastDark"
+    ],
+    "captures": "/tmp/duckpad-phase3-snapshots-final/logs-{0,1,2,3}.png",
+    "physical_ime_interaction": false
+  },
+  "localization": {
+    "status": "pass",
+    "strings": 1224,
+    "plural_entries": 5,
+    "languages": [
+      "en",
+      "ko",
+      "ja",
+      "zh-Hans",
+      "de",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "command": "python3 scripts/verify_localizations.py",
+    "localized_log_name": "Short language label only; no translated panel geometry changed"
+  },
+  "independent_review": {
+    "source_status": "no remaining Blocker/Major findings",
+    "performance_status": "50 ms universal claim not approved; single-line failure explicitly retained",
+    "final_evidence_status": "reviewed and approved; performance exception explicitly retained"
+  },
+  "limitations": [
+    "Single-line Unicode first ANSI layout exceeds50ms even with colour-only SGR.",
+    "No universal50ms guarantee for dense font-attribute changes or initial whole-file loading.",
+    "Exact source RGB can have insufficient contrast.",
+    "Generic bounded detection/header grammar is not a complete parser for every logging format.",
+    "Intel hardware, production remote servers and physical Korean IME interaction not tested in phase3.",
+    "Remote backend unchanged from phase2; no new SSH server integration run in phase3.",
+    "Development preview only; no commit, push, PR, merge, version bump or release."
+  ],
+  "packaged_validation": {
+    "bundle": "pass",
+    "general_smoke": "pass",
+    "language_log_ansi_smoke": "pass",
+    "skipped": [
+      "Native save-panel automation"
+    ],
+    "logs": [
+      "/tmp/duckpad-phase3-package.log",
+      "/tmp/duckpad-phase3-verify.log",
+      "/tmp/duckpad-phase3-smoke.log",
+      "/tmp/duckpad-phase3-packaged-language.log"
+    ],
+    "checks": [
+      "Finder/Open With",
+      "window resize",
+      "sandboxed XPC extension and isolation",
+      "ripgrep discovery",
+      "Swift/JSON/Python language switching, folding, comments",
+      "native Log ANSI RGB and raw bytes",
+      "Plain Text restores control visibility and clears ANSI decorations"
+    ]
+  }
+}

@@ -52,3 +52,18 @@ Terminal display regression checks (2026-10-17, Apple Silicon):
 - Move the same live session between 1x external displays and the 2x built-in display, preserving output and point-sized glyphs. The initial scale defect was reproduced on external displays, but only the built-in Retina display was connected for the final build. Final external-display round trips remain unverified.
 
 The final focused presentation run passes 16 tests in four suites. Session close menus and the suppression checkbox were inspected in English; all eight locale resources pass string/format validation. Package resource, XPC isolation and signature verification pass for the native preview build.
+
+## Workspace folder actions
+
+A Workspace root or nested folder offers **Reveal in Terminal** and
+**Reveal in Embedded Terminal** in its context menu. Files do not show these
+actions; unavailable folders and disabled Workspace interactions cannot launch
+sessions. Paths outside the selected root after lexical normalization are
+rejected.
+
+The external action opens the literal folder URL through macOS Terminal's
+registered directory document handler. The embedded action creates one new
+session with that folder as its working directory and reveals the terminal
+panel. Existing sessions, their running commands and document tabs are retained.
+No `cd` command is constructed or injected into a running shell. Folder names
+containing spaces, Korean, quotes or shell metacharacters remain literal paths.

@@ -429,18 +429,28 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     }
 
     func present(_ result: SearchResultSet, showsResults: Bool = true) {
-        openResult = result
+        let wasShowingResults = !resultsScroll.isHidden
+        let hadRows = numberOfRows(in: table) > 0
+        openResult = showsResults ? result : nil
         replacementResult = nil
         folderResult = nil
         folderRowOffsets = []
-        renderRows(result)
-        table.reloadData()
+        if showsResults {
+            renderRows(result)
+            table.reloadData()
+        } else {
+            rows = []
+            if hadRows { table.reloadData() }
+        }
         resultsScroll.isHidden = !showsResults || rows.isEmpty
-        onLayoutChanged?()
+        if showsResults || wasShowingResults { onLayoutChanged?() }
+        // Incremental Find only displays the count. Do not retain/build up to
+        // 100,000 hidden result rows or capture their payload in this closure.
+        let count = result.matchCount, truncated = result.isTruncated
         statusRenderer = { catalog in
-            result.isTruncated
-                ? catalog.text("%1$@+ matches (truncated)", arguments: [String(result.matchCount)])
-                : catalog.text("search.matches", arguments: [result.matchCount])
+            truncated
+                ? catalog.text("%1$@+ matches (truncated)", arguments: [String(count)])
+                : catalog.text("search.matches", arguments: [count])
         }
         status.stringValue = statusRenderer?(catalog) ?? ""
     }
@@ -641,16 +651,19 @@ final class SearchPanelView: NSView, NSSearchFieldDelegate, NSTableViewDataSourc
     @objc private func optionsChanged() { queryChanged() }
 
     private func clearResults() {
+        let hadVisibleResults = !resultsScroll.isHidden
+        let hadRows = numberOfRows(in: table) > 0
         replacementResult = nil
         openResult = nil
         statusRenderer = nil
         rows = []
         folderResult = nil
         folderRowOffsets = []
-        table.reloadData()
+        if hadRows { table.reloadData() }
         resultsScroll.isHidden = true
         status.stringValue = ""
-        onLayoutChanged?()
+        // Ordinary typing/IME updates do not change the dialog geometry.
+        if hadVisibleResults { onLayoutChanged?() }
     }
 
     private func queryChanged() {

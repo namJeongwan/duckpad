@@ -3,9 +3,15 @@ import Darwin
 import XPC
 import DuckpadPluginSupport
 import DuckpadTerminalBridge
+import DuckpadApplication
+import DuckpadInfrastructure
 
 private final class ShellSession: NSObject, DuckpadTerminalHostProtocol, @unchecked Sendable {
     private let lock = NSLock()
+    private var observations: [UUID: Task<Void, Never>] = [:]
+    private let remotePool = SSHConnectionPool(lifetime: { active in
+        if active { xpc_transaction_begin() } else { xpc_transaction_end() }
+    })
     private var master: FileHandle?
     private var child: pid_t = 0
     private var stopped = false
@@ -17,6 +23,51 @@ private final class ShellSession: NSObject, DuckpadTerminalHostProtocol, @unchec
 
     init(home: String, name: String) { self.home = home; self.name = name }
 
+    func readRemoteFile(_ data: Data, requestID: String, withReply reply: @escaping @Sendable (Data?) -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        guard !started, !stopped, data.count <= 32 * 1_024, observations.count < 64,
+              let id = UUID(uuidString: requestID), observations[id] == nil,
+              let request = try? JSONDecoder().decode(RemoteFileReadRequest.self, from: data) else { reply(nil); return }
+        xpc_transaction_begin()
+        observations[id] = Task { [self] in
+            let response: RemoteFileReadResponse
+            do {
+                if let path = request.configurationPath {
+                    guard path.hasPrefix("/"), path.utf8.count <= 16_384,
+                          !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw FileObservationError.invalidResponse }
+                }
+                let configuration = request.configurationPath.map { URL(fileURLWithPath: $0) }
+                switch request.operation {
+                case .read:
+                    let reader = SSHFileObservationReader(configuration: configuration, pool: remotePool)
+                    response = .init(read: try await reader.read(.ssh(request.location), after: request.cursor, maximumBytes: request.maximumBytes))
+                case .directory:
+                    let reader = SSHDirectoryReader(pool: remotePool, configuration: configuration)
+                    response = .init(directory: try await reader.list(host: request.location.host, path: request.homeDirectory ? nil : request.location.path))
+                case .hosts:
+                    let worker = Task.detached { try SSHHostCatalog().hosts(configuration: configuration) }
+                    response = .init(hosts: try await withTaskCancellationHandler {
+                        try await worker.value
+                    } onCancel: { worker.cancel() })
+                }
+            } catch {
+                response = .init(error: (error as? FileObservationError) ?? .unavailable)
+            }
+            reply(try? JSONEncoder().encode(response))
+            finishObservation(id)
+            xpc_transaction_end()
+        }
+    }
+    func cancelRemoteFile(_ requestID: String) {
+        guard let id = UUID(uuidString: requestID) else { return }
+        lock.lock(); defer { lock.unlock() }
+        observations[id]?.cancel()
+    }
+    private func finishObservation(_ id: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        observations.removeValue(forKey: id)
+    }
+
     func waitForExit(withReply reply: @escaping (Int32) -> Void) {
         lock.lock(); defer { lock.unlock() }
         if let exitStatus { reply(exitStatus) } else { exitReply = reply }
@@ -25,7 +76,7 @@ private final class ShellSession: NSObject, DuckpadTerminalHostProtocol, @unchec
     func start(directory: String, environment: [String: String], rows: UInt16, columns: UInt16,
                withReply reply: @escaping (FileHandle?, String?) -> Void) {
         lock.lock(); defer { lock.unlock() }
-        guard !started, !stopped, directory.utf8.count < 4096, !directory.contains("\0"),
+        guard !started, !stopped, observations.isEmpty, directory.utf8.count < 4096, !directory.contains("\0"),
               directory.hasPrefix("/"), environment.count <= 32 else { reply(nil, "invalid launch request"); return }
         started = true
         var env = ["HOME": home, "USER": name, "LOGNAME": name, "SHELL": "/bin/zsh",
@@ -76,6 +127,8 @@ private final class ShellSession: NSObject, DuckpadTerminalHostProtocol, @unchec
     func stop() {
         lock.lock(); defer { lock.unlock() }
         stopped = true
+        for task in observations.values { task.cancel() }
+        Task { await remotePool.shutdown() }
         if child > 0 {
             if let master {
                 let foreground = tcgetpgrp(master.fileDescriptor)

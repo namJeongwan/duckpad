@@ -19,6 +19,7 @@
 #include "SciLexer.h"
 #include "DPScintillaLegacyStyleRoles.h"
 #include "DPPlantUMLLexer.h"
+#include "DPLogLexer.h"
 #include "DPAsyncLexer.h"
 #include <chrono>
 
@@ -693,9 +694,28 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 - (BOOL)asynchronousStylingPending {
     if (![_lexerName isEqualToString:@"cpp"] && ![_lexerName isEqualToString:@"css"]
-        && ![_lexerName isEqualToString:@"xml"]) return NO;
+        && ![_lexerName isEqualToString:@"xml"] && ![_lexerName isEqualToString:@"duckpadlog"]) return NO;
     return [_scintilla message:SCI_PRIVATELEXERCALL wParam:DPAsyncLexerPendingOperation lParam:0] != 0;
 }
+- (NSUInteger)logStyledByteCount {
+    DPLogStatistics statistics;
+    if ([_lexerName isEqualToString:@"duckpadlog"]) [_scintilla message:SCI_PRIVATELEXERCALL wParam:DPLogStatisticsOperation lParam:reinterpret_cast<sptr_t>(&statistics)];
+    return statistics.styledBytes;
+}
+- (NSUInteger)maximumLogStyleSliceMicroseconds {
+    DPLogStatistics statistics;
+    if ([_lexerName isEqualToString:@"duckpadlog"]) [_scintilla message:SCI_PRIVATELEXERCALL wParam:DPLogStatisticsOperation lParam:reinterpret_cast<sptr_t>(&statistics)];
+    return statistics.maximumSliceMicroseconds;
+}
+- (NSInteger)ansiForegroundAtUTF8Position:(NSUInteger)position {
+    const sptr_t value = [_scintilla message:SCI_INDICATORVALUEAT wParam:DPLogForegroundIndicator lParam:position];
+    return value ? value & SC_INDICVALUEMASK : -1;
+}
+- (NSInteger)ansiBackgroundAtUTF8Position:(NSUInteger)position {
+    const sptr_t value = [_scintilla message:SCI_INDICATORVALUEAT wParam:DPLogBackgroundIndicator lParam:position];
+    return value ? value & SC_INDICVALUEMASK : -1;
+}
+- (BOOL)isStyleVisible:(NSInteger)style { return [_scintilla message:SCI_STYLEGETVISIBLE wParam:style] != 0; }
 - (NSUInteger)synchronouslyStyledByteCount { return _synchronouslyStyledByteCount; }
 - (BOOL)additionalSelectionTyping { return [_scintilla message:SCI_GETADDITIONALSELECTIONTYPING] != 0; }
 - (void)setAdditionalSelectionTyping:(BOOL)enabled { [_scintilla message:SCI_SETADDITIONALSELECTIONTYPING wParam:enabled]; }
@@ -750,6 +770,61 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (BOOL)loadUTF8:(NSData *)content revision:(uint64_t)revision error:(NSError **)error {
     return [self loadUTF8:content revision:revision preservingUndo:NO error:error];
+}
+
+- (BOOL)isObservedFileFollowingEnd {
+    const sptr_t rows = [_scintilla message:SCI_VISIBLEFROMDOCLINE wParam:[_scintilla message:SCI_GETLINECOUNT]];
+    return [_scintilla message:SCI_GETFIRSTVISIBLELINE] + [_scintilla message:SCI_LINESONSCREEN] >= rows
+        && [_scintilla message:SCI_GETSELECTIONEMPTY];
+}
+
+- (void)followObservedFileEnd {
+    [_scintilla message:SCI_GOTOPOS wParam:self.documentByteLength];
+    [_scintilla message:SCI_SCROLLCARET];
+}
+
+- (BOOL)applyObservedUTF8:(NSData *)data revision:(uint64_t)revision reset:(BOOL)reset {
+    if (_binaryDocument || _loadingText || data.length > 64 * 1024 || _revision == UINT64_MAX
+        || revision != _revision + 1 || [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] == nil) return NO;
+    // Shared panes have independent selections and scroll positions.
+    NSMutableArray<NSDictionary *> *states = [NSMutableArray array];
+    for (DPScintillaEditorView *peer in _searchMarkerPeers) {
+        ScintillaView *view = peer->_scintilla;
+        const sptr_t first = [view message:SCI_GETFIRSTVISIBLELINE];
+        const sptr_t rows = [view message:SCI_VISIBLEFROMDOCLINE wParam:[view message:SCI_GETLINECOUNT]];
+        const BOOL follows = first + [view message:SCI_LINESONSCREEN] >= rows
+            && [view message:SCI_GETSELECTIONEMPTY];
+        const NSUInteger length = [view message:SCI_GETSELECTIONSERIALIZED];
+        std::string selection(length + 1, '\0');
+        [view message:SCI_GETSELECTIONSERIALIZED wParam:0 lParam:reinterpret_cast<sptr_t>(selection.data())];
+        [states addObject:@{@"peer": peer, @"first": @(first), @"x": @([view message:SCI_GETXOFFSET]),
+            @"follow": @(follows), @"selection": [NSData dataWithBytes:selection.data() length:selection.size()]}];
+    }
+    _suppressEdit = YES;
+    [_scintilla setEditable:YES];
+    [_scintilla message:SCI_SETUNDOCOLLECTION wParam:0];
+    if (reset) [_scintilla message:SCI_CLEARALL];
+    if (data.length) [_scintilla message:SCI_APPENDTEXT wParam:data.length lParam:reinterpret_cast<sptr_t>(data.bytes)];
+    [_scintilla message:SCI_EMPTYUNDOBUFFER];
+    [_scintilla message:SCI_SETSAVEPOINT];
+    [_scintilla message:SCI_SETUNDOCOLLECTION wParam:1];
+    _revision = revision;
+    _suppressEdit = NO;
+    [_scintilla setEditable:_requestedInputEnabled && revision != UINT64_MAX];
+    for (NSDictionary *state in states) {
+        DPScintillaEditorView *peer = state[@"peer"];
+        if ([state[@"follow"] boolValue]) [peer followObservedFileEnd];
+        else if (!reset) {
+            NSData *selection = state[@"selection"];
+            [peer->_scintilla message:SCI_SETSELECTIONSERIALIZED wParam:0 lParam:reinterpret_cast<sptr_t>(selection.bytes)];
+            [peer->_scintilla message:SCI_SETFIRSTVISIBLELINE wParam:[state[@"first"] integerValue]];
+            [peer->_scintilla message:SCI_SETXOFFSET wParam:[state[@"x"] integerValue]];
+        }
+        [peer->_minimap invalidateContent];
+        peer->_searchOverviewNeedsRefresh = YES;
+    }
+    [self updateLineNumberMargin:[_scintilla message:SCI_GETMARGINWIDTHN wParam:0] > 0];
+    return YES;
 }
 
 - (BOOL)loadUTF8:(NSData *)content revision:(uint64_t)revision
@@ -1504,11 +1579,17 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (BOOL)setSearchHighlights:(NSArray<NSValue *> *)ranges revision:(uint64_t)revision {
     if (_binaryDocument || _revision != revision || ranges.count > 100000) return NO;
     const NSUInteger length = self.documentByteLength;
+    // Text documents already contain validated UTF-8. A continuation byte is
+    // the only interior position that is not a boundary; avoid two native
+    // character-navigation requests per edge for each of 100,000 matches.
+    auto boundary = [&](NSUInteger position) {
+        return position == 0 || position == length
+            || ([_scintilla message:SCI_GETCHARAT wParam:position] & 0xC0) != 0x80;
+    };
     for (NSValue *value in ranges) {
         const NSRange range = value.rangeValue;
         if (range.location > length || range.length > length - range.location
-            || ![self isUTF8Boundary:range.location documentLength:length]
-            || ![self isUTF8Boundary:NSMaxRange(range) documentLength:length]) return NO;
+            || !boundary(range.location) || !boundary(NSMaxRange(range))) return NO;
     }
     [self clearSearchHighlights];
     [_scintilla message:SCI_SETINDICATORCURRENT wParam:DPSearchIndicator];
@@ -1532,6 +1613,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)clearSearchHighlights {
+    BOOL active = NO;
+    for (DPScintillaEditorView *peer in _searchMarkerPeers) active |= peer->_searchHighlightsActive;
+    if (!active) return;
     for (DPScintillaEditorView *peer in _searchMarkerPeers) {
         peer->_searchHighlightsActive = NO;
         peer->_searchMarkerOffsets = [NSIndexSet indexSet];
@@ -2224,7 +2308,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 + (BOOL)supportsLexerNamed:(NSString *)lexerName {
     if (lexerName.length == 0) return NO;
-    Scintilla::ILexer5 *lexer = [lexerName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : CreateLexer(lexerName.UTF8String);
+    Scintilla::ILexer5 *lexer = [lexerName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : [lexerName isEqualToString:@"duckpadlog"] ? DPCreateLogLexer() : CreateLexer(lexerName.UTF8String);
     if (lexer == nullptr) return NO;
     lexer->Release();
     return YES;
@@ -2239,10 +2323,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         maximumStyleBytes:(NSUInteger)maximumStyleBytes {
     _languageConfigurationCount += 1;
     _maximumStyleBytes = maximumStyleBytes;
-    const BOOL overBudget = _binaryDocument || self.documentByteLength > maximumStyleBytes;
+    const BOOL overBudget = _binaryDocument || (self.documentByteLength > maximumStyleBytes && ![lexerName isEqualToString:@"duckpadlog"]);
     const BOOL nextBraceMatchingEnabled = braceMatching && !overBudget;
     NSString *effectiveName = overBudget ? @"null" : lexerName;
-    Scintilla::ILexer5 *lexer = [effectiveName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : CreateLexer(effectiveName.UTF8String);
+    Scintilla::ILexer5 *lexer = [effectiveName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : [effectiveName isEqualToString:@"duckpadlog"] ? DPCreateLogLexer() : CreateLexer(effectiveName.UTF8String);
     if (lexer == nullptr) return NO;
     [self cancelPendingSmartIndentation];
     _pendingSmartCaretPosition = -1;
@@ -2287,10 +2371,19 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
             _semanticStyleRoles.emplace_back(style, role);
         }
     }
+    if ([_lexerName isEqualToString:@"duckpadlog"] && ![effectiveName isEqualToString:@"duckpadlog"]) {
+        for (int indicator : {DPLogForegroundIndicator, DPLogBackgroundIndicator}) {
+            [_scintilla message:SCI_SETINDICATORCURRENT wParam:indicator];
+            [_scintilla message:SCI_INDICATORCLEARRANGE wParam:0 lParam:self.documentByteLength];
+        }
+    }
     _collapseAllFoldsAfterStyling = NO;
     [_scintilla message:SCI_SETILEXER wParam:0 lParam:reinterpret_cast<sptr_t>(DPWrapAsyncLexer(lexer))];
     [_colorPreview closeChooser];
     _lexerName = [effectiveName copy];
+    // ANSI foreground/background updates do not change glyph metrics. Retain
+    // the visible line layouts while bounded colour slices arrive.
+    [_scintilla message:SCI_SETLAYOUTCACHE wParam:_binaryDocument || [_lexerName isEqualToString:@"duckpadlog"] ? SC_CACHE_PAGE : SC_CACHE_NONE];
     if ([_lexerName isEqualToString:@"markdown"]) {
         [_scintilla message:SCI_SETPROPERTY
                      wParam:reinterpret_cast<uptr_t>("lexer.markdown.header.eolfill")
@@ -2464,6 +2557,33 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [_scintilla message:SCI_STYLESETFORE wParam:style lParam:colour];
         [_scintilla message:SCI_STYLESETBOLD wParam:style lParam:highContrast && role == 3];
     }
+    if ([_lexerName isEqualToString:@"duckpadlog"]) {
+        const int roles[] = {foreground, dark ? 0xB0A89E : 0x706860, dark ? 0xD8ADD2 : 0x904F8A,
+            dark ? 0xA1D19C : 0x387A25, dark ? 0x7CCCE8 : 0x0079A0,
+            errorColour, errorColour, dark ? 0xC0B48C : 0x77662F,
+            dark ? 0xD9A9C5 : 0x864A74, propertyColour};
+        for (int role = 0; role < DPLogRoleCount; ++role) for (int attributes = 0; attributes < 8; ++attributes) {
+            const int style = DPLogStyleBase + role * 8 + attributes;
+            [_scintilla message:SCI_STYLESETFORE wParam:style lParam:roles[role]];
+            [_scintilla message:SCI_STYLESETBOLD wParam:style lParam:(attributes & 1) || role == 5 || role == 6];
+            [_scintilla message:SCI_STYLESETITALIC wParam:style lParam:(attributes & 2) != 0];
+            [_scintilla message:SCI_STYLESETUNDERLINE wParam:style lParam:(attributes & 4) != 0];
+        }
+        [_scintilla message:SCI_STYLESETVISIBLE wParam:DPLogEscapeStyle lParam:0];
+        [_scintilla message:SCI_INDICSETSTYLE wParam:DPLogForegroundIndicator lParam:INDIC_TEXTFORE];
+        [_scintilla message:SCI_INDICSETFLAGS wParam:DPLogForegroundIndicator lParam:SC_INDICFLAG_VALUEFORE];
+        [_scintilla message:SCI_INDICSETSTYLE wParam:DPLogBackgroundIndicator lParam:INDIC_FULLBOX];
+        [_scintilla message:SCI_INDICSETFLAGS wParam:DPLogBackgroundIndicator lParam:SC_INDICFLAG_VALUEFORE];
+        [_scintilla message:SCI_INDICSETUNDER wParam:DPLogBackgroundIndicator lParam:1];
+        [_scintilla message:SCI_INDICSETALPHA wParam:DPLogBackgroundIndicator lParam:255];
+        [_scintilla message:SCI_INDICSETOUTLINEALPHA wParam:DPLogBackgroundIndicator lParam:255];
+        auto asRGB = [](int bgr) { return (bgr & 255) << 16 | (bgr & 0xFF00) | (bgr >> 16 & 255); };
+        for (const auto &[key, value] : {std::pair{"duckpad.log.foreground", asRGB(foreground)},
+                std::pair{"duckpad.log.background", asRGB(background)}, std::pair{"duckpad.log.dark", dark ? 1 : 0}}) {
+            const std::string text = std::to_string(value);
+            [_scintilla message:SCI_SETPROPERTY wParam:reinterpret_cast<uptr_t>(key) lParam:reinterpret_cast<sptr_t>(text.c_str())];
+        }
+    }
     if ([_lexerName isEqualToString:@"markdown"]) {
         for (int style = SCE_MARKDOWN_HEADER1; style <= SCE_MARKDOWN_HEADER6; ++style) {
             [_scintilla message:SCI_STYLESETBOLD wParam:style lParam:1];
@@ -2497,7 +2617,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (NSInteger)styleAtUTF8Position:(NSUInteger)position {
     if (position >= self.documentByteLength) return -1;
-    return [_scintilla message:SCI_GETSTYLEAT wParam:position];
+    return [_scintilla message:SCI_GETSTYLEINDEXAT wParam:position];
 }
 - (NSUInteger)foregroundColorForStyle:(NSInteger)style { return (NSUInteger)[_scintilla message:SCI_STYLEGETFORE wParam:style]; }
 - (BOOL)configuredFoldingEnabled { return _foldingEnabled; }
@@ -3474,6 +3594,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (void)notification:(SCNotification *)notification {
     if (notification->nmhdr.code == SCN_SAVEPOINTREACHED && _publishesDocumentEdits && !_suppressEdit) {
         if (self.onSavePointReached) self.onSavePointReached();
+    }
+    if (notification->nmhdr.code == SCN_MODIFIED && [_lexerName isEqualToString:@"duckpadlog"]
+        && (notification->modificationType & (SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE))) {
+        [_scintilla message:SCI_PRIVATELEXERCALL wParam:DPLogInvalidateOperation lParam:MAX(0, notification->position)];
     }
     if (notification->nmhdr.code == SCN_MODIFIED
         && (notification->modificationType & (SC_MOD_BEFOREINSERT | SC_MOD_BEFOREDELETE | SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT))) {

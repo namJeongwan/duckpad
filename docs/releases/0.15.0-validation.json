@@ -1,0 +1,460 @@
+{
+  "validated_at_utc": "2026-10-22T06:30:35.735725+00:00",
+  "version": "0.15.0",
+  "build": 66,
+  "source_baseline": "26c5f13d55508d74110898752655ba8b4bff8e43",
+  "scope": "Source validation before reviewed integration; final distribution verification is reported in the published release.",
+  "distinct_completed_test_function_names": 188,
+  "completed_test_functions": [
+    "ANSIColorsFontStateAndSplitSequencesPreserveBytesAndResetForPlainText",
+    "IMECompositionDoesNotTriggerSmartPairing",
+    "adapterUsesOnlyLastSuccessfullyAppliedBlockPair",
+    "allLocalesPreserveSessionAndRenderAtCompactWidths",
+    "angleBracketsRemainTwoLiteralEdits",
+    "appEventsRefreshAndCloseRemoteWindowWithoutReplacingOrClosingEditor",
+    "appKitKeyEventUsesSmartEditingThroughTheScintillaFirstResponder",
+    "appKitKeyEventsAutoCloseQuotesAndSkipMatchingParenthesis",
+    "appendAndDisplayOnLargeSharedDocumentStaysWithin50ms",
+    "appliedConfigurationCarriesTheDetectedCommentSyntax",
+    "autoClosedPairAdvancesWorkspaceRecoveryAsOneNativeEdit",
+    "automaticReconnectRetainsIncompleteUTF8AndStopCancelsBackoff",
+    "binarySelectorsAndOracleQuotedStringsUseTheirActualTokenRoles",
+    "blockCommentAcceptanceAdvancesDirtyRecoveryExactlyOnce",
+    "blockCommentRejectsInvalidDelimiterDataWithoutMutation",
+    "blockCommentRejectsMultiRectangularLineThinAndVirtualSelections",
+    "blockCommentReservesUndoRevisionBudget",
+    "blockCommentRoutesOnlyWhenLanguageStateIsReadyAndEditorIsCapable",
+    "blockCommentUndoRedoRestoresExactBytesSelectionAndRevision",
+    "blockCommentUseCaseDoesNotResolveOrPassDelimiters",
+    "blockCommentWrapAndUnwrapPreserveUTF8CRLFAndSelectionDirection",
+    "browserFitsLocalizedControlsAndClosesWithoutOpening",
+    "browserShortcutsStayInTheBrowserAndCloseWithoutOpeningFiles",
+    "cancellationDuringBackoffDoesNotStartAnotherAttempt",
+    "cancelledRemoteOpenCannotPublishAfterTransactionWait",
+    "caretHighlightPreferenceReachesExistingAndNewClonesWithoutEditing",
+    "changingMatchOptionsInvalidatesAndRefreshesResults",
+    "checkpointBoundaryEditsAndUndoMatchFreshDenseSGRStyling",
+    "clickingSearchOverviewRevealsTheMatchingLine",
+    "closerDedentAcceptsExact4096ByteWhitespacePrefix",
+    "closerDedentExcludesPasteIMEProgrammaticMultiCharacterAndNonWhitespaceLines",
+    "closerDedentPublishesTwoForwardEditsAndOneUndoRestoresBoth",
+    "closerDedentRedoRestoresBothAndUsesExistingComponentAuthority",
+    "closerDedentRequiresFiveRevisionBudget",
+    "closingLastSessionShowsEmptyStateAndReopeningDoesNotRecreateIt",
+    "commandRBelongsOnlyToReplaceAndShiftRRemainsProjectReplace",
+    "commandVPastesSingleSmartCharactersLiterally",
+    "commentToggleAdvancesWorkspaceRecoveryAndGroupedUndoRestoresIt",
+    "commonLevelsTimeAndStacksHaveDistinctReadableColorsInAllPalettes",
+    "commonPythonRustJavaAndStructuredLogsUseOneDetectionPath",
+    "completionCaptureCannotPublishAcrossSplitPaneFocus",
+    "connectionRetriesAreBoundedAndManualRetryAndCancellationWork",
+    "denseOverviewMarkersStayTranslucentInBothThemes",
+    "denseSearchTicksDoNotBlockNativeScrollbarThumb",
+    "detectedLogsReuseTheirProbeAcrossTailRevisionsAndRespectPlainOverride",
+    "dialogControlsFitWithoutHorizontalScrolling",
+    "directClosingDelimiterDedentsOneConfiguredLevel",
+    "directionCountAndOpacityControlsApplyWithoutChangingTheQueryText",
+    "directoryProtocolQuotesPathsAndPreservesHiddenAndUnicodeFiles",
+    "editUndoRotationAndPendingLexerReplacementCannotLeaveStaleANSI",
+    "editableLogContentIsRedetectedAfterReplacement",
+    "editorFontPreferencesReachClonesAndPreserveUndoAndZoom",
+    "editorSpacingPersistsAcrossPanesAndRestylingWithoutEditingText",
+    "embeddedFolderOpensExactlyOneNewSessionWithoutChangingExistingShells",
+    "emptyCaretInsertsAndRemovesAdjacentPairAtExactBytePosition",
+    "everyBundledLexerResolvesInVendoredLexilla",
+    "everyRegisteredLanguageHasVisibleSyntaxColorsAcrossPalettes",
+    "explicitIndentAdvancesDirtyAndRecoveryForEveryNativeEdit",
+    "explicitIndentUsesTabsForMakefileConfiguration",
+    "explicitIndentUsesTwoAndFourSpaceLanguageWidths",
+    "explicitMultilineIndentAndOutdentPreserveSelectionAndGroupUndo",
+    "explicitOutdentHandlesMixedLeadingWhitespace",
+    "explicitScopesAndBookmarkActionsUseTheCurrentQuery",
+    "failedCloseRetainsRecoveryAndReopenRetriesOwnedNativeLoad",
+    "failedLanguageApplicationDoesNotPublishReadyCommentCapability",
+    "failedLexerChangePreservesThePreviousSmartEditingConfiguration",
+    "familiarStatusFieldsKeepTheirOrderInBothAppearances",
+    "findNextHighlightsEveryMatchAndKeepsHighlightsDuringNavigation",
+    "findSelectionCaptureIsUnicodeBoundedWithoutFullDocumentRead",
+    "focusedCloseClosesTerminalWithoutClosingDocument",
+    "foldBraceAndIndentCapabilitiesAreAppliedAndCanBeDisabled",
+    "folderMenuRoutesLiteralPathsAndExcludesFilesAndUnavailableRoots",
+    "folderRowsAreClearedBeforeHiddenIncrementalPresentation",
+    "fourTabsRetainInputsAndShowOnlyRelevantActions",
+    "hostDiscoveryHandlesIncludesCyclesAndNeverExecutesOrBlocksOnSpecialFiles",
+    "identicalDelimitersRequireTwoDisjointEdgesBeforeUnwrap",
+    "indentGuidesRemainSubtleAcrossPaletteAndLexerChanges",
+    "indentationPreferencesReachClonesAndPreserveEdits",
+    "integratedWindowKeepsEditorAbovePanelAtMinimumSize",
+    "intelligenceCaptureChecksBudgetBeforeSnapshotAndBindsCaretRevision",
+    "jsonKeysValuesNumbersAndLiteralsUseDistinctColorsAndResetForPlainText",
+    "keyboardSelectionCommitsOnlyOnReturnAndEscapeKeepsTypedValue",
+    "keywordCompleteLanguagesRecognizeTheirReservedTokens",
+    "koreanCompositionCommitThenNewlineCommandKeepsIndentation",
+    "languageConfigurationIsNoOpUntilStyleBudgetBoundaryChanges",
+    "largeBlockCommentPublishesOneAggregateEditWithinExplicitCommandBudget",
+    "largeDocumentFallsBackWithoutSnapshotRead",
+    "largeRemoteCompletionPreservesNavigationAndFinishesCommittedSnapshot",
+    "largeStyleFallbackRetainsLiteralBlockCommentCapability",
+    "leavingTheQueryFieldForSelectionScopeDoesNotNavigate",
+    "lineNumberMarginGrowsAcrossDigitBoundaryInEveryPane",
+    "liveMarkedTextAndLateCatalogUpdatesPreserveCompositionAndSelection",
+    "liveReloadNativeEditorPreservesCaretFontAndUnsavedText",
+    "localReaderTracksAppendReplacementTruncationAndBoundedReads",
+    "localTailKeepsDirtyUndoRecoveryAndSharedSelectionsConsistent",
+    "manualLanguageOverridePersistsAndAutoRedetectsAfterSaveAs",
+    "manualRetryCannotResetObservationGrowthLimit",
+    "manualRetryKeepsViewportAndUnreadCountAndRereadsIncompleteUTF8",
+    "manyMatchesInOneWrappedCloneReuseLayout",
+    "markdownStylesHaveVisibleColorsAndResetWhenLanguageChanges",
+    "matchesInsideOneWrappedLineHaveDistinctTicksAndClickExactMatch",
+    "matchingSmartCloserMovesAcrossThePairWithoutCreatingAnEdit",
+    "menuExposesTerminalShortcutAndCheckedVisibility",
+    "mixedIndentationDedentsToExactTabStopColumn",
+    "multiCharacterDirectInsertionPreservesEmbeddedCRLFWithoutSmartIndentation",
+    "multilineANSISharedWrappedTailStaysWithin50ms",
+    "multilineCommentToggleIsBoundedAndOneUndoRestoresExactText",
+    "narrowStatusBarPrioritizesPositionAndEncoding",
+    "nativeBrowserThemeSnapshots",
+    "nativeCompletionListIsNonMutatingAndCancellable",
+    "nativeFilteredPopupSnapshots",
+    "nativeHighlightsRejectStaleOrSplitUTF8RangesAndPreserveMultipleSelections",
+    "nativeMenuCommandROpensReplaceAndPreservesAnActiveFindQuery",
+    "nestedDelimiterTextIsHandledLiterally",
+    "olderBindingsRemainEditableAndRemoteMetadataRoundTrips",
+    "openingIsLazyHidingPreservesSessionsAndClosingWindowClearsThem",
+    "optionsEmptyQueryAndEditsRefreshTheActualNativeDecorations",
+    "ordinaryTextIncompleteEscapesAndProbeSuffixDoNotTriggerLogMode",
+    "overflowPreservesInformationAndActionsAcrossResize",
+    "overviewTracksCollapsedLinesWithoutLayingOutTheLastLine",
+    "overviewTracksIdleWrappingAndResize",
+    "overviewUsesFullScrollbarWidthAndOnlyCapturesMarkerHits",
+    "panelResizesBelowWorkspaceAndRestoresEditorArea",
+    "permanentFailuresNeverRetry",
+    "plainTextAndPasteDoNotTriggerSmartPairing",
+    "plainTextIndentationDoesNotApplyCodeRulesOrTransformBulkInput",
+    "plainTextReturnPreservesLeadingWhitespaceAndOneUndo",
+    "popupStaysAnchoredWithoutTakingFocusAndDismissesWhenDisabled",
+    "pressingReturnAfterJSONMemberKeepsSiblingIndentAndDedentsTheCloser",
+    "pressingReturnAfterPythonColonUsesTheConfiguredIndentWidth",
+    "pressingReturnBetweenJSONBracesCreatesAnIndentedLineAndAlignsTheCloser",
+    "quoteLikeDelimitersAutoCloseAsOneNativeEdit",
+    "realReturnWithSelectionOrMultipleCaretsRemainsNative",
+    "realSSHReusesTransportLimitsChannelsAndIsolatesCancellation",
+    "recoveredUnavailableManualLanguageUsesPlainLexerUntilExplicitAutoReset",
+    "referenceFormFitsCompactDialog",
+    "rejectedBlockCommentReloadsUnchangedAuthorityWithoutPartialDelimiter",
+    "rejectedCloserCancelsPendingIndentationAndRecoversPreInputAuthority",
+    "rejectedCloserRecoveryRestoresThePrimaryPreInputCaret",
+    "rejectedIndentationReplacementKeepsAcceptedCloserAuthority",
+    "rejectedSecondaryCloserRecoveryPreservesFocusedAndPeerSelections",
+    "remoteOpenShortcutIsUniqueAndCanBeRemapped",
+    "remoteSnapshotTailAndRestartUseObservedOffsetWithoutDuplicatingBytes",
+    "repeatedCloserDedentsRetainInitiatingViewTracking",
+    "replacementProgressSurvivesEditorRefreshAndCancellation",
+    "replacementScopeAndSummaryFitAllLanguages",
+    "representativeLexersStyleKeywordsStringsCommentsAndUTF8",
+    "retriesThreeTimesAndRecoversOrPropagatesLastFailure",
+    "returnPreservesTypedDestinationsUnlessUserExplicitlyChooses",
+    "rotatedBOMSplitAcrossWritesIsRemovedOnce",
+    "searchAndOccurrenceRemainVisibleOverANSISolidBackground",
+    "searchWindowClosesAndReopensWithoutResizingTheEditor",
+    "secondaryBlockCommentUsesPrimaryAggregatePublisherWhenAcceptedOrRejected",
+    "secondaryCloserDedentUsesPrimaryPublisherAndCancelsTheInitiatorOnRejection",
+    "selectionCheckboxPreservesTheRangeAndHighlightsOnlyMatchesInsideIt",
+    "selectionSurroundFromSplitPanePublishesBoundedRecoveryEdits",
+    "selectionSurroundHandlesMultipleSelectionsAndEmptyCaret",
+    "selectionSurroundLargeRangeOnlyPublishesDelimiterBytes",
+    "selectionSurroundLeavesIMEPasteReplacementAndPlainTextNative",
+    "selectionSurroundPreservesUnicodeDirectionAndOneUndo",
+    "selectionSurroundReservesRevisionSpaceForUndo",
+    "selectionSurroundStopsWhenRecoveryRejectsAnEdit",
+    "selectionSurroundUsesTheRealAppKitInputPath",
+    "shortIndentationDedentsToZero",
+    "shutdownWaitsForMasterAlreadyRetiredByIdleExpiry",
+    "smallFindInputSkipsInactiveWrappedDocumentsWithWordMarkers",
+    "smartCloserSkipRequiresAnEmptyCaretBeforeTheExactNextCharacter",
+    "smartEditingPreservesCRLFAndCRLineEndings",
+    "smartIndentBoundsOnlyWhitespaceInspectionOnLongLines",
+    "splitBlockCommentTargetsFocusedPaneAndSharesAcceptedText",
+    "splitKoreanEmojiAndResetNeverInsertReplacementCharacters",
+    "sshProcessEnforcesOutputTimeoutAndCancellation",
+    "sshRangeProtocolQuotesPathsAndDetectsRotationOnMacOS",
+    "sshResponseRejectsMalformedOrUnboundedMetadata",
+    "statusUpdatesStayWithinInteractionBudget",
+    "stoppingUnchangedTailUnlocksOnlyAValidatedLocalSnapshot",
+    "surfaceFactoryIsLazyAndSessionsOwnTheirProcesses",
+    "tabCreatedDuringPreparationIsReusedWithoutLoadingOrClosingIt",
+    "tailBarKeepsControlsWithinMinimumWindowWidthInEveryLanguage",
+    "tailStartRejectsTypingAndCancellationWhileWaitingForPersistence",
+    "tailStopsAfterThreeRetriesAndManualRestartKeepsSnapshotAndOffset",
+    "terminationWaitsForAcceptedRemoteSnapshotCompletion",
+    "themeAndLanguageChangesDoNotMutateTextRevisionOrUndo",
+    "typingAndMarkedEditsDoNotRequestDialogResizing",
+    "typingFiltersBySubstringWithoutCompletingOrRejectingCustomHosts",
+    "typingOpeningBraceInJSONAutoClosesAndUndoRemovesThePair",
+    "undoRedoRejectionRecoversEachAcceptedComponentPrefix",
+    "unresolvedLexerAndBrokenPackagingStayVisiblyDegraded"
+  ],
+  "broad_log": "/tmp/duckpad-0150-focused-tests.log",
+  "individual_runs": [
+    {
+      "test": "RemoteFilePresentationTests.appEventsRefreshAndCloseRemoteWindowWithoutReplacingOrClosingEditor",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-appEventsRefreshAndCloseRemoteWindowWithoutReplacingOrClosingEditor.log"
+    },
+    {
+      "test": "RemoteFilePresentationTests.browserReusesConnectionContextForPreviewAndMultipleOpenAndIgnoresCancelledNavigation",
+      "status": "INCOMPLETE",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-browserReusesConnectionContextForPreviewAndMultipleOpenAndIgnoresCancelledNavigation.log"
+    },
+    {
+      "test": "RemoteFilePresentationTests.browserShortcutsStayInTheBrowserAndCloseWithoutOpeningFiles",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-browserShortcutsStayInTheBrowserAndCloseWithoutOpeningFiles.log"
+    },
+    {
+      "test": "RemoteFilePresentationTests.connectionRetriesAreBoundedAndManualRetryAndCancellationWork",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-connectionRetriesAreBoundedAndManualRetryAndCancellationWork.log"
+    },
+    {
+      "test": "RemoteFilePresentationTests.nativeBrowserThemeSnapshots",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-nativeBrowserThemeSnapshots.log"
+    },
+    {
+      "test": "RemoteFilePresentationTests.remoteOpenShortcutIsUniqueAndCanBeRemapped",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-remoteOpenShortcutIsUniqueAndCanBeRemapped.log"
+    },
+    {
+      "test": "RemoteFilePresentationTests.tailBarKeepsControlsWithinMinimumWindowWidthInEveryLanguage",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-tailBarKeepsControlsWithinMinimumWindowWidthInEveryLanguage.log"
+    },
+    {
+      "test": "SearchPanelViewTests.changingMatchOptionsInvalidatesAndRefreshesResults",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-changingMatchOptionsInvalidatesAndRefreshesResults.log"
+    },
+    {
+      "test": "SearchPanelViewTests.dialogControlsFitWithoutHorizontalScrolling",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-dialogControlsFitWithoutHorizontalScrolling.log"
+    },
+    {
+      "test": "SearchPanelViewTests.directionCountAndOpacityControlsApplyWithoutChangingTheQueryText",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-directionCountAndOpacityControlsApplyWithoutChangingTheQueryText.log"
+    },
+    {
+      "test": "SearchPanelViewTests.explicitScopesAndBookmarkActionsUseTheCurrentQuery",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-explicitScopesAndBookmarkActionsUseTheCurrentQuery.log"
+    },
+    {
+      "test": "SearchPanelViewTests.folderRowsAreClearedBeforeHiddenIncrementalPresentation",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-folderRowsAreClearedBeforeHiddenIncrementalPresentation.log"
+    },
+    {
+      "test": "SearchPanelViewTests.fourTabsRetainInputsAndShowOnlyRelevantActions",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-fourTabsRetainInputsAndShowOnlyRelevantActions.log"
+    },
+    {
+      "test": "SearchPanelViewTests.leavingTheQueryFieldForSelectionScopeDoesNotNavigate",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-leavingTheQueryFieldForSelectionScopeDoesNotNavigate.log"
+    },
+    {
+      "test": "SearchPanelViewTests.referenceFormFitsCompactDialog",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-referenceFormFitsCompactDialog.log"
+    },
+    {
+      "test": "SearchPanelViewTests.replacementProgressSurvivesEditorRefreshAndCancellation",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-replacementProgressSurvivesEditorRefreshAndCancellation.log"
+    },
+    {
+      "test": "SearchPanelViewTests.replacementScopeAndSummaryFitAllLanguages",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-replacementScopeAndSummaryFitAllLanguages.log"
+    },
+    {
+      "test": "SearchPanelViewTests.searchWindowClosesAndReopensWithoutResizingTheEditor",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-searchWindowClosesAndReopensWithoutResizingTheEditor.log"
+    },
+    {
+      "test": "SearchPanelViewTests.typingAndMarkedEditsDoNotRequestDialogResizing",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-typingAndMarkedEditsDoNotRequestDialogResizing.log"
+    },
+    {
+      "test": "SearchShortcutTests.commandRBelongsOnlyToReplaceAndShiftRRemainsProjectReplace",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-commandRBelongsOnlyToReplaceAndShiftRRemainsProjectReplace.log"
+    },
+    {
+      "test": "SearchShortcutTests.nativeMenuCommandROpensReplaceAndPreservesAnActiveFindQuery",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-nativeMenuCommandROpensReplaceAndPreservesAnActiveFindQuery.log"
+    },
+    {
+      "test": "TerminalPanelTests.allLocalesPreserveSessionAndRenderAtCompactWidths",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-allLocalesPreserveSessionAndRenderAtCompactWidths.log"
+    },
+    {
+      "test": "TerminalPanelTests.closingLastSessionShowsEmptyStateAndReopeningDoesNotRecreateIt",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-closingLastSessionShowsEmptyStateAndReopeningDoesNotRecreateIt.log"
+    },
+    {
+      "test": "TerminalPanelTests.focusedCloseClosesTerminalWithoutClosingDocument",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-focusedCloseClosesTerminalWithoutClosingDocument.log"
+    },
+    {
+      "test": "TerminalPanelTests.integratedWindowKeepsEditorAbovePanelAtMinimumSize",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-integratedWindowKeepsEditorAbovePanelAtMinimumSize.log"
+    },
+    {
+      "test": "TerminalPanelTests.menuExposesTerminalShortcutAndCheckedVisibility",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-menuExposesTerminalShortcutAndCheckedVisibility.log"
+    },
+    {
+      "test": "TerminalPanelTests.openingIsLazyHidingPreservesSessionsAndClosingWindowClearsThem",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-openingIsLazyHidingPreservesSessionsAndClosingWindowClearsThem.log"
+    },
+    {
+      "test": "TerminalPanelTests.panelResizesBelowWorkspaceAndRestoresEditorArea",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-panelResizesBelowWorkspaceAndRestoresEditorArea.log"
+    },
+    {
+      "test": "TerminalPanelTests.surfaceFactoryIsLazyAndSessionsOwnTheirProcesses",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-surfaceFactoryIsLazyAndSessionsOwnTheirProcesses.log"
+    },
+    {
+      "test": "WorkspaceTerminalTests.embeddedFolderOpensExactlyOneNewSessionWithoutChangingExistingShells",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-embeddedFolderOpensExactlyOneNewSessionWithoutChangingExistingShells.log"
+    },
+    {
+      "test": "WorkspaceTerminalTests.folderMenuRoutesLiteralPathsAndExcludesFilesAndUnavailableRoots",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-folderMenuRoutesLiteralPathsAndExcludesFilesAndUnavailableRoots.log"
+    },
+    {
+      "test": "detectedLogsReuseTheirProbeAcrossTailRevisionsAndRespectPlainOverride",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-detectedLogsReuseTheirProbeAcrossTailRevisionsAndRespectPlainOverride.log"
+    },
+    {
+      "test": "editableLogContentIsRedetectedAfterReplacement",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-editableLogContentIsRedetectedAfterReplacement.log"
+    },
+    {
+      "test": "TailPerformanceTests.appendAndDisplayOnLargeSharedDocumentStaysWithin50ms",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-appendAndDisplayOnLargeSharedDocumentStaysWithin50ms.log"
+    },
+    {
+      "test": "SearchHighlightTests.smallFindInputSkipsInactiveWrappedDocumentsWithWordMarkers",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-smallFindInputSkipsInactiveWrappedDocumentsWithWordMarkers.log"
+    },
+    {
+      "test": "LogHighlightingTests.multilineANSISharedWrappedTailStaysWithin50ms",
+      "status": "PASS",
+      "exit_code": 0,
+      "log": "/tmp/duckpad-0150-multilineANSISharedWrappedTailStaysWithin50ms.log"
+    }
+  ],
+  "language_usecase_log": "/tmp/duckpad-0150-language-usecase-tests.log",
+  "real_ssh_log": "/tmp/duckpad-0150-real-ssh-tests.log",
+  "real_ssh_temporary_loopback_fixture": true,
+  "user_ssh_files_modified": false,
+  "browser_native_standalone_probe": {
+    "status": "PASS",
+    "log": "/tmp/duckpad-0150-browser-probe.log",
+    "covers": [
+      "bounded preview",
+      "multiple open and browser reuse",
+      "cancelled navigation cannot overwrite typed path",
+      "newer response remains current"
+    ]
+  },
+  "incomplete_test": {
+    "test": "RemoteFilePresentationTests.browserReusesConnectionContextForPreviewAndMultipleOpenAndIgnoresCancelledNavigation",
+    "status": "INCOMPLETE",
+    "cause": "Undiagnosed exit 0 before completion marker; not counted as passed."
+  },
+  "performance": {
+    "tail_shared_17500000_bytes_max_ms": 4.103208,
+    "find_marked_input_3_cached_8MB_documents_max_ms": 6.472709,
+    "shared_wrapped_ANSI_8440000_bytes_immediate_append_display_max_ms": 2.674958,
+    "scope": "Native measured operation only; network excluded; asynchronous ANSI colour completion excluded from append/display timing."
+  },
+  "retained_known_limits": [
+    "18.9 MB Unicode single-line first ANSI colour layout historically 53.8-66.1 ms, not a passed 50 ms gate.",
+    "Publishing 100000 search highlights historically about 51.8 ms, not a passed 50 ms gate.",
+    "No full repository suite, Intel hardware, macOS 13 runtime, Linux server or physical keyboard validation."
+  ],
+  "localization": {
+    "languages": 8,
+    "string_keys": 1234,
+    "plural_entries": 5,
+    "passed": true
+  },
+  "independent_source_reviews": {
+    "reviewers": [
+      "/root/phase1_code_review",
+      "/root/release_log_ui_review"
+    ],
+    "remaining_blocker_or_major": 0
+  }
+}

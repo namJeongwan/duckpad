@@ -86,6 +86,87 @@ struct SearchHighlightTests {
         #expect(view.searchOverviewPositions.count == offsets.count)
         #expect(offsets.allSatisfy { !view.isSearchHighlighted(atUTF8Position: UInt($0)) })
     }
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["DUCKPAD_FIND_INPUT_PERFORMANCE"] == "1"))
+    func denseIncrementalFindPublishesAndAcceptsNextKeystrokeWithin50ms() async throws {
+        let text = String(repeating: "a ", count: 4_000_000)
+        let (controller, adapter, buffer) = try await fixture(text)
+        defer { controller.close(); adapter.invalidate() }
+        let panel = controller.searchPanel
+        panel.show(replace: false, selectedText: "a")
+        let view = try #require(adapter.activeScintillaView)
+        view.isWordWrapEnabled = true
+        controller.showAndFocus()
+        controller.window?.contentView?.layoutSubtreeIfNeeded(); controller.window?.displayIfNeeded()
+        let tabID = TabID()
+        let snippet = String(text.prefix(240))
+        let matches = (0..<100_000).map { offset in
+            SearchMatch(tabID: tabID, bufferID: buffer.bufferID, revision: buffer.revision,
+                        range: .init(location: offset * 2, length: 1), line: 1, column: offset * 2 + 1, snippet: snippet)
+        }
+        let result = SearchResultSet(generation: 1, documents: [.init(tabID: tabID, title: "dense.txt", matches: matches)], isTruncated: false, searchedByteCount: text.utf8.count)
+        let presented = ContinuousClock.now
+        panel.present(result, showsResults: false)
+        let presentation = elapsedMilliseconds(since: presented)
+        let decorated = ContinuousClock.now
+        adapter.setSearchHighlights(result)
+        let decoration = elapsedMilliseconds(since: decorated)
+        let field = try #require(descendants(panel).first { $0.accessibilityIdentifier() == "duckpad.search.find" } as? NSTextField)
+        let input = ContinuousClock.now
+        field.stringValue = "ab"
+        panel.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
+        panel.window?.contentView?.layoutSubtreeIfNeeded(); panel.window?.displayIfNeeded()
+        let typing = elapsedMilliseconds(since: input)
+        print("DUCKPAD_FIND_INPUT_PERF matches=100000 presentation_ms=\(presentation) decoration_ms=\(decoration) input_ms=\(typing)")
+        #expect(presentation < 50)
+        #expect(decoration < 50)
+        #expect(presentation + decoration < 50)
+        #expect(typing < 50)
+        #expect(!view.isSearchHighlighted(atUTF8Position: 0))
+        panel.hide()
+    }
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["DUCKPAD_FIND_INPUT_PERFORMANCE"] == "1"))
+    func smallFindInputSkipsInactiveWrappedDocumentsWithWordMarkers() async throws {
+        let (controller, adapter, buffer) = try await fixture("abc 한글 small file\n")
+        defer { controller.close(); adapter.invalidate() }
+        let large = String(repeating: "ap text ", count: 1_000_000)
+        var backgrounds = [DPScintillaEditorView]()
+        for _ in 0..<3 {
+            let descriptor = EditorBufferDescriptor(bufferID: BufferID(), revision: 0)
+            adapter.install(.init(bufferID: descriptor.bufferID, revision: 0, text: large)); adapter.display(descriptor)
+            let view = try #require(adapter.activeScintillaView)
+            view.isWordWrapEnabled = true
+            view.setPrimarySelectionUTF8Range(.init(location: 0, length: 2))
+            for _ in 0..<2_000 {
+                if view.searchOverviewPositions.count == 100_000 { break }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(view.searchOverviewPositions.count == 100_000)
+            backgrounds.append(view)
+        }
+        adapter.display(buffer)
+        controller.performShowFind()
+        let panel = controller.searchPanel
+        let field = try #require(descendants(panel).first { $0.accessibilityIdentifier() == "duckpad.search.find" } as? NSTextField)
+        try #require(panel.window).makeFirstResponder(field)
+        let input = try #require(field.currentEditor() as? NSTextView)
+        var times = [Double]()
+        for text in ["사용중", "사용", "유후", "유ㅎ", "유휴", "abc", "abcd"] {
+            let start = ContinuousClock.now
+            input.setMarkedText(text, selectedRange: .init(location: text.utf16.count, length: 0),
+                                replacementRange: .init(location: 0, length: input.string.utf16.count))
+            panel.window?.displayIfNeeded()
+            times.append(elapsedMilliseconds(since: start))
+        }
+        #expect(times.allSatisfy { $0 < 50 })
+        #expect(panel.currentQuery().pattern == "abcd")
+        #expect(backgrounds.allSatisfy { $0.searchOverviewPositions.count == 100_000 && $0.isWordHighlighted(atUTF8Position: 0) })
+        print("DUCKPAD_SMALL_FIND_PERF background_documents=3 markers_each=100000 bytes_each=\(large.utf8.count) input_max_ms=\(times.max()!) samples=\(times.count)")
+        panel.hide()
+    }
+    private func elapsedMilliseconds(since start: ContinuousClock.Instant) -> Double {
+        let c = start.duration(to: .now).components
+        return Double(c.seconds) * 1_000 + Double(c.attoseconds) / 1e15
+    }
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
 
     @Test func selectionCheckboxPreservesTheRangeAndHighlightsOnlyMatchesInsideIt() async throws {

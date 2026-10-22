@@ -1,0 +1,123 @@
+{
+  "date": "2026-10-22",
+  "feature": "Ctrl+F input and live Korean composition latency",
+  "baseline": "/tmp/duckpad-phase3-baseline (phase3 source snapshot before Find fixes)",
+  "live_reproduction": {
+    "application": "/Applications/Duckpad.app",
+    "version": "0.14.3 (65)",
+    "sample": "/tmp/duckpad-find-active-typing.sample",
+    "duration_seconds": 15,
+    "main_thread_samples": 9553,
+    "marked_text_handler_samples": 1892,
+    "clear_search_highlights_samples": 1837,
+    "overview_projection_samples": 1677,
+    "note": "Inclusive sampled stack counts; these are not individual keystroke latencies.",
+    "path": [
+      "SearchFieldEditor.setMarkedText",
+      "SearchPanelView.controlTextDidChange",
+      "DuckpadWindowController.cancelSearch",
+      "ScintillaEditorAdapter.clearSearchHighlights (all cached buffers)",
+      "DPScintillaEditorView.clearSearchHighlights",
+      "refreshSearchOverview",
+      "SCI_POINTYFROMPOSITION",
+      "EditView.LayoutLine"
+    ]
+  },
+  "controlled_regression": {
+    "fixture": "Tiny active file; 3 cached8MB wrapped docs with100,000 published word markers each;7 native marked-text updates",
+    "budget_ms": 50,
+    "before": {
+      "status": "fail",
+      "metrics": {
+        "background_documents": 3,
+        "markers_each": 100000,
+        "bytes_each": 8000000,
+        "input_max_ms": 1035.535042,
+        "samples": 7
+      },
+      "log": "/tmp/duckpad-small-find-regression-before.log",
+      "change": "Only inactive-clear guard removed; all marker preconditions and2UI regressions pass."
+    },
+    "after": {
+      "status": "pass",
+      "metrics": {
+        "background_documents": 3,
+        "markers_each": 100000,
+        "bytes_each": 8000000,
+        "input_max_ms": 9.570833,
+        "samples": 7
+      },
+      "log": "/tmp/duckpad-small-find-regression-after.log",
+      "change": "Inactive-clear guard restored. Existing word markers and final composed query are preserved."
+    }
+  },
+  "functional": {
+    "status": "pass",
+    "logs": [
+      "/tmp/duckpad-small-find-regression-after.log",
+      "/tmp/duckpad-find-functional-final.log"
+    ],
+    "coverage": [
+      "Korean marked revisions without whitespace workaround",
+      "all8languages control geometry",
+      "no resize request on ordinary query/marked changes",
+      "Folder->hidden incremental result clears native table row count",
+      "shared panes, query options, empty queries, edits and search tick alignment",
+      "log styling, raw bytes and ANSI/search overlay visibility"
+    ],
+    "executed_test_functions": 31,
+    "opt_in_performance_tests_skipped": 4,
+    "focused_actual_reproduction_test_executed_separately": true
+  },
+  "dense_results_stress": {
+    "status": "fail",
+    "fixture": "8MB wrapped ASCII document,100,000 matches;240-character snippets",
+    "before": {
+      "matches": 100000,
+      "presentation_ms": 39.658542,
+      "decoration_ms": 49.11425,
+      "input_ms": 14.412208
+    },
+    "after": {
+      "matches": 100000,
+      "presentation_ms": 0.091875,
+      "decoration_ms": 51.822916,
+      "input_ms": 6.446583
+    },
+    "budget_ms": 50,
+    "note": "Hidden rows reduced from39.66ms to0.09ms and next input6.45ms; synchronous highlight publication51.82ms still exceeds50ms. Not counted as a passed universal performance gate.",
+    "logs": [
+      "/tmp/duckpad-find-input-wrapped-before.log",
+      "/tmp/duckpad-find-dense-final.log"
+    ]
+  },
+  "preview": {
+    "path": "build/tail-phase3-find-preview/Duckpad.app",
+    "version": "0.14.3",
+    "build": 65,
+    "architecture": "native arm64",
+    "signing": "ad-hoc",
+    "notarized": false,
+    "status": "built and verified"
+  },
+  "review": {
+    "source": "approved; no remaining Blocker/Major",
+    "evidence": "reviewed; no remaining Blocker/Major, stress failures explicitly retained"
+  },
+  "git_integration": "No commit, push, PR, merge or release requested/performed.",
+  "packaged_validation": {
+    "status": "pass",
+    "bundle": "pass",
+    "general_smoke": "pass",
+    "language_log_ansi_smoke": "pass",
+    "skipped": [
+      "Native save-panel automation"
+    ],
+    "logs": [
+      "/tmp/duckpad-phase3-find-package.log",
+      "/tmp/duckpad-phase3-find-verify.log",
+      "/tmp/duckpad-phase3-find-smoke.log",
+      "/tmp/duckpad-phase3-find-packaged-language.log"
+    ]
+  }
+}

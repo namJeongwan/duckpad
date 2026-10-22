@@ -1262,3 +1262,104 @@
 "Show hidden files in the workspace and file searches. Search ignore rules still apply." = "Mostrar arquivos ocultos no espaço de trabalho e nas buscas de arquivos. As regras de exclusão continuam sendo aplicadas.";
 
 "Highlight matching words at the caret" = "Destacar palavras iguais à palavra sob o cursor";
+
+"Open Remote File" = "Abrir arquivo remoto";
+
+"Open Remote File…" = "Abrir arquivo remoto…";
+
+"SSH host" = "Host SSH";
+
+"Remote path" = "Caminho remoto";
+
+"Follow file changes (Tail)" = "Acompanhar alterações (Tail)";
+
+"Uses your SSH configuration and key authentication. Remote files open read-only. Connect once in Terminal to trust a new host. Tail starts with the latest 1 MiB." = "Usa a configuração SSH e autenticação por chave. Arquivos remotos são somente leitura. Confie em novos hosts primeiro no Terminal. Tail mostra o último MiB.";
+
+"Tail Mode" = "Modo Tail";
+
+"Follow End" = "Acompanhar o fim";
+
+"Clear Tail Output" = "Limpar saída Tail";
+
+"Stop Tail Mode" = "Parar modo Tail";
+
+"Tail · Following" = "Tail · Acompanhando";
+
+"Tail · Scrolling paused" = "Tail · Rolagem pausada";
+
+"Tail · Paused" = "Tail · Pausado";
+
+"Remote files are read-only." = "Arquivos remotos são somente leitura.";
+
+"Stop Tail mode to edit this file." = "Pare o modo Tail para editar este arquivo.";
+
+"Could not open or follow the file" = "Não foi possível abrir ou acompanhar o arquivo";
+
+"SSH connection failed. Check your host, SSH key, and known_hosts entry." = "Falha na conexão SSH. Verifique o host, a chave SSH e a entrada known_hosts.";
+
+"Save or discard your changes before starting Tail mode." = "Salve ou descarte as alterações antes de iniciar o modo Tail.";
+
+"Tail and remote viewing currently require a UTF-8 text file." = "Tail e a visualização remota exigem um arquivo de texto UTF-8.";
+
+"Tail paused after 64 MiB of new output. Clear Tail Output to continue." = "Tail pausado após 64 MiB de nova saída. Limpe a saída para continuar.";
+
+"The file is larger than 64 MiB. Enable Tail to open its recent output." = "O arquivo supera 64 MiB. Ative Tail para abrir a saída recente.";
+
+"The SSH request timed out." = "A solicitação SSH expirou.";
+
+"Could not save the document state. Try again." = "Não foi possível salvar o estado do documento. Tente novamente.";
+
+"This document is not available for Tail mode." = "O modo Tail não está disponível para este documento.";
+
+"The file is unavailable." = "O arquivo está indisponível.";
+
+"The server returned an invalid file response." = "O servidor retornou uma resposta de arquivo inválida.";
+
+"Connect" = "Conectar";
+
+"Reconnect" = "Reconectar";
+
+"Connecting…" = "Conectando…";
+
+"Parent folder" = "Pasta superior";
+
+"Refresh" = "Atualizar";
+
+"File preview" = "Prévia do arquivo";
+
+"Remote files" = "Arquivos remotos";
+
+"SSH keys · Read-only · Select multiple files to open · Tail starts with the latest 1 MiB." = "Chaves SSH · Somente leitura · Seleção múltipla · Tail começa no último MiB.";
+
+"Choose an SSH host or enter one to connect." = "Selecione ou digite um host SSH.";
+
+"Select a file to preview its contents." = "Selecione um arquivo para visualizar o conteúdo.";
+
+"Loading preview…" = "Carregando prévia…";
+
+"Connected · Showing the first 5,000 entries" = "Conectado · Exibindo as primeiras 5.000 entradas";
+
+"Connected · SSH connection shared across files" = "Conectado · Conexão SSH compartilhada entre arquivos";
+
+"Opened in the editor. Select another file to continue." = "Aberto no editor. Selecione outro arquivo para continuar.";
+"Log" = "Log";
+
+"Show suggestions" = "Mostrar sugestões";
+
+"Suggestions for %1$@" = "Sugestões para %1$@";
+
+"Filter hosts" = "Filtrar hosts";
+
+"Filter folders" = "Filtrar pastas";
+
+"Reconnecting… (%1$@/%2$@)" = "Reconectando… (%1$@/%2$@)";
+
+"%1$@ Select Retry to reconnect." = "%1$@ Selecione Tentar novamente para reconectar.";
+
+"Reveal in Terminal" = "Abrir no Terminal";
+
+"Reveal in Embedded Terminal" = "Abrir no terminal integrado";
+
+"Could not open Terminal" = "Não foi possível abrir o Terminal";
+
+"Could not open %1$@ in Terminal." = "Não foi possível abrir %1$@ no Terminal.";

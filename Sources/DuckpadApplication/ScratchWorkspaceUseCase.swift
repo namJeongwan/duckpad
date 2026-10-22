@@ -788,6 +788,29 @@ public final class ScratchWorkspaceUseCase {
         }
     }
 
+    /// Atomic observation commit: no asynchronous gap between the revision check,
+    /// native append and metadata publication. Closing/rebinding a tab wins over stale reads.
+    public func applyObservedFileUpdate(tabID: TabID, expected: FileWorkspaceContext, identity: FileIdentity,
+                                       install: (EditorBufferDescriptor) -> Bool) -> Bool {
+        guard startupState == .ready, !transactionBusy, fileContext(tabID: tabID) == expected,
+              let index = session.tabs.firstIndex(where: { $0.id == tabID }),
+              session.buffers[expected.buffer.bufferID]?.isDirty == false,
+              var binding = expected.binding, binding.isReadOnly,
+              expected.buffer.revision < UInt64.max else { return false }
+        var candidate = session
+        binding.observedIdentity = identity
+        do {
+            let revision = try candidate.replaceFileContents(tabID: tabID, binding: binding, title: expected.title,
+                expectedRevision: expected.buffer.revision, expectedBinding: expected.binding)
+            guard install(.init(bufferID: expected.buffer.bufferID, revision: revision)) else { return false }
+            session = candidate
+            persistenceState = .pending
+            schedulePersistence()
+            publish(.bufferEdited(index: index))
+            return true
+        } catch { return false }
+    }
+
     /// Disk bytes have changed, but binding/persistence may still fail. Never
     /// treat an Undo to the previous disk state as a clean document afterward.
     public func fileWriteCompleted(for bufferID: BufferID) {
@@ -999,6 +1022,44 @@ public final class ScratchWorkspaceUseCase {
         } catch let error as TextFileStoreError { return .failed(.store(error)) }
         catch let error as SessionError { return .failed(.session(error)) }
         catch { return .failed(.store(.io(String(describing: error)))) }
+    }
+
+    /// Observation requests commit only after transaction admission. Installation
+    /// and publication are synchronous, so cancellation cannot leave an empty tab.
+    public func addObservedFile(binding: FileBinding, title: String,
+        isCurrent: () -> Bool, install: (EditorBufferDescriptor) -> Void) async -> TabID? {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        guard !Task.isCancelled, isCurrent() else { return nil }
+        if let existing = session.tabID(canonicalPath: binding.canonicalPath) { return existing }
+        var candidate = session
+        do {
+            _ = try candidate.addFile(binding: binding, title: title)
+            guard let id = candidate.tabID(canonicalPath: binding.canonicalPath),
+                  let buffer = try? candidate.buffer(for: id) else { return nil }
+            install(.init(bufferID: buffer.id, revision: buffer.revision))
+            session = candidate
+            persistenceState = .pending
+            schedulePersistence()
+            publish(.tabInserted(index: candidate.tabs.count - 1))
+            return id
+        } catch { return nil }
+    }
+
+    public func startObservingFile(expected: FileWorkspaceContext, binding: FileBinding,
+        isCurrent: () -> Bool) async -> Bool {
+        await acquireTransaction()
+        defer { releaseTransaction() }
+        guard !Task.isCancelled, isCurrent(), fileContext(tabID: expected.tabID) == expected,
+              snapshot().tabs.first(where: { $0.id == expected.tabID })?.isDirty == false,
+              let index = session.tabs.firstIndex(where: { $0.id == expected.tabID }),
+              let original = expected.binding else { return false }
+        do { try session.updateFileBinding(tabID: expected.tabID, binding: binding, expectedBinding: original) }
+        catch { return false }
+        persistenceState = .pending
+        schedulePersistence()
+        publish(.tabUpdated(index: index))
+        return true
     }
 
     @discardableResult

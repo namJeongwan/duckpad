@@ -133,6 +133,9 @@ public struct LanguageDetector: Sendable {
                 $0.detectionPriority == $1.detectionPriority
                     ? $0.id < $1.id : $0.detectionPriority > $1.detectionPriority
             }).first {
+                if best.id == .plainText, registry[.log] != nil, LogFileDetection.matches(contentPrefix) {
+                    return .init(languageID: .log, confidence: .content, reason: "bounded common log probe")
+                }
                 return .init(
                     languageID: best.id,
                     confidence: .extensionMatch,
@@ -146,6 +149,10 @@ public struct LanguageDetector: Sendable {
             if plantUML.contentSignatures.contains(where: { opening == $0 || opening.hasPrefix($0 + " ") }) {
                 return .init(languageID: plantUML.id, confidence: .content, reason: "PlantUML opening directive")
             }
+        }
+        if registry[.log] != nil,
+           filename.map(LogFileDetection.isRotatedLogFilename) == true || LogFileDetection.matches(contentPrefix) {
+            return .init(languageID: .log, confidence: .content, reason: "bounded common log probe")
         }
         return .init(languageID: .plainText, confidence: .fallback, reason: "plain-text fallback")
     }
@@ -233,6 +240,7 @@ public final class LanguageWorkspaceUseCase {
     }
     private var appliedLanguageByBuffer: [BufferID: AppliedLanguage] = [:]
     private var registryValidationIssue: String?
+    private var detectedLogsByBuffer: [BufferID: (filename: String?, revision: UInt64, detection: LanguageDetection)] = [:]
 
     public private(set) var state: LanguageServiceState = .degraded("not initialized")
     public var onStateChange: ((LanguageServiceState) -> Void)?
@@ -284,11 +292,21 @@ public final class LanguageWorkspaceUseCase {
         guard let context = workspace.activeLanguageContext(), let editor else {
             return publish(.degraded("No active editor buffer"))
         }
-        let detection = detector.detect(
-            filename: context.filename,
-            contentPrefix: editor.detectionPrefix(maximumBytes: detector.maximumContentProbeBytes),
-            override: context.override
-        )
+        let detection: LanguageDetection
+        if context.override == .automatic, let cached = detectedLogsByBuffer[context.buffer.bufferID], cached.filename == context.filename,
+           cached.revision == context.buffer.revision || workspace.activeFileContext()?.binding?.tailMode == true {
+            detection = cached.detection
+        } else {
+            // Filename matches need no content probe for the common .log path.
+            let named = detector.detect(filename: context.filename, contentPrefix: Data(), override: context.override)
+            detection = named.languageID == .log ? named : detector.detect(
+                filename: context.filename,
+                contentPrefix: editor.detectionPrefix(maximumBytes: detector.maximumContentProbeBytes),
+                override: context.override)
+            if detection.languageID == .log, context.override == .automatic {
+                detectedLogsByBuffer[context.buffer.bufferID] = (context.filename, context.buffer.revision, detection)
+            }
+        }
         guard let definition = registry[detection.languageID] else {
             return publish(.degraded("Language unavailable: \(detection.languageID.rawValue)"))
         }
@@ -306,7 +324,7 @@ public final class LanguageWorkspaceUseCase {
         )
         let applied = AppliedLanguage(
             configuration: configuration,
-            overBudget: editor.activeDocumentByteLength > maximumStyleBytes
+            overBudget: definition.id != .log && editor.activeDocumentByteLength > maximumStyleBytes
         )
         if appliedLanguageByBuffer[context.buffer.bufferID] != applied {
             guard editor.applyLanguage(configuration) else {
@@ -332,6 +350,7 @@ public final class LanguageWorkspaceUseCase {
         if case .manual(let id) = override, registry[id] == nil {
             return .rejected(.invalidRecoveryState("unknown language \(id.rawValue)"))
         }
+        detectedLogsByBuffer.removeValue(forKey: context.buffer.bufferID)
         let outcome = await workspace.setLanguageOverride(override, for: context.tabID)
         if case .applied = outcome { _ = refreshActive() }
         return outcome

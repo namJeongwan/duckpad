@@ -48,6 +48,35 @@ struct SearchPanelViewTests {
         #expect(find.convert(find.bounds, to: panel).minY != replacement.convert(replacement.bounds, to: panel).minY)
     }
 
+    @Test func typingAndMarkedEditsDoNotRequestDialogResizing() throws {
+        let (window, panel) = host(width: 640, replace: false, language: .korean)
+        defer { panel.hide(); window.contentView = nil; window.close() }
+        let field = try #require(descendants(panel).first { $0.accessibilityIdentifier() == "duckpad.search.find" } as? NSTextField)
+        var layouts = 0
+        panel.onLayoutChanged = { layouts += 1 }
+        for text in ["a", "ab", "사용중", "사용", "유후", "유ㅎ", "유휴"] {
+            field.stringValue = text
+            panel.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
+            #expect(panel.currentQuery().pattern == text)
+        }
+        let empty = SearchResultSet(generation: 1, documents: [], isTruncated: false, searchedByteCount: 0)
+        panel.present(empty, showsResults: false)
+        #expect(layouts == 0)
+    }
+
+    @Test func folderRowsAreClearedBeforeHiddenIncrementalPresentation() throws {
+        let (window, panel) = host(width: 640, replace: false, language: .english)
+        defer { panel.hide(); window.contentView = nil; window.close() }
+        let identity = FileIdentity(canonicalPath: "/tmp/a.txt", device: 1, inode: 2, byteCount: 4, modifiedNanoseconds: 0, contentToken: "fixture")
+        panel.present(FolderSearchResultSet(rootPath: "/tmp", documents: [.init(path: "/tmp/a.txt", relativePath: "a.txt", identity: identity,
+            matches: [.init(range: .init(location: 0, length: 1), line: 1, column: 1, snippet: "duck")])], isTruncated: false,
+            searchedFileCount: 1, skippedFileCount: 0, searchedByteCount: 4))
+        let table = try #require(descendants(panel).compactMap { $0 as? NSTableView }.first)
+        #expect(table.numberOfRows == 2)
+        panel.present(SearchResultSet(generation: 2, documents: [], isTruncated: false, searchedByteCount: 4), showsResults: false)
+        #expect(table.numberOfRows == 0)
+    }
+
     @Test func changingMatchOptionsInvalidatesAndRefreshesResults() async throws {
         let panel = SearchPanelView(frame: .zero)
         panel.refreshLocalization(catalog: LocalizationCatalog(language: .english))
