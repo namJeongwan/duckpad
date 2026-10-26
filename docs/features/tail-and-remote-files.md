@@ -190,21 +190,35 @@ its existing polling policy.
 
 The browser shows reconnect progress and returns to a manual Retry action after
 exhaustion. The Tail bar also offers Retry after an exhausted connection failure.
-Manual Tail retry resumes from the last committed byte offset, retaining the
-viewport, unread count and observation growth budget. Bytes in an incomplete
-UTF-8 character are read again. It does not restart observation or jump to the
-end. Automatic retries retain the live decoder and cursor. The readable snapshot
-remains available throughout a disconnect. Stop, cancellation, changing servers,
+Manual and automatic Tail reconnect load the latest approximately 64 KiB in a
+single replacement and resume Following at the end, rather than replaying the
+backlog from the old offset. A metadata read locates the end; one bounded read
+loads the current window. A cut first line is discarded where possible, and
+incomplete UTF-8 at the end is retained for the next append. The previous
+snapshot remains readable until replacement succeeds. Successful replacement
+clears unread counts and restarts the bounded growth budget; subsequent appends
+still enforce the 64 MiB limit. Stop, cancellation, changing servers,
 closing the browser or closing a Tail tab cancel outstanding retry waits.
 
-Validation: 26 distinct focused test functions pass, including reconnect
-exhaustion/cancellation, incomplete Korean UTF-8, viewport/unread preservation
-and the 64 MiB growth limit across manual retry. Eight-language resources and
+Original filter/retry validation: 26 distinct focused test functions passed, including reconnect
+exhaustion/cancellation, incomplete Korean UTF-8 and the 64 MiB growth limit.
+Eight-language resources and
 control geometry pass; native light/dark filter captures were inspected. The
 arm64 development preview passes bundle verification and general app smokes;
 native save-panel automation was skipped. Independent review has no remaining
 Blocker/Major findings. Physical IME, Intel and real network outage testing
 were not performed for this change. Details: [remote-filter-and-retry-validation.json](remote-filter-and-retry-validation.json).
+
+Reconnect regression validation (2026-10-23): all 16 focused Release test
+functions completed across RemoteReconnectTests, RemoteRetryBudgetTests,
+FileTailUTF8DecoderTests and TailRemoteIntegrationTests. A 3,000,014-byte local
+fixture backlog required exactly two reads and a 65,502-byte replacement;
+measured reconnect-to-Following times were 6.07 ms (append) and 7.20 ms (rotation).
+These are local fixture measurements, excluding SSH network latency. Empty
+files, rotation between metadata and content reads, incomplete Korean UTF-8,
+late cancelled replies, read-only/Undo/recovery state and the subsequent 64 MiB
+growth limit are covered. Live network outage and release-package validation
+were not run for this follow-up.
 
 The destination popup now shows up to 12 rows at 32 points per row with
 6-point outer padding. It chooses the available space above or below the

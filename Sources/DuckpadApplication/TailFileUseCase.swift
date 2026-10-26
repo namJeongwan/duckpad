@@ -55,12 +55,15 @@ import Foundation
         }
     }
 
-    private func follow(tabID: TabID, source: FileObservationSource, cursor initial: FileObservationCursor, generation: UUID) async {
+    private func follow(tabID: TabID, source: FileObservationSource, cursor initial: FileObservationCursor, generation: UUID, reloadLatest: Bool = false) async {
         var cursor = initial, decoder = FileTailUTF8Decoder(), growth = growthBytes[tabID] ?? 0, retry = 0
+        var reloadLatest = reloadLatest
         while !Task.isCancelled, generations[tabID] == generation,
               let context = workspace.fileContext(tabID: tabID), context.binding?.tailMode == true {
             do {
-                let read = try await reader.read(source, after: cursor, maximumBytes: 64 * 1_024 - 4)
+                let read: FileObservationRead
+                if reloadLatest { read = try await latestSnapshot(source) }
+                else { read = try await reader.read(source, after: cursor, maximumBytes: 64 * 1_024 - 4) }
                 guard !Task.isCancelled, generations[tabID] == generation,
                       workspace.fileContext(tabID: tabID) == context else { break }
                 var nextDecoder = decoder
@@ -80,12 +83,13 @@ import Foundation
                         try await Task.sleep(for: .milliseconds(10))
                         continue
                     }
+                    if reloadLatest { observed.followObservedFileEnd(in: context.buffer.bufferID) }
                     if wasFollowing || read.reset { unreadLineCounts.removeValue(forKey: tabID) }
                     else { unreadLineCounts[tabID, default: 0] += text.reduce(0) { $0 + ($1 == 10 ? 1 : 0) } }
                     onChange?()
                 }
                 retry = 0
-                cursor = read.cursor; decoder = nextDecoder
+                cursor = read.cursor; decoder = nextDecoder; reloadLatest = false
                 growth = read.reset ? text.count : growth + text.count
                 growthBytes[tabID] = growth
                 let wasFailed = states[tabID] != .following
@@ -103,6 +107,7 @@ import Foundation
                         states[tabID] = .failed(failure); onChange?(); break
                     }
                     delay = next; retry += 1
+                    reloadLatest = true
                     states[tabID] = .reconnecting(attempt: retry, total: retryPolicy.delays.count)
                 } else {
                     states[tabID] = .failed(failure)
@@ -110,12 +115,35 @@ import Foundation
                     delay = .seconds(2)
                 }
                 onChange?()
-                // Retain cursor and partial UTF-8 bytes across automatic retries.
+                // Keep the readable snapshot until a bounded latest snapshot succeeds.
                 // Cancellation, Stop and tab closure must never reconnect.
                 do { try await Task.sleep(for: delay) } catch { break }
             }
         }
         if generations[tabID] == generation { tasks.removeValue(forKey: tabID) }
+    }
+
+    private func latestSnapshot(_ source: FileObservationSource) async throws -> FileObservationRead {
+        // Match the native observation-update limit: one metadata request and
+        // one bounded replacement, independent of how much accumulated offline.
+        let maximumBytes = 64 * 1_024 - 4
+        let metadata = try await reader.read(source, after: nil, maximumBytes: 1)
+        try Task.checkCancellation()
+        let start = metadata.sourceSize > UInt64(maximumBytes) ? metadata.sourceSize - UInt64(maximumBytes) : 0
+        let read = try await reader.read(source,
+            after: .init(identity: metadata.cursor.identity, offset: start), maximumBytes: maximumBytes)
+        try Task.checkCancellation()
+        // Rotation/truncation between stat and read must not publish the start
+        // of a replacement file as its end. Retry from fresh metadata instead.
+        guard !read.reset, read.cursor.identity == metadata.cursor.identity,
+              read.sourceSize >= metadata.sourceSize,
+              read.cursor.offset >= metadata.sourceSize else { throw FileObservationError.unavailable }
+        var data = read.data
+        if start > 0 {
+            while data.first.map({ $0 & 0xC0 == 0x80 }) == true { data.removeFirst() }
+            if let newline = data.firstIndex(of: 10) { data = Data(data.suffix(from: data.index(after: newline))) }
+        }
+        return .init(data: data, cursor: read.cursor, sourceSize: read.sourceSize, reset: true)
     }
 
     public func canRetry(tabID: TabID) -> Bool {
@@ -124,18 +152,17 @@ import Foundation
         return RemoteConnectionRetryPolicy.isConnectionFailure(error)
     }
 
-    /// Resume a failed connection without restarting observation. The committed
-    /// cursor excludes partial UTF-8, which is re-read; viewport, unread count
-    /// and the current observation's growth budget stay intact.
+    /// Reconnect at the current end rather than replaying an arbitrarily large
+    /// backlog. Replace the readable snapshot only after the latest read succeeds.
     public func retry(tabID: TabID) {
         guard canRetry(tabID: tabID), let binding = workspace.fileContext(tabID: tabID)?.binding,
               binding.tailMode == true, let remote = binding.remoteFile else { return }
         tasks.removeValue(forKey: tabID)?.cancel()
         let generation = UUID(); generations[tabID] = generation
         let cursor = FileObservationCursor(identity: binding.observedIdentity.contentToken, offset: binding.observedIdentity.byteCount)
-        states[tabID] = .following
+        states[tabID] = .reconnecting(attempt: 1, total: max(1, retryPolicy.delays.count))
         tasks[tabID] = Task { [weak self] in
-            await self?.follow(tabID: tabID, source: .ssh(remote), cursor: cursor, generation: generation)
+            await self?.follow(tabID: tabID, source: .ssh(remote), cursor: cursor, generation: generation, reloadLatest: true)
         }
         onChange?()
     }
