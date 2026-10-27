@@ -67,3 +67,19 @@ session with that folder as its working directory and reveals the terminal
 panel. Existing sessions, their running commands and document tabs are retained.
 No `cd` command is constructed or injected into a running shell. Folder names
 containing spaces, Korean, quotes or shell metacharacters remain literal paths.
+
+### Login session and shell locale
+
+`DuckpadTerminalHost.xpc` sets `XPCService.JoinExistingSession = true` so its
+shells run in the caller's login security session. Without this setting, Git's
+macOS credential helper can fail with `errSecInteractionNotAllowed` (-25308)
+when accessing the login keychain. This setting does not bypass keychain item
+ACLs or unlock a locked keychain. Bundle verification requires the setting.
+
+Shell startup preserves explicit `LANG`, `LANGUAGE` and standard `LC_*` category
+overrides through the existing environment allowlist. Finder launches without
+`LANG` use a system-derived UTF-8 locale when available, with `en_US.UTF-8` as a
+fallback. App display-language preferences do not rewrite shell locale settings.
+Unrelated application environment variables are not forwarded. Locale regression
+checks cover Korean, Japanese, German, English, explicit category overrides and
+malformed values. Real credential access remains subject to macOS authorization.

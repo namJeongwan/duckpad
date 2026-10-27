@@ -95,7 +95,7 @@ private final class EditorGroupFilePanels: FilePanelPresenting {
 }
 
 @MainActor
-private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPort {
+private class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPort {
     enum Event: Equatable {
         case orientation(EditorGroupSplitOrientation?)
         case activate(EditorGroupID)
@@ -118,7 +118,6 @@ private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPor
     private(set) var synchronousGroupFocusCallbackCount = 0
     private var snapshots: [BufferID: EditorTextSnapshot] = [:]
     private(set) var visibleBuffers: [EditorGroupID: EditorBufferDescriptor] = [:]
-
     func setEditorGroupOrientation(_ orientation: EditorGroupSplitOrientation?) {
         events.append(.orientation(orientation))
         if orientation != nil, let splitOrientation {
@@ -190,8 +189,99 @@ private final class EditorGroupRouterSpy: EditorGroupRoutingPort, SplitEditorPor
     }
 }
 
+@MainActor
+private final class BlockingInputEditorGroupRouterSpy: EditorGroupRouterSpy, EditorInputSynchronizationPort {
+    var blocksNextInputFlush = false
+    private(set) var inputFlushCount = 0
+    private(set) var pendingInputFlush: CheckedContinuation<Bool, Never>?
+
+    func synchronizePendingInput() async -> Bool {
+        inputFlushCount += 1
+        guard blocksNextInputFlush else { return true }
+        blocksNextInputFlush = false
+        return await withCheckedContinuation { pendingInputFlush = $0 }
+    }
+
+    func releaseInputFlush() {
+        let pending = pendingInputFlush
+        pendingInputFlush = nil
+        pending?.resume(returning: true)
+    }
+}
+
 @Suite(.serialized)
 struct EditorGroupCommandTests {
+    @Test @MainActor
+    func suspendedSharedCloseDoesNotBecomeGlobalCloseDuringAnotherRemoval() async throws {
+        let router = BlockingInputEditorGroupRouterSpy()
+        let fixture = await makeEditorGroupController(tabCount: 3, router: router)
+        defer { router.releaseInputFlush(); fixture.controller.close() }
+        let tabs = fixture.workspace.snapshot().tabs
+        let shared = try #require(tabs.last)
+        fixture.controller.editorGroupWorkspace.onAction?(.split(shared.id, .primary, .sideBySide, .copy))
+        await fixture.workspace.waitForPendingPersistence()
+        let flushes = router.inputFlushCount
+        router.blocksNextInputFlush = true
+        fixture.controller.editorGroupWorkspace.onAction?(.close(shared.id, .secondary))
+        await eventually { router.pendingInputFlush != nil }
+        await fixture.store.blockNextCommit()
+        let removal = Task { await fixture.workspace.close(tabID: tabs[0].id, decision: .discard) }
+        await fixture.store.waitUntilCommitIsBlocked()
+        router.releaseInputFlush()
+        try await Task.sleep(for: .milliseconds(20))
+        // The stale close must abort, rather than entering requestClose's
+        // second flush and queuing a document-wide close behind the removal.
+        #expect(router.inputFlushCount == flushes + 1)
+        await fixture.store.releaseCommit()
+        _ = await removal.value
+        await fixture.workspace.waitForPendingPersistence()
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(fixture.workspace.snapshot().tabs.contains { $0.id == shared.id })
+        let layout = fixture.controller.editorGroupLayoutSnapshot
+        #expect(layout.visibleGroups.filter { layout.tabIDs(in: $0).contains(shared.id) }.count == 2)
+    }
+
+    @Test @MainActor
+    func newlyInsertedTabCanBeDraggedIntoItsFirstSplit() async throws {
+        let fixture = await makeEditorGroupController(tabCount: 2)
+        defer { fixture.controller.close() }
+        _ = await fixture.workspace.addScratch()
+        let tab = try #require(fixture.workspace.snapshot().tabs.last)
+        fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+        let view = fixture.controller.editorGroupWorkspace
+        let edge = NSPoint(x: view.dropOverlay.bounds.maxX - 2, y: view.dropOverlay.bounds.midY)
+        let payload = EditorGroupDragPayload(tabID: tab.id, sourceGroup: .primary)
+        #expect(view.updateEdgeDrop(payload: payload, location: edge, optionPressed: false) == .move)
+        #expect(view.performEdgeDrop(payload: payload, location: edge, optionPressed: false))
+        #expect(fixture.controller.editorGroupLayoutSnapshot.secondaryTabIDs == [tab.id])
+    }
+
+    @Test(arguments: ["primary", "secondary", "shortcut", "context"])
+    @MainActor func closingSharedTabDismissesOnlyTheInvokingPane(route: String) async throws {
+        let fixture = await makeEditorGroupController(tabCount: 3)
+        defer { fixture.controller.close() }
+        let tab = try #require(fixture.workspace.snapshot().tabs.last)
+        fixture.controller.editorGroupWorkspace.onAction?(.split(tab.id, .primary, .sideBySide, .copy))
+        markDirty(tab.buffer, workspace: fixture.workspace, router: fixture.router, text: "미저장 shared edit")
+        let group: EditorGroupID = route == "primary" ? .primary : .secondary
+        fixture.controller.editorGroupWorkspace.onAction?(.select(tab.id, group))
+        if route == "shortcut" { fixture.controller.performCloseActiveTab() }
+        else if route == "context" {
+            fixture.controller.editorGroupWorkspace.onAction?(.context(tab.id, group, .close(.current)))
+        } else { fixture.controller.editorGroupWorkspace.onAction?(.close(tab.id, group)) }
+        await eventually {
+            let layout = fixture.controller.editorGroupLayoutSnapshot
+            return layout.visibleGroups.filter { layout.tabIDs(in: $0).contains(tab.id) }.count == 1
+        }
+        #expect(fixture.workspace.snapshot().tabs.contains { $0.id == tab.id })
+        #expect(fixture.workspace.snapshot().tabs.first { $0.id == tab.id }?.isDirty == true)
+        #expect(fixture.router.snapshot(for: tab.buffer.bufferID)?.text == "미저장 shared edit")
+        #expect(fixture.router.snapshot(for: tab.buffer.bufferID) != nil)
+        let layout = fixture.controller.editorGroupLayoutSnapshot
+        if group == .primary { #expect(!layout.primaryTabIDs.contains(tab.id)) }
+        else { #expect(layout.orientation == nil); #expect(layout.primaryTabIDs.contains(tab.id)) }
+    }
+
     @Test @MainActor
     func cancelledQueuedFilenameActivationCannotReplaceTheInvokingPane() async throws {
         let fixture = await makeEditorGroupController(tabCount: 4)
@@ -1135,7 +1225,8 @@ struct EditorGroupCommandTests {
 @MainActor
 private func makeEditorGroupController(
     tabCount: Int,
-    saveURLs: [URL] = []
+    saveURLs: [URL] = [],
+    router suppliedRouter: EditorGroupRouterSpy? = nil
 ) async -> (
     controller: DuckpadWindowController,
     workspace: ScratchWorkspaceUseCase,
@@ -1146,7 +1237,7 @@ private func makeEditorGroupController(
     for _ in 0..<tabCount { session.addUntitled() }
     let store = EditorGroupSessionStore(session: session)
     let workspace = ScratchWorkspaceUseCase(store: store)
-    let router = EditorGroupRouterSpy()
+    let router = suppliedRouter ?? EditorGroupRouterSpy()
     let panels = EditorGroupFilePanels()
     panels.saveURLs = saveURLs
     let fileUseCase = saveURLs.isEmpty
@@ -1287,7 +1378,8 @@ private extension NSMenu {
     #expect(germanWidths != strips.map { $0.flowLayout.itemWidths })
 }
 
-@Test @MainActor func explorerFileOpensDirectlyInSplitAndSplitsAgainWithoutResettingDragState() async throws {
+@Test(arguments: [false, true]) @MainActor
+func explorerFileOpensDirectlyInSplitAndSplitsAgainWithoutResettingDragState(openFirst: Bool) async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("duckpad-explorer-split-\(UUID())")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -1307,11 +1399,23 @@ private extension NSMenu {
     defer { controller.close() }
     controller.start(); await controller.waitForStartup()
     let entry = WorkspaceBrowserEntry(rootID: root.id, relativePath: "notes.txt", name: "notes.txt", kind: .file)
-    controller.editorGroupWorkspace.onAction?(.openWorkspaceEntry(entry, .primary, .right))
+    if openFirst {
+        // The same callback as the Explorer's double-click; immediately drag
+        // the resulting real file tab before any split has existed.
+        controller.routeOpenWorkspaceEntry(entry)
+        await eventually { workspace.snapshot().tabs.contains { $0.displayTitle == "notes.txt" } }
+        let tab = try #require(workspace.snapshot().tabs.first { $0.displayTitle == "notes.txt" })
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        let view = controller.editorGroupWorkspace
+        let edge = NSPoint(x: view.dropOverlay.bounds.maxX - 2, y: view.dropOverlay.bounds.midY)
+        #expect(view.performEdgeDrop(payload: .init(tabID: tab.id, sourceGroup: .primary),
+                                     location: edge, optionPressed: false))
+    } else { controller.editorGroupWorkspace.onAction?(.openWorkspaceEntry(entry, .primary, .right)) }
     await eventually { controller.editorGroupLayoutSnapshot.visibleGroups.count == 2 }
     let first = controller.editorGroupLayoutSnapshot
     let tab = try #require(workspace.snapshot().tabs.first { $0.displayTitle == "notes.txt" })
     #expect(first.tabIDs(in: first.focusedGroup) == [tab.id])
+    #expect(!first.primaryTabIDs.contains(tab.id))
     #expect(router.snapshot(for: tab.buffer.bufferID)?.text == "한글 workspace content")
     // Existing file: read/open may activate it, but the captured target still determines the split.
     controller.editorGroupWorkspace.onAction?(.openWorkspaceEntry(entry, .primary, .down))

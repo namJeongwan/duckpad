@@ -11,6 +11,7 @@ INSTALLER="$APP/Contents/XPCServices/DuckpadNativeInstaller.xpc"
 TERMINAL="$APP/Contents/XPCServices/DuckpadTerminalHost.xpc"
 test -x "$TERMINAL/Contents/MacOS/DuckpadTerminalHost"
 [[ "$(plutil -extract CFBundleIdentifier raw "$TERMINAL/Contents/Info.plist")" == "com.namjeongwan.duckpad.terminal-host" ]]
+[[ "$(plutil -extract XPCService.JoinExistingSession raw "$TERMINAL/Contents/Info.plist")" == "true" ]]
 for KEY in CFBundleShortVersionString CFBundleVersion; do
     [[ "$(plutil -extract "$KEY" raw "$APP/Contents/Info.plist")" == "$(plutil -extract "$KEY" raw "$TERMINAL/Contents/Info.plist")" ]]
 done

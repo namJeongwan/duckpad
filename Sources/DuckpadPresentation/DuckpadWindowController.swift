@@ -1083,9 +1083,26 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 }
             }
             guard case .applied = await self.workspace.activate(tabID: id) else { return }
-            await self.requestClose(tabIDs: [id], retryingSaveTabID: nil)
+            await self.requestClose(tabIDs: [id], retryingSaveTabID: nil, closingGroup: group)
         }
         pendingCloseTasks[token] = task
+    }
+
+    private func dismissDuplicateTab(_ id: TabID, from group: EditorGroupID) -> Bool {
+        guard workspaceInteractionsAreActionable, provisionalEditorGroupLayout == nil else { return false }
+        let previous = editorGroupLayout.snapshot
+        guard editorGroupLayout.dismissDuplicate(id, from: group) else { return false }
+        let snapshot = workspace.snapshot()
+        reconcileEditorGroupRoutes(from: previous, to: editorGroupLayout.snapshot, workspace: snapshot)
+        applyEditorGroupOrientation()
+        rebuildEditorGroupIndexCache(editorGroupLayout.snapshot, workspace: snapshot)
+        routeSelectedEditorGroups(snapshot)
+        let layout = editorGroupLayout.snapshot
+        if let selected = layout.selectedTabID(in: layout.focusedGroup) {
+            renderLayoutAndActivate(tabID: selected, group: layout.focusedGroup)
+        }
+        recoveryUseCase?.editorViewStateDidChange()
+        return true
     }
 
     @discardableResult
@@ -1121,8 +1138,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return
         }
         if extensionServiceHost?.closeFocusedPanel(in: workspaceContentSplit) == true { return }
-        guard let id = workspace.snapshot().tabs.first(where: \.isActive)?.id else { return }
-        performClose(id)
+        let layout = editorGroupLayout.snapshot
+        guard let id = layout.selectedTabID(in: layout.focusedGroup) else { return }
+        performClose(id, in: layout.focusedGroup)
     }
 
     func closeAuxiliaryPanel() -> Bool {
@@ -3074,7 +3092,13 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 self.editorGroupLayout.snapshot.tabIDs(in: $0).contains(tabID)
             }) else { return }
             if let zone = dropZone {
-                self.performAdjacentGroupSplit(tabID: tabID, source: source, target: target, zone: zone, operation: .copy)
+                // A newly opened file belongs in the destination pane. Existing
+                // documents can gain another view without moving their original.
+                let operation: EditorGroupDropOperation
+                if case .opened = outcome, self.editorGroupLayout.snapshot.tabIDs(in: source).count > 1 {
+                    operation = .move
+                } else { operation = .copy }
+                self.performAdjacentGroupSplit(tabID: tabID, source: source, target: target, zone: zone, operation: operation)
             } else if self.editorGroupLayout.snapshot.tabIDs(in: target).contains(tabID) {
                 self.performActivate(tabID, in: target)
             } else {
@@ -3828,6 +3852,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         currentLayout: EditorGroupLayoutSnapshot
     ) {
         if previousLayout.orientation == nil, currentLayout.orientation == nil {
+            // Incremental tab-strip updates must also refresh drag membership.
+            // Otherwise tabs opened since the last full layout cannot split.
+            _ = editorGroupWorkspace.applyFocus(layout: currentLayout)
             if case .activeTabChanged(_, let currentIndex) = change.kind,
                change.snapshot.tabs.indices.contains(currentIndex),
                requestedEditorGroupSelection?.tabID == change.snapshot.tabs[currentIndex].id,
@@ -4418,10 +4445,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private func requestClose(
         tabIDs: [TabID],
         retryingSaveTabID: TabID?,
-        forcedDecision: CloseDecision? = nil
+        forcedDecision: CloseDecision? = nil,
+        closingGroup: EditorGroupID? = nil
     ) async {
         if let queued = activeEditor as? any EditorInputSynchronizationPort,
            !(await queued.synchronizePendingInput()) { return }
+        if let group = closingGroup {
+            guard workspaceInteractionsAreActionable, provisionalEditorGroupLayout == nil,
+                  tabIDs.count == 1, let id = tabIDs.first,
+                  editorGroupLayout.snapshot.tabIDs(in: group).contains(id) else { return }
+            if dismissDuplicateTab(id, from: group) { return }
+        }
         var batchDecision: DirtyTabBatchDecision?
         var requestedBatchDecision = false
         let outcome = await tabCloseCoordinator.close(

@@ -171,6 +171,18 @@ public final class EditorGroupLayoutModel {
         reconcileSelections()
     }
 
+    /// Remove one view of a shared document without closing the document.
+    @discardableResult
+    public func dismissDuplicate(_ tabID: TabID, from group: EditorGroupID) -> Bool {
+        guard tabIDs(in: group).contains(tabID),
+              tree.groups.contains(where: { $0 != group && tabIDs(in: $0).contains(tabID) }) else { return false }
+        remove(tabID, from: group)
+        focusedGroup = group
+        normalizeEmptyGroup()
+        reconcileSelections()
+        return true
+    }
+
     private func move(
         _ tabID: TabID,
         from source: EditorGroupID,
