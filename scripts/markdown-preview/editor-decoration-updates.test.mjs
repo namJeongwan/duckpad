@@ -76,3 +76,18 @@ test('opening a fence before an existing unclosed fence invalidates every reclas
     assert.deepEqual(snapshot(state),snapshot(create(state.doc,state.selection)));
   }
 });
+
+test('cached task labels survive deleting distant earlier paragraphs before DOM creation',()=>{
+  const prefix='prefix '.repeat(60)+'\n\n',source=prefix+'keep\n\nother\n\n- [ ] task\n\nEnd';
+  let state=create(source);
+  state=state.update({changes:{from:0,to:prefix.length,insert:''}}).state;
+  let checkbox;
+  for(const set of state.facet(EditorView.decorations))set.between(0,state.doc.length,(_from,_to,value)=>{
+    if(value.spec.widget?.constructor.name==='Checkbox')checkbox=value.spec.widget;
+  });
+  assert.ok(checkbox);
+  const previous=document.createElement;
+  document.createElement=()=>({setAttribute(name,value){this[name]=value;},addEventListener(){}});
+  try { assert.equal(checkbox.toDOM({state})['aria-label'],'- [ ] task'); }
+  finally { document.createElement=previous; }
+});

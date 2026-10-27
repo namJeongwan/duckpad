@@ -33,11 +33,11 @@ class Bullet extends WidgetType {
   toDOM() { const span=document.createElement('span'); span.className='md-bullet'; span.textContent='•'; return span; }
 }
 class Checkbox extends WidgetType {
-  constructor(checked, position) { super(); this.checked=checked; this.position=position; }
-  eq(other) { return this.checked===other.checked && this.position===other.position; }
+  constructor(checked, position, label) { super(); Object.assign(this,{checked,position,label}); }
+  eq(other) { return this.checked===other.checked && this.position===other.position && this.label===other.label; }
   toDOM(view) {
     const box=document.createElement('input'); box.type='checkbox';box.checked=this.checked;box.className='md-task';
-    box.setAttribute('aria-label', view.state.doc.lineAt(this.position).text);
+    box.setAttribute('aria-label', this.label);
     box.addEventListener('mousedown', event=>{ event.preventDefault();if(view.state.readOnly)return;
       view.dispatch({changes:{from:view.posAtDOM(box)+1,to:view.posAtDOM(box)+2,insert:this.checked?' ':'x'}}); });
     return box;
@@ -127,7 +127,7 @@ function decorations(state,start=0,end=state.doc.length) {
         else if(node.parent?.name==='BulletList')output.push(Decoration.replace({widget:new Bullet()}).range(marker.from,marker.to));
       }
     } else if(name==='TaskMarker'&&!active(state,from,to)) {
-      output.push(Decoration.replace({widget:new Checkbox(/x/i.test(doc.sliceString(from,to)),from)}).range(from,to));return false;
+      output.push(Decoration.replace({widget:new Checkbox(/x/i.test(doc.sliceString(from,to)),from,doc.lineAt(from).text)}).range(from,to));return false;
     } else if(name==='Blockquote') {
       const first=doc.lineAt(from).number,last=doc.lineAt(to).number;
       for(let index=first;index<=last;index++)line(doc.line(index).from,'md-quote');
