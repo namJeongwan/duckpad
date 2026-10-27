@@ -3,45 +3,40 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.16.0</title>
-            <pubDate>Tue, 27 Oct 2026 19:21:36 +0900</pubDate>
-            <sparkle:version>68</sparkle:version>
-            <sparkle:shortVersionString>0.16.0</sparkle:shortVersionString>
+            <title>0.16.1</title>
+            <pubDate>Tue, 27 Oct 2026 21:52:10 +0900</pubDate>
+            <sparkle:version>69</sparkle:version>
+            <sparkle:shortVersionString>0.16.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.16.0
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.16.1
 
-Markdown documents gain a bundled CodeMirror 6 editor with Source and Live editing in the same document. Other file types continue to use Scintilla.
+This patch fixes Explorer-to-editor splits, closing shared tabs, and the integrated terminal's login security session and locale.
 
-## Changes
+## Fixes
 
-- Render headings, emphasis, inline code, tasks, lists, local images, editable tables, KaTeX math and Mermaid diagrams while editing Markdown. Preserve native Undo/Redo, UTF-8 bytes, mixed line endings and pending composition across Save and recovery boundaries.
-- Edit table cells with a plain caret and stable column widths. Navigate cells with arrow keys, Tab and Shift-Tab; use the contextual menu for clipboard, rows and columns.
-- Use Command-click to follow web links in the default browser and file links in Duckpad. Match Markdown surfaces, syntax and diagrams to the workspace palette.
-- Replace the separate Markdown preview window and tab preview actions with Source/Live editing. Use Shift-Command-V to switch modes. Click math to edit its source; display math keeps a live result beneath its source. Formatted copy and shared table rendering remain available. Raw HTML remains editable source.
-- Keep presentation fixed while dragging a selection; reveal selected Markdown after release. Update changed Markdown blocks and indexed byte coordinates instead of scanning the whole document on each keystroke.
-- Drag files directly from Workspace Explorer into editor splits. Split a newly opened or sole tab without having to create another split first.
-- Reconnect failed remote Tail at the latest file end, retaining the last readable snapshot until a bounded reload succeeds.
-- Keep two Tail panes following after split/resize and asynchronous line wrapping. Pausing one pane preserves its selection and viewport while other panes keep following.
+- Split a file immediately after opening it from Workspace Explorer. The drag destination now receives updated tab membership alongside incremental tab-strip updates.
+- Drop an unopened Explorer file onto a split edge without leaving an unnecessary copy in the original pane. Already open files can still gain another view.
+- Close only the invoking pane's shared tab with its close button, current-tab context action or Command-W. Keep the remaining document's dirty content and native Undo/Redo until its last view closes. Drain pending editor input before disposal and abort stale closes if another persisted removal starts while input is being synchronized. Close-all actions retain document-wide behavior.
+- Run the integrated terminal's XPC helper in the caller's login security session. This addresses the missing session connection associated with Git credential-helper errors `failed to get: -25308` and `failed to store: -25308`. Keychain item permissions and locked-keychain authorization still apply.
+- Preserve explicit `LANG`, `LANGUAGE` and standard `LC_*` settings. Finder launches without `LANG` use an available system UTF-8 locale, falling back to `en_US.UTF-8`, rather than forcing English for every shell. Application display-language settings remain independent of shell locale.
 
-App and all three helpers: **0.16.0 (68)**, upgrading **0.15.1 (67)**. Requires **macOS 13 or later**. Universal binaries include Apple Silicon and Intel. Existing documents, settings, recovery data and the native plugin ABI remain compatible.
+App and all three helpers: **0.16.1 (69)**, upgrading **0.16.0 (68)**. Requires **macOS 13 or later**. Universal binaries include Apple Silicon and Intel. Existing documents, recovery data, settings and plugin ABI remain compatible. No new dependencies are added.
 
 ## Installation
 
-Download `Duckpad-0.16.0-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.16.0-universal.zip`. Verify downloads against `SHA256SUMS.txt`.
+Download `Duckpad-0.16.1-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.16.1-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Existing installations can use Check for Updates after the signed feed is published.
 
 ## Validation and limitations
 
-**64 distinct focused Release test functions completed**, covering Source/Live, math and offline fonts, table arrows and composition, native byte mirrors, Save/Undo/recovery, language transitions, split teardown, image grant lifetime and Tail reconnect/following. Twenty-seven JavaScript tests and independent randomized byte/decoration checks also pass. Localization keys and format arguments are verified across all eight languages; all locales were not manually inspected.
+Focused checks cover immediate first splits, the Explorer open callback followed by a drag, shared-tab close routes, overlapping input synchronization and persisted removal, dirty Korean text, native Undo/Redo, group routing and locale precedence. Before/after regressions reproduce the reported split failures and the overlapping-close failure. **115 distinct focused Release test functions completed**, recorded in `0.16.1-validation.json`.
 
-The final universal app and three helpers passed bundle/signature checks. Isolated packaged application, Markdown Source/Live (including math fonts, Mermaid, stable tables and links), and all eight localization smokes passed. DMG/ZIP integrity and uploaded asset hashes were verified before publication. Native Save-panel automation is excluded. Two broader tests remain failing outside the focused pass claim: the folder-search routing fixture and a legacy Replace shortcut expectation (Cmd-H versus the unchanged Cmd-R menu). Full-suite completion is not claimed. A transient combined-run drop-proposal failure passed on isolated rerun.
+The final merged-source universal app and all three helpers passed version, architecture and signature checks. Isolated application and Markdown smokes, all eight packaged localization smokes, DMG/ZIP integrity and uploaded asset hash verification passed. The packaged terminal helper's login audit session matches its owning app. Native Save-panel automation was skipped.
 
-Synthetic transaction/bridge timings are not physical keyboard-to-paint latency or a runtime comparison with Obsidian. Installed Obsidian 1.8.9 was statically inspected for architecture; no proprietary source is incorporated. Large Markdown blocks and diagrams still require work proportional to their contents.
+Actual account `git pull` authentication, physical pointer dragging and Korean keyboard interaction, Intel hardware, macOS 13 runtime, and full repository suite completion are not claimed. Caret, scroll and Markdown mode inheritance during secondary-to-primary pane promotion have not been specifically verified. Broader search-test limitations documented in 0.16.0 remain outside this patch's focused validation. The distribution is ad-hoc signed, without Developer ID signing or Apple notarization.
 
-Physical Korean keyboard input, Intel hardware execution and macOS 13 runtime require separate verification. The distribution is ad-hoc signed, without Developer ID signing or Apple notarization.
-
-Release source: `533105551eff946ac133e5bdcb54330c566c81ab` ([PR #102](https://github.com/namJeongwan/duckpad/pull/102)).
+Release source: `2d933b5ccd872b8267c5088040516b31e8531f1d` ([PR #104](https://github.com/namJeongwan/duckpad/pull/104)).
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.16.0/Duckpad-0.16.0-universal.zip" length="53384359" type="application/octet-stream" sparkle:edSignature="aTjXjDUWZrDa8TifiNHyNYGV0nTC7MWwLAj8c6hxIQT8RlTm6IZdShEiUo4tSi/28xEJr9posFYE4/V8ut7QBg=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.16.1/Duckpad-0.16.1-universal.zip" length="53416982" type="application/octet-stream" sparkle:edSignature="ZsNjT5NvgJzjMI2kTHXfXPq0ZtY9VvOUvlC+WlMHR8pIAq4p4Vnso4JyyWrzVZ+oCwau6dtNkrIxOtPeaejcBw=="/>
         </item>
     </channel>
 </rss>
