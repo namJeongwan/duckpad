@@ -214,14 +214,7 @@ public enum DuckpadMainMenuFactory {
         viewMenu.addItem(.separator())
         add("Show minimap", #selector(DuckpadWindowController.performToggleMinimap(_:)), "", target, modifiers: [], to: viewMenu)
         add("Word Wrap", #selector(DuckpadWindowController.performToggleWordWrap(_:)), "", target, modifiers: [], to: viewMenu)
-        add("Markdown Preview", #selector(DuckpadWindowController.performToggleMarkdownPreview(_:)), "V", target, modifiers: [.command, .shift], to: viewMenu)
-        add("Close Preview", #selector(DuckpadWindowController.performCloseMarkdownPreview(_:)), "w", target, modifiers: [.control], to: viewMenu)
-        for item in viewMenu.items where item.action == #selector(DuckpadWindowController.performToggleMarkdownPreview(_:))
-            || item.action == #selector(DuckpadWindowController.performCloseMarkdownPreview(_:)) {
-            // Visibility is refreshed on menu open; key equivalents must still
-            // validate against the current tab before that menu has been opened.
-            item.allowsKeyEquivalentWhenHidden = true
-        }
+        add("Markdown Live Editing", #selector(DuckpadWindowController.performToggleMarkdownLiveEditing(_:)), "V", target, modifiers: [.command, .shift], to: viewMenu)
         target.menuNeedsUpdate(viewMenu)
         add("Show Wrap Symbols", #selector(DuckpadWindowController.performToggleWrapMarker(_:)), "", target, modifiers: [], to: viewMenu)
         add("Show Whitespace", #selector(DuckpadWindowController.performToggleWhitespace(_:)), "", target, modifiers: [], to: viewMenu)

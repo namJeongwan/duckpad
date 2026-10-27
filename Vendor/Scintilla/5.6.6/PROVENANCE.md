@@ -628,6 +628,17 @@ a single continuation-byte check per edge on already validated UTF-8 text
 (binary documents remain rejected); the general byte-navigation helper is
 unchanged. Only the Duckpad bridge changes; no upstream/generated files change.
 
+## Markdown CodeMirror bridge (2026-10-27)
+
+The Duckpad-owned bridge exposes all selection anchor/caret byte positions and
+an atomic selection setter for the CodeMirror Markdown surface. The setter
+validates UTF-8 boundaries and the existing 10,000-selection bound before changing
+any selection. Native document bytes and Undo remain the application storage and
+command bridge; Markdown presentation is supplied by bundled CodeMirror 6 in
+DuckpadEditorAdapter. Only `bridge/DuckpadScintillaBridge.mm` and its public header
+change. No upstream Scintilla/Lexilla or generated sources are modified.
+No Obsidian implementation code is included.
+
 2026-10-27 Tail viewport fix: Duckpad-owned bridge retains explicit Follow intent
 through asynchronous wrapping after group splits and resizes. Paint scrolls the
 end caret back into view when display-line estimates settle. A view-scoped local

@@ -1409,3 +1409,29 @@
 "The remote folder is unavailable. Check the path and permissions." = "원격 폴더를 열 수 없습니다. 경로와 접근 권한을 확인하세요.";
 
 "Connected · Folder unavailable. Check the remote path and permissions." = "연결됨 · 폴더를 열 수 없습니다. 원격 경로와 접근 권한을 확인하세요.";
+
+"Markdown Live Editing" = "Markdown Live 편집";
+
+"Markdown Source Mode" = "원문";
+
+"Markdown Live Preview" = "Live 편집";
+
+"Insert Row Below" = "아래에 행 삽입";
+
+"Insert Column Right" = "오른쪽에 열 삽입";
+
+"Delete Row" = "행 삭제";
+
+"Delete Column" = "열 삭제";
+
+"Table cell %1$d, %2$d" = "표 %1$d행 %2$d열";
+
+"Table Options" = "표 옵션";
+
+"Mermaid Diagram" = "Mermaid 다이어그램";
+
+"Edit Source" = "원문 편집";
+
+"Rendering diagram…" = "다이어그램 렌더링 중…";
+
+"Diagram incomplete. Edit the source to continue." = "다이어그램이 완성되지 않았습니다. 원문을 편집하세요.";

@@ -12,3 +12,9 @@
 /Sources/DuckpadPresentation/Resources/MarkdownPreview/*.js whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 /Sources/DuckpadPresentation/Resources/MarkdownPreview/*.css whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 /Sources/DuckpadPresentation/Resources/MarkdownPreview/THIRD_PARTY_NOTICES.txt whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+
+# CodeMirror snippets contain significant trailing tabs inside JS templates.
+# Preserve generated editor strings, upstream styles and license notices too.
+/Sources/DuckpadEditorAdapter/Resources/MarkdownEditor/*.js whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+/Sources/DuckpadEditorAdapter/Resources/MarkdownEditor/*.css whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+/Sources/DuckpadEditorAdapter/Resources/MarkdownEditor/THIRD_PARTY_NOTICES.txt whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

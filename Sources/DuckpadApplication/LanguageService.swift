@@ -350,6 +350,14 @@ public final class LanguageWorkspaceUseCase {
         if case .manual(let id) = override, registry[id] == nil {
             return .rejected(.invalidRecoveryState("unknown language \(id.rawValue)"))
         }
+        if let queued = editor as? any EditorInputSynchronizationPort,
+           !(await queued.synchronizePendingInput()) {
+            return .rejected(.invalidRecoveryState("editor input could not synchronize"))
+        }
+        guard let current = workspace.activeLanguageContext(), current.tabID == context.tabID,
+              current.buffer.bufferID == context.buffer.bufferID, current.override == context.override else {
+            return .rejected(.invalidRecoveryState("active document changed"))
+        }
         detectedLogsByBuffer.removeValue(forKey: context.buffer.bufferID)
         let outcome = await workspace.setLanguageOverride(override, for: context.tabID)
         if case .applied = outcome { _ = refreshActive() }

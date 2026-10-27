@@ -1661,6 +1661,40 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [self scheduleWordHighlights:YES];
 }
 
+- (NSArray<NSDictionary<NSString *, NSNumber *> *> *)selectionUTF8Positions {
+    const NSInteger count = [_scintilla message:SCI_GETSELECTIONS];
+    if (count > 10000) return @[];
+    NSMutableArray *positions = [NSMutableArray arrayWithCapacity:count];
+    for (NSInteger index = 0; index < count; ++index) {
+        [positions addObject:@{@"anchor": @([_scintilla message:SCI_GETSELECTIONNANCHOR wParam:index]),
+                               @"caret": @([_scintilla message:SCI_GETSELECTIONNCARET wParam:index])}];
+    }
+    return positions;
+}
+
+- (NSUInteger)mainSelectionIndex { return [_scintilla message:SCI_GETMAINSELECTION]; }
+
+- (BOOL)setSelectionUTF8Positions:(NSArray<NSDictionary<NSString *, NSNumber *> *> *)positions mainIndex:(NSUInteger)mainIndex {
+    if (!_scintilla || positions.count == 0 || positions.count > 10000 || mainIndex >= positions.count) return NO;
+    const NSUInteger length = self.documentByteLength;
+    std::vector<std::pair<NSInteger, NSInteger>> validated;
+    for (NSDictionary *position in positions) {
+        NSInteger anchor, caret;
+        if (!DPIntegerFromNumber(position[@"anchor"], &anchor) || !DPIntegerFromNumber(position[@"caret"], &caret)
+            || anchor < 0 || caret < 0 || anchor > length || caret > length
+            || ![self isUTF8Boundary:anchor documentLength:length] || ![self isUTF8Boundary:caret documentLength:length]) return NO;
+        validated.emplace_back(anchor, caret);
+    }
+    BOOL first = YES;
+    for (const auto [anchor, caret] : validated) {
+        [_scintilla message:first ? SCI_SETSELECTION : SCI_ADDSELECTION wParam:caret lParam:anchor];
+        first = NO;
+    }
+    [_scintilla message:SCI_SETMAINSELECTION wParam:mainIndex];
+    [self scheduleWordHighlights:YES];
+    return YES;
+}
+
 - (void)attachWordHighlighter {
     __weak DPScintillaEditorView *weakSelf = self;
     [_wordHighlighter addView:_scintilla onChange:^{

@@ -161,14 +161,11 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     public var onClosed: (() -> Void)?
     public var onDocumentURLUsed: ((URL) -> Void)?
     private let editorHostView: NSView
-    private let markdownPreview: MarkdownPreviewCoordinator
-    private var markdownPreviewPanel: MarkdownPreviewPanel? { markdownPreview.panel }
     private let markdownImageAccess: any MarkdownImageAccess
     weak var markdownCommandsMenu: NSMenu?
     private var markdownImageDropTask: Task<Void, Never>?
     var markdownImageDropDecision: (@MainActor (NSWindow) async -> MarkdownImageDropDecision?)?
     public var onMarkdownImageDropPreferenceChanged: (@MainActor (Int) async -> Bool)?
-    var isMarkdownPreviewVisible: Bool { markdownPreviewPanel != nil }
     private let fileUseCase: FileDocumentUseCase?
     private let filePanels: (any FilePanelPresenting)?
     private let fileConflictPresenter: (any FileConflictPresenting)?
@@ -286,7 +283,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         fallbackEditor = fallback
         activeEditor = editorAdapter ?? fallback!
-        markdownPreview = MarkdownPreviewCoordinator(workspace: workspace, editor: activeEditor, resourceReader: previewResourceReader, imageAccess: markdownImageAccess)
         self.editorGroupRouter = editorGroupRouter
         editorHostView = editorView ?? fallback!.scrollView
         editorGroupWorkspace = EditorGroupWorkspaceView(
@@ -364,6 +360,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             }
         }
         editorGroupWorkspace.onAction = { [weak self] action in self?.performEditorGroupAction(action) }
+        (activeEditor as? any MarkdownLiveEditorPort)?.onOpenMarkdownLink = { [weak self] url in
+            self?.openMarkdownLink(url)
+        }
         bindEditorGroupContextValidation()
         editorGroupRouter?.onEditorGroupFocus = { [weak self] group in
             self?.performEditorGroupFocus(group)
@@ -521,7 +520,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         (activeEditor as? any DeclarationNavigationEditorPort)?.onDeclarationRequested = nil
         (activeEditor as? any DeclarationNavigationEditorPort)?.onDeclarationHoverRequested = nil
         markdownImageDropTask?.cancel()
-        markdownPreview.close()
         extensionServiceHost?.close(in: workspaceContentSplit)
         if let extensionUseCase { extensionServiceHost?.unregister(extensionUseCase) }
         cancelSearch()
@@ -567,6 +565,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspace.onChange = nil
         editorGroupRouter?.onEditorGroupFocus = nil
         activeEditor.onEdit = nil
+        (activeEditor as? any MarkdownLiveEditorPort)?.onOpenMarkdownLink = nil
         (activeEditor as? any EditorStatusReportingPort)?.onEditorStatusChange = nil
         if let foldingEditor = activeEditor as? any FoldingEditorPort {
             foldingEditor.onFoldStateChange = nil
@@ -1122,10 +1121,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return
         }
         if extensionServiceHost?.closeFocusedPanel(in: workspaceContentSplit) == true { return }
-        if isMarkdownPreviewVisible {
-            performCloseMarkdownPreview()
-            return
-        }
         guard let id = workspace.snapshot().tabs.first(where: \.isActive)?.id else { return }
         performClose(id)
     }
@@ -1136,7 +1131,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return true
         }
         if extensionServiceHost?.closePresentedPanel(in: workspaceContentSplit) == true { return true }
-        if isMarkdownPreviewVisible { performCloseMarkdownPreview(); return true }
         if isTerminalVisible { hideTerminal(); return true }
         return false
     }
@@ -1381,7 +1375,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         declarationNavigation.cancel()
         if let latestWorkspaceSnapshot { updateWindowTitle(latestWorkspaceSnapshot, catalog: catalog) }
         updateAccessory?.refreshLocalization(catalog: catalog)
-        markdownPreviewPanel?.refreshLocalization(catalog: catalog)
         workspaceSidebar.refreshLocalization(catalog: catalog)
         terminalPanel?.refreshLocalization(catalog: catalog)
         commandBar.setWorkspaceVisible(workspaceSidebar.superview != nil, catalog: catalog)
@@ -1903,7 +1896,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               let context = workspace.activeFileContext(),
               context.binding?.isReadOnly != true else { return }
         beginFileCommandTask { [weak self] in
-            await self?.routeAcceptedSaveFile(expectedContext: context)
+            guard let self, let current = await self.synchronizedFileContext(context) else { return }
+            await self.routeAcceptedSaveFile(expectedContext: current)
         }
     }
 
@@ -1912,7 +1906,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               let context = workspace.activeFileContext(),
               context.binding?.isReadOnly != true else { return }
         beginFileCommandTask { [weak self] in
-            await self?.routeAcceptedSaveFileAs(expectedContext: context)
+            guard let self, let current = await self.synchronizedFileContext(context) else { return }
+            await self.routeAcceptedSaveFileAs(expectedContext: current)
         }
     }
 
@@ -1921,8 +1916,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
               let context = workspace.activeFileContext(),
               context.binding?.isReadOnly != true else { return }
         beginFileCommandTask { [weak self] in
-            await self?.routeSaveCopyAs(expectedContext: context)
+            guard let self, let current = await self.synchronizedFileContext(context) else { return }
+            await self.routeSaveCopyAs(expectedContext: current)
         }
+    }
+
+    private func synchronizedFileContext(_ before: FileWorkspaceContext) async -> FileWorkspaceContext? {
+        if let queued = activeEditor as? any EditorInputSynchronizationPort,
+           !(await queued.synchronizePendingInput()) { return nil }
+        guard let after = workspace.activeFileContext(), after.tabID == before.tabID,
+              after.buffer.bufferID == before.buffer.bufferID, after.binding == before.binding,
+              after.pendingFileFormat == before.pendingFileFormat else { return nil }
+        return after
     }
 
     @objc public func performRenameFile(_ sender: Any? = nil) { beginFileLocationChange(renaming: true) }
@@ -1965,40 +1970,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         if case .move = operation { recordActiveDocumentURLIfSaved(outcome) }
     }
 
-    @objc public func performCloseMarkdownPreview(_ sender: Any? = nil) {
-        guard markdownPreviewPanel != nil else { return }
-        markdownPreview.close()
-        if let menu = markdownCommandsMenu { menuNeedsUpdate(menu) }
+    @objc public func performToggleMarkdownLiveEditing(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable,
+              workspace.snapshot().tabs.first(where: { $0.isActive })?.isMarkdownDocument == true,
+              let editor = activeEditor as? any MarkdownLiveEditorPort,
+              editor.canUseMarkdownLiveEditing else { return }
+        editor.setMarkdownLiveEditingEnabled(!editor.isMarkdownLiveEditingEnabled)
         activeEditor.focus()
-    }
-
-    @objc public func performToggleMarkdownPreview(_ sender: Any? = nil) {
-        if markdownPreviewPanel != nil {
-            performCloseMarkdownPreview()
-            return
-        }
-        guard workspaceInteractionsAreActionable, workspace.activeFileContext()?.binding?.isReadOnly != true else { return }
-        markdownPreview.open(in: workspaceContentSplit) { [weak self] in self?.performCloseMarkdownPreview() }
-        onUsageMetric?(.feature(.markdownPreview))
-        if let menu = markdownCommandsMenu { menuNeedsUpdate(menu) }
-        scheduleMarkdownPreview()
-    }
-
-    private func scheduleMarkdownPreview() {
-        if !markdownPreview.schedule() { performCloseMarkdownPreview() }
     }
 
     private func routeDroppedFiles(_ urls: [URL], at point: NSPoint) {
         guard MarkdownImageDrop.containsOnlyImages(urls) else { openExternalURLs(urls); return }
         let layout = editorGroupLayout.snapshot
-        let group: EditorGroupID?
-        if let preview = markdownPreviewPanel, preview.bounds.contains(preview.convert(point, from: nil)) {
-            group = layout.focusedGroup
-        } else {
-            group = layout.visibleGroups.first { id in
-                guard let host = editorGroupWorkspace.pane(for: id)?.editorHostView else { return false }
-                return host.bounds.contains(host.convert(point, from: nil))
-            }
+        let group = layout.visibleGroups.first { id in
+            guard let host = editorGroupWorkspace.pane(for: id)?.editorHostView else { return false }
+            return host.bounds.contains(host.convert(point, from: nil))
         }
         guard let group, let tab = layout.selectedTabID(in: group) else { openExternalURLs(urls); return }
         guard markdownImageDropTask == nil else { return }
@@ -2041,7 +2027,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             let text = MarkdownImageDrop.markup(for: urls, documentURL: documentURL)
             guard case .accepted = editor.replaceActive(range: selection, with: Data(text.utf8), expectedRevision: context.buffer.revision) else { return }
             markdownImageAccess.remember(urls)
-            markdownPreviewPanel?.reloadImageAccess()
+            (activeEditor as? any MarkdownLiveEditorPort)?.refreshMarkdownImageAccess()
             editor.selectAndReveal(.init(location: selection.location + text.utf8.count, length: 0))
             editor.focus()
         }
@@ -2320,8 +2306,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     @objc public func performCloseEditorSplit(_ sender: Any? = nil) {
         guard let editor = actionableSplitEditor, editor.splitOrientation != nil else { return }
-        editor.closeSplit()
-        recoveryUseCase?.editorViewStateDidChange()
+        let bufferID = workspace.activeFileContext()?.buffer.bufferID
+        let orientation = editor.splitOrientation
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let queued = self.activeEditor as? any EditorInputSynchronizationPort,
+               !(await queued.synchronizePendingInput()) { return }
+            guard self.workspaceInteractionsAreActionable,
+                  self.workspace.activeFileContext()?.buffer.bufferID == bufferID,
+                  editor.splitOrientation == orientation else { return }
+            editor.closeSplit()
+            self.recoveryUseCase?.editorViewStateDidChange()
+        }
     }
 
     @objc public func performMoveActiveTabToGroupRight(_ sender: Any? = nil) {
@@ -2354,6 +2350,18 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func closeEditorGroup(_ group: EditorGroupID) {
+        guard let queued = activeEditor as? any EditorInputSynchronizationPort else {
+            closeSynchronizedEditorGroup(group); return
+        }
+        let layout = editorGroupLayout.snapshot
+        Task { @MainActor [weak self] in
+            guard await queued.synchronizePendingInput(), let self,
+                  self.editorGroupLayout.snapshot == layout else { return }
+            self.closeSynchronizedEditorGroup(group)
+        }
+    }
+
+    private func closeSynchronizedEditorGroup(_ group: EditorGroupID) {
         guard workspaceInteractionsAreActionable,
               provisionalEditorGroupLayout == nil,
               editorGroupRouter != nil,
@@ -2405,15 +2413,21 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func updateMarkdownMenu(_ menu: NSMenu, isMarkdown: Bool) {
         for item in menu.items {
-            if item.action == #selector(performToggleMarkdownPreview(_:)) {
+            if item.action == #selector(performToggleMarkdownLiveEditing(_:)) {
                 item.isHidden = !isMarkdown
-            } else if item.action == #selector(performCloseMarkdownPreview(_:)) {
-                item.isHidden = !isMarkdownPreviewVisible
+
             }
         }
     }
 
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(performToggleMarkdownLiveEditing(_:)) {
+            let editor = activeEditor as? any MarkdownLiveEditorPort
+            menuItem.isHidden = workspace.snapshot().tabs.first(where: { $0.isActive })?.isMarkdownDocument != true
+            menuItem.state = editor?.isMarkdownLiveEditingEnabled == true ? .on : .off
+            return !menuItem.isHidden && workspaceInteractionsAreActionable
+                && editor?.canUseMarkdownLiveEditing == true && window?.attachedSheet == nil
+        }
         if menuItem.action == #selector(performOpenRemoteFile(_:)) {
             return workspaceInteractionsAreActionable && remoteFileUseCase != nil && window?.attachedSheet == nil
         }
@@ -2428,16 +2442,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
         if menuItem.action == #selector(performSnippets(_:)) {
             return workspaceInteractionsAreActionable && window?.attachedSheet == nil && activeEditor is any SnippetEditorPort
-        }
-        if menuItem.action == #selector(performCloseMarkdownPreview(_:)) {
-            menuItem.isHidden = !isMarkdownPreviewVisible
-            return isMarkdownPreviewVisible && window?.attachedSheet == nil
-        }
-        if menuItem.action == #selector(performToggleMarkdownPreview(_:)) {
-            menuItem.isHidden = workspace.snapshot().tabs.first(where: { $0.isActive })?.isMarkdownDocument != true
-            menuItem.state = isMarkdownPreviewVisible ? .on : .off
-            return !menuItem.isHidden && (isMarkdownPreviewVisible || (workspaceInteractionsAreActionable
-                && workspace.activeFileContext()?.binding?.isReadOnly != true))
         }
         if menuItem.action == #selector(performFormatDocument(_:)) {
             return workspaceInteractionsAreActionable && formattingUseCase?.canFormat == true
@@ -2857,6 +2861,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    var markdownExternalLinkOpener: (URL) -> Void = { NSWorkspace.shared.open($0) }
+
+    func openMarkdownLink(_ url: URL) {
+        guard workspaceInteractionsAreActionable, !terminationReviewInProgress, !hasTornDownWindow else { return }
+        if url.isFileURL { openExternalURLs([url]) }
+        else if ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") { markdownExternalLinkOpener(url) }
+    }
+
     public func routeOpenFile(encodingHint: TextFileEncoding? = nil) async {
         if workspaceInteractionsAreActionable, keepsClosedWindowForReopen, window?.isVisible == false { showAndFocus() }
         guard workspaceInteractionsAreActionable,
@@ -3255,6 +3267,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func routeSaveAll() async {
+        if let queued = activeEditor as? any EditorInputSynchronizationPort,
+           !(await queued.synchronizePendingInput()) { return }
         guard let fileUseCase else { return }
         let originalTabID = workspace.snapshot().tabs.first(where: \.isActive)?.id
         let originalGroup = editorGroupLayout.snapshot.focusedGroup
@@ -3382,6 +3396,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     func prepareTerminationDocuments() async -> [TabSnapshot] {
         guard terminationReviewInProgress else { return [] }
+        if let queued = activeEditor as? any EditorInputSynchronizationPort { _ = await queued.synchronizePendingInput() }
         await waitForStartup()
         await waitForAcceptedWorkspaceTasks()
         await fileUseCase?.waitForLiveReload()
@@ -4405,6 +4420,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         retryingSaveTabID: TabID?,
         forcedDecision: CloseDecision? = nil
     ) async {
+        if let queued = activeEditor as? any EditorInputSynchronizationPort,
+           !(await queued.synchronizePendingInput()) { return }
         var batchDecision: DirtyTabBatchDecision?
         var requestedBatchDecision = false
         let outcome = await tabCloseCoordinator.close(
@@ -4705,10 +4722,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return editorGroupRouter != nil
                 && provisionalEditorGroupLayout == nil
                 && editorGroupLayout.snapshot.orientation != nil
-        case .previewMarkdown:
-            return workspaceInteractionsAreActionable && provisionalEditorGroupLayout == nil
-                && workspace.snapshot().tabs.first(where: { $0.id == tabID })?.isMarkdownDocument == true
-                && workspace.fileContext(tabID: tabID)?.binding?.isReadOnly != true
         case .compareWithOpenDocument:
             return workspaceInteractionsAreActionable && workspace.snapshot().tabs.count >= 2
         case .renameFile, .moveFile, .trashFile:
@@ -4773,17 +4786,6 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             performEditorGroupFocus(otherEditorGroup(than: group))
         case .closeEditorGroup:
             closeEditorGroup(group)
-        case .previewMarkdown:
-            guard validateContextAction(action, tabID: tabID, group: group) else { return }
-            performActivate(tabID, in: group)
-            let activation = editorGroupActivationTask
-            Task { @MainActor [weak self] in
-                await activation?.value
-                guard let self, self.workspace.activeFileContext()?.tabID == tabID,
-                      self.editorGroupLayout.snapshot.focusedGroup == group else { return }
-                if self.markdownPreviewPanel == nil { self.performToggleMarkdownPreview() }
-                else { self.scheduleMarkdownPreview() }
-            }
         case .compareWithOpenDocument:
             guard let source = workspace.snapshot().tabs.first(where: { $0.id == tabID }) else { return }
             beginOpenDocumentCompare(source: source, initiatingGroup: group)
@@ -5272,13 +5274,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             return
         }
         if let menu = markdownCommandsMenu { updateMarkdownMenu(menu, isMarkdown: active.isMarkdownDocument) }
+        (activeEditor as? any MarkdownLiveEditorPort)?.setMarkdownDocumentURL(
+            workspace.activeFileContext()?.binding.map { URL(fileURLWithPath: $0.canonicalPath) })
         window?.title = "\(active.localizedTitle(catalog: catalog)) — Duckpad"
         window?.isDocumentEdited = active.isDirty
     }
 
     private func renderEditorStatus() {
         refreshTailStatus()
-        scheduleMarkdownPreview()
         statusBar.showLoading(remoteFileUseCase?.loadingProgress ?? fileUseCase?.loadingProgress ?? pendingWorkspaceFileReads.values.first)
         guard let status = (activeEditor as? any EditorStatusReportingPort)?.editorStatus else { return }
         let binding = workspace.activeFileContext()?.binding

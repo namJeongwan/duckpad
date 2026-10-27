@@ -2706,3 +2706,33 @@ func ordinaryTextUndoClearsDirtyAtTheLoadedOrSavedBaseline(saveFirst: Bool) asyn
     editor.activeScintillaView?.undo()
     #expect(workspace.snapshot().tabs.first(where: { $0.isActive })?.isDirty == (state != .originalRestored))
 }
+
+@Test @MainActor func markdownLinksRouteWebToTheDefaultOpenerAndFilesIntoDuckpadTabs() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = ScintillaEditorAdapter()
+    let store = RoutingFileStore()
+    let target = URL(fileURLWithPath: "/tmp/markdown-linked-file.txt")
+    await store.seed("linked file 한글", at: target)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    let controller = DuckpadWindowController(workspace: workspace,
+        previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
+        editorAdapter: editor, editorView: editor.view, fileUseCase: files, automaticallyStarts: false)
+    defer { controller.close(); editor.invalidate() }
+    controller.start(); await controller.waitForStartup()
+    var external: [URL] = []
+    controller.markdownExternalLinkOpener = { external.append($0) }
+    let web = try #require(URL(string: "https://example.com/path"))
+    editor.onOpenMarkdownLink?(web)
+    #expect(external == [web])
+    editor.onOpenMarkdownLink?(target)
+    let deadline = ContinuousClock.now + .seconds(3)
+    while workspace.activeFileContext()?.binding?.canonicalPath != target.path, ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(workspace.activeFileContext()?.binding?.canonicalPath == target.path)
+    let buffer = try #require(workspace.snapshot().activeBuffer)
+    #expect(editor.snapshot(for: buffer.bufferID)?.text == "linked file 한글")
+    #expect(external == [web])
+    editor.onOpenMarkdownLink?(try #require(URL(string: "javascript:alert(1)")))
+    #expect(external == [web])
+}

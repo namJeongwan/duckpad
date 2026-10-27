@@ -1,13 +1,37 @@
 import AppKit
 import DuckpadApplication
 import DuckpadDomain
-import DuckpadEditorAdapter
+@testable import DuckpadEditorAdapter
+import WebKit
 @testable import DuckpadInfrastructure
 @testable import DuckpadPresentation
 import Testing
 
 @Suite(.serialized)
 struct NativeFileDropTests {
+    @Test @MainActor func markdownEditorForwardsInternalDragsAndEntireLifecycle() {
+        _ = NSApplication.shared
+        for type in ["com.duckpad.editor-group-tab.v1", "com.duckpad.workspace-entry.v1"] {
+            let root = ForwardedDragDestination(frame: .init(x: 0, y: 0, width: 500, height: 300))
+            root.registerForDraggedTypes([.init(type)])
+            let web = MarkdownEditorWebView(frame: root.bounds, configuration: WKWebViewConfiguration())
+            root.addSubview(web)
+            let window = NSWindow(contentRect: root.bounds, styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false; window.contentView = root
+            defer { window.contentView = nil; window.close() }
+            let board = NSPasteboard.withUniqueName()
+            defer { board.releaseGlobally() }
+            board.setData(Data("test".utf8), forType: .init(type))
+            let info = FileDraggingInfo(window: window, pasteboard: board, operation: .copy)
+            #expect(web.draggingEntered(info) == .copy)
+            #expect(web.draggingUpdated(info) == .copy)
+            #expect(web.prepareForDragOperation(info))
+            #expect(web.performDragOperation(info))
+            web.draggingExited(info); web.concludeDragOperation(info)
+            #expect(root.events == ["entered", "updated", "prepare", "perform", "exited", "conclude"])
+        }
+    }
+
     @Test @MainActor func nativeEditorForwardsFinderFilesToWorkspaceWithoutInsertingPaths() throws {
         _ = NSApplication.shared
         let editor = ScintillaEditorAdapter()
@@ -204,27 +228,6 @@ struct NativeFileDropTests {
         #expect(asks == 0)
     }
 
-    @Test @MainActor func previewForwardsImageDropsToWorkspaceWithLocation() throws {
-        let root = FileDropView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
-        let panel = MarkdownPreviewPanel(frame: root.bounds, resourceReader: LocalPreviewResourceReader(), imageAccess: TestMarkdownImageAccess())
-        root.addSubview(panel)
-        let window = NSWindow(contentRect: root.bounds, styleMask: [.titled], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = root
-        defer { panel.invalidate(); window.contentView = nil; window.close() }
-        let web = try #require(panel.subviews.compactMap { $0 as? MarkdownPreviewWebView }.first)
-        let board = NSPasteboard.withUniqueName()
-        defer { board.releaseGlobally() }
-        let url = URL(fileURLWithPath: "/tmp/test.svg")
-        board.writeObjects([url as NSURL])
-        var received: [URL] = []
-        root.onFilesAtLocation = { urls, point in received = urls; #expect(point == NSPoint(x: 20, y: 20)) }
-        let info = FileDraggingInfo(window: window, pasteboard: board, operation: .copy)
-        #expect(web.draggingEntered(info) == .copy)
-        #expect(web.performDragOperation(info))
-        #expect(received == [url])
-    }
-
     @MainActor private func findNativeContent(in view: NSView) -> NSView? {
         if view.registeredDraggedTypes.contains(.fileURL) { return view }
         return view.subviews.lazy.compactMap { findNativeContent(in: $0) }.first
@@ -260,4 +263,14 @@ private final class FileDraggingInfo: NSObject, NSDraggingInfo {
         using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
     ) {}
     func resetSpringLoading() {}
+}
+
+@MainActor private final class ForwardedDragDestination: NSView {
+    var events: [String] = []
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { events.append("entered"); return .copy }
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation { events.append("updated"); return .copy }
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool { events.append("prepare"); return true }
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool { events.append("perform"); return true }
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) { events.append("exited") }
+    override func concludeDragOperation(_ sender: (any NSDraggingInfo)?) { events.append("conclude") }
 }

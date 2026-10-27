@@ -33,11 +33,11 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
         if hasVisibleGroups {
             return displayedGroupViews[activeEditorGroup]
         }
-        if let primaryActiveView, primaryActiveView.hasEditorFocus {
+        if let primaryActiveView, primaryActiveView.hasEditorFocus || markdownEditors.editor(for: primaryActiveView)?.hasEditorFocus == true {
             lastFocusedViewID = ObjectIdentifier(primaryActiveView)
             return primaryActiveView
         }
-        if splitOrientation != nil, let secondaryActiveView, secondaryActiveView.hasEditorFocus {
+        if splitOrientation != nil, let secondaryActiveView, secondaryActiveView.hasEditorFocus || markdownEditors.editor(for: secondaryActiveView)?.hasEditorFocus == true {
             lastFocusedViewID = ObjectIdentifier(secondaryActiveView)
             return secondaryActiveView
         }
@@ -173,6 +173,8 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     private var readOnlyBuffers: Set<BufferID> = []
     private var lifecycleGeneration: UInt64 = 0
     private var isInvalidated = false
+    let markdownEditors = MarkdownEditorCoordinator()
+    private var handlingMarkdownCommand = false
     private var editCallbackDepth = 0
     private var editorGroupLayoutRequestGeneration: UInt64 = 0
     private var deferredEditorGroupCloseRequestGeneration: UInt64?
@@ -190,9 +192,38 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public init(defaultViewState: EditorViewState = EditorViewState(),
-                markdownClipboardRenderer: (any MarkdownClipboardRendering)? = nil) {
+                markdownClipboardRenderer: (any MarkdownClipboardRendering)? = nil,
+                markdownResourceReader: (any PreviewResourceReading)? = nil,
+                markdownImageAccess: (any MarkdownImageAccess)? = nil) {
         self.defaultViewState = defaultViewState
         self.markdownClipboardRenderer = markdownClipboardRenderer
+        markdownEditors.resourceReader = markdownResourceReader
+        markdownEditors.imageAccess = markdownImageAccess
+        markdownEditors.onStatusChange = { [weak self] in self?.onEditorStatusChange?() }
+        markdownEditors.validatesRevision = { [weak self] bufferID, revision in
+            guard let self else { return false }
+            return self.currentRevision(for: bufferID) == revision && !self.pendingRecoveryBuffers.contains(bufferID)
+        }
+        markdownEditors.onCommand = { [weak self] command, native in
+            guard let self, self.activeScintillaView === native else { return }
+            if command == "save" {
+                NSApp.sendAction(NSSelectorFromString("performSaveFile:"), to: nil, from: nil)
+                return
+            }
+            let commands: [String: EditorCommand] = ["undo": .undo, "redo": .redo, "cut": .cut, "copy": .copy,
+                "paste": .paste, "delete": .delete, "selectAll": .selectAll, "duplicateLine": .duplicateLine,
+                "moveLineUp": .moveLineUp, "moveLineDown": .moveLineDown, "deleteLine": .deleteLine,
+                "joinLines": .joinLines, "uppercase": .uppercase, "lowercase": .lowercase, "indent": .indent,
+                "unindent": .unindent, "trimTrailingWhitespace": .trimTrailingWhitespace,
+                "selectNextOccurrence": .selectNextOccurrence, "selectAllOccurrences": .selectAllOccurrences,
+                "skipCurrentOccurrence": .skipCurrentOccurrence, "undoAddedSelection": .undoAddedSelection,
+                "addCursorAbove": .addCursorAbove, "addCursorBelow": .addCursorBelow,
+                "splitSelectionIntoLines": .splitSelectionIntoLines, "collapseSelections": .collapseSelections]
+            guard let command = commands[command] else { return }
+            self.handlingMarkdownCommand = true
+            defer { self.handlingMarkdownCommand = false }
+            self.perform(command)
+        }
         Self.prepareResources()
         splitView.dividerStyle = .thin
         splitView.isVertical = true
@@ -207,6 +238,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func refreshLocalization(catalog: LocalizationCatalog = L10n.catalog) {
+        markdownEditors.refreshLocalization(catalog: catalog)
         primaryHost.setAccessibilityLabel(catalog.text("Primary editor pane"))
         internalSecondaryHost.setAccessibilityLabel(catalog.text("Secondary editor pane"))
         secondaryGroupHost.setAccessibilityLabel(catalog.text("Secondary editor group"))
@@ -265,7 +297,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
             storeViewState(bufferID: activeBuffer.bufferID)
             // The retained native view and recovery journal already own the text.
         }
-        let restoreEditorFocus = activeScintillaView?.hasEditorFocus == true
+        let restoreEditorFocus = activeScintillaView?.hasEditorFocus == true || activeCodeMirrorEditor?.hasEditorFocus == true
         hideSplit(focusPrimary: false)
         let editorView = preparePrimaryView(for: buffer)
         activeBuffer = buffer
@@ -282,6 +314,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
         bufferOwners[buffer.bufferID] = bufferOwners[buffer.bufferID] ?? .primary
         bufferGroupViews[buffer.bufferID, default: [:]][.primary] = editorView
         restoreSplitViewState(for: buffer.bufferID, primary: editorView)
+        configureMarkdownEditors(for: buffer.bufferID)
         // Removing the outgoing view makes the window its own first responder.
         // Transfer editor focus in the same turn, before session persistence.
         if restoreEditorFocus { focus() }
@@ -294,6 +327,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
         deferredEditorGroupCloseRequestGeneration = nil
         scheduledEditorGroupCloseRequestGeneration = nil
         guard let orientation else {
+            guard !markdownEditors.hasComposition else { return }
             closeEditorGroups(requestGeneration: requestGeneration)
             return
         }
@@ -454,6 +488,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
             pending.offset = end
         }
         pendingTextLoads.removeValue(forKey: buffer.bufferID)
+        configureMarkdownEditors(for: buffer.bufferID)
         synchronizeRevision(buffer.revision, for: buffer.bufferID)
         for view in allViews(for: buffer.bufferID) {
             view.isInputEnabled = isInputEnabled(for: buffer.bufferID)
@@ -568,6 +603,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
 
     private func install(_ snapshot: EditorTextSnapshot, preservingUndo: Bool,
                          preparedCheckpoint: EditorRecoveryCheckpoint? = nil) {
+        defer { markdownEditors.reload(snapshot.bufferID) }
         if snippetBuffer == snapshot.bufferID { cancelSnippet() }
         guard !isInvalidated else { return }
         if !preservingUndo {
@@ -752,6 +788,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func retire(bufferID: BufferID) {
+        markdownEditors.retire(bufferID)
         formatUndoActions.removeValue(forKey: bufferID)
         trustedSavePoints.remove(bufferID)
         if snippetBuffer == bufferID { cancelSnippet() }
@@ -829,6 +866,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func invalidate() {
+        markdownEditors.invalidate()
         formatUndoActions.removeAll()
         trustedSavePoints.removeAll()
         onFileFormatSavePointReached = nil
@@ -899,6 +937,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func setInputEnabled(_ isEnabled: Bool) {
+        defer { markdownEditors.refreshAppearance() }
         if !isEnabled {
             for bufferID in Array(pendingRecoveryBuffers) {
                 recoverPendingBufferIfNeeded(bufferID)
@@ -949,7 +988,10 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
         if hadFocus { activeScintillaView?.focusEditor() }
     }
 
-    public func focus() { (openingPreview?.editor ?? activeScintillaView)?.focusEditor() }
+    public func focus() {
+        if openingPreview == nil, let editor = markdownEditors.editor(for: activeScintillaView) { editor.focus(); return }
+        (openingPreview?.editor ?? activeScintillaView)?.focusEditor()
+    }
 
     public func split(orientation: EditorSplitOrientation) {
         guard !hasVisibleGroups else { return }
@@ -963,7 +1005,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func closeSplit() {
-        guard !hasVisibleGroups else { return }
+        guard !hasVisibleGroups, !markdownEditors.hasComposition else { return }
         guard splitOrientation != nil, let bufferID = activeBuffer?.bufferID else { return }
         storeViewState(bufferID: bufferID)
         var state = viewStates[bufferID] ?? EditorViewState()
@@ -1009,6 +1051,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func applyPreferences(_ settings: AppSettings) {
+        defer { markdownEditors.refreshAppearance() }
         displayPreferences = settings
         setDefaultViewOptions(wordWrapEnabled: settings.defaultWordWrapEnabled,
                               wrapMarkerVisible: settings.defaultWrapMarkerVisible)
@@ -1263,6 +1306,9 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func perform(_ command: EditorCommand) {
+        if !handlingMarkdownCommand, openingPreview == nil, let editor = markdownEditors.editor(for: activeScintillaView), editor.ready {
+            editor.command(String(describing: command)); return
+        }
         guard canPerform(command), let editorView = openingPreview?.editor ?? activeScintillaView else { return }
         switch command {
         case .undo: editorView.undo()
@@ -1334,7 +1380,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public var canToggleBlockComment: Bool {
-        guard !isInvalidated,
+        guard activeCodeMirrorEditor?.isComposing != true, !isInvalidated,
               let bufferID = activeBuffer?.bufferID,
               let primary = bufferViews[bufferID],
               let selectionOwner = activeScintillaView,
@@ -1445,6 +1491,8 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
               bufferViews[bufferID] != nil,
               supportsLexer(named: configuration.lexerName) else { return false }
         let editorViews = allViews(for: bufferID)
+        if configuration.languageID.rawValue != "markdown",
+           editorViews.contains(where: { markdownEditors.editor(for: $0)?.isComposing == true }) { return false }
         for editorView in editorViews {
             guard editorView.applyLexerNamed(
                 configuration.lexerName,
@@ -1459,6 +1507,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
             editorView.apply(nativePalette(themePalette))
         }
         languageConfigurations[bufferID] = configuration
+        configureMarkdownEditors(for: bufferID)
         declarationHover.cancel()
         if editorViews.allSatisfy(\.configuredFoldingEnabled) {
             editorViews.forEach { retryPendingFoldRecovery(in: $0) }
@@ -1470,6 +1519,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func applyTheme(_ palette: EditorThemePalette) {
+        markdownEditors.setTheme(palette)
         themePalette = palette
         let native = nativePalette(palette)
         bufferViews.values.forEach { $0.apply(native) }
@@ -1478,7 +1528,8 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func toggleLineComment(prefix: String) -> EditorEditOutcome {
-        guard !prefix.isEmpty, let activeBuffer, let editorView = activeScintillaView else {
+        guard activeCodeMirrorEditor?.isComposing != true,
+              !prefix.isEmpty, let activeBuffer, let editorView = activeScintillaView else {
             return .rejected(currentRevision: activeBuffer?.revision ?? 0)
         }
         let oldRevision = activeBuffer.revision
@@ -1492,7 +1543,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func toggleBlockComment() -> EditorEditOutcome {
-        guard !isInvalidated,
+        guard activeCodeMirrorEditor?.isComposing != true, !isInvalidated,
               let activeBuffer,
               activeBuffer.revision < .max,
               let primary = bufferViews[activeBuffer.bufferID],
@@ -1553,7 +1604,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
         guard !isInvalidated, openingPreview == nil, activeBuffer == buffer, pendingTextLoads[buffer.bufferID] == nil,
               let view = activeScintillaView,
               view.revision == buffer.revision else { return false }
-        return !view.hasMarkedText()
+        return !view.hasMarkedText() && markdownEditors.editor(for: view)?.isComposing != true
     }
 
     public func captureExtensionInput(
@@ -1850,6 +1901,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     private func appendRecovery(_ edit: EditorIncrementalEdit, resultingRevision: UInt64, recordUsage: Bool = true) {
+        markdownEditors.accepted(edit)
         if recordUsage {
             onAcceptedEditLanguage?(languageConfigurations[edit.bufferID]?.languageID ?? .plainText)
             updateSnippet(edit)
@@ -2325,6 +2377,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
             self?.receiveBridgeError(error, bufferID: bufferID)
         }
         editorView.onStatusChange = { [weak self, weak editorView] in
+            if let self, let editorView { self.markdownEditors.nativeStatusChanged(editorView) }
             guard let self, let editorView, self.activeScintillaView === editorView else { return }
             self.onEditorStatusChange?()
         }
@@ -2405,6 +2458,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     private func discardViewIdentity(_ editorView: DPScintillaEditorView) {
+        markdownEditors.detach(editorView)
         let identifier = ObjectIdentifier(editorView)
         documentIntelligenceContextIDs.removeValue(forKey: identifier)
         navigationContextIDs.removeValue(forKey: identifier)
@@ -2512,6 +2566,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func setReadOnly(_ isReadOnly: Bool, for bufferID: BufferID) {
+        defer { markdownEditors.refreshAppearance() }
         if !isReadOnly { pendingBinaryViewStates.removeValue(forKey: bufferID) }
         guard readOnlyBuffers.contains(bufferID) != isReadOnly else { return }
         if isReadOnly { readOnlyBuffers.insert(bufferID) }
@@ -2590,6 +2645,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     private func applyStoredLanguage(to editorView: DPScintillaEditorView, bufferID: BufferID) {
+        defer { configureMarkdownEditor(editorView, for: bufferID) }
         let storedConfiguration = languageConfigurations[bufferID]
         let configuration = storedConfiguration ?? EditorLanguageConfiguration(
             languageID: .plainText, lexerName: "null", indentation: .init(),
@@ -2792,7 +2848,21 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
         return EditorTextSnapshot(bufferID: checkpoint.bufferID, revision: revision, text: text)
     }
 
+    private func configureMarkdownEditor(_ view: DPScintillaEditorView, for bufferID: BufferID) {
+        if languageConfigurations[bufferID]?.languageID.rawValue == "markdown",
+           binaryDocuments[bufferID] == nil, pendingTextLoads[bufferID] == nil {
+            markdownEditors.attach(view, bufferID: bufferID)
+        } else {
+            markdownEditors.detach(view)
+        }
+    }
+
+    private func configureMarkdownEditors(for bufferID: BufferID) {
+        for view in allViews(for: bufferID) { configureMarkdownEditor(view, for: bufferID) }
+    }
+
     private func load(_ snapshot: EditorTextSnapshot, into editorView: DPScintillaEditorView, preservingUndo: Bool = false) {
+        defer { markdownEditors.reload(snapshot.bufferID) }
         cancelPendingSmartIndentation(for: snapshot.bufferID)
         isRecovering = true
         defer { isRecovering = false }

@@ -100,6 +100,8 @@ public final class SessionRecoveryUseCase {
     @discardableResult
     public func flush() async -> RecoveryOutcome {
         pendingToken = nil
+        if let queued = editor as? any EditorInputSynchronizationPort,
+           !(await queued.synchronizePendingInput()) { return .failed(.unavailable("Editor input could not be synchronized")) }
         return await commit()
     }
 
@@ -111,6 +113,8 @@ public final class SessionRecoveryUseCase {
         pendingToken = nil
         editor.setInputEnabled(false)
         defer { editor.setInputEnabled(workspace.snapshot().startup == .ready) }
+        if let queued = editor as? any EditorInputSynchronizationPort,
+           !(await queued.synchronizePendingInput()) { return .failed(.unavailable("Editor input could not be synchronized")) }
         while true {
             let serial = changeSerial
             let outcome = await commit(verifyingDurability: true)

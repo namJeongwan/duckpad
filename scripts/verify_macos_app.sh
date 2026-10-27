@@ -42,12 +42,15 @@ PRESENTATION_RESOURCES="$(resource_root DuckpadPresentation)"
 LOCALIZATION_RESOURCES="$(resource_root DuckpadLocalization)"
 test -f "$INFRASTRUCTURE_RESOURCES/Languages.json"
 test -d "$EDITOR_RESOURCES/ScintillaCursors"
+for ASSET in editor.js editor.css mermaid.js katex.css fonts/KaTeX_Main-Regular.woff2 THIRD_PARTY_NOTICES.txt; do
+    test -s "$EDITOR_RESOURCES/MarkdownEditor/$ASSET"
+done
 test -d "$INFRASTRUCTURE_RESOURCES/BundledExtensions"
 test -f "$PRESENTATION_RESOURCES/MaterialIconTheme/LICENSE"
 test -f "$PRESENTATION_RESOURCES/MaterialIconTheme/PROVENANCE.md"
 test -f "$PRESENTATION_RESOURCES/MaterialIconTheme/dist/material-icons.json"
 test -f "$PRESENTATION_RESOURCES/MaterialIconTheme/icons/file.svg"
-for ASSET in preview.js highlight.css katex.css THIRD_PARTY_NOTICES.txt fonts/KaTeX_Main-Regular.woff2; do
+for ASSET in clipboard.js THIRD_PARTY_NOTICES.txt; do
     test -s "$PRESENTATION_RESOURCES/MarkdownPreview/$ASSET"
 done
 for ASSET in pin.svg unpin.svg eye.svg LICENSES; do

@@ -1369,3 +1369,29 @@
 "The remote folder is unavailable. Check the path and permissions." = "リモートフォルダを開けません。パスとアクセス権を確認してください。";
 
 "Connected · Folder unavailable. Check the remote path and permissions." = "接続済み · フォルダを開けません。リモートパスとアクセス権を確認してください。";
+
+"Markdown Live Editing" = "Markdown ライブ編集";
+
+"Markdown Source Mode" = "ソース";
+
+"Markdown Live Preview" = "ライブプレビュー";
+
+"Insert Row Below" = "下に行を挿入";
+
+"Insert Column Right" = "右に列を挿入";
+
+"Delete Row" = "行を削除";
+
+"Delete Column" = "列を削除";
+
+"Table cell %1$d, %2$d" = "表の%1$d行%2$d列";
+
+"Table Options" = "表のオプション";
+
+"Mermaid Diagram" = "Mermaid ダイアグラム";
+
+"Edit Source" = "ソースを編集";
+
+"Rendering diagram…" = "ダイアグラムを描画中…";
+
+"Diagram incomplete. Edit the source to continue." = "ダイアグラムが未完成です。ソースを編集してください。";

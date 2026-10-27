@@ -708,8 +708,9 @@ public final class FileDocumentUseCase {
     ) async -> FileSaveOutcome {
         await acquireOperation()
         defer { releaseOperation() }
-        guard let context = workspace.activeFileContext() else { return .failed(.noActiveDocument) }
-        guard expectedContext == nil || expectedContext == context else {
+        guard let beforeInput = workspace.activeFileContext() else { return .failed(.noActiveDocument) }
+        guard expectedContext == nil || expectedContext == beforeInput,
+              let context = await synchronizedSaveContext(beforeInput) else {
             return .failed(.comparisonInvalidated)
         }
         guard let binding = context.binding else { return .requiresDestination(context.tabID) }
@@ -733,8 +734,9 @@ public final class FileDocumentUseCase {
     ) async -> FileSaveOutcome {
         await acquireOperation()
         defer { releaseOperation() }
-        guard let context = workspace.activeFileContext() else { return .failed(.noActiveDocument) }
-        guard expectedContext == nil || expectedContext == context else {
+        guard let beforeInput = workspace.activeFileContext() else { return .failed(.noActiveDocument) }
+        guard expectedContext == nil || expectedContext == beforeInput,
+              let context = await synchronizedSaveContext(beforeInput) else {
             return .failed(.comparisonInvalidated)
         }
         return await save(context: context, to: url, conversion: conversion, overwrite: false, renewingAccess: renewingAccess)
@@ -751,10 +753,11 @@ public final class FileDocumentUseCase {
     ) async -> FileSaveOutcome {
         await acquireOperation()
         defer { releaseOperation() }
-        guard let context = workspace.activeFileContext() else {
+        guard let beforeInput = workspace.activeFileContext() else {
             return .failed(.noActiveDocument)
         }
-        guard expectedContext == nil || expectedContext == context else {
+        guard expectedContext == nil || expectedContext == beforeInput,
+              let context = await synchronizedSaveContext(beforeInput) else {
             return .failed(.comparisonInvalidated)
         }
         guard context.binding?.isReadOnly != true else { return .failed(.readOnly) }
@@ -1005,6 +1008,15 @@ public final class FileDocumentUseCase {
         } catch let error {
             return .failed(.store(error))
         }
+    }
+
+    private func synchronizedSaveContext(_ before: FileWorkspaceContext) async -> FileWorkspaceContext? {
+        if let queued = editor as? any EditorInputSynchronizationPort,
+           !(await queued.synchronizePendingInput()) { return nil }
+        guard let after = workspace.activeFileContext(), after.tabID == before.tabID,
+              after.buffer.bufferID == before.buffer.bufferID, after.binding == before.binding,
+              after.pendingFileFormat == before.pendingFileFormat else { return nil }
+        return after
     }
 
     private func save(
