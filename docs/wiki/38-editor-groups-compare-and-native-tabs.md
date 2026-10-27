@@ -371,3 +371,31 @@ commits, the code/test checkpoint was verified on both local history and remote
 `ca97721d8795a647c8677ab339cdfd5b49ff4182`. Documentation-candidate receipt and
 the later main integration are verified from Git metadata rather than claimed
 recursively by this file's own bytes.
+
+### Explorer split and shared-tab close follow-up
+
+An unsplit window now refreshes its drag membership snapshot alongside incremental
+strip updates. A newly opened Explorer file can immediately split without first
+creating and closing another group. Dropping a previously unopened file on an
+edge moves the new tab into the destination instead of leaving an extra view in
+the source pane; an already open file can still gain another view.
+
+Closing a shared tab through its close button, current-tab context action or
+Command-W dismisses that group's occurrence. The document stays open until its
+last occurrence closes, including dirty text and native Undo/Redo. Pending web
+input drains before a view is discarded. Close-all operations retain their
+existing document-wide behavior.
+
+Regression evidence: the original implementation fails the new first-drag,
+shared-close and direct-Explorer-drop assertions. The corrected controller
+regressions pass, including the Explorer double-click callback followed by an
+immediate edge drag. Native Scintilla integration verifies both closing sides
+with dirty Korean text and Undo/Redo. These are isolated integration checks,
+not a claim that a physical pointer drag was manually tested.
+
+Pane-scoped close admission is revalidated after the single input flush. A
+suspended-flush regression overlaps another pending persisted removal: the stale
+shared close must abort instead of falling through to document-wide close. The
+regression fails before the guard and passes after it. Caret, scroll and Markdown
+mode inheritance when promoting a secondary pane into an empty primary pane have
+not been specifically verified by this follow-up.
