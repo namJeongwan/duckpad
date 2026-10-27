@@ -3,47 +3,45 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.15.1</title>
-            <pubDate>Thu, 22 Oct 2026 17:35:16 +0900</pubDate>
-            <sparkle:version>67</sparkle:version>
-            <sparkle:shortVersionString>0.15.1</sparkle:shortVersionString>
+            <title>0.16.0</title>
+            <pubDate>Tue, 27 Oct 2026 19:21:36 +0900</pubDate>
+            <sparkle:version>68</sparkle:version>
+            <sparkle:shortVersionString>0.16.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.15.1
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.16.0
 
-This patch fixes Remote SSH File connections being treated as failed when only the remote path is invalid, and corrects input-field behaviour in Replace and the remote browser.
+Markdown documents gain a bundled CodeMirror 6 editor with Source and Live editing in the same document. Other file types continue to use Scintilla.
 
-## Fixes
+## Changes
 
-- Establish the SSH host connection before opening a typed or remembered remote path. Missing folders, files entered as folders, and invalid paths show a folder-specific error while keeping the host connected, the input intact and the last usable listing available. Correct the path and use Return or Refresh to continue through the shared connection.
-- Keep folder errors out of automatic reconnect retries. A server that authenticates successfully but cannot open its home directory can still open an explicitly requested accessible folder.
-- Make preview and Open use the same file when selecting from a retained listing. Editing the path clears the old selection and preview, so Open uses the newly typed destination.
-- Keep long Remote Path and other shared single-line inputs on one line while editing and resizing; scroll horizontally instead of wrapping. Preserve Korean composition, selection and native Undo/Redo.
-- Remove the default blue focus ring from classic Find/Replace fields. Replace uses the common input component with rounded controls, neutral focus and hover feedback, while retaining the classic dialog layout.
-- Localize the new folder status and error messages in all eight supported languages.
+- Render headings, emphasis, inline code, tasks, lists, local images, editable tables, KaTeX math and Mermaid diagrams while editing Markdown. Preserve native Undo/Redo, UTF-8 bytes, mixed line endings and pending composition across Save and recovery boundaries.
+- Edit table cells with a plain caret and stable column widths. Navigate cells with arrow keys, Tab and Shift-Tab; use the contextual menu for clipboard, rows and columns.
+- Use Command-click to follow web links in the default browser and file links in Duckpad. Match Markdown surfaces, syntax and diagrams to the workspace palette.
+- Replace the separate Markdown preview window and tab preview actions with Source/Live editing. Use Shift-Command-V to switch modes. Click math to edit its source; display math keeps a live result beneath its source. Formatted copy and shared table rendering remain available. Raw HTML remains editable source.
+- Keep presentation fixed while dragging a selection; reveal selected Markdown after release. Update changed Markdown blocks and indexed byte coordinates instead of scanning the whole document on each keystroke.
+- Drag files directly from Workspace Explorer into editor splits. Split a newly opened or sole tab without having to create another split first.
+- Reconnect failed remote Tail at the latest file end, retaining the last readable snapshot until a bounded reload succeeds.
+- Keep two Tail panes following after split/resize and asynchronous line wrapping. Pausing one pane preserves its selection and viewport while other panes keep following.
 
-App and all three helpers: **0.15.1 (67)**, upgrading **0.15.0 (66)**. Requires **macOS 13 or later**. The universal distribution includes Apple Silicon and Intel. Existing documents, settings, recovery data, encoding handling, Undo history and the native plugin ABI remain compatible. Remote SSH File and Log Tail Viewer remain included. No new dependencies are added.
+App and all three helpers: **0.16.0 (68)**, upgrading **0.15.1 (67)**. Requires **macOS 13 or later**. Universal binaries include Apple Silicon and Intel. Existing documents, settings, recovery data and the native plugin ABI remain compatible.
 
 ## Installation
 
-Download `Duckpad-0.15.1-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.15.1-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Existing installations can use Check for Updates after the signed update feed is published.
+Download `Duckpad-0.16.0-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.16.0-universal.zip`. Verify downloads against `SHA256SUMS.txt`.
 
 ## Validation and limitations
 
-**60 distinct focused Release test functions completed**, including two opt-in loopback SSH tests. Checks cover invalid/missing/file paths, inaccessible home directories, folder-error retry policy, retained-list selection, path editing, native shell protocol quoting, SSH reuse and cancellation, input geometry, Korean composition and Undo/Redo. Native light/dark checks verify neutral focus and single-line path layout. Read-only checks against two configured servers verify that a directory error does not replace the authenticated SSH transport; the actual browser and sandboxed XPC helper also recover after correcting the path.
+**64 distinct focused Release test functions completed**, covering Source/Live, math and offline fonts, table arrows and composition, native byte mirrors, Save/Undo/recovery, language transitions, split teardown, image grant lifetime and Tail reconnect/following. Twenty-seven JavaScript tests and independent randomized byte/decoration checks also pass. Localization keys and format arguments are verified across all eight languages; all locales were not manually inspected.
 
-The final universal app and its three helpers are verified, then exercised through isolated packaged application and SSH/Tail smoke checks before publication. Native Save-panel automation is skipped. A combined presentation test run can exit before some completion markers; affected functions are rerun individually. One existing browser-reuse test still ends without its completion marker and is excluded from the count; a standalone native harness owning NSApp.run completes its bounded-preview, multiple-open and stale-navigation workflow. The cause of the test-process exit remains undiagnosed.
+The final universal app and three helpers passed bundle/signature checks. Isolated packaged application, Markdown Source/Live (including math fonts, Mermaid, stable tables and links), and all eight localization smokes passed. DMG/ZIP integrity and uploaded asset hashes were verified before publication. Native Save-panel automation is excluded. Two broader tests remain failing outside the focused pass claim: the folder-search routing fixture and a legacy Replace shortcut expectation (Cmd-H versus the unchanged Cmd-R menu). Full-suite completion is not claimed. A transient combined-run drop-proposal failure passed on isolated rerun.
 
-Remote access remains read-only and UTF-8 only, using SSH configuration, keys or an agent. Password prompts are not supported; trust new hosts in Terminal before connecting. Existing Tail size and polling limits and the documented 0.15.0 stress-performance limits remain in effect; this patch does not introduce a universal 50 ms rendering guarantee.
+Synthetic transaction/bridge timings are not physical keyboard-to-paint latency or a runtime comparison with Obsidian. Installed Obsidian 1.8.9 was statically inspected for architecture; no proprietary source is incorporated. Large Markdown blocks and diagrams still require work proportional to their contents.
 
-Intel hardware, macOS 13 runtime, physical Korean keyboard interaction and the full repository test suite are not validated. The distribution is ad-hoc signed, without Developer ID signing or Apple notarization.
+Physical Korean keyboard input, Intel hardware execution and macOS 13 runtime require separate verification. The distribution is ad-hoc signed, without Developer ID signing or Apple notarization.
 
-## Release basis
-
-Source: `4fc4bf17d6899fd2cea16797d161424505654586`, merged through [PR #99](https://github.com/namJeongwan/duckpad/pull/99).
-
-Final distribution checks passed: universal app and all three helper versions/architectures, bundle resources, entitlements and ad-hoc signatures; Finder/Open With, bookmarked recovery/save after relaunch, resize, sandboxed XPC isolation and ripgrep discovery; packaged Log/ANSI rendering and sandboxed SSH preview/multiple-file opening with split UTF-8 Tail through one authenticated transport. Native Save-panel automation was skipped. Archive integrity and uploaded SHA-256 digests are checked before publication.
+Release source: `533105551eff946ac133e5bdcb54330c566c81ab` ([PR #102](https://github.com/namJeongwan/duckpad/pull/102)).
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.15.1/Duckpad-0.15.1-universal.zip" length="52810523" type="application/octet-stream" sparkle:edSignature="c7dLMah2yHKGkCNueQSKC6T6rH5OWbf9tLEgJc5VaW8eNlfUHRE87xs0kRHRBuY9xv3h9ixfBf+bgC6xcgEZAQ=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.16.0/Duckpad-0.16.0-universal.zip" length="53384359" type="application/octet-stream" sparkle:edSignature="aTjXjDUWZrDa8TifiNHyNYGV0nTC7MWwLAj8c6hxIQT8RlTm6IZdShEiUo4tSi/28xEJr9posFYE4/V8ut7QBg=="/>
         </item>
     </channel>
 </rss>
