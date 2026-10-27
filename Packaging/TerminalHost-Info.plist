@@ -22,6 +22,8 @@
     <string>13.0</string>
     <key>XPCService</key>
     <dict>
+        <key>JoinExistingSession</key>
+        <true/>
         <key>RunLoopType</key>
         <string>NSRunLoop</string>
         <key>ServiceType</key>

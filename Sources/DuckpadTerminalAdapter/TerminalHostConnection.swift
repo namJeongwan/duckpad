@@ -1,4 +1,5 @@
 import Foundation
+import DuckpadApplication
 import DuckpadPluginSupport
 
 /// One authenticated connection and PTY per surface; invalidation stops its shell.
@@ -25,9 +26,10 @@ final class TerminalHostConnection {
                 continuation.resume(throwing: CocoaError(.executableNotLoadable)); return
             }
             let resources = Bundle.main.resourceURL!
-            let environment = ["LANG": "en_US.UTF-8", "TERM": "xterm-ghostty",
-                               "TERMINFO": resources.appendingPathComponent("terminfo").path,
-                               "GHOSTTY_RESOURCES_DIR": resources.appendingPathComponent("ghostty").path]
+            var environment = TerminalLocaleEnvironment.values()
+            environment["TERM"] = "xterm-ghostty"
+            environment["TERMINFO"] = resources.appendingPathComponent("terminfo").path
+            environment["GHOSTTY_RESOURCES_DIR"] = resources.appendingPathComponent("ghostty").path
             let reply: @Sendable (FileHandle?, String?) -> Void = { handle, error in
                 if let handle { continuation.resume(returning: handle) }
                 else { continuation.resume(throwing: NSError(domain: "DuckpadTerminal", code: 1, userInfo: [NSLocalizedDescriptionKey: error ?? "launch failed"])) }

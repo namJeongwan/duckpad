@@ -82,7 +82,7 @@ private final class ShellSession: NSObject, DuckpadTerminalHostProtocol, @unchec
         var env = ["HOME": home, "USER": name, "LOGNAME": name, "SHELL": "/bin/zsh",
                    "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
                    "TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "Duckpad"]
-        for key in ["LANG", "LC_CTYPE", "TERM", "TERMINFO", "GHOSTTY_RESOURCES_DIR"] {
+        for key in TerminalLocaleEnvironment.keys + ["TERM", "TERMINFO", "GHOSTTY_RESOURCES_DIR"] {
             if let value = environment[key], value.utf8.count < 4096, !value.contains("\0") { env[key] = value }
         }
         if let resources = env["GHOSTTY_RESOURCES_DIR"] {
