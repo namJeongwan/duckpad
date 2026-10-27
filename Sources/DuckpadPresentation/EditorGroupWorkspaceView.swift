@@ -12,6 +12,7 @@ public final class EditorGroupWorkspaceView: NSView {
         case move(TabID, EditorGroupID, EditorGroupID)
         case clone(TabID, EditorGroupID, EditorGroupID)
         case transfer(TabID, EditorGroupID, EditorGroupID, Int, EditorGroupDropOperation)
+        case openWorkspaceEntry(WorkspaceBrowserEntry, EditorGroupID, EditorGroupDropOverlay.Zone?)
         case focus(EditorGroupID)
         case close(TabID, EditorGroupID)
         case context(TabID, EditorGroupID, TabContextAction)
@@ -80,7 +81,7 @@ public final class EditorGroupWorkspaceView: NSView {
             splitView.topAnchor.constraint(equalTo: topAnchor),
             splitView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        registerForDraggedTypes([groupPasteboardType])
+        registerForDraggedTypes([groupPasteboardType, .init(WorkspaceEntryDragPayload.pasteboardType)])
         bind(primaryPane)
     }
 
@@ -163,7 +164,7 @@ public final class EditorGroupWorkspaceView: NSView {
               dropOverlay.zone(at: location) != nil else { return nil }
         let operation = EditorGroupDragPayload.dropOperation(optionPressed: optionPressed)
         if operation == .move, layoutSnapshot.tabIDs(in: payload.sourceGroup).count <= 1 {
-            return nil
+            return .copy
         }
         return operation
     }
@@ -285,6 +286,7 @@ public final class EditorGroupWorkspaceView: NSView {
     }
 
     public override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        if workspaceEntry(from: sender) != nil { return workspaceDropLocation(from: sender) != nil }
         guard let payload = nativePayload(from: sender) else { return false }
         let location = dropLocation(from: sender)
         if isTransferDrop(payload, at: location) {
@@ -301,6 +303,11 @@ public final class EditorGroupWorkspaceView: NSView {
 
     public override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         defer { cancelDrop() }
+        if let entry = workspaceEntry(from: sender) {
+            guard let location = workspaceDropLocation(from: sender) else { return false }
+            onAction?(.openWorkspaceEntry(entry, dropTarget, dropOverlay.zone(at: location, edgeFraction: 0.12)))
+            return true
+        }
         guard let payload = nativePayload(from: sender) else {
             cancelDrop()
             return false
@@ -427,7 +434,26 @@ public final class EditorGroupWorkspaceView: NSView {
         }
     }
 
+    private func workspaceEntry(from sender: any NSDraggingInfo) -> WorkspaceBrowserEntry? {
+        guard let data = sender.draggingPasteboard.data(forType: .init(WorkspaceEntryDragPayload.pasteboardType)) else { return nil }
+        return WorkspaceEntryDragPayload(data: data)?.entry
+    }
+
+    private func workspaceDropLocation(from sender: any NSDraggingInfo) -> NSPoint? {
+        guard sender.draggingSourceOperationMask.contains(.copy) else { return nil }
+        let point = dropLocation(from: sender)
+        guard layoutSnapshot?.visibleGroups.contains(dropTarget) == true,
+              dropOverlay.bounds.contains(point) else { return nil }
+        return point
+    }
+
     private func updateNativeDrag(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        if workspaceEntry(from: sender) != nil {
+            guard let point = workspaceDropLocation(from: sender) else { cancelDrop(); return [] }
+            if let zone = dropOverlay.zone(at: point, edgeFraction: 0.12) { dropOverlay.present(highlighting: zone) }
+            else { dropOverlay.presentTransfer() }
+            return .copy
+        }
         guard let payload = nativePayload(from: sender) else {
             cancelDrop()
             return []

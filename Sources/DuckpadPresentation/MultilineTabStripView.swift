@@ -16,7 +16,6 @@ public enum TabContextAction: Equatable, Sendable {
     case focusOtherEditorGroup
     case closeEditorGroup
     case compareWithOpenDocument
-    case previewMarkdown
 }
 
 @MainActor
@@ -79,7 +78,6 @@ private final class AccessibleTabView: NSView {
 private final class DuckpadTabItem: NSCollectionViewItem {
     static let identifier = NSUserInterfaceItemIdentifier("DuckpadTabItem")
     private let fileIconImage = NSImageView()
-    private let previewButton = StatusBarButton(frame: .zero)
     private let titleLabel = NSTextField(labelWithString: "")
     private let dirtyIndicator = NSView()
     private let pinButton = TabPinButton(frame: .zero)
@@ -161,24 +159,12 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         closeButton.target = self
         closeButton.action = #selector(closePressed)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        previewButton.isBordered = false
-        previewButton.imagePosition = .imageOnly
-        previewButton.image = ZedTabIcons.markdownPreview
-        previewButton.contentTintColor = .controlAccentColor
-        previewButton.target = self
-        previewButton.action = #selector(previewMarkdown)
-        previewButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(fileIconImage)
-        view.addSubview(previewButton)
         view.addSubview(dirtyIndicator)
         view.addSubview(titleLabel)
         view.addSubview(pinButton)
         view.addSubview(closeButton)
         NSLayoutConstraint.activate([
-            previewButton.centerXAnchor.constraint(equalTo: fileIconImage.centerXAnchor),
-            previewButton.centerYAnchor.constraint(equalTo: fileIconImage.centerYAnchor),
-            previewButton.widthAnchor.constraint(equalToConstant: 21),
-            previewButton.heightAnchor.constraint(equalToConstant: 21),
             fileIconImage.leadingAnchor.constraint(equalTo: dirtyIndicator.trailingAnchor, constant: 2),
             fileIconImage.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             fileIconImage.widthAnchor.constraint(equalToConstant: 17),
@@ -258,9 +244,6 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         view.setAccessibilityLabel(text("%1$@ tab", L10n.argument(tab.localizedTitle(catalog: catalog))))
         view.setAccessibilityValue(state)
         view.setAccessibilityHelp(text("Activate %1$@ tab", L10n.argument(tab.localizedTitle(catalog: catalog))))
-        previewButton.toolTip = text("Markdown Preview") + " (⇧⌘V)"
-        previewButton.setAccessibilityLabel(text("Markdown Preview"))
-        previewButton.setAccessibilityIdentifier("duckpad.tab.markdown-preview.\(stableID)")
         closeButton.setAccessibilityIdentifier("duckpad.tab.close.\(stableID)")
         closeButton.setAccessibilityLabel(text("Close %1$@", L10n.argument(tab.localizedTitle(catalog: catalog))))
         closeButton.setAccessibilityValue(tab.isDirty ? text("modified tab") : text("unmodified tab"))
@@ -280,11 +263,6 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         ])
     }
 
-    @objc private func previewMarkdown() {
-        guard previewButton.isEnabled, configuredTab?.isMarkdownDocument == true else { return }
-        onContextAction?(.previewMarkdown)
-    }
-
     @objc private func closePressed() {
         onClose?()
     }
@@ -295,16 +273,12 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     }
 
     func setInteractionsEnabled(_ enabled: Bool) {
-        previewButton.isEnabled = enabled
         pinButton.isEnabled = enabled
         closeButton.isEnabled = enabled
     }
 
     private func updateActionVisibility() {
-        let showPreview = configuredTab?.isMarkdownDocument == true && isHovered
-        previewButton.isHidden = !showPreview
-        fileIconImage.isHidden = showPreview
-        if !showPreview { previewButton.resetPointerState() }
+        fileIconImage.isHidden = false
         closeButton.isHidden = !showCloseButton || !(showInactiveButtons || configuredTab?.isActive == true || isSelected || isHovered)
         pinButton.isHidden = !(showInactiveButtons || configuredTab?.isPinned == true || isHovered)
         if !isHovered { pinButton.resetPointerState() }
@@ -379,7 +353,6 @@ private final class DuckpadTabItem: NSCollectionViewItem {
         isHovered = false
         pinButton.resetPointerState()
         closeButton.resetPointerState()
-        previewButton.resetPointerState()
         onActivate = nil
         onClose = nil
         onContextAction = nil
@@ -392,10 +365,6 @@ private final class DuckpadTabItem: NSCollectionViewItem {
     private func makeContextMenu() -> NSMenu? {
         guard let tab = configuredTab else { return nil }
         let menu = NSMenu(title: tab.displayTitle)
-        if tab.isMarkdownDocument {
-            add(L10n.text("Markdown Preview"), action: #selector(previewMarkdown), to: menu, contextAction: .previewMarkdown)
-            menu.addItem(.separator())
-        }
         add(L10n.text("Close"), action: #selector(closeCurrent), to: menu)
         add(L10n.text("Close Others"), action: #selector(closeOthers), to: menu)
         add(L10n.text("Close to Left"), action: #selector(closeLeft), to: menu)

@@ -1369,3 +1369,29 @@
 "The remote folder is unavailable. Check the path and permissions." = "A pasta remota não está disponível. Verifique o caminho e as permissões.";
 
 "Connected · Folder unavailable. Check the remote path and permissions." = "Conectado · Pasta indisponível. Verifique o caminho remoto e as permissões.";
+
+"Markdown Live Editing" = "Edição Markdown ao vivo";
+
+"Markdown Source Mode" = "Código-fonte";
+
+"Markdown Live Preview" = "Prévia ao vivo";
+
+"Insert Row Below" = "Inserir linha abaixo";
+
+"Insert Column Right" = "Inserir coluna à direita";
+
+"Delete Row" = "Excluir linha";
+
+"Delete Column" = "Excluir coluna";
+
+"Table cell %1$d, %2$d" = "Célula da tabela %1$d, %2$d";
+
+"Table Options" = "Opções da tabela";
+
+"Mermaid Diagram" = "Diagrama Mermaid";
+
+"Edit Source" = "Editar código-fonte";
+
+"Rendering diagram…" = "Renderizando diagrama…";
+
+"Diagram incomplete. Edit the source to continue." = "Diagrama incompleto. Edite o código-fonte para continuar.";

@@ -1369,3 +1369,29 @@
 "The remote folder is unavailable. Check the path and permissions." = "无法打开远程文件夹。请检查路径和访问权限。";
 
 "Connected · Folder unavailable. Check the remote path and permissions." = "已连接 · 无法打开文件夹。请检查远程路径和访问权限。";
+
+"Markdown Live Editing" = "Markdown 实时编辑";
+
+"Markdown Source Mode" = "源码";
+
+"Markdown Live Preview" = "实时预览";
+
+"Insert Row Below" = "在下方插入行";
+
+"Insert Column Right" = "在右侧插入列";
+
+"Delete Row" = "删除行";
+
+"Delete Column" = "删除列";
+
+"Table cell %1$d, %2$d" = "表格第%1$d行第%2$d列";
+
+"Table Options" = "表格选项";
+
+"Mermaid Diagram" = "Mermaid 图表";
+
+"Edit Source" = "编辑源码";
+
+"Rendering diagram…" = "正在渲染图表…";
+
+"Diagram incomplete. Edit the source to continue." = "图表尚未完成。请编辑源码。";

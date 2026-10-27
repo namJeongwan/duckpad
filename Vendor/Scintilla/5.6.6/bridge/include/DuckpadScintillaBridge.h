@@ -231,6 +231,9 @@ typedef NS_ENUM(NSInteger, DPScintillaSelectionCommand) {
 - (BOOL)isWordHighlightedAtUTF8Position:(NSUInteger)position NS_SWIFT_NAME(isWordHighlighted(atUTF8Position:));
 @property(nonatomic, readonly) NSUInteger wordHighlightInspectedByteCount;
 - (void)setPrimarySelectionUTF8Range:(NSRange)range;
+@property(nonatomic, readonly, copy) NSArray<NSDictionary<NSString *, NSNumber *> *> *selectionUTF8Positions;
+@property(nonatomic, readonly) NSUInteger mainSelectionIndex;
+- (BOOL)setSelectionUTF8Positions:(NSArray<NSDictionary<NSString *, NSNumber *> *> *)positions mainIndex:(NSUInteger)mainIndex;
 - (void)revealDeclarationInUTF8Range:(NSRange)range NS_SWIFT_NAME(revealDeclaration(in:));
 - (void)restoreCaretUTF8Position:(NSUInteger)caret
                   anchorPosition:(NSUInteger)anchor

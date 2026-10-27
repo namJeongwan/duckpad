@@ -120,7 +120,7 @@ struct EditorGroupWorkspaceViewTests {
         }
     }
 
-    @Test @MainActor func edgeDropRejectsLastTabMoveButAllowsOptionClone() {
+    @Test @MainActor func edgeDropClonesLastTabImmediatelyWithoutOption() {
         let fixture = makeFixture(tabCount: 1)
         fixture.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
         fixture.view.layoutSubtreeIfNeeded()
@@ -131,8 +131,45 @@ struct EditorGroupWorkspaceViewTests {
         let payload = EditorGroupDragPayload(tabID: fixture.tabs[0].id, sourceGroup: .primary)
         let right = NSPoint(x: fixture.view.dropOverlay.bounds.maxX - 2, y: fixture.view.dropOverlay.bounds.midY)
 
-        #expect(fixture.view.validateEdgeDrop(payload: payload, location: right, optionPressed: false) == nil)
+        #expect(fixture.view.validateEdgeDrop(payload: payload, location: right, optionPressed: false) == .copy)
+        var actions: [EditorGroupWorkspaceView.Action] = []
+        fixture.view.onAction = { actions.append($0) }
+        #expect(fixture.view.performEdgeDrop(payload: payload, location: right, optionPressed: false))
+        #expect(actions == [.split(fixture.tabs[0].id, .primary, .sideBySide, .copy)])
         #expect(fixture.view.validateEdgeDrop(payload: payload, location: right, optionPressed: true) == .copy)
+    }
+
+    @Test @MainActor func explorerEntryCanDropDirectlyOnEverySplitEdgeAndCenter() throws {
+        let fixture = makeFixture(tabCount: 1)
+        let window = hostInWindow(fixture.view)
+        defer { fixture.view.tearDown(); window.contentView = nil; window.close() }
+        fixture.view.apply(workspace: workspace(tabs: fixture.tabs), layout: layout(
+            primary: [fixture.tabs[0].id], primarySelection: fixture.tabs[0].id))
+        let entry = WorkspaceBrowserEntry(rootID: WorkspaceRootID(), relativePath: "docs/한글.md", name: "한글.md", kind: .file)
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        board.setData(try #require(WorkspaceEntryDragPayload(entry: entry).encodedData()), forType: .init(WorkspaceEntryDragPayload.pasteboardType))
+        window.contentView?.layoutSubtreeIfNeeded()
+        let host = fixture.view.primaryPane.editorHostView
+        let bounds = host.bounds
+        let points: [(NSPoint, EditorGroupDropOverlay.Zone?)] = [
+            (.init(x: 2, y: bounds.midY), .left),
+            (.init(x: bounds.maxX - 2, y: bounds.midY), .right),
+            (.init(x: bounds.midX, y: bounds.maxY - 2), .up),
+            (.init(x: bounds.midX, y: 2), .down),
+            (.init(x: bounds.midX, y: bounds.midY), nil),
+        ]
+        var actions: [EditorGroupWorkspaceView.Action] = []
+        fixture.view.onAction = { actions.append($0) }
+        for (point, zone) in points {
+            let sender = DraggingInfoStub(window: window, pasteboard: board,
+                location: host.convert(point, to: nil), sourceOperationMask: .copy)
+            #expect(fixture.view.draggingEntered(sender) == .copy)
+            #expect(fixture.view.prepareForDragOperation(sender))
+            #expect(fixture.view.performDragOperation(sender))
+            #expect(actions.last == .openWorkspaceEntry(entry, .primary, zone))
+            #expect(!fixture.view.dropOverlay.isPresenting)
+        }
     }
 
     @Test @MainActor func edgeDropEmitsTypedSplitAndAlwaysCleansUpOverlay() {

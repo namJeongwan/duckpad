@@ -106,6 +106,27 @@ private final class BlockingWorkspacePanel: FilePanelPresenting {
     #expect(browser.roots.count == 1)
 }
 
+@Test @MainActor func explorerDragPublishesScopedFileIdentityAndRejectsFoldersAndDisabledState() throws {
+    let root = WorkspaceRoot(canonicalPath: "/tmp/workspace", displayName: "workspace")
+    let sidebar = WorkspaceSidebarView(frame: .init(x: 0, y: 0, width: 240, height: 500))
+    _ = sidebar.apply(roots: [root])
+    let outline = try #require(sidebar.subviews.compactMap { $0 as? NSScrollView }.first?.documentView as? NSOutlineView)
+    let parent = WorkspaceSidebarNode(root: root)
+    let entry = WorkspaceBrowserEntry(rootID: root.id, relativePath: "docs/한글.md", name: "한글.md", kind: .file)
+    let node = WorkspaceSidebarNode(entry: entry, parent: parent)
+    let writer = try #require((sidebar as any NSOutlineViewDataSource).outlineView?(outline, pasteboardWriterForItem: node) as? NSPasteboardItem)
+    let data = try #require(writer.data(forType: .init(WorkspaceEntryDragPayload.pasteboardType)))
+    #expect(WorkspaceEntryDragPayload(data: data)?.entry == entry)
+    #expect((sidebar as any NSOutlineViewDataSource).outlineView?(outline, pasteboardWriterForItem: parent) == nil)
+    sidebar.setInteractionsEnabled(false)
+    #expect((sidebar as any NSOutlineViewDataSource).outlineView?(outline, pasteboardWriterForItem: node) == nil)
+    for path in ["../secret", "/tmp/secret", "docs/../../secret", ""] {
+        let invalid = WorkspaceEntryDragPayload(entry: .init(rootID: root.id, relativePath: path, name: "x", kind: .file))
+        #expect(WorkspaceEntryDragPayload(data: try #require(invalid.encodedData())) == nil)
+    }
+    #expect(WorkspaceEntryDragPayload(data: Data(repeating: 0, count: 16_385)) == nil)
+}
+
 @Test @MainActor func workspaceSidebarLoadsChildrenPersistsExpansionAndRoutesContextActions() {
     _ = NSApplication.shared
     let root = WorkspaceRoot(

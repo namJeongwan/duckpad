@@ -1409,3 +1409,29 @@
 "The remote folder is unavailable. Check the path and permissions." = "The remote folder is unavailable. Check the path and permissions.";
 
 "Connected · Folder unavailable. Check the remote path and permissions." = "Connected · Folder unavailable. Check the remote path and permissions.";
+
+"Markdown Live Editing" = "Markdown Live Editing";
+
+"Markdown Source Mode" = "Source";
+
+"Markdown Live Preview" = "Live Preview";
+
+"Insert Row Below" = "Insert Row Below";
+
+"Insert Column Right" = "Insert Column Right";
+
+"Delete Row" = "Delete Row";
+
+"Delete Column" = "Delete Column";
+
+"Table cell %1$d, %2$d" = "Table cell %1$d, %2$d";
+
+"Table Options" = "Table Options";
+
+"Mermaid Diagram" = "Mermaid Diagram";
+
+"Edit Source" = "Edit Source";
+
+"Rendering diagram…" = "Rendering diagram…";
+
+"Diagram incomplete. Edit the source to continue." = "Diagram incomplete. Edit the source to continue.";

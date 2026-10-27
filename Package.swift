@@ -217,7 +217,7 @@ let package = Package(
                 "DuckpadScintillaBridge",
                 "DuckpadLocalization",
             ],
-            resources: [.copy("Resources/ScintillaCursors")]
+            resources: [.copy("Resources/ScintillaCursors"), .copy("Resources/MarkdownEditor")]
         ),
         .executableTarget(
             name: "DuckpadApp",

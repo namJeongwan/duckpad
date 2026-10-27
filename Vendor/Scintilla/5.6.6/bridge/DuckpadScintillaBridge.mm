@@ -233,6 +233,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     uint64_t _revision;
     BOOL _suppressEdit;
     BOOL _requestedInputEnabled;
+    BOOL _observedFollowEnd;
+    id _observedInputMonitor;
     NSUInteger _declarationHoverPosition;
     NSRange _declarationHoverRange;
     BOOL _binaryDocument;
@@ -619,6 +621,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)dealloc {
+    if (_observedInputMonitor) [NSEvent removeMonitor:_observedInputMonitor];
     [_wordHighlighter removeView:_scintilla];
     [[_scintilla content] unmarkText];
     [NSNotificationCenter.defaultCenter removeObserver:self];
@@ -633,6 +636,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)invalidate {
+    if (_observedInputMonitor) [NSEvent removeMonitor:_observedInputMonitor];
+    _observedInputMonitor = nil;
+    _observedFollowEnd = NO;
     _minimap.scintilla = nil;
     [_minimap removeFromSuperview];
     [_wordHighlighter removeView:_scintilla];
@@ -773,12 +779,31 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (BOOL)isObservedFileFollowingEnd {
+    // Idle wrapping changes display-line estimates after a split/resize. Retain
+    // explicit Follow intent until a user gesture or selection leaves the end.
+    if (_observedFollowEnd && [_scintilla message:SCI_GETSELECTIONEMPTY]
+        && [_scintilla message:SCI_GETCURRENTPOS] == self.documentByteLength) return YES;
     const sptr_t rows = [_scintilla message:SCI_VISIBLEFROMDOCLINE wParam:[_scintilla message:SCI_GETLINECOUNT]];
     return [_scintilla message:SCI_GETFIRSTVISIBLELINE] + [_scintilla message:SCI_LINESONSCREEN] >= rows
         && [_scintilla message:SCI_GETSELECTIONEMPTY];
 }
 
 - (void)followObservedFileEnd {
+    _observedFollowEnd = YES;
+    if (!_observedInputMonitor) {
+        __weak DPScintillaEditorView *weakSelf = self;
+        _observedInputMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:
+            NSEventMaskScrollWheel | NSEventMaskLeftMouseDown | NSEventMaskKeyDown
+            handler:^NSEvent *(NSEvent *event) {
+                DPScintillaEditorView *view = weakSelf;
+                if (!view || !view.window || event.window != view.window) return event;
+                const BOOL targetsView = event.type == NSEventTypeKeyDown
+                    ? view.hasEditorFocus
+                    : NSPointInRect([view convertPoint:event.locationInWindow fromView:nil], view.bounds);
+                if (targetsView) view->_observedFollowEnd = NO;
+                return event;
+            }];
+    }
     [_scintilla message:SCI_GOTOPOS wParam:self.documentByteLength];
     [_scintilla message:SCI_SCROLLCARET];
 }
@@ -791,9 +816,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     for (DPScintillaEditorView *peer in _searchMarkerPeers) {
         ScintillaView *view = peer->_scintilla;
         const sptr_t first = [view message:SCI_GETFIRSTVISIBLELINE];
-        const sptr_t rows = [view message:SCI_VISIBLEFROMDOCLINE wParam:[view message:SCI_GETLINECOUNT]];
-        const BOOL follows = first + [view message:SCI_LINESONSCREEN] >= rows
-            && [view message:SCI_GETSELECTIONEMPTY];
+        const BOOL follows = peer.isObservedFileFollowingEnd;
         const NSUInteger length = [view message:SCI_GETSELECTIONSERIALIZED];
         std::string selection(length + 1, '\0');
         [view message:SCI_GETSELECTIONSERIALIZED wParam:0 lParam:reinterpret_cast<sptr_t>(selection.data())];
@@ -1638,6 +1661,40 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [self scheduleWordHighlights:YES];
 }
 
+- (NSArray<NSDictionary<NSString *, NSNumber *> *> *)selectionUTF8Positions {
+    const NSInteger count = [_scintilla message:SCI_GETSELECTIONS];
+    if (count > 10000) return @[];
+    NSMutableArray *positions = [NSMutableArray arrayWithCapacity:count];
+    for (NSInteger index = 0; index < count; ++index) {
+        [positions addObject:@{@"anchor": @([_scintilla message:SCI_GETSELECTIONNANCHOR wParam:index]),
+                               @"caret": @([_scintilla message:SCI_GETSELECTIONNCARET wParam:index])}];
+    }
+    return positions;
+}
+
+- (NSUInteger)mainSelectionIndex { return [_scintilla message:SCI_GETMAINSELECTION]; }
+
+- (BOOL)setSelectionUTF8Positions:(NSArray<NSDictionary<NSString *, NSNumber *> *> *)positions mainIndex:(NSUInteger)mainIndex {
+    if (!_scintilla || positions.count == 0 || positions.count > 10000 || mainIndex >= positions.count) return NO;
+    const NSUInteger length = self.documentByteLength;
+    std::vector<std::pair<NSInteger, NSInteger>> validated;
+    for (NSDictionary *position in positions) {
+        NSInteger anchor, caret;
+        if (!DPIntegerFromNumber(position[@"anchor"], &anchor) || !DPIntegerFromNumber(position[@"caret"], &caret)
+            || anchor < 0 || caret < 0 || anchor > length || caret > length
+            || ![self isUTF8Boundary:anchor documentLength:length] || ![self isUTF8Boundary:caret documentLength:length]) return NO;
+        validated.emplace_back(anchor, caret);
+    }
+    BOOL first = YES;
+    for (const auto [anchor, caret] : validated) {
+        [_scintilla message:first ? SCI_SETSELECTION : SCI_ADDSELECTION wParam:caret lParam:anchor];
+        first = NO;
+    }
+    [_scintilla message:SCI_SETMAINSELECTION wParam:mainIndex];
+    [self scheduleWordHighlights:YES];
+    return YES;
+}
+
 - (void)attachWordHighlighter {
     __weak DPScintillaEditorView *weakSelf = self;
     [_wordHighlighter addView:_scintilla onChange:^{
@@ -1686,6 +1743,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const NSUInteger length = (NSUInteger)[_scintilla message:SCI_GETLENGTH];
     const NSUInteger safeCaret = MIN(caret, length);
     const NSUInteger safeAnchor = MIN(anchor, length);
+    if (safeCaret != length || safeAnchor != length) _observedFollowEnd = NO;
     [_scintilla message:SCI_SETSEL wParam:(uptr_t)safeAnchor lParam:(sptr_t)safeCaret];
     [_scintilla message:SCI_SETFIRSTVISIBLELINE wParam:(uptr_t)firstVisibleLine];
     [_scintilla message:SCI_SETXOFFSET wParam:(uptr_t)horizontalScrollOffset];
@@ -3653,6 +3711,12 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         return;
     }
     if (notification->nmhdr.code == SCN_PAINTED) {
+        if (_observedFollowEnd && [_scintilla message:SCI_GETSELECTIONEMPTY]
+            && [_scintilla message:SCI_GETCURRENTPOS] == self.documentByteLength) {
+            const sptr_t rows = [_scintilla message:SCI_VISIBLEFROMDOCLINE wParam:[_scintilla message:SCI_GETLINECOUNT]];
+            if ([_scintilla message:SCI_GETFIRSTVISIBLELINE] + [_scintilla message:SCI_LINESONSCREEN] < rows)
+                [_scintilla message:SCI_SCROLLCARET];
+        }
         [self refreshColorPreviews];
         // Idle wrapping can finish after layout/SC_UPDATE_CONTENT. Check the
         // O(1) display count; scrolling alone must not remap every match.
