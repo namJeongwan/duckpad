@@ -89,6 +89,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         outline.usesAutomaticRowHeights = false
         outline.indentationPerLevel = 14
         outline.dataSource = self
+        outline.setDraggingSourceOperationMask(.copy, forLocal: true)
         outline.delegate = self
         outline.target = self
         outline.doubleAction = #selector(openSelected)
@@ -358,6 +359,16 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             outline.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             outline.scrollRowToVisible(row)
         }
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> (any NSPasteboardWriting)? {
+        guard interactionsEnabled, let node = item as? WorkspaceSidebarNode,
+              node.kind == .file, node.isAvailable else { return nil }
+        let entry = WorkspaceBrowserEntry(rootID: node.rootID, relativePath: node.relativePath, name: node.name, kind: .file)
+        guard let data = WorkspaceEntryDragPayload(entry: entry).encodedData() else { return nil }
+        let writer = NSPasteboardItem()
+        writer.setData(data, forType: .init(WorkspaceEntryDragPayload.pasteboardType))
+        return writer
     }
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {

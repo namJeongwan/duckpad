@@ -1043,6 +1043,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         case .transfer(let tabID, let source, let destination, let index, let operation):
             performGroupTransfer(tabID: tabID, source: source, orientation: editorGroupLayout.snapshot.orientation,
                                  operation: operation, destination: destination, insertionIndex: index)
+        case .openWorkspaceEntry(let entry, let target, let zone):
+            routeOpenWorkspaceEntry(entry, dropTarget: target, dropZone: zone)
         case .focus(let group):
             performEditorGroupFocus(group)
         case .close(let tabID, let group):
@@ -3008,7 +3010,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    func routeOpenWorkspaceEntry(_ entry: WorkspaceBrowserEntry) {
+    func routeOpenWorkspaceEntry(_ entry: WorkspaceBrowserEntry, dropTarget: EditorGroupID? = nil,
+                                 dropZone: EditorGroupDropOverlay.Zone? = nil) {
         guard workspaceBrowserCommandsAreActionable,
               let workspaceBrowserUseCase,
               let fileUseCase else { return }
@@ -3024,7 +3027,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             do {
                 let read = try await workspaceBrowserUseCase.readFile(entry)
                 guard let self, self.workspaceInteractionsAreActionable, !Task.isCancelled else { return }
-                self.beginAcceptedWorkspaceFileOpen(read, fileUseCase: fileUseCase)
+                self.beginAcceptedWorkspaceFileOpen(read, fileUseCase: fileUseCase, dropTarget: dropTarget, dropZone: dropZone)
             } catch let failure as WorkspaceBrowserFailure {
                 guard let self, !Task.isCancelled else { return }
                 self.workspaceSidebar.presentFailure(failure)
@@ -3037,7 +3040,9 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
 
     private func beginAcceptedWorkspaceFileOpen(
         _ read: WorkspaceFileRead,
-        fileUseCase: FileDocumentUseCase
+        fileUseCase: FileDocumentUseCase,
+        dropTarget: EditorGroupID? = nil,
+        dropZone: EditorGroupDropOverlay.Zone? = nil
     ) {
         let token = UUID()
         let task = Task { @MainActor [weak self] in
@@ -3046,6 +3051,24 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             let outcome = await fileUseCase.open(read)
             guard !self.terminationReviewInProgress else { return }
             await self.handle(fileOutcome: outcome) {}
+            guard let target = dropTarget, self.workspaceInteractionsAreActionable,
+                  self.editorGroupLayout.snapshot.visibleGroups.contains(target) else { return }
+            let tabID: TabID
+            switch outcome {
+            case .opened(let id), .activatedExisting(let id): tabID = id
+            default: return
+            }
+            guard let source = self.editorGroupLayout.snapshot.visibleGroups.first(where: {
+                self.editorGroupLayout.snapshot.tabIDs(in: $0).contains(tabID)
+            }) else { return }
+            if let zone = dropZone {
+                self.performAdjacentGroupSplit(tabID: tabID, source: source, target: target, zone: zone, operation: .copy)
+            } else if self.editorGroupLayout.snapshot.tabIDs(in: target).contains(tabID) {
+                self.performActivate(tabID, in: target)
+            } else {
+                self.performGroupTransfer(tabID: tabID, source: source,
+                    orientation: self.editorGroupLayout.snapshot.orientation, operation: .copy, destination: target)
+            }
         }
         pendingWorkspaceFileOpenTasks[token] = task
     }

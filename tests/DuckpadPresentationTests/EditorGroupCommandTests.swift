@@ -1286,3 +1286,37 @@ private extension NSMenu {
     }
     #expect(germanWidths != strips.map { $0.flowLayout.itemWidths })
 }
+
+@Test @MainActor func explorerFileOpensDirectlyInSplitAndSplitsAgainWithoutResettingDragState() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("duckpad-explorer-split-\(UUID())")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("notes.txt")
+    try Data("한글 workspace content".utf8).write(to: file)
+    let browser = WorkspaceBrowserUseCase(store: LocalWorkspaceRootStore(archiveURL: directory.appendingPathComponent("roots.json")))
+    _ = await browser.start()
+    _ = await browser.addRoot(directory)
+    let root = try #require(browser.roots.first)
+    let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+    let router = EditorGroupRouterSpy()
+    let files = FileDocumentUseCase(workspace: workspace, editor: router, store: EditorGroupFileStore())
+    let controller = DuckpadWindowController(workspace: workspace,
+        previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(),
+        editorAdapter: router, editorView: NSView(), secondaryEditorView: NSView(), editorGroupRouter: router,
+        fileUseCase: files, workspaceBrowserUseCase: browser, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.start(); await controller.waitForStartup()
+    let entry = WorkspaceBrowserEntry(rootID: root.id, relativePath: "notes.txt", name: "notes.txt", kind: .file)
+    controller.editorGroupWorkspace.onAction?(.openWorkspaceEntry(entry, .primary, .right))
+    await eventually { controller.editorGroupLayoutSnapshot.visibleGroups.count == 2 }
+    let first = controller.editorGroupLayoutSnapshot
+    let tab = try #require(workspace.snapshot().tabs.first { $0.displayTitle == "notes.txt" })
+    #expect(first.tabIDs(in: first.focusedGroup) == [tab.id])
+    #expect(router.snapshot(for: tab.buffer.bufferID)?.text == "한글 workspace content")
+    // Existing file: read/open may activate it, but the captured target still determines the split.
+    controller.editorGroupWorkspace.onAction?(.openWorkspaceEntry(entry, .primary, .down))
+    await eventually { controller.editorGroupLayoutSnapshot.visibleGroups.count == 3 }
+    let second = controller.editorGroupLayoutSnapshot
+    #expect(second.tabIDs(in: second.focusedGroup) == [tab.id])
+    #expect(workspace.snapshot().tabs.filter { $0.id == tab.id }.count == 1)
+}
