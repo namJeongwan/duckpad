@@ -98,6 +98,91 @@ private actor ObservationBlockingStore: SessionStore {
         #expect(view.documentByteLength == before)
     }
 
+    @Test func appendBeforeReflowPaintRetainsFollowIntent() throws {
+        _ = NSApplication.shared
+        let editor = ScintillaEditorAdapter()
+        defer { editor.invalidate() }
+        let id = BufferID(), source = String(repeating: "long wrapped log message\n", count: 300)
+        editor.install(.init(bufferID: id, revision: 0, text: source))
+        editor.display(.init(bufferID: id, revision: 0))
+        let view = try #require(editor.activeScintillaView)
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 800, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = editor.view; window.orderFront(nil)
+        defer { window.contentView = nil; window.close() }
+        editor.view.layoutSubtreeIfNeeded(); window.displayIfNeeded()
+        editor.followObservedFileEnd(in: id)
+        // A group restoration/rewrap can temporarily move the viewport while
+        // retaining the end selection. Append synchronously, before a paint.
+        view.restoreCaretUTF8Position(UInt(source.utf8.count), anchorPosition: UInt(source.utf8.count), firstVisibleLine: 0, horizontalScrollOffset: 0, wordWrapEnabled: true)
+        #expect(view.isObservedFileFollowingEnd)
+        #expect(editor.applyObservedUTF8(Data("new\n".utf8), to: .init(bufferID: id, revision: 1), reset: false))
+        #expect(view.caretUTF8Position == source.utf8.count + 4)
+        #expect(view.isObservedFileFollowingEnd)
+    }
+
+    @Test func twoRemoteLogsKeepFollowingAcrossSplitAndFocusChanges() async throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspace = ScratchWorkspaceUseCase(store: InMemorySessionStore())
+        let editor = ScintillaEditorAdapter()
+        let reader = RemoteFixtureReader()
+        let remote = RemoteFileUseCase(workspace: workspace, editor: editor, reader: reader)
+        let tail = TailFileUseCase(workspace: workspace, editor: editor, reader: reader)
+        let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor, editorView: editor.view, secondaryEditorView: editor.secondaryGroupView, editorGroupRouter: editor, remoteFileUseCase: remote, tailFileUseCase: tail)
+        defer { tail.cancelAll(); controller.close(); editor.invalidate() }
+        await controller.waitForStartup()
+        controller.showAndFocus()
+        let initial = String(repeating: "long log message " + String(repeating: "value ", count: 25) + "\n", count: 300)
+        var tabs: [TabID] = [], buffers: [BufferID] = [], files: [URL] = [], views: [DPScintillaEditorView] = []
+        for name in ["first.log", "second.log"] {
+            let file = root.appendingPathComponent(name)
+            try Data(initial.utf8).write(to: file)
+            files.append(file)
+            let location = try #require(RemoteFileLocation(host: "test-alias", path: file.path))
+            let tab = try await remote.open(location, tail: true)
+            tabs.append(tab)
+            buffers.append(try #require(workspace.fileContext(tabID: tab)).buffer.bufferID)
+            views.append(try #require(editor.activeScintillaView))
+            try await tail.start(tabID: tab)
+            editor.setWordWrapEnabled(true)
+            controller.window?.contentView?.layoutSubtreeIfNeeded()
+            controller.window?.displayIfNeeded()
+            editor.followObservedFileEnd(in: buffers.last!)
+            #expect(editor.isObservedFileFollowingEnd(in: buffers.last!))
+        }
+        controller.performMoveActiveTabToGroupRight(nil)
+        try await wait { controller.editorGroupLayoutSnapshot.visibleGroups.count == 2 }
+        controller.window?.contentView?.layoutSubtreeIfNeeded(); controller.window?.displayIfNeeded()
+        for buffer in buffers { #expect(editor.isObservedFileFollowingEnd(in: buffer)) }
+        #expect(controller.editorGroupLayoutSnapshot.visibleGroups.count == 2)
+        for step in 1...3 {
+            for index in 0..<2 {
+                _ = await workspace.activate(tabID: tabs[index])
+                let handle = try FileHandle(forWritingTo: files[index])
+                try handle.seekToEnd(); try handle.write(contentsOf: Data("한글 \(step)\n".utf8)); try handle.close()
+            }
+            try await wait { buffers.allSatisfy { editor.observedByteCount(for: $0) == initial.utf8.count + step * 9 } }
+            for buffer in buffers { #expect(editor.isObservedFileFollowingEnd(in: buffer)) }
+            for tab in tabs { #expect(tail.states[tab] == .following) }
+        }
+        // One pane deliberately pauses; new bytes still arrive without moving
+        // its selection/viewport, while the other pane continues following.
+        views[0].restoreCaretUTF8Position(10, anchorPosition: 2, firstVisibleLine: 0, horizontalScrollOffset: 0, wordWrapEnabled: true)
+        #expect(!editor.isObservedFileFollowingEnd(in: buffers[0]))
+        for file in files {
+            let handle = try FileHandle(forWritingTo: file)
+            try handle.seekToEnd(); try handle.write(contentsOf: Data("last\n".utf8)); try handle.close()
+        }
+        try await wait { buffers.allSatisfy { editor.observedByteCount(for: $0) == initial.utf8.count + 32 } }
+        #expect(views[0].anchorUTF8Position == 2 && views[0].caretUTF8Position == 10 && views[0].firstVisibleLine == 0)
+        #expect(editor.isObservedFileFollowingEnd(in: buffers[1]))
+        for buffer in buffers {
+            #expect(editor.snapshot(for: buffer)?.text == initial + "한글 1\n한글 2\n한글 3\nlast\n")
+        }
+    }
+
     @Test func stoppingUnchangedTailUnlocksOnlyAValidatedLocalSnapshot() async throws {
         _ = NSApplication.shared
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

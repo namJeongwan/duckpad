@@ -627,3 +627,11 @@ for every cached document on every Find/IME edit. Search range validation uses
 a single continuation-byte check per edge on already validated UTF-8 text
 (binary documents remain rejected); the general byte-navigation helper is
 unchanged. Only the Duckpad bridge changes; no upstream/generated files change.
+
+2026-10-27 Tail viewport fix: Duckpad-owned bridge retains explicit Follow intent
+through asynchronous wrapping after group splits and resizes. Paint scrolls the
+end caret back into view when display-line estimates settle. A view-scoped local
+AppKit input monitor clears this intent before wheel, mouse or keyboard gestures;
+non-end restored selections also clear it. Paused panes retain their independent
+selection/scroll while appends continue. Monitors are removed on invalidation and
+deallocation. No upstream Scintilla file or regenerated source changes.
