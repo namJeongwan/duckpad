@@ -14,7 +14,15 @@ It brings familiar text editing to the Mac with native menus, multiple document 
 
 ## Download
 
-[Download Duckpad](https://github.com/namJeongwan/duckpad/releases/latest)
+Install with Homebrew:
+
+```sh
+brew install --cask namJeongwan/duckpad/duckpad
+```
+
+Homebrew automatically adds the [Duckpad tap](https://github.com/namJeongwan/homebrew-duckpad).
+
+Or [download Duckpad](https://github.com/namJeongwan/duckpad/releases/latest) for manual installation.
 
 Requires macOS 13 or later. Supports Apple Silicon and Intel Macs.
 
