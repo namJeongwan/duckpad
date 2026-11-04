@@ -1435,3 +1435,48 @@
 "Rendering diagram…" = "다이어그램 렌더링 중…";
 
 "Diagram incomplete. Edit the source to continue." = "다이어그램이 완성되지 않았습니다. 원문을 편집하세요.";
+
+"Language server" = "언어 서버";
+
+"Keyword" = "키워드";
+
+"↑↓ select · Tab insert · Esc close" = "↑↓ 선택 · Tab 삽입 · Esc 닫기";
+
+/* Python language server settings */
+"Python" = "Python";
+"Settings scope" = "설정 범위";
+"All projects" = "모든 프로젝트";
+"Current project" = "현재 프로젝트";
+"Use default server" = "기본 서버 사용";
+"Python interpreter" = "Python 인터프리터";
+"Automatic (.venv, then default Python)" = "자동 (.venv 우선, 이후 기본 Python)";
+"Choose…" = "선택…";
+"Choose Python interpreter…" = "Python 인터프리터 선택…";
+"Apply Python settings" = "Python 설정 적용";
+"Select a saved Python file to configure its project." = "저장된 Python 파일을 선택하면 해당 프로젝트를 설정할 수 있습니다.";
+"Existing environments are used without creating or installing project packages. Install the selected language server separately." = "기존 환경을 사용하며 프로젝트 환경 생성이나 패키지 설치는 하지 않습니다. 선택한 언어 서버는 별도로 설치해야 합니다.";
+"Active interpreter: %1$@" = "사용 중인 인터프리터: %1$@";
+"Automatic" = "자동";
+"Server command: %1$@" = "서버 명령: %1$@";
+"Enter an absolute Python interpreter path, or leave it empty for automatic detection." = "Python 인터프리터의 절대 경로를 입력하거나 비워 두면 자동으로 감지합니다.";
+"Python language server is unavailable. Check the server installation and interpreter path." = "Python 언어 서버를 사용할 수 없습니다. 서버 설치와 인터프리터 경로를 확인하세요.";
+
+/* Language plugin settings */
+"Language Support" = "언어 지원";
+"Interpreter" = "인터프리터";
+"Choose interpreter…" = "인터프리터 선택…";
+"Apply language settings" = "언어 설정 적용";
+"Automatic environment detection" = "환경 자동 감지";
+"Install and enable a language support plugin in Extensions." = "확장 기능에서 언어 지원 플러그인을 설치하고 활성화하세요.";
+"Select a saved file to configure its project." = "저장된 파일을 선택하면 해당 프로젝트를 설정할 수 있습니다.";
+"Existing environments are used. Project environments and packages are not created or installed automatically." = "기존 환경을 사용합니다. 프로젝트 환경 생성이나 패키지 설치는 자동으로 하지 않습니다.";
+"Install command: %1$@" = "설치 명령: %1$@";
+"Language server is unavailable. Check the server installation and interpreter path." = "언어 서버를 사용할 수 없습니다. 서버 설치와 인터프리터 경로를 확인하세요.";
+"Enter an absolute interpreter path, or leave it empty for automatic detection." = "인터프리터의 절대 경로를 입력하거나 비워 두면 자동으로 감지합니다.";
+"Multiple enabled plugins provide the same language. Disable one of them." = "활성화된 여러 플러그인이 같은 언어를 지원합니다. 하나를 비활성화하세요.";
+
+"All defaults" = "전체 기본값";
+
+"Current workspace" = "현재 워크스페이스";
+
+"Selected folder" = "선택한 폴더";

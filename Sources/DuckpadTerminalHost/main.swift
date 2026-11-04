@@ -9,6 +9,43 @@ import DuckpadInfrastructure
 private final class ShellSession: NSObject, DuckpadTerminalHostProtocol, @unchecked Sendable {
     private let lock = NSLock()
     private var observations: [UUID: Task<Void, Never>] = [:]
+    private let languageServer = LanguageServerProcessSession()
+    private var languageServerRunning = false
+    private var languageServerTask: Task<Void, Never>?
+
+    func languageServerProjectRoot(_ data: Data, withReply reply: @escaping @Sendable (String?) -> Void) {
+        guard data.count < 256 * 1024,
+              let request = try? JSONDecoder().decode(LanguageServerLaunchRequest.self, from: data), request.isValid else { reply(nil); return }
+        xpc_transaction_begin()
+        Task {
+            defer { xpc_transaction_end() }
+            do {
+                try await LanguageServerRegistrationVerifier.verify(request.registration)
+                reply(LanguageServerProcessSession.projectRoot(for: request).path)
+            } catch { reply(nil) }
+        }
+    }
+    func startLanguageServer(_ data: Data, withReply reply: @escaping @Sendable (FileHandle?, FileHandle?, Data?) -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        guard !started, !stopped, observations.isEmpty, data.count < 2 * 1024 * 1024,
+              let request = try? JSONDecoder().decode(LanguageServerLaunchRequest.self, from: data), request.isValid else { reply(nil, nil, nil); return }
+        started = true
+        xpc_transaction_begin(); languageServerRunning = true
+        languageServerTask = Task {
+            do {
+                let (input, output, context) = try await languageServer.start(request, home: home)
+                let contextData = try JSONEncoder().encode(context)
+                reply(input, output, contextData)
+            } catch {
+                languageServerStartFailed()
+                reply(nil, nil, nil)
+            }
+        }
+    }
+    private func languageServerStartFailed() {
+        lock.lock(); defer { lock.unlock() }
+        if languageServerRunning { languageServerRunning = false; xpc_transaction_end() }
+    }
     private let remotePool = SSHConnectionPool(lifetime: { active in
         if active { xpc_transaction_begin() } else { xpc_transaction_end() }
     })
@@ -127,6 +164,9 @@ private final class ShellSession: NSObject, DuckpadTerminalHostProtocol, @unchec
     func stop() {
         lock.lock(); defer { lock.unlock() }
         stopped = true
+        languageServerTask?.cancel(); languageServerTask = nil
+        languageServer.stop()
+        if languageServerRunning { languageServerRunning = false; xpc_transaction_end() }
         for task in observations.values { task.cancel() }
         Task { await remotePool.shutdown() }
         if child > 0 {

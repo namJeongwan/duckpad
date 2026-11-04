@@ -1395,3 +1395,48 @@
 "Rendering diagram…" = "ダイアグラムを描画中…";
 
 "Diagram incomplete. Edit the source to continue." = "ダイアグラムが未完成です。ソースを編集してください。";
+
+"Language server" = "言語サーバー";
+
+"Keyword" = "キーワード";
+
+"↑↓ select · Tab insert · Esc close" = "↑↓ 選択 · Tab 挿入 · Esc 閉じる";
+
+/* Python language server settings */
+"Python" = "Python";
+"Settings scope" = "設定の適用範囲";
+"All projects" = "すべてのプロジェクト";
+"Current project" = "現在のプロジェクト";
+"Use default server" = "既定のサーバーを使用";
+"Python interpreter" = "Python インタープリター";
+"Automatic (.venv, then default Python)" = "自動（.venv を優先、次に既定の Python）";
+"Choose…" = "選択…";
+"Choose Python interpreter…" = "Python インタープリターを選択…";
+"Apply Python settings" = "Python 設定を適用";
+"Select a saved Python file to configure its project." = "保存済みの Python ファイルを選択すると、そのプロジェクトを設定できます。";
+"Existing environments are used without creating or installing project packages. Install the selected language server separately." = "既存の環境を使用し、プロジェクト環境の作成やパッケージのインストールは行いません。選択した言語サーバーは別途インストールしてください。";
+"Active interpreter: %1$@" = "使用中のインタープリター: %1$@";
+"Automatic" = "自動";
+"Server command: %1$@" = "サーバーコマンド: %1$@";
+"Enter an absolute Python interpreter path, or leave it empty for automatic detection." = "Python インタープリターの絶対パスを入力するか、空欄にすると自動検出します。";
+"Python language server is unavailable. Check the server installation and interpreter path." = "Python 言語サーバーを利用できません。サーバーのインストールとインタープリターのパスを確認してください。";
+
+/* Language plugin settings */
+"Language Support" = "言語サポート";
+"Interpreter" = "インタープリター";
+"Choose interpreter…" = "インタープリターを選択…";
+"Apply language settings" = "言語設定を適用";
+"Automatic environment detection" = "環境を自動検出";
+"Install and enable a language support plugin in Extensions." = "拡張機能で言語サポートプラグインをインストールして有効にしてください。";
+"Select a saved file to configure its project." = "保存済みのファイルを選択すると、そのプロジェクトを設定できます。";
+"Existing environments are used. Project environments and packages are not created or installed automatically." = "既存の環境を使用します。プロジェクト環境の作成やパッケージのインストールは自動で行いません。";
+"Install command: %1$@" = "インストールコマンド: %1$@";
+"Language server is unavailable. Check the server installation and interpreter path." = "言語サーバーを利用できません。サーバーのインストールとインタープリターのパスを確認してください。";
+"Enter an absolute interpreter path, or leave it empty for automatic detection." = "インタープリターの絶対パスを入力するか、空欄にすると自動検出します。";
+"Multiple enabled plugins provide the same language. Disable one of them." = "複数の有効なプラグインが同じ言語を提供しています。いずれかを無効にしてください。";
+
+"All defaults" = "全体のデフォルト";
+
+"Current workspace" = "現在のワークスペース";
+
+"Selected folder" = "選択したフォルダ";

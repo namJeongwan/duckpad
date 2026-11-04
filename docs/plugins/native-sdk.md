@@ -2,6 +2,8 @@
 
 Host API 1.3.0 adds native plugins to the existing package installer and command registry. The native ABI is version 1. Native modules execute in the Duckpad process and can create their own AppKit views. Clipboard History 0.2.0 is the reference implementation: Rust owns history semantics; Swift owns clipboard observation, persistence, UI, and all eight UI translations.
 
+Host API 1.5 also adds [declarative language support plugins](../../SDK/LanguageSupport/language-support.md). These register LSP services through their signed manifests and do not extend the native C ABI.
+
 ## SDK and entry points
 
 The public contract is [DuckpadNative.h](../../SDK/DuckpadNative/include/DuckpadNative.h). [DuckpadHost.swift](../../SDK/DuckpadNative/Swift/DuckpadHost.swift) is a source wrapper compiled into a Swift plugin; plugins do not link Duckpad's internal Swift modules.

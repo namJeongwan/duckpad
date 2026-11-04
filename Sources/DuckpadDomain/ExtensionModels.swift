@@ -64,6 +64,7 @@ public enum ExtensionCapability: String, Codable, CaseIterable, Sendable {
     case clipboardWrite = "clipboard.write"
     case pluginStorage = "storage.plugin"
     case uiList = "ui.list"
+    case languageServers = "language.servers"
     case nativeCode = "runtime.native"
 }
 
@@ -122,6 +123,7 @@ public struct ExtensionContributions: Codable, Equatable, Sendable {
     public let keybindings: [ExtensionKeybindingContribution]
     public let snippets: [ExtensionSnippetContribution]
     public let themes: [ExtensionThemeContribution]
+    public let languageServices: [LanguageServiceContribution]
     public let languages: [ExtensionLanguageContribution]
 
     public init(
@@ -129,10 +131,20 @@ public struct ExtensionContributions: Codable, Equatable, Sendable {
         keybindings: [ExtensionKeybindingContribution] = [],
         snippets: [ExtensionSnippetContribution] = [],
         themes: [ExtensionThemeContribution] = [],
-        languages: [ExtensionLanguageContribution] = []
+        languages: [ExtensionLanguageContribution] = [],
+        languageServices: [LanguageServiceContribution] = []
     ) {
         self.commands = commands; self.keybindings = keybindings
-        self.snippets = snippets; self.themes = themes; self.languages = languages
+        self.snippets = snippets; self.themes = themes; self.languages = languages; self.languageServices = languageServices
+    }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        commands = try values.decode([ExtensionCommandContribution].self, forKey: .commands)
+        keybindings = try values.decode([ExtensionKeybindingContribution].self, forKey: .keybindings)
+        snippets = try values.decode([ExtensionSnippetContribution].self, forKey: .snippets)
+        themes = try values.decode([ExtensionThemeContribution].self, forKey: .themes)
+        languages = try values.decode([ExtensionLanguageContribution].self, forKey: .languages)
+        languageServices = try values.decodeIfPresent([LanguageServiceContribution].self, forKey: .languageServices) ?? []
     }
 }
 
@@ -188,8 +200,10 @@ public struct LoadedExtensionPackage: Equatable, Sendable {
     public let signatureDigest: String
     public let capabilitySchemaDigest: String
     public let trustSource: TrustSource
+    public let languageServiceFiles: [String: Data]?
     public let nativeFiles: [String: Data]?
-    public init(manifest: ExtensionManifest, module: Data, packageDigest: String, publisherFingerprint: String, signatureDigest: String, capabilitySchemaDigest: String, trustSource: TrustSource, nativeFiles: [String: Data]? = nil) {
+    public init(manifest: ExtensionManifest, module: Data, packageDigest: String, publisherFingerprint: String, signatureDigest: String, capabilitySchemaDigest: String, trustSource: TrustSource, nativeFiles: [String: Data]? = nil, languageServiceFiles: [String: Data]? = nil) {
+        self.languageServiceFiles = languageServiceFiles
         self.manifest = manifest; self.module = module
         self.packageDigest = packageDigest; self.publisherFingerprint = publisherFingerprint
         self.signatureDigest = signatureDigest; self.capabilitySchemaDigest = capabilitySchemaDigest; self.trustSource = trustSource; self.nativeFiles = nativeFiles

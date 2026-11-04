@@ -1,5 +1,31 @@
 # Scintilla 5.6.6 provenance
 
+2026-11-02 completion context: the bridge caches Lexilla's named-style metadata
+separately from palette roles, suppressing code completion for strings (including
+STRINGEOL), characters, regexes, comments, and Ruby POD/data. Dirty styles refresh
+from a line boundary rather than resuming after a closing quote; synchronous work
+is bounded to 256 KiB and pending asynchronous styling stays quiet. Lexilla still
+classifies interpolation expressions as code. Null-lexer scratch text uses a
+4 KiB current-line escaped-quote check, preserving apostrophes within prose words.
+This changes only the maintained bridge/header; lexer sources are unchanged.
+
+2026-11-02 automatic completion: the Duckpad-owned bridge/header publish committed
+direct/IME typing after native insertion completes, and cancel pending suggestions
+on Escape, mouse input, and editor focus loss. Tentative IME text, read-only/binary
+documents, and multiple selections do not request suggestions. `cocoa/ScintillaView.h`
+adds a deletion input source; `ScintillaView.mm` brackets Backspace/forward Delete
+keyboard handling and responder delete/cut actions with the existing input lifecycle
+callbacks. The bridge distinguishes insertion, deletion, and cancellation, allowing
+Application to refresh candidates when deletion leaves an empty prefix. Tentative
+IME deletion and Undo/Redo remain outside this request path. These Cocoa patches
+must be retained when regenerating the vendor tree. Application owns scheduling
+and analysis; the rich AppKit panel owns candidate presentation, while Scintilla
+retains document editing and Undo. These bridge and Cocoa source patches are
+maintained in-tree; generated sources are unchanged.
+The legacy native popup, after showing the prefiltered list, switches to normal autocomplete
+options so continued typing updates the selected prefix match instead of retaining
+the first original candidate. Initial diacritic-folded matches remain available.
+
 2026-10-19 localization integration: `SCIContentView.menuForEvent:` notifies the
 optional delegate before returning a generated context menu. The Duckpad-owned
 bridge maps pinned command tags to stable keys and localized labels without

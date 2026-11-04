@@ -1435,3 +1435,48 @@
 "Rendering diagram…" = "Rendering diagram…";
 
 "Diagram incomplete. Edit the source to continue." = "Diagram incomplete. Edit the source to continue.";
+
+"Language server" = "Language server";
+
+"Keyword" = "Keyword";
+
+"↑↓ select · Tab insert · Esc close" = "↑↓ select · Tab insert · Esc close";
+
+/* Python language server settings */
+"Python" = "Python";
+"Settings scope" = "Settings scope";
+"All projects" = "All projects";
+"Current project" = "Current project";
+"Use default server" = "Use default server";
+"Python interpreter" = "Python interpreter";
+"Automatic (.venv, then default Python)" = "Automatic (.venv, then default Python)";
+"Choose…" = "Choose…";
+"Choose Python interpreter…" = "Choose Python interpreter…";
+"Apply Python settings" = "Apply Python settings";
+"Select a saved Python file to configure its project." = "Select a saved Python file to configure its project.";
+"Existing environments are used without creating or installing project packages. Install the selected language server separately." = "Existing environments are used without creating or installing project packages. Install the selected language server separately.";
+"Active interpreter: %1$@" = "Active interpreter: %1$@";
+"Automatic" = "Automatic";
+"Server command: %1$@" = "Server command: %1$@";
+"Enter an absolute Python interpreter path, or leave it empty for automatic detection." = "Enter an absolute Python interpreter path, or leave it empty for automatic detection.";
+"Python language server is unavailable. Check the server installation and interpreter path." = "Python language server is unavailable. Check the server installation and interpreter path.";
+
+/* Language plugin settings */
+"Language Support" = "Language Support";
+"Interpreter" = "Interpreter";
+"Choose interpreter…" = "Choose interpreter…";
+"Apply language settings" = "Apply language settings";
+"Automatic environment detection" = "Automatic environment detection";
+"Install and enable a language support plugin in Extensions." = "Install and enable a language support plugin in Extensions.";
+"Select a saved file to configure its project." = "Select a saved file to configure its project.";
+"Existing environments are used. Project environments and packages are not created or installed automatically." = "Existing environments are used. Project environments and packages are not created or installed automatically.";
+"Install command: %1$@" = "Install command: %1$@";
+"Language server is unavailable. Check the server installation and interpreter path." = "Language server is unavailable. Check the server installation and interpreter path.";
+"Enter an absolute interpreter path, or leave it empty for automatic detection." = "Enter an absolute interpreter path, or leave it empty for automatic detection.";
+"Multiple enabled plugins provide the same language. Disable one of them." = "Multiple enabled plugins provide the same language. Disable one of them.";
+
+"All defaults" = "All defaults";
+
+"Current workspace" = "Current workspace";
+
+"Selected folder" = "Selected folder";

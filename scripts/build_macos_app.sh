@@ -121,6 +121,13 @@ install -m 0644 "$REPOSITORY_ROOT/Vendor/Scintilla/5.6.6/License.txt" "$APP/Cont
 install -m 0644 "$REPOSITORY_ROOT/Vendor/Lexilla/5.5.3/License.txt" "$APP/Contents/Resources/ThirdPartyLicenses/Lexilla.txt"
 install -m 0644 "$REPOSITORY_ROOT/Vendor/WAMR/2.4.5/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/WAMR.txt"
 install -m 0644 "$REPOSITORY_ROOT/.build/checkouts/Sparkle/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/Sparkle.txt"
+install -m 0644 "$REPOSITORY_ROOT/Vendor/CodeEditCompletion/LICENSE.md" "$APP/Contents/Resources/ThirdPartyLicenses/CodeEditCompletion.txt"
+install -m 0644 "$REPOSITORY_ROOT/Vendor/LanguageClient/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/LanguageClient.txt"
+install -m 0644 "$REPOSITORY_ROOT/Sources/DuckpadInfrastructure/Resources/CompletionMatching/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/CodeMirrorCompletion.txt"
+for COMPLETION_PACKAGE in LanguageServerProtocol JSONRPC Semaphore; do
+    install -m 0644 "$REPOSITORY_ROOT/.build/checkouts/$COMPLETION_PACKAGE/LICENSE" "$APP/Contents/Resources/ThirdPartyLicenses/$COMPLETION_PACKAGE.txt"
+done
+
 
 ditto "$REPOSITORY_ROOT/Vendor/Ripgrep/NOTICES" "$APP/Contents/Resources/ThirdPartyLicenses/Ripgrep"
 

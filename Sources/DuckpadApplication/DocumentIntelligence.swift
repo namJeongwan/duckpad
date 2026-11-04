@@ -303,6 +303,7 @@ public enum DocumentIntelligenceAnalyzer {
         var current = String.UnicodeScalarView()
         var currentBytes = 0
         var currentOverflowed = false
+        var cancellationCountdown = 4_096
         func finishCurrent() {
             if !currentOverflowed, current.count >= 2 { body(String(current)) }
             current.removeAll(keepingCapacity: true)
@@ -310,6 +311,11 @@ public enum DocumentIntelligenceAnalyzer {
             currentOverflowed = false
         }
         for scalar in text.unicodeScalars {
+            cancellationCountdown -= 1
+            if cancellationCountdown == 0 {
+                if Task.isCancelled { return consumed }
+                cancellationCountdown = 4_096
+            }
             let width = utf8Width(of: scalar)
             guard consumed <= maximumBytes - width else { return consumed }
             consumed += width
@@ -432,7 +438,12 @@ public enum DocumentIntelligenceAnalyzer {
 @MainActor
 public final class DocumentIntelligenceUseCase {
     private weak var editor: (any DocumentIntelligenceEditorPort)?
+    private var automaticCompletionTask: Task<Void, Never>?
+    private var automaticCompletionGeneration: UInt64 = 0
     public let maximumDocumentBytes: Int
+    public var completionProvider: (any DocumentCompletionProviding)?
+    public var completionMatcher: (any DocumentCompletionMatching)?
+    private let completionWords = DocumentCompletionWordIndex()
 
     public init(
         editor: any DocumentIntelligenceEditorPort,
@@ -451,25 +462,90 @@ public final class DocumentIntelligenceUseCase {
             && editor.activeDocumentIntelligenceByteLength <= maximumDocumentBytes
     }
 
+    /// Enables suggestions after typing without taking a document snapshot on each key.
+    public func enableAutomaticCompletion(supplementalTerms: @escaping @MainActor () -> [String] = { [] }) {
+        cancelPendingAutomaticCompletion()
+        guard let editor = editor as? any AutomaticDocumentCompletionEditorPort else { return }
+        editor.onCompletionEdit = { [weak self] edit in self?.completionWords.apply(edit) }
+        editor.onCompletionRetired = { [weak self] buffer in
+            self?.completionWords.retire(buffer); self?.completionProvider?.retire(bufferID: buffer)
+        }
+        editor.onCompletionInput = { [weak self, weak editor] input in
+            guard let self else { return }
+            self.cancelPendingAutomaticCompletion()
+            guard input != .cancel, let editor, let context = editor.completionInputContext,
+                  editor.activeDocumentIntelligenceByteLength <= self.maximumDocumentBytes else { return }
+            let generation = self.automaticCompletionGeneration
+            self.automaticCompletionTask = Task { @MainActor [weak self, weak editor] in
+                // Coalesce synchronous native notifications, without waiting for a typing pause.
+                await Task.yield()
+                guard let self, let editor, !Task.isCancelled,
+                      self.automaticCompletionGeneration == generation,
+                      editor.completionInputContext == context else { return }
+                _ = await self.computeCompletion(supplementalTerms: supplementalTerms(), automaticContext: context)
+            }
+        }
+    }
+
     public func complete(supplementalTerms: [String] = []) async -> DocumentCompletionOutcome {
+        cancelPendingAutomaticCompletion()
+        return await computeCompletion(supplementalTerms: supplementalTerms, automaticContext: nil)
+    }
+
+    private func computeCompletion(
+        supplementalTerms: [String], automaticContext: DocumentCompletionInputContext?
+    ) async -> DocumentCompletionOutcome {
+        let requestGeneration = automaticCompletionGeneration
         guard let editor, editor.activeDocumentIntelligenceBuffer != nil else { return .unavailable }
         let byteLength = editor.activeDocumentIntelligenceByteLength
         guard byteLength <= maximumDocumentBytes else {
             editor.cancelCompletion()
             return .overBudget(actualBytes: byteLength, maximumBytes: maximumDocumentBytes)
         }
+        if let automaticEditor = editor as? any AutomaticDocumentCompletionEditorPort,
+           automaticEditor.completionInputContext == nil {
+            editor.cancelCompletion(); return .unavailable
+        }
         guard let capture = editor.captureDocumentIntelligence(maximumBytes: maximumDocumentBytes) else {
             return .unavailable
         }
-        let completion = await Task.detached(priority: .userInitiated) {
+        if automaticContext != nil {
+            guard let prefix = DocumentCompletionPrefix(capture),
+                  DocumentCompletionContext.allowsAutomatic(in: capture, prefix: prefix) else {
+                editor.cancelCompletion(); return .noPrefix
+            }
+        }
+        if let richEditor = editor as? any RichDocumentCompletionEditorPort, let matcher = completionMatcher {
+            return await richCompletion(capture, editor: richEditor, matcher: matcher,
+                supplementalTerms: supplementalTerms, automaticContext: automaticContext)
+        }
+        if automaticContext != nil, let prefix = DocumentCompletionPrefix(capture),
+           DocumentCompletionContext.isFunctionName(in: capture, prefix: prefix) {
+            editor.cancelCompletion(); return .noMatches
+        }
+        let analysis = Task.detached(priority: .userInitiated) {
             DocumentIntelligenceAnalyzer.completion(
                 in: capture,
                 supplementalTerms: supplementalTerms
             )
-        }.value
-        guard !Task.isCancelled else { return .stale }
+        }
+        let completion = await withTaskCancellationHandler {
+            await analysis.value
+        } onCancel: {
+            analysis.cancel()
+        }
+        guard !Task.isCancelled, requestGeneration == automaticCompletionGeneration else { return .stale }
+        if let automaticContext {
+            guard let automaticEditor = editor as? any AutomaticDocumentCompletionEditorPort,
+                  automaticEditor.completionInputContext == automaticContext,
+                  automaticContext == DocumentCompletionInputContext(
+                buffer: capture.buffer, caretUTF8: capture.caretUTF8,
+                contextID: capture.contextID, languageID: capture.languageID
+            ) else { return .stale }
+        }
         guard let completion else { return .stale }
-        guard !completion.prefix.isEmpty else { return .noPrefix }
+        guard !completion.prefix.isEmpty,
+              completion.prefix.unicodeScalars.count >= 1 else { return .noPrefix }
         guard !completion.items.isEmpty else { return .noMatches }
         return editor.presentCompletionItems(
             completion.items,
@@ -497,6 +573,66 @@ public final class DocumentIntelligenceUseCase {
         return .ready(DocumentOutline(buffer: capture.buffer, symbols: symbols))
     }
 
+    private func richCompletion(_ capture: DocumentIntelligenceCapture, editor: any RichDocumentCompletionEditorPort,
+                                matcher: any DocumentCompletionMatching, supplementalTerms: [String],
+                                automaticContext: DocumentCompletionInputContext?) async -> DocumentCompletionOutcome {
+        let generation = automaticCompletionGeneration
+        guard let prefix = DocumentCompletionPrefix(capture) else { return .noPrefix }
+        func current() -> Bool {
+            guard !Task.isCancelled, generation == automaticCompletionGeneration, editor.activeDocumentIntelligenceBuffer == capture.buffer else { return false }
+            guard let automaticContext, let automatic = editor as? any AutomaticDocumentCompletionEditorPort else { return true }
+            return automatic.completionInputContext == automaticContext
+        }
+        let functionName = DocumentCompletionContext.isFunctionName(in: capture, prefix: prefix)
+        var local: [DocumentCompletionSuggestion] = []
+        if !prefix.isMemberAccess && !functionName {
+            let range = prefix.replaceRange
+            let currentWord = String(data: capture.utf8[range.location..<(range.location + range.length)], encoding: .utf8)
+            let words = await completionWords.terms(in: capture).filter { $0 != prefix.text && $0 != currentWord }
+            var seen = Set(words)
+            local = words.map { .init(label: $0, insertRange: prefix.insertRange, replaceRange: prefix.replaceRange) }
+            for term in supplementalTerms.joined(separator: " ").prefix(256 * 1_024).split(whereSeparator: { $0.isWhitespace }) {
+                let word = String(term)
+                if word != prefix.text, word.utf8.count <= 256, seen.insert(word).inserted {
+                    local.append(.init(label: word, kind: 14, source: .keyword, insertRange: prefix.insertRange, replaceRange: prefix.replaceRange))
+                }
+            }
+            local = await rank(local, prefix: prefix.text, matcher: matcher)
+        }
+        guard current() else { return .stale }
+        _ = editor.presentCompletionSuggestions(local, capture: capture)
+        if automaticContext != nil, completionProvider != nil {
+            // Local filtering is immediate; only server traffic waits for a short quiet interval.
+            do { try await Task.sleep(for: .milliseconds(60)) } catch { return .stale }
+            guard current() else { return .stale }
+        }
+        var semantic = (try? await completionProvider?.completions(in: capture, prefixRange: prefix.insertRange)) ?? []
+        guard current() else { return .stale }
+        if functionName {
+            semantic = semantic.filter { $0.label.hasPrefix(prefix.text) }.map {
+                var item = $0; item.adjustIndentation = true; return item
+            }
+        }
+        let rankedSemantic = await rank(semantic, prefix: prefix.text, matcher: matcher)
+            .sorted { $0.sortText < $1.sortText }
+        var labels = Set<String>()
+        let suggestions = (rankedSemantic + local).filter { labels.insert($0.label).inserted }.prefix(200)
+        guard current() else { return .stale }
+        guard !suggestions.isEmpty else { editor.cancelCompletion(); return .noMatches }
+        return editor.presentCompletionSuggestions(Array(suggestions), capture: capture) ? .presented(count: suggestions.count) : .stale
+    }
+
+    private func rank(_ items: [DocumentCompletionSuggestion], prefix: String,
+                      matcher: any DocumentCompletionMatching) async -> [DocumentCompletionSuggestion] {
+        let matches = await matcher.matches(prefix, candidates: items.map(\.filterText), limit: 200)
+        return matches.compactMap { match in
+            guard items.indices.contains(match.index) else { return nil }
+            var item = items[match.index]
+            if item.filterText == item.label { item.matches = match.ranges }
+            return item
+        }
+    }
+
     @discardableResult
     public func reveal(_ symbol: DocumentSymbol, in outline: DocumentOutline) -> Bool {
         guard let editor,
@@ -506,5 +642,14 @@ public final class DocumentIntelligenceUseCase {
         return true
     }
 
-    public func cancel() { editor?.cancelCompletion() }
+    public func cancel() {
+        cancelPendingAutomaticCompletion()
+        editor?.cancelCompletion()
+    }
+
+    private func cancelPendingAutomaticCompletion() {
+        automaticCompletionTask?.cancel()
+        automaticCompletionTask = nil
+        automaticCompletionGeneration &+= 1
+    }
 }

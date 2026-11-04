@@ -27,7 +27,7 @@ public struct DuckpadSettingsSmokeState: Equatable, Sendable {
 
 @MainActor
 public final class DuckpadSettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
-    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation", "Searching", "Formatting", "Privacy"]
+    public static let categories = ["General", "Tab Bar", "Editing", "Dark Mode", "Margins/Border/Edge", "New Document", "Default Directory", "Recent Files History", "Indentation", "Searching", "Formatting", "Language Support", "Privacy"]
     public var onShowUsageStatistics: (() -> Void)?
     public private(set) var selectedCategory = "General"
     private var catalog = L10n.catalog
@@ -54,6 +54,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     private let appearance = NSPopUpButton(frame: .zero, pullsDown: false)
     private let wordWrap = NSButton(checkboxWithTitle: L10n.text("Wrap long lines in new tabs"), target: nil, action: nil)
     private let wrapMarkers = NSButton(checkboxWithTitle: L10n.text("Show wrap symbols in new tabs"), target: nil, action: nil)
+    private let languageServices = LanguageServicesSettingsView()
     private let status = NSTextField(labelWithString: "")
     private var settings = AppSettings.defaults
     private var update: ((AppSettings) async -> AppSettingsUpdateOutcome)?
@@ -107,6 +108,17 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         }
     }
 
+    public var onLanguageServiceSelected: ((LanguageServerRegistration) -> Void)?
+    public var selectedLanguageService: LanguageServerRegistration? { languageServices.selectedRegistration }
+    public func configureLanguageServices(_ registrations: [LanguageServerRegistration], preferredLanguageID: String? = nil, conflictingLanguages: Set<String> = []) {
+        languageServices.configureRegistrations(registrations, preferredLanguageID: preferredLanguageID, conflictingLanguages: conflictingLanguages)
+    }
+    public func configureLanguageWorkspace(id: SessionID?, folders: [LanguageServiceFolder], selectedFolderID: String? = nil,
+                                           projectRoot: String? = nil, context: LanguageServerLaunchContext? = nil, unavailable: Bool = false) {
+        languageServices.configureWorkspace(id: id, folders: folders, selectedFolderID: selectedFolderID,
+            projectRoot: projectRoot, context: context, unavailable: unavailable)
+    }
+
     public func selectAppearance(_ mode: AppAppearanceMode) {
         var proposed = settings
         proposed.appearanceMode = mode
@@ -144,6 +156,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
         window?.title = catalog.text("Preferences")
         for binding in localizationBindings { binding(catalog) }
         editorFont.refreshLocalization(catalog: catalog)
+        languageServices.refreshLocalization(catalog)
         refreshLanguageNote()
         status.stringValue = statusLocalization?(catalog) ?? ""
     }
@@ -226,6 +239,14 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
                 page.bottomAnchor.constraint(lessThanOrEqualTo: pageHost.bottomAnchor),
             ])
             pages[category] = page
+        }
+        (pages["Language Support"] as? NSStackView)?.addArrangedSubview(languageServices)
+        languageServices.onLanguageChange = { [weak self] in self?.onLanguageServiceSelected?($0) }
+        languageServices.onChange = { [weak self] services in
+            guard let self else { return }
+            var proposed = self.settings
+            proposed.languageServices = services
+            self.startUpdate(proposed)
         }
         func checkbox(_ title: String, _ key: WritableKeyPath<AppSettings, Bool>, _ category: String, help: String? = nil) {
             let button = NSButton(checkboxWithTitle: L10n.text(title), target: self, action: #selector(settingChanged(_:)))
@@ -693,6 +714,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
 
     private func render(_ settings: AppSettings, preservingPendingSpacingOnly: Bool = false) {
         self.settings = settings
+        languageServices.render(settings.languageServices)
         for control in spacingControls {
             if !preservesSpacingDrafts || (preservingPendingSpacingOnly && pendingSpacingValues[control.key] == nil) {
                 control.field.stringValue = String(settings[keyPath: control.key])
@@ -728,6 +750,7 @@ public final class DuckpadSettingsWindowController: NSWindowController, NSWindow
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
+        languageServices.setControlsEnabled(enabled)
         for control in spacingControls {
             control.field.isEnabled = enabled || preservesSpacingDrafts
             control.stepper.isEnabled = enabled || preservesSpacingDrafts

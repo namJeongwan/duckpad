@@ -2,6 +2,8 @@ import Foundation
 
 /// One connection owns one terminal. Only the signed containing app may connect.
 @objc public protocol DuckpadTerminalHostProtocol {
+    func languageServerProjectRoot(_ request: Data, withReply reply: @escaping @Sendable (String?) -> Void)
+    func startLanguageServer(_ request: Data, withReply reply: @escaping @Sendable (FileHandle?, FileHandle?, Data?) -> Void)
     func readRemoteFile(_ request: Data, requestID: String, withReply reply: @escaping @Sendable (Data?) -> Void)
     func cancelRemoteFile(_ requestID: String)
     func waitForExit(withReply reply: @escaping (Int32) -> Void)
