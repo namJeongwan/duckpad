@@ -146,7 +146,14 @@ swift scripts/build_language_plugins.swift
 The default operation verifies inventories and Ed25519 signatures without
 rewriting files. Signing requires `--signing-seed /absolute/external/seed` with a
 0600 raw Ed25519 seed. `--create-key` is explicit and only creates a missing seed;
-it never rotates an existing publisher. The development language publisher has
+it never rotates an existing publisher. The language-support publisher has
 its own key, separate from Text Tools and Clipboard. Its private seed is outside
 the worktree; only the public key, manifests, inventories and signatures ship in
-source. A public release/catalog entry has not been published by this work.
+source.
+
+The independently released [Python](https://github.com/namJeongwan/duckpad-plugin-python),
+[Ruby/Rails](https://github.com/namJeongwan/duckpad-plugin-ruby) and
+[Rust](https://github.com/namJeongwan/duckpad-plugin-rust) packages are version 0.1.0
+and listed in the official catalog for host API 1.5.0. Install from Available
+Plugins, or extract a release ZIP and select its `.duckpad-plugin` folder with
+Install Plugin. Language server binaries remain separately installed tools.

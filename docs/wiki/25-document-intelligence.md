@@ -1,6 +1,6 @@
 # Current-document completion, language servers, and symbol outline
 
-Status: **Implemented; optional language packages are not published**
+Status: **Released in Duckpad 0.17.0; optional language packages are version 0.1.0**
 
 ## User contract
 
@@ -148,8 +148,8 @@ environments, files and stored preferences are retained. Syntax support and
 local word/keyword completion remain available without an LSP plugin.
 
 Server binaries remain external, separately installed tools. Installation commands
-are displayed as guidance; automatic downloads and catalog publication are not
-implemented. No new native C callbacks, WASM imports or generic process API were
+are displayed as guidance; automatic server downloads are not implemented.
+The signed language packages are published through the official plugin catalog. No new native C callbacks, WASM imports or generic process API were
 introduced. LSP processes still run through the existing unsandboxed helper;
 its server grant is not a filesystem sandbox. Broader LSP editor features beyond
 completion/resolve remain separate work.
@@ -258,10 +258,19 @@ after relaunch. Packaged checks cover signed installation and opt-in activation,
 plugin withdrawal, first-character input, deletion to an empty prefix, quoted
 input, class declarations, member access and method-stub Tab/Undo/Redo.
 
-The native Release preview passes bundle, resources, XPC isolation and ad-hoc
-signature verification. English/Korean Language Support preferences and dark/light
-completion panels were visually inspected. All eight locale files parse and share
-1,285 keys. The other six locale windows, Intel execution, a full Rails project
-and the unrelated full application smoke suite remain unverified. Reference
-language packages are version 0.1.0 with host API minimum 1.5.0; they have not been
-published to a plugin catalog. This work does not publish an app release.
+The universal 0.17.0 (70) release passes bundle, resources, XPC isolation and
+ad-hoc signature verification, 164 focused Release tests, isolated application and
+Markdown smoke, all eight packaged locale-loading checks and final helper-backed
+completion/method-stub/reload checks. English/Korean Language Support preferences
+and dark/light completion panels were visually inspected during development.
+All eight locale files parse and share 1,285 keys. Native Save-panel automation,
+the other six locale preference windows, Intel hardware execution, macOS 13
+runtime, a full Rails project and the full test suite remain unverified.
+
+Language packages are version 0.1.0 with host API minimum 1.5.0 and are listed in
+the official catalog. Their independent repositories are
+[Python](https://github.com/namJeongwan/duckpad-plugin-python),
+[Ruby/Rails](https://github.com/namJeongwan/duckpad-plugin-ruby) and
+[Rust](https://github.com/namJeongwan/duckpad-plugin-rust). See the
+[release validation record](../releases/0.17.0-validation.json) for artifact
+digests, source identity, checks and limitations.
