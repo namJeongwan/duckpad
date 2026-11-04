@@ -1473,7 +1473,14 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         pendingFileCommandTasks[token] = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.pendingFileCommandTasks.removeValue(forKey: token) }
-            await fileUseCase.refreshFromDisk(tabID: tabID, discardingRevision: revision)
+            guard let failure = await fileUseCase.refreshFromDisk(tabID: tabID, discardingRevision: revision),
+                  failure != .cancelled, failure != .unsavedChanges(tabID), self.workspaceInteractionsAreActionable,
+                  self.workspace.snapshot().tabs.first(where: \.isActive)?.id == tabID else { return }
+            self.fileConflictPresenter?.presentFileFailure(failure, attachedTo: self.window, retry: { [weak self] in
+                guard let self, self.workspace.snapshot().tabs.first(where: \.isActive)?.id == tabID else { return }
+                // Any intervening edits need a fresh discard confirmation.
+                self.performReloadExternalFile(nil)
+            })
         }
     }
 

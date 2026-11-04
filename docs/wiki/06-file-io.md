@@ -53,6 +53,28 @@ binding의 identity는 canonical path, device/inode, byte count, nanosecond mtim
 
 save I/O 중 추가 edit가 들어와도 저장한 snapshot revision과 현재 revision이 같을 때만 clean 처리한다. 더 새 revision은 binding의 새 disk identity를 받되 dirty로 남아 accepted input을 잃지 않는다.
 
+## Live reload warnings and explicit retry
+
+Live reload reports both external conflicts and unavailable files. An explicit
+Reload from Disk action now receives the typed failure from `refreshFromDisk`
+and presents the existing file-error sheet, including missing-file or permission
+information. Retry targets the original active tab and repeats discard
+confirmation if the buffer has since become dirty. Canceled operations and errors from an inactive tab do not open a sheet on
+another document.
+
+Keep Editing acknowledges the exact external `FileIdentity`, or the current
+read failure, for that tab. Reading the same state after monitoring resumes no
+longer restores the banner. A different external identity or failure is still
+reported. Successful reading/reloading clears the acknowledgement; a later
+outage therefore remains visible. Acknowledgements are bounded by the open tab
+set and are not persisted across app launches. File bytes, unsaved revisions,
+encoding and Undo history continue through the existing transaction path.
+
+Regression checks cover missing/denied/I/O failures, working UI Retry, preserving
+contents on failure, repeated acknowledged warnings and new external versions.
+The packaged native smoke clicks the real Reload/Retry/Keep Editing controls,
+recreates a missing fixture, and verifies both Cancel and confirmed dirty reload.
+
 ## Files
 
 - `Sources/DuckpadDomain/FileBinding.swift`, `ScratchSession.swift`

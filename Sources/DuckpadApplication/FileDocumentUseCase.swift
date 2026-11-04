@@ -114,6 +114,12 @@ public final class FileDocumentUseCase {
     private var liveReloadTask: Task<Void, Never>?
     private var pendingLivePaths = Set<String>()
     public private(set) var externalChanges: [TabID: LiveFileChange] = [:]
+    private enum ObservedLiveChange: Equatable {
+        case conflict(FileIdentity)
+        case unavailable(FileOperationFailure)
+    }
+    private var observedLiveChanges: [TabID: ObservedLiveChange] = [:]
+    private var acknowledgedLiveChanges: [TabID: ObservedLiveChange] = [:]
     public var onExternalChanges: (() -> Void)?
     public var conventionsUseCase: DocumentConventionsUseCase?
     public var formattingUseCase: DocumentFormattingUseCase?
@@ -178,13 +184,34 @@ public final class FileDocumentUseCase {
         let tabs = workspace.snapshot().tabs
         let ids = Set(tabs.map(\.id))
         externalChanges = externalChanges.filter { ids.contains($0.key) }
+        observedLiveChanges = observedLiveChanges.filter { ids.contains($0.key) }
+        acknowledgedLiveChanges = acknowledgedLiveChanges.filter { ids.contains($0.key) }
         guard liveReloadEnabled, !liveReloadSuspended, workspace.snapshot().startup == .ready else { return }
         changeMonitor?.watch(paths: Set(tabs.compactMap { workspace.fileContext(tabID: $0.id)?.binding.flatMap { $0.remoteFile == nil && $0.tailMode != true ? $0.canonicalPath : nil } }))
     }
 
     public func dismissExternalChange(for tabID: TabID) {
+        acknowledgedLiveChanges[tabID] = observedLiveChanges[tabID]
         externalChanges.removeValue(forKey: tabID)
         onExternalChanges?()
+    }
+
+    private func recordLiveChange(_ change: ObservedLiveChange, for tabID: TabID) {
+        observedLiveChanges[tabID] = change
+        guard acknowledgedLiveChanges[tabID] != change else {
+            externalChanges.removeValue(forKey: tabID)
+            return
+        }
+        switch change {
+        case .conflict: externalChanges[tabID] = .conflict
+        case .unavailable: externalChanges[tabID] = .unavailable
+        }
+    }
+
+    private func clearLiveChange(for tabID: TabID) {
+        externalChanges.removeValue(forKey: tabID)
+        observedLiveChanges.removeValue(forKey: tabID)
+        acknowledgedLiveChanges.removeValue(forKey: tabID)
     }
 
     private func queueLiveReload(_ paths: Set<String>) {
@@ -212,10 +239,11 @@ public final class FileDocumentUseCase {
 
     /// Clean documents reload automatically. Explicit discard applies only to
     /// the exact revision reviewed by the user; concurrent edits always win.
-    public func refreshFromDisk(tabID: TabID, discardingRevision: UInt64? = nil) async {
+    @discardableResult
+    public func refreshFromDisk(tabID: TabID, discardingRevision: UInt64? = nil) async -> FileOperationFailure? {
         await acquireOperation()
         defer { releaseOperation() }
-        guard !Task.isCancelled, !liveReloadSuspended, let context = workspace.fileContext(tabID: tabID), let binding = context.binding, binding.remoteFile == nil else { return }
+        guard !Task.isCancelled, !liveReloadSuspended, let context = workspace.fileContext(tabID: tabID), let binding = context.binding, binding.remoteFile == nil else { return .cancelled }
         loadingProgress = FileLoadingProgress(path: binding.canonicalPath, loadedByteCount: 0, totalByteCount: nil)
         defer { loadingProgress = nil }
         do {
@@ -224,17 +252,22 @@ public final class FileDocumentUseCase {
             guard UInt64(read.data.count) == read.identity.byteCount else {
                 throw TextFileStoreError.io("\(url.path): incomplete file read")
             }
-            guard !Task.isCancelled, !liveReloadSuspended, let current = workspace.fileContext(tabID: tabID), current.binding == binding else { return }
+            guard !Task.isCancelled, !liveReloadSuspended, let current = workspace.fileContext(tabID: tabID), current.binding == binding else { return .cancelled }
+            // Recovery ends the acknowledged outage even when unsaved edits
+            // prevent installing the newly readable contents.
+            if case .unavailable? = acknowledgedLiveChanges[tabID] {
+                acknowledgedLiveChanges.removeValue(forKey: tabID)
+            }
             if read.identity == binding.observedIdentity, binding.tailMode != true, !needsBinaryContent(context) {
-                externalChanges.removeValue(forKey: tabID)
+                clearLiveChange(for: tabID)
                 onExternalChanges?()
-                return
+                return nil
             }
             let dirty = workspace.snapshot().tabs.first(where: { $0.id == tabID })?.isDirty == true
             guard !dirty || discardingRevision == current.buffer.revision else {
-                externalChanges[tabID] = .conflict
+                recordLiveChange(.conflict(read.identity), for: tabID)
                 onExternalChanges?()
-                return
+                return .unsavedChanges(tabID)
             }
             // A producer may stop between UTF-8 bytes. Preserve the readable
             // snapshot when leaving Tail instead of switching it to binary mode.
@@ -246,30 +279,47 @@ public final class FileDocumentUseCase {
                 strictEncoding: binding.encoding.isLegacy, preservingUndo: true,
                 previousFormat: outputFormat(context: current, conversion: nil))
             let decoded = contents.decoded
-            guard !Task.isCancelled, !liveReloadSuspended else { return }
+            guard !Task.isCancelled, !liveReloadSuspended else { return .cancelled }
             let retained = try await store.prepareSecurityScopedAccess(to: url, ownerID: securityScopeOwnerID)
             let updated = FileBinding(canonicalPath: read.identity.canonicalPath, encoding: decoded.encoding,
                 byteOrderMark: decoded.byteOrderMark, lineEnding: decoded.lineEnding,
                 observedIdentity: read.identity, securityScopedBookmark: retained.bookmark ?? binding.securityScopedBookmark,
                 binaryByteCount: decoded.binaryByteCount)
-            guard !Task.isCancelled, !liveReloadSuspended else { return }
+            guard !Task.isCancelled, !liveReloadSuspended else { return .cancelled }
             let result = await workspace.replaceFileContents(tabID: tabID, binding: updated, title: current.title,
                 expectedRevision: current.buffer.revision, expectedBinding: binding,
                 installContents: contents.install)
             switch result {
             case .applied:
-                if let refreshed = workspace.fileContext(tabID: tabID),
-                   await finishLoading(contents.finish, context: refreshed) == nil {
-                    externalChanges.removeValue(forKey: tabID)
+                guard let refreshed = workspace.fileContext(tabID: tabID) else { return .cancelled }
+                if let failure = await finishLoading(contents.finish, context: refreshed) {
+                    recordLiveChange(.unavailable(failure), for: tabID)
+                    onExternalChanges?()
+                    return failure
                 }
-            case .rejected(.unknownTab): externalChanges.removeValue(forKey: tabID)
-            case .rejected: externalChanges[tabID] = .conflict
-            case .persistenceFailed: externalChanges[tabID] = .unavailable
+                clearLiveChange(for: tabID)
+            case .rejected(.unknownTab): clearLiveChange(for: tabID); return .cancelled
+            case .rejected(let error):
+                recordLiveChange(.conflict(read.identity), for: tabID)
+                onExternalChanges?()
+                return .session(error)
+            case .persistenceFailed(let failure):
+                recordLiveChange(.unavailable(.workspace(failure)), for: tabID)
+                onExternalChanges?()
+                return .workspace(failure)
             }
         } catch {
-            if workspace.fileContext(tabID: tabID)?.binding == binding { externalChanges[tabID] = .unavailable }
+            guard !Task.isCancelled, !(error is CancellationError),
+                  workspace.fileContext(tabID: tabID)?.binding == binding else { return .cancelled }
+            let failure = (error as? FileOperationFailure)
+                ?? (error as? TextFileStoreError).map { .store($0) }
+                ?? .store(.io(String(describing: error)))
+            recordLiveChange(.unavailable(failure), for: tabID)
+            onExternalChanges?()
+            return failure
         }
         onExternalChanges?()
+        return nil
     }
 
     /// Reacquires every recovered document bookmark before the window becomes
@@ -1294,7 +1344,7 @@ public final class FileDocumentUseCase {
             }
             (editor as? any EditorSavePointPort)?.recordSavePoint(for: context.buffer.bufferID, revision: context.buffer.revision)
             conventionsUseCase?.documentOpened(context.buffer.bufferID)
-            externalChanges.removeValue(forKey: context.tabID)
+            clearLiveChange(for: context.tabID)
             onExternalChanges?()
             return nil
         } catch {

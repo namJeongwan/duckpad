@@ -69,6 +69,7 @@ private actor FileStoreFake: TextFileStore {
     }
 
     func externalReplace(_ text: String, at url: URL) { seed(text, at: url) }
+    func removeFile(at url: URL) { files.removeValue(forKey: url.path) }
     func text(at url: URL) -> String? { files[url.standardizedFileURL.path].flatMap { String(data: $0.data, encoding: .utf8) } }
     func data(at url: URL) -> Data? { files[url.standardizedFileURL.path]?.data }
     func result(at url: URL) -> FileReadResult? { files[url.standardizedFileURL.path] }
@@ -1074,7 +1075,7 @@ private actor FileSessionStoreFake: SessionStore {
     await store.waitForBlockedRead()
     _ = editor.replaceWith("my typing")
     await store.releaseRead()
-    await reload.value
+    #expect(await reload.value == .unsavedChanges(id))
     let context = try #require(workspace.fileContext(tabID: id))
     #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "my typing")
     #expect(files.externalChanges[id] == .conflict)
@@ -1251,4 +1252,78 @@ private actor FileSessionStoreFake: SessionStore {
     #expect(workspace.fileContext(tabID: id) == before)
     #expect(await files.saveActive() == .saved(id))
     #expect(await store.text(at: url) == "한글🦆")
+}
+
+@Test @MainActor func keepingEditsAcknowledgesOnlyTheSameExternalFileVersion() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let store = FileStoreFake(), url = URL(fileURLWithPath: "/tmp/duckpad-acknowledged.note")
+    await store.seed("before", at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    guard case .opened(let id) = await files.open(url) else { Issue.record("open failed"); return }
+    let context = try #require(workspace.fileContext(tabID: id))
+    _ = editor.replaceWith("unsaved")
+    await store.externalReplace("external one", at: url)
+    await files.refreshFromDisk(tabID: id)
+    #expect(files.externalChanges[id] == .conflict)
+    files.dismissExternalChange(for: id)
+    await files.refreshFromDisk(tabID: id)
+    #expect(files.externalChanges[id] == nil)
+    await store.externalReplace("external two", at: url)
+    await files.refreshFromDisk(tabID: id)
+    #expect(files.externalChanges[id] == .conflict)
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text.contains("unsaved") == true)
+}
+
+@Test @MainActor func keepingUnavailableFileDoesNotRepeatTheSameFailure() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let source = FileStoreFake(), url = URL(fileURLWithPath: "/tmp/duckpad-missing-ack.note")
+    await source.seed("recovered contents", at: url)
+    let opened = FileDocumentUseCase(workspace: workspace, editor: editor, store: source)
+    guard case .opened(let id) = await opened.open(url) else { Issue.record("open failed"); return }
+    let missingStore = FileStoreFake()
+    let missing = FileDocumentUseCase(workspace: workspace, editor: editor, store: missingStore)
+    #expect(await missing.refreshFromDisk(tabID: id) == .store(.notFound(url.path)))
+    #expect(missing.externalChanges[id] == .unavailable)
+    missing.dismissExternalChange(for: id)
+    await missing.refreshFromDisk(tabID: id)
+    #expect(missing.externalChanges[id] == nil)
+    #expect(editor.snapshot(for: try #require(workspace.fileContext(tabID: id)).buffer.bufferID)?.text == "recovered contents")
+    await missingStore.seed("available again", at: url)
+    #expect(await missing.refreshFromDisk(tabID: id) == nil)
+    #expect(missing.externalChanges[id] == nil)
+    await missingStore.removeFile(at: url)
+    #expect(await missing.refreshFromDisk(tabID: id) == .store(.notFound(url.path)))
+    #expect(missing.externalChanges[id] == .unavailable)
+}
+
+@Test @MainActor func dirtyFileRecoveryClearsAcknowledgementBeforeAnotherOutage() async throws {
+    let workspace = ScratchWorkspaceUseCase(store: FileSessionStoreFake())
+    let editor = FileEditorFake()
+    let binding = EditorBindingUseCase(workspace: workspace, editor: editor)
+    workspace.onChange = { binding.render($0) }
+    _ = await workspace.start()
+    let store = FileStoreFake(), url = URL(fileURLWithPath: "/tmp/duckpad-dirty-outage.note")
+    await store.seed("original", at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    guard case .opened(let id) = await files.open(url) else { Issue.record("open failed"); return }
+    let context = try #require(workspace.fileContext(tabID: id))
+    _ = editor.replaceWith("unsaved")
+    await store.removeFile(at: url)
+    #expect(await files.refreshFromDisk(tabID: id) == .store(.notFound(url.path)))
+    files.dismissExternalChange(for: id)
+    await store.seed("changed on disk", at: url)
+    #expect(await files.refreshFromDisk(tabID: id) == .unsavedChanges(id))
+    #expect(files.externalChanges[id] == .conflict)
+    await store.removeFile(at: url)
+    #expect(await files.refreshFromDisk(tabID: id) == .store(.notFound(url.path)))
+    #expect(files.externalChanges[id] == .unavailable)
+    #expect(editor.snapshot(for: context.buffer.bufferID)?.text == "unsaved")
 }

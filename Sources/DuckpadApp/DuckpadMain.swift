@@ -702,6 +702,12 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 fflush(stdout)
                 Darwin._exit(0)
             }
+        } else if let path = environment["DUCKPAD_LIVE_RELOAD_SMOKE_FILE"] {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                await LiveFileReloadSmoke.run(controller: controller, editor: editor, files: fileUseCase, url: URL(fileURLWithPath: path))
+                Darwin._exit(0)
+            }
         } else if let path = environment["DUCKPAD_COMPLETION_SMOKE_FILE"] {
             Task { @MainActor in
                 await controller.waitForStartup()

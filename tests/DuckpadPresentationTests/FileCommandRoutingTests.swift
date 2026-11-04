@@ -253,6 +253,8 @@ private actor RoutingFileStore: TextFileStore {
     private var readPaths: [String] = []
     private var generation: UInt64 = 0
     private var forcedWriteError: TextFileStoreError?
+    private var forcedReadError: TextFileStoreError?
+    func setReadError(_ error: TextFileStoreError?) { forcedReadError = error }
     private var failureAfterWrite: FileCommitFailureState?
     func setFailureAfterWrite(_ state: FileCommitFailureState) { failureAfterWrite = state }
     private(set) var renewedPaths: [String] = []
@@ -273,6 +275,7 @@ private actor RoutingFileStore: TextFileStore {
     func canonicalURL(for url: URL) async throws(TextFileStoreError) -> URL { url.standardizedFileURL }
     func read(from url: URL) async throws(TextFileStoreError) -> FileReadResult {
         readPaths.append(url.path)
+        if let forcedReadError { throw forcedReadError }
         if blockNextRead {
             blockNextRead = false
             blockedReadEntered = true
@@ -2735,4 +2738,40 @@ func ordinaryTextUndoClearsDirtyAtTheLoadedOrSavedBaseline(saveFirst: Bool) asyn
     #expect(external == [web])
     editor.onOpenMarkdownLink?(try #require(URL(string: "javascript:alert(1)")))
     #expect(external == [web])
+}
+
+@Test(arguments: ["missing", "denied", "io"])
+@MainActor func reloadBannerReportsReadFailureAndRetryActuallyReloads(kind: String) async throws {
+    _ = NSApplication.shared
+    let workspace = ScratchWorkspaceUseCase(store: RoutingSessionStore())
+    let editor = TextViewEditorAdapter(), store = RoutingFileStore(), panels = PanelFake()
+    let url = URL(fileURLWithPath: "/tmp/duckpad-reload-button.note")
+    await store.seed("preserved contents", at: url)
+    let files = FileDocumentUseCase(workspace: workspace, editor: editor, store: store)
+    let controller = DuckpadWindowController(workspace: workspace, previewResourceReader: LocalPreviewResourceReader(), markdownImageAccess: TestMarkdownImageAccess(), editorAdapter: editor,
+        editorView: editor.scrollView, fileUseCase: files, filePanels: panels, fileConflictPresenter: panels, automaticallyStarts: false)
+    defer { controller.close() }
+    controller.start(); await controller.waitForStartup()
+    guard case .opened(let id) = await files.open(url) else { Issue.record("open failed"); return }
+    let failure: TextFileStoreError = kind == "missing" ? .notFound(url.path) : (kind == "denied" ? .permissionDenied(url.path) : .io("injected read failure"))
+    await store.setReadError(failure)
+    await files.refreshFromDisk(tabID: id)
+    #expect(!controller.liveFileBanner.isHidden)
+    let content = try #require(controller.window?.contentView)
+    content.layoutSubtreeIfNeeded()
+    let reload = controller.liveFileBanner.reload
+    let point = reload.convert(NSPoint(x: reload.bounds.midX, y: reload.bounds.midY), to: content.superview)
+    let hit = try #require(content.hitTest(point))
+    #expect(hit === reload || hit.isDescendant(of: reload), "Reload must receive actual mouse clicks")
+    reload.performClick(nil)
+    for _ in 0..<2_000 where panels.failures.isEmpty { await Task.yield() }
+    #expect(panels.failures == [.store(failure)])
+    #expect(editor.textView.string == "preserved contents")
+    guard let retry = panels.fileFailureRetries.first else { return }
+    await store.setReadError(nil); await store.seed("now available", at: url)
+    retry()
+    for _ in 0..<2_000 where editor.textView.string != "now available" { await Task.yield() }
+    #expect(editor.textView.string == "now available")
+    #expect(files.externalChanges[id] == nil)
+    #expect(controller.liveFileBanner.isHidden)
 }
