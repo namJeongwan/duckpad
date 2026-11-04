@@ -4,7 +4,7 @@ Read the [API reference](api-reference.md) first. The examples below target a ma
 
 ## 1. Pick the extension boundary
 
-Start with a selection transform: it receives text and returns text. Use the existing [Rust sample](../../Samples/DuckpadTextTools/module.rs), whose operation 1 sorts lines and operation 2 trims trailing whitespace. For clipboard policy/storage, study the separate Clipboard repository. Arbitrary native UI, custom webviews, LSP processes and network access are not currently plugin APIs.
+Start with a selection transform: it receives text and returns text. Use the existing [Rust sample](../../Samples/DuckpadTextTools/module.rs), whose operation 1 sorts lines and operation 2 trims trailing whitespace. For clipboard policy/storage, study the separate Clipboard repository. For declarative LSP providers, use the [language support SDK](../../SDK/LanguageSupport/language-support.md) introduced with host API 1.5.0. These packages register signed language-service definitions rather than a generic process API.
 
 Keep the plugin in a separate repository. Do not fork the catalog to store its source. Choose your own stable plugin ID, command IDs, publisher ID and signing key ID; the `com.duckpad` identity belongs to Duckpad.
 

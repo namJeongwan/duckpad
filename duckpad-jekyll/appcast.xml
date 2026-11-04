@@ -3,40 +3,48 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.16.1</title>
-            <pubDate>Tue, 27 Oct 2026 21:52:10 +0900</pubDate>
-            <sparkle:version>69</sparkle:version>
-            <sparkle:shortVersionString>0.16.1</sparkle:shortVersionString>
+            <title>0.17.0</title>
+            <pubDate>Wed, 04 Nov 2026 16:44:35 +0900</pubDate>
+            <sparkle:version>70</sparkle:version>
+            <sparkle:shortVersionString>0.17.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.16.1
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.17.0
 
-This patch fixes Explorer-to-editor splits, closing shared tabs, and the integrated terminal's login security session and locale.
+Duckpad now offers native automatic completion from the first committed character, with current-document words and language keywords available without installing a language server. The compact popup follows the editor theme, refreshes while deleting, and stays quiet at empty prefixes, inside strings/comments and while declaring new class names.
 
-## Fixes
+## Language support
 
-- Split a file immediately after opening it from Workspace Explorer. The drag destination now receives updated tab membership alongside incremental tab-strip updates.
-- Drop an unopened Explorer file onto a split edge without leaving an unnecessary copy in the original pane. Already open files can still gain another view.
-- Close only the invoking pane's shared tab with its close button, current-tab context action or Command-W. Keep the remaining document's dirty content and native Undo/Redo until its last view closes. Drain pending editor input before disposal and abort stale closes if another persisted removal starts while input is being synchronized. Close-all actions retain document-wide behavior.
-- Run the integrated terminal's XPC helper in the caller's login security session. This addresses the missing session connection associated with Git credential-helper errors `failed to get: -25308` and `failed to store: -25308`. Keychain item permissions and locked-keychain authorization still apply.
-- Preserve explicit `LANG`, `LANGUAGE` and standard `LC_*` settings. Finder launches without `LANG` use an available system UTF-8 locale, falling back to `en_US.UTF-8`, rather than forcing English for every shell. Application display-language settings remain independent of shell locale.
+Optional Python, Ruby/Rails and Rust support packages share a common LSP client. Install the corresponding **0.1.0 language plugin** from Plugins Admin → Available Plugins, or download and extract its separate ZIP, then select the extracted `.duckpad-plugin` folder with Install Plugin. The packages are not bundled into the app.
 
-App and all three helpers: **0.16.1 (69)**, upgrading **0.16.0 (68)**. Requires **macOS 13 or later**. Universal binaries include Apple Silicon and Intel. Existing documents, recovery data, settings and plugin ABI remain compatible. No new dependencies are added.
+- [Python 0.1.0](https://github.com/namJeongwan/duckpad-plugin-python/releases/tag/v0.1.0)
+- [Ruby/Rails 0.1.0](https://github.com/namJeongwan/duckpad-plugin-ruby/releases/tag/v0.1.0)
+- [Rust 0.1.0](https://github.com/namJeongwan/duckpad-plugin-rust/releases/tag/v0.1.0)
 
-## Installation
+Python defaults to basedpyright and also supports Pyright and ty. Ruby uses Ruby LSP, and Rust uses rust-analyzer. Server binaries and project dependencies remain separately installed tools; Duckpad does not download them automatically. Configure server and interpreter choices in Preferences → Language Support for all defaults, the current workspace or a selected folder. Recovered workspaces keep independent choices, even when two windows open the same project.
 
-Download `Duckpad-0.16.1-universal.dmg` and drag Duckpad into Applications, or extract `Duckpad-0.16.1-universal.zip`. Verify downloads against `SHA256SUMS.txt`. Existing installations can use Check for Updates after the signed feed is published.
+Python method-name completion uses actual server results. In a class, basedpyright and Pyright suggest methods such as `__init__` and `__repr__` after `def __`. Inserted method bodies retain indentation and line endings; completion and additional imports form one Undo operation. The tested ty version does not return candidates in that method-name slot.
 
-## Validation and limitations
+Plugin definitions are signed and checked again by the authenticated helper before server launch. Disabling or removing a provider withdraws its registrations and pending results. Language servers run through the existing unsandboxed helper; this capability is not a filesystem sandbox.
 
-Focused checks cover immediate first splits, the Explorer open callback followed by a drag, shared-tab close routes, overlapping input synchronization and persisted removal, dirty Korean text, native Undo/Redo, group routing and locale precedence. Before/after regressions reproduce the reported split failures and the overlapping-close failure. **115 distinct focused Release test functions completed**, recorded in `0.16.1-validation.json`.
+## File reload
 
-The final merged-source universal app and all three helpers passed version, architecture and signature checks. Isolated application and Markdown smokes, all eight packaged localization smokes, DMG/ZIP integrity and uploaded asset hash verification passed. The packaged terminal helper's login audit session matches its owning app. Native Save-panel automation was skipped.
+Reload from Disk now explains missing-file, permission and I/O failures and provides a working Retry action. Keep Editing acknowledges the observed external version or outage without hiding later changes or new outages. Unsaved edits retain the existing revision and discard-confirmation safeguards.
 
-Actual account `git pull` authentication, physical pointer dragging and Korean keyboard interaction, Intel hardware, macOS 13 runtime, and full repository suite completion are not claimed. Caret, scroll and Markdown mode inheritance during secondary-to-primary pane promotion have not been specifically verified. Broader search-test limitations documented in 0.16.0 remain outside this patch's focused validation. The distribution is ad-hoc signed, without Developer ID signing or Apple notarization.
+## Compatibility and installation
 
-Release source: `2d933b5ccd872b8267c5088040516b31e8531f1d` ([PR #104](https://github.com/namJeongwan/duckpad/pull/104)).
+The app and all three helpers are **0.17.0 (70)**, upgrading **0.16.1 (69)**. Requires macOS 13 or later. The universal build includes Apple Silicon and Intel. Existing documents, recovery data, native plugin ABI and settings remain compatible; legacy Python settings migrate to the common workspace-aware language settings. Language plugins require host API 1.5.0 and keep their separate version 0.1.0.
+
+Download `Duckpad-0.17.0-universal.dmg` or `Duckpad-0.17.0-universal.zip` and verify against `SHA256SUMS.txt`. Homebrew installations can run `brew update` followed by `brew upgrade --cask namjeongwan/duckpad/duckpad` after the tap update. Existing installations can use Check for Updates after the signed feed is published.
+
+## Validation and limits
+
+164 focused Swift test functions passed in Release configuration, covering native committed input/IME/context, atomic edits and Undo, language-provider authority/lifecycle, independent workspace settings and file-reload regressions. Actual basedpyright, Pyright, ty, Ruby LSP and rust-analyzer integrations passed. The final universal app checks exercised signed installation, member completion, first-character/deletion behavior, method-stub Tab/Undo/Redo and reload controls. All eight localization resources parse with identical key sets; English/Korean preferences and dark/light completion panels were visually inspected.
+
+The universal app was built from merged release commit `bdf63dd7dd79d833f5193763308a640ab3212a8a`. App and all three helper versions/architectures, bundle/resources/XPC/ad-hoc signatures, isolated application/Markdown smoke, all eight packaged localization smokes and DMG/ZIP integrity passed. Public language-plugin ZIPs were downloaded, checked against their signed definitions and installed in isolated smoke profiles. Native Save-panel automation was skipped. Uploaded app assets are hash-verified before publication.
+
+Intel hardware execution, macOS 13 runtime, a full Rails application, six locale preference windows, physical Korean keyboard interaction and full repository suite completion are not claimed. Server indexing and third-party type information affect semantic results. The distribution is ad-hoc signed, without Developer ID signing or Apple notarization.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.16.1/Duckpad-0.16.1-universal.zip" length="53416982" type="application/octet-stream" sparkle:edSignature="ZsNjT5NvgJzjMI2kTHXfXPq0ZtY9VvOUvlC+WlMHR8pIAq4p4Vnso4JyyWrzVZ+oCwau6dtNkrIxOtPeaejcBw=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.17.0/Duckpad-0.17.0-universal.zip" length="64863066" type="application/octet-stream" sparkle:edSignature="Y7k08vb7jTSYfoHoyZtzac88Ix9TfhRJ+wmVRtjKVh4aYoXyHb5nib3v7o7v5EIpUxTo9zFLRxPqKP96sZXfDQ=="/>
         </item>
     </channel>
 </rss>

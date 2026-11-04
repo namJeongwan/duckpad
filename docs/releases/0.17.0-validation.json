@@ -1,0 +1,66 @@
+{
+  "version": "0.17.0",
+  "build": "70",
+  "sourceCommit": "bdf63dd7dd79d833f5193763308a640ab3212a8a",
+  "completedReleaseFunctionCount": 164,
+  "completedReleaseGroups": {
+    "languageProvidersAndIntegration": 105,
+    "automaticInputAndContext": 12,
+    "fileReloadAndDocumentSafety": 47
+  },
+  "liveServers": [
+    "basedpyright",
+    "Pyright",
+    "ty",
+    "Ruby LSP",
+    "rust-analyzer"
+  ],
+  "packagedChecks": {
+    "bundleResourcesXPCSignatures": "PASS",
+    "appAndThreeHelpers": "0.17.0 (70), arm64+x86_64",
+    "isolatedApplicationSmoke": "PASS; native Save-panel UI automation skipped",
+    "allEightPackagedLocales": "PASS",
+    "publicLanguagePackageInstallationAndLifecycle": "PASS; public ZIPs extracted for local folder installation",
+    "firstCharacterDeletionAndQuotedContext": "PASS",
+    "magicMethodRealTabIndentationCaretUndoRedo": "PASS; basedpyright and Pyright",
+    "liveReloadButtonsRetryKeepCancelConfirmedReload": "PASS",
+    "markdownSourceLiveRenderingAndSourcePreservation": "PASS",
+    "archives": "hdiutil verify and unzip -tq PASS"
+  },
+  "signing": "Ad-hoc; no Developer ID signing or Apple notarization.",
+  "notRun": [
+    "Intel hardware execution",
+    "macOS 13 runtime",
+    "full Rails application",
+    "six non-English/Korean preference windows",
+    "physical Korean keyboard interaction",
+    "full repository suite",
+    "native Save-panel UI automation"
+  ],
+  "knownLimits": [
+    "Language server binaries and project dependencies are external.",
+    "Tested ty does not return method-name candidates after def __ in a class."
+  ],
+  "artifacts": {
+    "Duckpad-0.17.0-universal.dmg": {
+      "size": 63735416,
+      "sha256": "3b90ea9c358fe34b1b1d4b052165b4949c210f2961f4f93b9cfc2d3943d459a7"
+    },
+    "Duckpad-0.17.0-universal.zip": {
+      "size": 64863066,
+      "sha256": "fe240082fd8623105e812ba9b3e5cbea7d0dbfb88ac3d6967882ef31a1e599c6"
+    }
+  },
+  "plugins": {
+    "version": "0.1.0",
+    "hostAPIMinimum": "1.5.0",
+    "repositories": [
+      "https://github.com/namJeongwan/duckpad-plugin-python",
+      "https://github.com/namJeongwan/duckpad-plugin-ruby",
+      "https://github.com/namJeongwan/duckpad-plugin-rust"
+    ]
+  },
+  "validatedAt": "2026-11-04T08:03:40.363916+00:00",
+  "releaseURL": "https://github.com/namJeongwan/duckpad/releases/tag/v0.17.0",
+  "remoteVerification": "All three draft assets downloaded and matched local SHA-256; published stable/latest target tag equals sourceCommit; public ZIP and checksum downloads matched again."
+}
