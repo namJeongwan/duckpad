@@ -235,6 +235,9 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     BOOL _requestedInputEnabled;
     BOOL _observedFollowEnd;
     id _observedInputMonitor;
+    BOOL _completionInputCommitted;
+    BOOL _completionInputWasDeletion;
+    uint64_t _completionInputBaseRevision;
     NSUInteger _declarationHoverPosition;
     NSRange _declarationHoverRange;
     BOOL _binaryDocument;
@@ -262,6 +265,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     BOOL _braceMatchingEnabled;
     DPScintillaPalette _palette;
     std::vector<std::pair<int, int>> _semanticStyleRoles;
+    std::vector<int> _nonCodeCompletionStyles;
     NSUInteger _commentCommandInspectedByteCount;
     NSUInteger _synchronouslyStyledByteCount;
     NSInteger _highlightedBraceUTF8Position;
@@ -662,6 +666,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     self.onError = nil;
     self.onFocus = nil;
     self.onStatusChange = nil;
+    self.onCompletionInput = nil;
     self.onFoldStateChange = nil;
     self.onFoldRecoveryProgress = nil;
     self.onSmartIndentationStateChange = nil;
@@ -1048,12 +1053,15 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [_scintilla message:SCI_AUTOCSETCHOOSESINGLE wParam:0];
     [_scintilla message:SCI_AUTOCSETAUTOHIDE wParam:1];
     [_scintilla message:SCI_AUTOCSETDROPRESTOFWORD wParam:1];
+    // Application already matched Unicode/diacritic-folded candidates. Preserve
+    // that initial list, then enable native prefix matching for continued typing.
     [_scintilla message:SCI_AUTOCSETOPTIONS wParam:SC_AUTOCOMPLETE_SELECT_FIRST_ITEM];
     [_scintilla message:SCI_AUTOCSETMAXHEIGHT wParam:12];
     [_scintilla message:SCI_AUTOCSETMAXWIDTH wParam:48];
     [_scintilla message:SCI_AUTOCSHOW
                  wParam:(uptr_t)prefixByteCount
                  lParam:(sptr_t)list.UTF8String];
+    [_scintilla message:SCI_AUTOCSETOPTIONS wParam:SC_AUTOCOMPLETE_NORMAL];
     _completionItemCount = validated.count;
     return self.isCompletionActive;
 }
@@ -1786,6 +1794,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (void)scintillaWillInsertTextFromSource:(SCITextInputSource)source {
     [self clearDeclarationHover];
+    if (self.onCompletionInput) self.onCompletionInput(DPScintillaCompletionInputCancel);
+    _completionInputWasDeletion = source == SCITextInputSourceDeletion;
+    _completionInputCommitted = source == SCITextInputSourceDirect || source == SCITextInputSourceIMECommit || _completionInputWasDeletion;
+    _completionInputBaseRevision = _revision;
     _textInputSourceKnown = YES;
     _directInputInsertion = source == SCITextInputSourceDirect || source == SCITextInputSourceDirectNewline;
     if (source == SCITextInputSourceDirectNewline) {
@@ -1807,6 +1819,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (void)scintillaDidInsertText {
+    const BOOL requestsCompletion = _completionInputCommitted && _revision != _completionInputBaseRevision
+        && _requestedInputEnabled && !_binaryDocument && !_loadingText && !_suppressEdit
+        && !self.hasMarkedText && [_scintilla message:SCI_GETSELECTIONS] == 1
+        && [_scintilla message:SCI_GETSELECTIONEMPTY];
+    _completionInputCommitted = NO;
     DPScintillaEditorView *publisher = _documentPublisher;
     if (publisher != nil && publisher->_directInputInitiator == self) {
         publisher->_directInputInitiator = nil;
@@ -1814,6 +1831,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [self clearDirectInputPreflightState];
     _directInputInsertion = NO;
     _textInputSourceKnown = NO;
+    if (requestsCompletion && self.onCompletionInput) self.onCompletionInput(_completionInputWasDeletion
+        ? DPScintillaCompletionInputDeletion : DPScintillaCompletionInputInsertion);
 }
 
 - (BOOL)scintillaHandleDirectSelectionText:(NSString *)text {
@@ -1972,6 +1991,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 }
 
 - (BOOL)scintillaHandleSelectionEscape {
+    if (self.onCompletionInput) self.onCompletionInput(DPScintillaCompletionInputCancel);
     if ([_scintilla message:SCI_AUTOCACTIVE] || [_scintilla message:SCI_CALLTIPACTIVE]
         || [_scintilla message:SCI_GETSELECTIONS] <= 1) return NO;
     if (![self canPerformSelection:DPScintillaSelectionCommandCollapseSelections]) return NO;
@@ -1981,6 +2001,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 - (BOOL)scintillaHandleMouseDown:(NSEvent *)event {
     [self clearDeclarationHover];
+    if (self.onCompletionInput) self.onCompletionInput(DPScintillaCompletionInputCancel);
     const NSEventModifierFlags modifiers = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
     if ((modifiers & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift)) == (NSEventModifierFlagCommand | NSEventModifierFlagOption)
         && event.clickCount == 1 && _requestedInputEnabled && !_loadingText && !_binaryDocument
@@ -2396,6 +2417,7 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         && ![effectiveName isEqualToString:@"null"];
     [self updateModificationEventMask];
     _semanticStyleRoles.clear();
+    _nonCodeCompletionStyles.clear();
     const int namedStyles = lexer->NamedStyles();
     for (int style = 0; style < namedStyles; style += 1) {
         std::string semantic;
@@ -2403,6 +2425,12 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         if (const char *tags = lexer->TagsOfStyle(style)) semantic += tags;
         if (const char *description = lexer->DescriptionOfStyle(style)) semantic += description;
         std::transform(semantic.begin(), semantic.end(), semantic.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        // Completion context is independent of palette roles: STRINGEOL is both
+        // an error and a string, and must stay quiet while the user is typing it.
+        if (semantic.find("comment") != std::string::npos || semantic.find("string") != std::string::npos
+            || semantic.find("character") != std::string::npos || semantic.find("regex") != std::string::npos
+            || semantic.find("sce_rb_pod") != std::string::npos || semantic.find("sce_rb_datasection") != std::string::npos)
+            _nonCodeCompletionStyles.push_back(style);
         int role = 0;
         if (semantic.find("error") != std::string::npos || semantic.find("bad") != std::string::npos
             || semantic.find("unterminated") != std::string::npos) role = 6;
@@ -2415,7 +2443,11 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
                  || semantic.find("tag") != std::string::npos) role = 7;
         _semanticStyleRoles.emplace_back(style, role);
     }
-    if (namedStyles == 0) DPAppendLegacyStyleRoles(effectiveName.UTF8String, _semanticStyleRoles);
+    if (namedStyles == 0) {
+        DPAppendLegacyStyleRoles(effectiveName.UTF8String, _semanticStyleRoles);
+        for (const auto &[style, role] : _semanticStyleRoles)
+            if (role == 1 || role == 4) _nonCodeCompletionStyles.push_back(style);
+    }
     // Legacy Markdown has style IDs but does not publish NamedStyles metadata.
     if ([effectiveName isEqualToString:@"markdown"]) {
         for (int style = SCE_MARKDOWN_DEFAULT; style <= SCE_MARKDOWN_CODEBK; ++style) {
@@ -2676,6 +2708,51 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 - (NSInteger)styleAtUTF8Position:(NSUInteger)position {
     if (position >= self.documentByteLength) return -1;
     return [_scintilla message:SCI_GETSTYLEINDEXAT wParam:position];
+}
+
+- (BOOL)allowsCodeCompletion {
+    if (_binaryDocument || _languageStylingFallback) return NO;
+    const NSUInteger caret = self.caretUTF8Position;
+    if (caret == 0) return YES;
+    if ([_lexerName isEqualToString:@"null"]) {
+        // Untyped scratch text has no lexer. Only infer balanced/escaped quotes
+        // on its current bounded line; language-specific parsing stays in Lexilla.
+        const NSUInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:caret];
+        const NSUInteger start = [_scintilla message:SCI_POSITIONFROMLINE wParam:line];
+        if (caret - start > 4096) return NO;
+        NSData *text = [self utf8BytesInRange:NSMakeRange(start, caret - start) error:nil];
+        if (!text) return NO;
+        const auto *bytes = static_cast<const unsigned char *>(text.bytes);
+        unsigned char quote = 0;
+        bool escaped = false;
+        for (NSUInteger i = 0; i < text.length; i++) {
+            const auto ch = bytes[i];
+            if (escaped) { escaped = false; continue; }
+            if (quote != 0 && ch == '\\') { escaped = true; continue; }
+            if (quote != 0) { if (ch == quote) quote = 0; }
+            else if (ch == '"' || ch == '\'' || ch == '`') {
+                // An apostrophe in prose (don't, user's) is not a string opener.
+                if (ch == '\'' && i > 0 && (std::isalnum(bytes[i - 1]) || bytes[i - 1] == '_' || bytes[i - 1] >= 0x80)) continue;
+                quote = ch;
+            }
+        }
+        return quote == 0;
+    }
+    const NSUInteger styled = [_scintilla message:SCI_GETENDSTYLED];
+    if (styled < caret) {
+        // Resume at a line boundary: the byte before endStyled can be a closing
+        // quote whose string style must not become the following token's state.
+        const NSUInteger dirtyLine = [_scintilla message:SCI_LINEFROMPOSITION wParam:styled];
+        const NSUInteger start = [_scintilla message:SCI_POSITIONFROMLINE wParam:dirtyLine];
+        if (caret - start > DPMaximumSynchronousStyleBytes) return NO;
+        [_scintilla message:SCI_COLOURISE wParam:start lParam:caret];
+        _synchronouslyStyledByteCount += caret - start;
+    }
+    // Never classify from stale styles while the snapshot lexer is still working.
+    if (self.asynchronousStylingPending || (NSUInteger)[_scintilla message:SCI_GETENDSTYLED] < caret) return NO;
+    const int style = [_scintilla message:SCI_GETSTYLEFROMSUBSTYLE
+        wParam:[_scintilla message:SCI_GETSTYLEINDEXAT wParam:caret - 1]];
+    return std::find(_nonCodeCompletionStyles.begin(), _nonCodeCompletionStyles.end(), style) == _nonCodeCompletionStyles.end();
 }
 - (NSUInteger)foregroundColorForStyle:(NSInteger)style { return (NSUInteger)[_scintilla message:SCI_STYLEGETFORE wParam:style]; }
 - (BOOL)configuredFoldingEnabled { return _foldingEnabled; }
@@ -3700,6 +3777,10 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
         [self scheduleWordHighlights:YES];
         [self publishFocus];
         return;
+    }
+    if (notification->nmhdr.code == SCN_FOCUSOUT) {
+        if (self.onCompletionInput) self.onCompletionInput(DPScintillaCompletionInputCancel);
+        [self cancelCompletion];
     }
     if (notification->nmhdr.code == SCN_MARGINCLICK && notification->margin == 1) {
         const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:notification->position];

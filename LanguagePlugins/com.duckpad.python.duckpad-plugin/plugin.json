@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "id": "com.duckpad.python",
+  "name": "Python",
+  "version": {
+    "major": 0,
+    "minor": 1,
+    "patch": 0
+  },
+  "api": {
+    "minimum": {
+      "major": 1,
+      "minor": 5,
+      "patch": 0
+    },
+    "maximumExclusive": {
+      "major": 2,
+      "minor": 0,
+      "patch": 0
+    }
+  },
+  "publisher": {
+    "id": "com.duckpad",
+    "keyID": "language-support-preview-1"
+  },
+  "runtime": {
+    "kind": "language-provider",
+    "module": "plugin.json",
+    "abi": "duckpad-language-1"
+  },
+  "capabilities": [
+    {
+      "id": "language.servers",
+      "scope": "application"
+    },
+    {
+      "id": "documents.read",
+      "scope": "application"
+    }
+  ],
+  "contributes": {
+    "commands": [],
+    "keybindings": [],
+    "snippets": [],
+    "themes": [],
+    "languages": [
+      {
+        "id": "python",
+        "extensions": [
+          "py",
+          "pyi",
+          "pyw"
+        ]
+      }
+    ],
+    "languageServices": [
+      {
+        "languageID": "python",
+        "displayName": "Python",
+        "defaultServerID": "basedpyright",
+        "projectRootMarkers": [
+          "pyproject.toml",
+          "pyrightconfig.json",
+          "ty.toml",
+          "setup.py",
+          "setup.cfg",
+          ".venv/pyvenv.cfg",
+          ".git"
+        ],
+        "projectExecutableDirectories": [
+          ".venv/bin"
+        ],
+        "interpreter": {
+          "projectPaths": [
+            ".venv/bin/python"
+          ],
+          "executableNames": [
+            "python3",
+            "python"
+          ]
+        },
+        "servers": [
+          {
+            "id": "basedpyright",
+            "command": [
+              "basedpyright-langserver",
+              "--stdio"
+            ],
+            "configuration": {
+              "python": {
+                "pythonPath": "${interpreter}"
+              },
+              "basedpyright": {
+                "analysis": {
+                  "diagnosticMode": "openFilesOnly",
+                  "autoImportCompletions": true
+                }
+              }
+            },
+            "installHint": "uv tool install basedpyright"
+          },
+          {
+            "id": "pyright",
+            "command": [
+              "pyright-langserver",
+              "--stdio"
+            ],
+            "configuration": {
+              "python": {
+                "pythonPath": "${interpreter}",
+                "analysis": {
+                  "diagnosticMode": "openFilesOnly",
+                  "autoImportCompletions": true
+                }
+              }
+            },
+            "installHint": "npm install -g pyright"
+          },
+          {
+            "id": "ty",
+            "command": [
+              "ty",
+              "server"
+            ],
+            "configuration": {
+              "ty": {
+                "configuration": {
+                  "environment": {
+                    "python": "${interpreter}"
+                  }
+                },
+                "diagnosticMode": "openFilesOnly"
+              }
+            },
+            "initializationOptions": {
+              "settings": {
+                "configuration": {
+                  "environment": {
+                    "python": "${interpreter}"
+                  }
+                },
+                "diagnosticMode": "openFilesOnly"
+              },
+              "experimental": {
+                "useUv": "off"
+              }
+            },
+            "installHint": "uv tool install ty"
+          }
+        ]
+      }
+    ]
+  }
+}

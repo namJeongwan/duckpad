@@ -28,6 +28,11 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
         publicKey: Data(base64Encoded: "WlOI4aUUE1yhCuLzGBpcklFSUDTxp+Smn07d2RQ2idE=")!, source: .userImported
     )
 
+    public static let languageSupportPublisherKey = TrustedPublisherKey(
+        publisherID: "com.duckpad", keyID: "language-support-preview-1",
+        publicKey: Data(base64Encoded: "1c3TZsMGKdC5Z7mpLclefJsbyTYczC19l1F+rvwtP6k=")!, source: .userImported
+    )
+
     private var installGenerations: [ExtensionID: UInt64] = [:]
     private var removing: Set<ExtensionID> = []
     private let root: URL
@@ -37,7 +42,7 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
     private let limits: ExtensionHostLimits
     private let snapshotInterposition: (@Sendable (URL) -> Void)?
 
-    public init(root: URL, bundledPackages: [URL]? = nil, trustedKeys: [TrustedPublisherKey] = [bundledTextToolsKey, clipboardPublisherKey], bundledDigestAllowlist: [ExtensionID: String] = [ExtensionID(rawValue: "com.duckpad.text-tools"): "ce54eed65c4707a705fb246a2bcf304be77366376147a5a17d4f1be3ad984390"], limits: ExtensionHostLimits = ExtensionHostLimits(), snapshotInterposition: (@Sendable (URL) -> Void)? = nil) {
+    public init(root: URL, bundledPackages: [URL]? = nil, trustedKeys: [TrustedPublisherKey] = [bundledTextToolsKey, clipboardPublisherKey, languageSupportPublisherKey], bundledDigestAllowlist: [ExtensionID: String] = [ExtensionID(rawValue: "com.duckpad.text-tools"): "ce54eed65c4707a705fb246a2bcf304be77366376147a5a17d4f1be3ad984390"], limits: ExtensionHostLimits = ExtensionHostLimits(), snapshotInterposition: (@Sendable (URL) -> Void)? = nil) {
         self.root = root.standardizedFileURL
         if let bundledPackages { self.bundledPackages = bundledPackages }
         else {
@@ -199,7 +204,9 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
         try validate(manifest)
         let native = manifest.runtime.kind == "native"
         guard let module = files[manifest.runtime.module] else { throw ExtensionFailure.invalidPackagePath }
-        if native {
+        if manifest.runtime.kind == "language-provider" {
+            guard Set(files.keys) == ["plugin.json", "SHA256SUMS", "SIGNATURE.ed25519"] else { throw ExtensionFailure.invalidPackagePath }
+        } else if native {
             guard module.count <= 16 * 1_024 * 1_024 else { throw ExtensionFailure.limitExceeded("native module") }
             // Mach-O signatures are also enforced by macOS at dlopen time.
             guard module.count >= 4, [[0xcf,0xfa,0xed,0xfe], [0xca,0xfe,0xba,0xbe], [0xbe,0xba,0xfe,0xca]].contains(Array(module.prefix(4))) else {
@@ -230,7 +237,8 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
             ? .bundled : .userImported
         return LoadedExtensionPackage(manifest: manifest, module: module, packageDigest: packageDigest,
                                       publisherFingerprint: fingerprint, signatureDigest: signatureDigest,
-                                      capabilitySchemaDigest: capabilitySchemaDigest, trustSource: source, nativeFiles: native ? files : nil)
+                                      capabilitySchemaDigest: capabilitySchemaDigest, trustSource: source, nativeFiles: native ? files : nil,
+                                      languageServiceFiles: manifest.runtime.kind == "language-provider" ? files : nil)
     }
 
     /// Publishes a verified snapshot, preserving every existing version.
@@ -258,7 +266,18 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
         let native = manifest.runtime.kind == "native" && manifest.runtime.abi == "duckpad-native-1" && manifest.runtime.module == "module.dylib"
             && manifest.capabilities.contains(.init(id: .nativeCode, scope: .application))
             && manifest.contributes.commands.allSatisfy { $0.inputScope == .service }
-        guard manifest.schemaVersion == 1, wasm || native,
+        let language = manifest.runtime.kind == "language-provider" && manifest.runtime.abi == "duckpad-language-1"
+            && manifest.runtime.module == "plugin.json" && !manifest.contributes.languageServices.isEmpty
+            && manifest.contributes.commands.isEmpty && manifest.contributes.keybindings.isEmpty
+            && manifest.contributes.snippets.isEmpty && manifest.contributes.themes.isEmpty
+            && manifest.api.minimum >= SemanticVersion(major: 1, minor: 5, patch: 0)
+            && manifest.capabilities.contains(.init(id: .languageServers, scope: .application))
+            && manifest.capabilities.contains(.init(id: .documentsRead, scope: .application))
+        guard manifest.contributes.languageServices.isEmpty || language,
+              manifest.contributes.languageServices.count <= 8,
+              Set(manifest.contributes.languageServices.map(\.languageID)).count == manifest.contributes.languageServices.count,
+              manifest.contributes.languageServices.allSatisfy({ service in service.isValid && manifest.contributes.languages.contains { $0.id == service.languageID } }),
+              manifest.schemaVersion == 1, wasm || native || language,
               manifest.id.rawValue.utf8.count <= 128, manifest.name.utf8.count <= 128,
               manifest.publisher.id.utf8.count <= 128, manifest.publisher.keyID.utf8.count <= 128,
               manifest.id.rawValue.range(of: #"^[a-z0-9]+(?:[.-][a-z0-9-]+)+$"#, options: .regularExpression) != nil,
@@ -293,7 +312,19 @@ public actor LocalExtensionPackageLoader: ExtensionPackageLoaderPort {
         try exactKeys(object["runtime"] as? [String: Any], ["kind", "module", "abi"])
         for value in object["capabilities"] as? [[String: Any]] ?? [] { try exactKeys(value, ["id", "scope"]) }
         guard let contributions = object["contributes"] as? [String: Any] else { throw ExtensionFailure.malformedManifest("invalid contributions") }
-        try exactKeys(contributions, ["commands", "keybindings", "snippets", "themes", "languages"])
+        guard Set(contributions.keys).subtracting(["commands", "keybindings", "snippets", "themes", "languages", "languageServices"]).isEmpty,
+              Set(["commands", "keybindings", "snippets", "themes", "languages"]).isSubset(of: Set(contributions.keys)) else {
+            throw ExtensionFailure.malformedManifest("unknown or missing contribution keys")
+        }
+        for service in contributions["languageServices"] as? [[String: Any]] ?? [] {
+            let required: Set<String> = ["languageID", "displayName", "defaultServerID", "servers", "projectRootMarkers", "projectExecutableDirectories"]
+            guard required.isSubset(of: Set(service.keys)), Set(service.keys).subtracting(required.union(["interpreter"])).isEmpty else { throw ExtensionFailure.malformedManifest("invalid language service keys") }
+            if let interpreter = service["interpreter"] as? [String: Any] { try exactKeys(interpreter, ["projectPaths", "executableNames"]) }
+            for server in service["servers"] as? [[String: Any]] ?? [] {
+                let required: Set<String> = ["id", "command", "installHint"]
+                guard required.isSubset(of: Set(server.keys)), Set(server.keys).subtracting(required.union(["initializationOptions", "configuration"])).isEmpty else { throw ExtensionFailure.malformedManifest("invalid server keys") }
+            }
+        }
         for value in contributions["commands"] as? [[String: Any]] ?? [] { try exactKeys(value, ["id", "title", "operation", "inputScope"]) }
         for value in contributions["keybindings"] as? [[String: Any]] ?? [] { try exactKeys(value, ["command", "key"]) }
         for value in contributions["snippets"] as? [[String: Any]] ?? [] { try exactKeys(value, ["language", "prefix", "body"]) }

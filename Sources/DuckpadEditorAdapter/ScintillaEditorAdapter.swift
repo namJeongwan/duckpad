@@ -3,6 +3,9 @@ import DuckpadLocalization
 import DuckpadApplication
 import DuckpadDomain
 import DuckpadScintillaBridge
+import DuckpadCompletionUI
+
+extension ScintillaEditorAdapter: AutomaticDocumentCompletionEditorPort {}
 
 /// Production editor adapter. Scintilla owns live text; Application owns only
 /// buffer identity/revision/dirty metadata.
@@ -86,6 +89,17 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
 
     public var onEdit: ((EditorIncrementalEdit) -> EditorEditOutcome)?
     public var onAcceptedEditLanguage: ((LanguageID) -> Void)?
+    public var onCompletionInput: ((DocumentCompletionInput) -> Void)?
+    public var onCompletionEdit: ((EditorIncrementalEdit) -> Void)?
+    public var onCompletionRetired: ((BufferID) -> Void)?
+    public var onCompletionBatch: (([SearchReplacementEdit], DocumentIntelligenceCapture, Int) async -> Bool)?
+    public var onCompletionResolve: ((DocumentCompletionSuggestion, DocumentIntelligenceCapture) async -> DocumentCompletionSuggestion?)?
+    public var onCompletionShutdown: (() -> Void)?
+    let completionPanel = SuggestionController()
+    var completionPanelCapture: DocumentIntelligenceCapture?
+    var completionPresentationID = UUID()
+    public var completionSuggestionCount: Int { completionPanel.itemCount }
+    public var isCompletionSuggestionVisible: Bool { completionPanel.isVisible }
     public var onEditorStatusChange: (() -> Void)?
     public var editorStatus: EditorStatusSnapshot? {
         guard let view = activeScintillaView else { return nil }
@@ -167,6 +181,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     private var pendingRecoveryBuffers: Set<BufferID> = []
     private var revisionExhaustedBuffers: Set<BufferID> = []
     private var themePalette: EditorThemePalette = .light
+    var completionThemeColors: EditorThemeColors { themePalette.colors }
     private var defaultViewState: EditorViewState
     private var isRecovering = false
     private var inputEnabled = true
@@ -788,6 +803,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func retire(bufferID: BufferID) {
+        onCompletionRetired?(bufferID)
         markdownEditors.retire(bufferID)
         formatUndoActions.removeValue(forKey: bufferID)
         trustedSavePoints.remove(bufferID)
@@ -930,6 +946,13 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
         onEdit = nil
         onFoldStateChange = nil
         onEditorStatusChange = nil
+        onCompletionInput = nil
+        onCompletionEdit = nil
+        onCompletionRetired = nil
+        onCompletionBatch = nil
+        onCompletionResolve = nil
+        completionPanel.close()
+        onCompletionShutdown?(); onCompletionShutdown = nil
         onDeclarationRequested = nil
         onDeclarationHoverRequested = nil
         declarationHover.cancel()
@@ -1405,6 +1428,23 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
 
     public var activeDocumentIntelligenceByteLength: Int { activeDocumentByteLength }
 
+    public var completionInputContext: DocumentCompletionInputContext? {
+        guard !isInvalidated, inputEnabled, let activeBuffer,
+              !readOnlyBuffers.contains(activeBuffer.bufferID),
+              binaryDocuments[activeBuffer.bufferID] == nil,
+              !pendingRecoveryBuffers.contains(activeBuffer.bufferID),
+              let view = activeScintillaView, view.hasEditorFocus,
+              markdownEditors.editor(for: view) == nil,
+              view.isInputEnabled, view.revision == activeBuffer.revision,
+              !view.isCompletionActive,
+              view.selectionCount == 1, view.caretUTF8Position == view.anchorUTF8Position,
+              !view.hasMarkedText(),
+              view.allowsCodeCompletion,
+              let contextID = documentIntelligenceContextIDs[ObjectIdentifier(view)] else { return nil }
+        return .init(buffer: activeBuffer, caretUTF8: Int(clamping: view.caretUTF8Position),
+                     contextID: contextID, languageID: activeLanguageID)
+    }
+
     public func captureDocumentIntelligence(maximumBytes: Int) -> DocumentIntelligenceCapture? {
         guard maximumBytes >= 0,
               let activeBuffer, binaryDocuments[activeBuffer.bufferID] == nil,
@@ -1472,6 +1512,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func cancelCompletion() {
+        completionPanel.close()
         bufferViews.values.forEach { $0.cancelCompletion() }
         secondaryBufferViews.values.forEach { $0.cancelCompletion() }
         groupPeerViews.values.flatMap { $0 }.forEach { $0.cancelCompletion() }
@@ -1519,6 +1560,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     public func applyTheme(_ palette: EditorThemePalette) {
+        if themePalette != palette { completionPanel.close() }
         markdownEditors.setTheme(palette)
         themePalette = palette
         let native = nativePalette(palette)
@@ -1901,6 +1943,7 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     private func appendRecovery(_ edit: EditorIncrementalEdit, resultingRevision: UInt64, recordUsage: Bool = true) {
+        onCompletionEdit?(edit)
         markdownEditors.accepted(edit)
         if recordUsage {
             onAcceptedEditLanguage?(languageConfigurations[edit.bufferID]?.languageID ?? .plainText)
@@ -2352,6 +2395,20 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
     }
 
     private func attachViewCallbacks(_ editorView: DPScintillaEditorView, bufferID: BufferID) {
+        editorView.onCompletionInput = { [weak self, weak editorView] input in
+            guard let self, let editorView, self.isLive(editorView, for: bufferID),
+                  self.activeScintillaView === editorView else { return }
+            if input != .cancel, !editorView.allowsCodeCompletion {
+                self.completionPanel.close()
+                self.onCompletionInput?(.cancel)
+                return
+            }
+            switch input {
+            case .insertion: self.onCompletionInput?(.insertion)
+            case .deletion: self.onCompletionInput?(.deletion)
+            default: self.onCompletionInput?(.cancel)
+            }
+        }
         editorView.onDeclarationHovered = { [weak self, weak editorView] position in
             guard let self, let editorView, self.isLive(editorView, for: bufferID) else { return }
             let language = self.languageConfigurations[bufferID]?.languageID.rawValue
@@ -2379,12 +2436,14 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
         editorView.onStatusChange = { [weak self, weak editorView] in
             if let self, let editorView { self.markdownEditors.nativeStatusChanged(editorView) }
             guard let self, let editorView, self.activeScintillaView === editorView else { return }
+            self.completionSelectionDidChange()
             self.onEditorStatusChange?()
         }
         editorView.onFocus = { [weak self, weak editorView] in
             guard let self, let editorView,
                   self.isLive(editorView, for: bufferID) else { return }
             self.lastFocusedViewID = ObjectIdentifier(editorView)
+            self.completionSelectionDidChange()
             if let group = self.visibleGroup(containing: editorView) {
                 self.activateEditorGroup(group)
                 self.onEditorGroupFocus?(group)

@@ -117,6 +117,7 @@ public final class AppSettingsUseCase {
     }
 
     private func persist(_ settings: AppSettings) async -> AppSettingsUpdateOutcome {
+        guard settings.languageServices.count <= 64, settings.languageServices.allSatisfy({ $0.key.utf8.count <= 512 && !$0.key.contains("\0") && $0.value.isValid }) else { return .failed(.writeFailed("invalid language service settings")) }
         var normalized = settings
         normalized.schemaVersion = AppSettings.currentSchemaVersion
         normalized.editorFontSize = settings.editorFontSize.isFinite ? (min(max(settings.editorFontSize, 6), 72) * 100).rounded() / 100 : 13

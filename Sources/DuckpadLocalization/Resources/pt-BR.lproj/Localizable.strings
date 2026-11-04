@@ -1395,3 +1395,48 @@
 "Rendering diagram…" = "Renderizando diagrama…";
 
 "Diagram incomplete. Edit the source to continue." = "Diagrama incompleto. Edite o código-fonte para continuar.";
+
+"Language server" = "Servidor de linguagem";
+
+"Keyword" = "Palavra-chave";
+
+"↑↓ select · Tab insert · Esc close" = "↑↓ Selecionar · Tab Inserir · Esc Fechar";
+
+/* Python language server settings */
+"Python" = "Python";
+"Settings scope" = "Escopo das configurações";
+"All projects" = "Todos os projetos";
+"Current project" = "Projeto atual";
+"Use default server" = "Usar servidor padrão";
+"Python interpreter" = "Interpretador Python";
+"Automatic (.venv, then default Python)" = "Automático (.venv, depois Python padrão)";
+"Choose…" = "Escolher…";
+"Choose Python interpreter…" = "Escolher interpretador Python…";
+"Apply Python settings" = "Aplicar configurações Python";
+"Select a saved Python file to configure its project." = "Selecione um arquivo Python salvo para configurar seu projeto.";
+"Existing environments are used without creating or installing project packages. Install the selected language server separately." = "Ambientes existentes são usados sem criar ambientes ou instalar pacotes do projeto. Instale separadamente o servidor de linguagem escolhido.";
+"Active interpreter: %1$@" = "Interpretador ativo: %1$@";
+"Automatic" = "Automático";
+"Server command: %1$@" = "Comando do servidor: %1$@";
+"Enter an absolute Python interpreter path, or leave it empty for automatic detection." = "Insira o caminho absoluto do interpretador Python ou deixe vazio para detecção automática.";
+"Python language server is unavailable. Check the server installation and interpreter path." = "O servidor de linguagem Python está indisponível. Verifique a instalação e o caminho do interpretador.";
+
+/* Language plugin settings */
+"Language Support" = "Suporte a linguagens";
+"Interpreter" = "Interpretador";
+"Choose interpreter…" = "Escolher interpretador…";
+"Apply language settings" = "Aplicar configurações da linguagem";
+"Automatic environment detection" = "Detecção automática do ambiente";
+"Install and enable a language support plugin in Extensions." = "Instale e ative um plugin de suporte a linguagens em Extensões.";
+"Select a saved file to configure its project." = "Selecione um arquivo salvo para configurar seu projeto.";
+"Existing environments are used. Project environments and packages are not created or installed automatically." = "Ambientes existentes são usados. Ambientes e pacotes do projeto não são criados ou instalados automaticamente.";
+"Install command: %1$@" = "Comando de instalação: %1$@";
+"Language server is unavailable. Check the server installation and interpreter path." = "O servidor de linguagem está indisponível. Verifique a instalação e o caminho do interpretador.";
+"Enter an absolute interpreter path, or leave it empty for automatic detection." = "Insira o caminho absoluto do interpretador ou deixe vazio para detecção automática.";
+"Multiple enabled plugins provide the same language. Disable one of them." = "Vários plugins ativos oferecem suporte à mesma linguagem. Desative um deles.";
+
+"All defaults" = "Padrões globais";
+
+"Current workspace" = "Espaço de trabalho atual";
+
+"Selected folder" = "Pasta selecionada";

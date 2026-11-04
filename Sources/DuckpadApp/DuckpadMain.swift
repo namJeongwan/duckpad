@@ -14,8 +14,13 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private var windowController: DuckpadWindowController?
     private weak var mainMenuTarget: DuckpadWindowController?
     private var windowControllers: [ObjectIdentifier: DuckpadWindowController] = [:]
+    private var windowCompletionProviders: [ObjectIdentifier: LanguageServerCompletionProvider] = [:]
+    private var windowDocumentURLs: [ObjectIdentifier: () -> URL?] = [:]
     private var windowEditors: [ObjectIdentifier: ScintillaEditorAdapter] = [:]
     private var windowRecoveryRoots: [ObjectIdentifier: URL] = [:]
+    private var languageProjectResolution: Task<Void, Never>?
+    private var settingsWindowOwner: ObjectIdentifier?
+    private var observedExtensionPolicyGeneration: UInt64?
     private var settingsWindowController: DuckpadSettingsWindowController?
     private var minimapPreferenceUpdatePending = false
     private lazy var projectController: DuckpadAppInfoController = {
@@ -57,6 +62,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         let searchUseCase: SearchWorkspaceUseCase
         let workspaceBrowserUseCase: WorkspaceBrowserUseCase
         let languageUseCase: LanguageWorkspaceUseCase
+        let completionProvider: LanguageServerCompletionProvider
         let documentIntelligenceUseCase: DocumentIntelligenceUseCase
         let extensionUseCase: ExtensionWorkspaceUseCase
     }
@@ -696,18 +702,150 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
                 fflush(stdout)
                 Darwin._exit(0)
             }
+        } else if let path = environment["DUCKPAD_COMPLETION_SMOKE_FILE"] {
+            Task { @MainActor in
+                await controller.waitForStartup()
+                if let packagePath = environment["DUCKPAD_LANGUAGE_PLUGIN_SMOKE_PACKAGE"] {
+                    do {
+                        let id = try await self.extensionUpdateInstaller.installPackage(at: URL(fileURLWithPath: packagePath))
+                        await controller.refreshExtensions()
+                        precondition(!runtime.completionProvider.registrations.contains { $0.extensionID == id }, "installed language plugin activated without enablement")
+                        try await extensionUseCase.setEnabled(id, enabled: true)
+                        precondition(runtime.completionProvider.registrations.contains { $0.extensionID == id }, "enabled language plugin did not register")
+                        print("Duckpad language plugin installation smoke ready: verified + opt-in + registered")
+                        fflush(stdout)
+                    } catch { preconditionFailure("language plugin installation failed: \(error)") }
+                }
+                if case .failed = await fileUseCase.open(URL(fileURLWithPath: path)) {
+                    preconditionFailure("completion smoke document did not open")
+                }
+                guard let view = editor.activeScintillaView else { preconditionFailure("completion smoke editor missing") }
+                controller.showAndFocus()
+                view.focusEditor()
+                let completionCaret = environment["DUCKPAD_COMPLETION_SMOKE_CARET"].flatMap(Int.init)
+                    ?? Int(clamping: view.documentByteLength)
+                precondition(completionCaret >= 0 && completionCaret <= view.documentByteLength, "invalid completion smoke caret")
+                view.setPrimarySelectionUTF8Range(.init(location: completionCaret, length: 0))
+                if environment["DUCKPAD_COMPLETION_MAGIC_METHOD_SMOKE"] == "1" {
+                    await MagicMethodCompletionSmoke.run(controller: controller, editor: editor,
+                        intelligence: documentIntelligenceUseCase, provider: runtime.completionProvider,
+                        url: URL(fileURLWithPath: path), expectedServer: environment["DUCKPAD_COMPLETION_SMOKE_EXPECT_SERVER"] ?? "basedpyright")
+                    if environment["DUCKPAD_COMPLETION_SMOKE_KEEP_OPEN"] != "1" { Darwin._exit(0) }
+                    return
+                }
+                if let input = environment["DUCKPAD_COMPLETION_SMOKE_INPUT"], input.count == 1 {
+                    let original = view.contentUTF8
+                    guard let client = controller.window?.firstResponder as? any NSTextInputClient else {
+                        preconditionFailure("completion smoke text input client missing")
+                    }
+                    client.insertText(input, replacementRange: .init(location: NSNotFound, length: 0))
+                    try? await Task.sleep(for: .milliseconds(80))
+                    precondition(editor.isCompletionSuggestionVisible, "first-character completion did not appear")
+                    client.doCommand(by: NSSelectorFromString("deleteBackward:"))
+                    try? await Task.sleep(for: .milliseconds(80))
+                    precondition(view.contentUTF8 == original && !editor.isCompletionSuggestionVisible,
+                        "deleting the last prefix character did not close completion")
+                    client.insertText(input, replacementRange: .init(location: NSNotFound, length: 0))
+                    try? await Task.sleep(for: .milliseconds(80))
+                    precondition(editor.isCompletionSuggestionVisible, "completion did not reopen on first-character input")
+                    print("Duckpad completion input smoke ready: first character + Backspace closes empty prefix + retyping")
+                    fflush(stdout)
+                    if environment["DUCKPAD_COMPLETION_SMOKE_CONTEXT"] == "1" {
+                        client.insertText("\"" + input, replacementRange: .init(location: NSNotFound, length: 0))
+                        try? await Task.sleep(for: .milliseconds(80))
+                        precondition(!editor.isCompletionSuggestionVisible && !view.allowsCodeCompletion,
+                            "completion appeared inside a quoted string")
+                        client.doCommand(by: NSSelectorFromString("deleteBackward:"))
+                        try? await Task.sleep(for: .milliseconds(80))
+                        precondition(!editor.isCompletionSuggestionVisible, "deleting string content reopened code completion")
+                        client.insertText("\"\n" + input, replacementRange: .init(location: NSNotFound, length: 0))
+                        try? await Task.sleep(for: .milliseconds(80))
+                        precondition(editor.isCompletionSuggestionVisible, "code completion did not resume after leaving a string")
+                        print("Duckpad completion context smoke ready: quoted typing/deletion suppressed, code resumed")
+                        fflush(stdout)
+                    }
+                }
+                if environment["DUCKPAD_COMPLETION_DECLARATION_SMOKE"] == "1" {
+                    guard let client = controller.window?.firstResponder as? any NSTextInputClient else {
+                        preconditionFailure("declaration smoke text input client missing")
+                    }
+                    for text in ["class P", "erson:"] {
+                        client.insertText(text, replacementRange: .init(location: NSNotFound, length: 0))
+                        try? await Task.sleep(for: .milliseconds(80))
+                        precondition(!editor.isCompletionSuggestionVisible, "declaration name or block colon opened completion")
+                    }
+                    client.insertText("\n    pass\n\nclass Child(P", replacementRange: .init(location: NSNotFound, length: 0))
+                    try? await Task.sleep(for: .milliseconds(80))
+                    precondition(editor.isCompletionSuggestionVisible, "base-class reference did not complete")
+                    client.insertText("):\n    pass\n\ndf.", replacementRange: .init(location: NSNotFound, length: 0))
+                    print("Duckpad declaration completion smoke ready: class P + class Person: suppressed, base-class reference + member access retained")
+                    fflush(stdout)
+                }
+                documentIntelligenceUseCase.cancel()
+                var semanticItems: [DocumentCompletionSuggestion] = []
+                let indexingDeadline = ContinuousClock.now.advanced(by: .seconds(12))
+                repeat {
+                    if let capture = editor.captureDocumentIntelligence(maximumBytes: 1_048_576),
+                       let prefix = DocumentCompletionPrefix(capture),
+                       let provider = documentIntelligenceUseCase.completionProvider {
+                        semanticItems = (try? await provider.completions(in: capture, prefixRange: prefix.insertRange)) ?? []
+                    }
+                    if !semanticItems.isEmpty { break }
+                    try? await Task.sleep(for: .milliseconds(300))
+                } while ContinuousClock.now < indexingDeadline
+                guard !semanticItems.isEmpty else {
+                    preconditionFailure("completion smoke did not receive semantic server results")
+                }
+                let result = await documentIntelligenceUseCase.complete()
+                guard case .presented(let count) = result, editor.isCompletionSuggestionVisible else {
+                    preconditionFailure("completion smoke did not show the rich panel")
+                }
+                print("Duckpad semantic completion smoke ready: \(count) candidates, authenticated helper + rich panel")
+                fflush(stdout)
+                if let expected = environment["DUCKPAD_COMPLETION_SMOKE_EXPECT_SERVER"] {
+                    precondition(runtime.completionProvider.context(for: URL(fileURLWithPath: path))?.serverID == expected, "wrong plugin server selected")
+                }
+                if environment["DUCKPAD_LANGUAGE_PLUGIN_LIFECYCLE_SMOKE"] == "1" {
+                    do {
+                        let registration = runtime.completionProvider.registrations.first!
+                        try await extensionUseCase.setEnabled(registration.extensionID, enabled: false)
+                        precondition(runtime.completionProvider.registrations.isEmpty && !editor.isCompletionSuggestionVisible, "disabled language plugin retained completion")
+                        try await extensionUseCase.setEnabled(registration.extensionID, enabled: true)
+                        precondition(runtime.completionProvider.registrations.count == 1, "re-enabled language plugin was not registered")
+                        let item = extensionUseCase.state().items.first { $0.manifest.id == registration.extensionID }!
+                        try await extensionUseCase.withdrawForRemoval(item)
+                        try await self.extensionUpdateInstaller.uninstall(item) { try await self.stopExtensionForRemoval(registration.extensionID) }
+                        await controller.refreshExtensions(); extensionUseCase.finishRemoval(registration.extensionID)
+                        precondition(runtime.completionProvider.registrations.isEmpty && !editor.isCompletionSuggestionVisible, "uninstalled plugin retained completion")
+                        precondition(FileManager.default.fileExists(atPath: path), "uninstallation changed the project file")
+                        print("Duckpad language plugin lifecycle smoke ready: disabled + re-enabled + uninstalled + project retained")
+                        fflush(stdout)
+                    } catch { preconditionFailure("language plugin lifecycle failed: \(error)") }
+                }
+                if let root = environment["DUCKPAD_WORKSPACE_LANGUAGE_SMOKE_ROOT"] {
+                    await self.checkWorkspaceLanguageSmoke(primary: runtime, document: URL(fileURLWithPath: path), root: URL(fileURLWithPath: root))
+                }
+                if environment["DUCKPAD_LANGUAGE_SETTINGS_SMOKE"] == "1" {
+                    self.showSettings()
+                    self.settingsWindowController?.selectCategory("Language Support")
+                    print("Duckpad language settings smoke ready")
+                    fflush(stdout)
+                }
+                if environment["DUCKPAD_COMPLETION_SMOKE_KEEP_OPEN"] != "1" { Darwin._exit(0) }
+            }
         } else if environment["DUCKPAD_INTELLIGENCE_SMOKE"] == "1" {
             Task { @MainActor in
                 await controller.waitForStartup()
                 guard let view = editor.activeScintillaView else {
                     preconditionFailure("document intelligence smoke editor missing")
                 }
+                view.focusEditor()
                 let text = "func paddle() {}\npaddling pad"
                 view.insertCommittedText(text)
                 await workspace.waitForPendingPersistence()
                 let completion = await documentIntelligenceUseCase.complete()
                 guard case .presented(let count) = completion, count == 2,
-                      view.isCompletionActive else {
+                      editor.isCompletionSuggestionVisible else {
                     preconditionFailure("current-document completion did not present exact candidates")
                 }
                 let outline = await documentIntelligenceUseCase.outline()
@@ -921,6 +1059,82 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         0x04, 0x00, 0x41, 0x00, 0x0b,
     ])
 
+    /// Isolated packaged regression: two recovered windows use the same file with
+    /// different environments, and changing one must preserve the other's connection.
+    private func checkWorkspaceLanguageSmoke(primary: WindowRuntime, document: URL, root: URL) async {
+        let secondRoot = root.appendingPathComponent("secondary-recovery")
+        let secondary = makeWindowRuntime(recoveryRoot: secondRoot)
+        register(secondary, recoveryRoot: secondRoot)
+        await secondary.controller.waitForStartup()
+        precondition(!secondary.completionProvider.registrations.isEmpty, "second workspace did not load language plugin")
+        if case .failed = await secondary.fileUseCase.open(document) {
+            preconditionFailure("second workspace did not open the shared file")
+        }
+        guard let view = secondary.editor.activeScintillaView else { preconditionFailure("second workspace editor missing") }
+        secondary.controller.showAndFocus()
+        view.setPrimarySelectionUTF8Range(.init(location: Int(clamping: view.documentByteLength), length: 0))
+        let a = primary.completionProvider.currentWorkspaceID, b = secondary.completionProvider.currentWorkspaceID
+        precondition(a != b, "workspaces share an identity")
+        let registration = primary.completionProvider.registrations.first!
+        let envA = document.deletingLastPathComponent().appendingPathComponent(".venv/bin/python").path
+        let envB = document.deletingLastPathComponent().appendingPathComponent("other-env/bin/python").path
+        func save(_ settings: AppSettings) async {
+            guard case .saved(let saved) = await settingsUseCase.update(settings) else { preconditionFailure("workspace settings did not save") }
+            apply(saved)
+        }
+        var settings = settingsUseCase.state.settings
+        var selected = settings.languageServices[registration.settingsKey] ?? .init()
+        let restoring = environment["DUCKPAD_WORKSPACE_LANGUAGE_SMOKE_RESTORE"] == "1"
+        let identities = root.appendingPathComponent("workspace-identities.txt")
+        let identityText = a.rawValue.uuidString + "\n" + b.rawValue.uuidString
+        if restoring {
+            precondition((try? String(contentsOf: identities, encoding: .utf8)) == identityText, "workspace identities changed after relaunch")
+            precondition(selected.workspace(a).interpreterPath == envA && selected.workspace(b).interpreterPath == envB, "workspace settings did not restore")
+        } else {
+            selected.workspaces[a.rawValue.uuidString] = .init(interpreterPath: envA)
+            selected.workspaces[b.rawValue.uuidString] = .init(interpreterPath: envB)
+            settings.languageServices[registration.settingsKey] = selected
+            await save(settings)
+            do { try identityText.write(to: identities, atomically: true, encoding: .utf8) }
+            catch { preconditionFailure("workspace smoke identities did not save") }
+        }
+        func labels(_ runtime: WindowRuntime) async -> [String] {
+            runtime.documentIntelligenceUseCase.cancel()
+            runtime.editor.cancelCompletion()
+            let deadline = ContinuousClock.now.advanced(by: .seconds(15))
+            repeat {
+                if let capture = runtime.editor.captureDocumentIntelligence(maximumBytes: 1_048_576), let prefix = DocumentCompletionPrefix(capture) {
+                    let values = (try? await runtime.completionProvider.completions(in: capture, prefixRange: prefix.insertRange)) ?? []
+                    if values.contains(where: { $0.label.hasPrefix("only_environment_") }) { return values.map(\.label) }
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            } while ContinuousClock.now < deadline
+            return []
+        }
+        let labelsA = await labels(primary), labelsB = await labels(secondary)
+        precondition(labelsA.contains("only_environment_a") && !labelsA.contains("only_environment_b"), "primary workspace used wrong environment")
+        precondition(labelsB.contains("only_environment_b") && !labelsB.contains("only_environment_a"), "secondary workspace used wrong environment")
+        let contextA = primary.completionProvider.context(for: document)
+        precondition(contextA?.workspaceID == a && secondary.completionProvider.context(for: document)?.workspaceID == b, "helper returned wrong workspace owner")
+        selected.workspaces[b.rawValue.uuidString]?.interpreterPath = envA
+        settings.languageServices[registration.settingsKey] = selected
+        await save(settings)
+        precondition(primary.completionProvider.context(for: document) == contextA && secondary.completionProvider.context(for: document) == nil, "workspace update restarted the wrong connection")
+        let changedLabels = await labels(secondary)
+        precondition(changedLabels.contains("only_environment_a"), "changed workspace did not use new environment")
+        selected.workspaces[b.rawValue.uuidString]?.interpreterPath = envB
+        settings.languageServices[registration.settingsKey] = selected
+        await save(settings)
+        let restoredLabels = await labels(secondary)
+        precondition(restoredLabels.contains("only_environment_b"), "secondary environment did not return")
+        guard case .saved = await primary.recoveryUseCase.flush(), case .saved = await secondary.recoveryUseCase.flush() else {
+            preconditionFailure("workspace recovery did not persist")
+        }
+        print("Duckpad workspace language smoke ready: same file + distinct environments + selective restart + " + (restoring ? "relaunch restored" : "durable identities"))
+        fflush(stdout)
+        primary.controller.showAndFocus()
+    }
+
     private func makeWindowRuntime(
         recoveryRoot: URL,
         verifiedRecoveryRoot: VerifiedRecoveryRoot? = nil
@@ -967,6 +1181,47 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         conventions.onRulesChanged = { [weak languageUseCase] in _ = languageUseCase?.refreshActive() }
         fileUseCase.conventionsUseCase = conventions
         let documentIntelligenceUseCase = DocumentIntelligenceUseCase(editor: editor)
+        let fallbackWorkspaceID = workspace.snapshot().sessionID
+        let completionProvider = LanguageServerCompletionProvider(settings: settings.languageServices,
+            workspaceID: { [weak workspace] in workspace?.snapshot().sessionID ?? fallbackWorkspaceID }) { [weak workspace] bufferID in
+            guard let tab = workspace?.snapshot().tabs.first(where: { $0.buffer.bufferID == bufferID }),
+                  let path = tab.fullPath else { return nil }
+            return URL(fileURLWithPath: path)
+        }
+        documentIntelligenceUseCase.completionProvider = completionProvider
+        workspaceBrowserUseCase.onRootSetChange = { [weak self, weak completionProvider] roots in
+            guard let completionProvider else { return }
+            let changed = completionProvider.updateWorkspaceFolders(roots.map {
+                .init(id: $0.id.rawValue.uuidString, path: $0.canonicalPath, displayName: $0.displayName)
+            })
+            if changed, let self, let owner = self.settingsWindowOwner,
+               self.windowCompletionProviders[owner] === completionProvider,
+               let settingsWindow = self.settingsWindowController, settingsWindow.window?.isVisible == true,
+               let selected = settingsWindow.selectedLanguageService { settingsWindow.onLanguageServiceSelected?(selected) }
+        }
+        completionProvider.onInvalidation = { [weak documentIntelligenceUseCase, weak editor] in
+            documentIntelligenceUseCase?.cancel(); editor?.cancelCompletion()
+        }
+        documentIntelligenceUseCase.completionMatcher = CodeMirrorCompletionMatcher()
+        editor.onCompletionShutdown = { [weak completionProvider] in completionProvider?.shutdown() }
+        editor.onCompletionResolve = { [weak completionProvider] item, capture in
+            await completionProvider?.resolve(item, capture: capture)
+        }
+        editor.onCompletionBatch = { [weak workspace, weak editor] edits, capture, caret in
+            guard let workspace, let editor,
+                  let reservation = await workspace.reserveEditorBatch(bufferID: capture.buffer.bufferID,
+                    expectedRevision: capture.buffer.revision, editCount: edits.count) else { return false }
+            guard editor.completionCaptureIsCurrent(capture) else { workspace.cancelEditorBatch(reservation); return false }
+            let outcome = editor.replaceActiveBatch(edits, expectedRevision: capture.buffer.revision) {
+                workspace.commitEditorBatch(reservation, edits: $0)
+            }
+            guard case .accepted = outcome else { workspace.cancelEditorBatch(reservation); return false }
+            editor.selectAndReveal(.init(location: caret, length: 0))
+            return true
+        }
+        documentIntelligenceUseCase.enableAutomaticCompletion { [weak languageUseCase] in
+            languageUseCase?.activeCompletionTerms ?? []
+        }
         // Install/Enable authorizes declared plugin capabilities without a separate permission UI.
         let allowsDevelopmentExtensions = true
         let extensionUseCase = ExtensionWorkspaceUseCase(
@@ -979,6 +1234,9 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             nativeActivationSession: nativeExtensionActivationSession,
             automaticallyAuthorizesEnabledPackages: true
         )
+        completionProvider.validateRegistration = { [weak extensionUseCase] registration in
+            await extensionUseCase?.validateLanguageServiceAccess(registration) ?? false
+        }
         let formattingUseCase = DocumentFormattingUseCase(workspace: workspace, editor: editor, formatter: BundledPrettierFormatter())
         formattingUseCase.onUsageMetric = { [weak self] in self?.usageStatistics?.record($0) }
         extensionUseCase.onUsageMetric = { [weak self] in self?.usageStatistics?.record($0) }
@@ -1034,6 +1292,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             searchUseCase: searchUseCase,
             workspaceBrowserUseCase: workspaceBrowserUseCase,
             languageUseCase: languageUseCase,
+            completionProvider: completionProvider,
             documentIntelligenceUseCase: documentIntelligenceUseCase,
             extensionUseCase: extensionUseCase
         )
@@ -1049,6 +1308,13 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private func register(_ runtime: WindowRuntime, recoveryRoot: URL) {
         let controller = runtime.controller
         let identifier = ObjectIdentifier(controller)
+        windowCompletionProviders[identifier] = runtime.completionProvider
+        windowDocumentURLs[identifier] = { [weak workspace = runtime.workspace] in
+            guard let snapshot = workspace?.snapshot(), let buffer = snapshot.activeBuffer,
+                  let path = snapshot.tabs.first(where: { $0.buffer.bufferID == buffer.bufferID })?.fullPath,
+                  !path.isEmpty else { return nil }
+            return URL(fileURLWithPath: path)
+        }
         controller.onUsageMetric = { [weak self] in
             self?.usageStatistics?.recordActivity()
             self?.usageStatistics?.record($0)
@@ -1056,6 +1322,31 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         controller.configureExtensionServices(extensionServiceHost)
         let updater = extensionUpdateInstaller!
         let registry = runtime.extensionUseCase
+        registry.onLanguageServicesChange = { [weak self, weak registry, weak provider = runtime.completionProvider] registrations in
+            guard let self, let provider else { return }
+            provider.update(registrations: registrations, settings: self.settingsUseCase.state.settings.languageServices)
+            if self.settingsWindowOwner == identifier, let settingsWindow = self.settingsWindowController, settingsWindow.window?.isVisible == true {
+                settingsWindow.configureLanguageServices(provider.registrations, conflictingLanguages: provider.conflictingLanguages)
+                if let selected = settingsWindow.selectedLanguageService { settingsWindow.onLanguageServiceSelected?(selected) }
+            }
+            if let generation = registry?.servicePolicyGeneration {
+                let previous = self.observedExtensionPolicyGeneration
+                if previous == nil || generation > previous! {
+                    self.observedExtensionPolicyGeneration = generation
+                    if previous != nil {
+                        // Withdraw immediately in every window, including candidates
+                        // already awaiting matching, before asynchronous policy refresh.
+                        for (otherID, other) in self.windowCompletionProviders where otherID != identifier {
+                            other.update(registrations: [], settings: self.settingsUseCase.state.settings.languageServices)
+                        }
+                        Task { @MainActor [weak self] in
+                            guard let self else { return }
+                            for (otherID, controller) in self.windowControllers where otherID != identifier { await controller.refreshExtensions() }
+                        }
+                    }
+                }
+            }
+        }
         controller.configureExtensionUpdates(check: { try await updater.check($0) }, prepare: { try await updater.prepare($0, publisherFingerprint: $1) }, install: { [weak self] prepared in
             let installed = await registry.state().items.contains { $0.manifest.id == prepared.release.extensionID }
             let kind: UsageMetric.Kind = installed ? .pluginUpdate : .pluginInstall
@@ -1163,6 +1454,8 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             guard let self, let controller else { return }
             let identifier = ObjectIdentifier(controller)
             self.windowRecoveryRoots.removeValue(forKey: identifier)
+            self.windowCompletionProviders.removeValue(forKey: identifier)
+            self.windowDocumentURLs.removeValue(forKey: identifier)
             self.windowEditors.removeValue(forKey: identifier)
             self.windowControllers.removeValue(forKey: identifier)
             if self.windowController === controller {
@@ -1401,6 +1694,43 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
     private func configuredSettingsWindow() -> DuckpadSettingsWindowController {
         let settingsWindow = settingsWindowController ?? DuckpadSettingsWindowController()
         settingsWindowController = settingsWindow
+        languageProjectResolution?.cancel()
+        let documentController = windowControllers.values.first(where: { $0.window?.isKeyWindow == true })
+            ?? mainMenuTarget ?? activeDocumentController
+        let id = documentController.map(ObjectIdentifier.init)
+        settingsWindowOwner = id
+        let document = id.flatMap { windowDocumentURLs[$0]?() }
+        let provider = id.flatMap { windowCompletionProviders[$0] }
+        let languageID = id.flatMap { windowEditors[$0]?.completionInputContext?.languageID.rawValue }
+        settingsWindow.configureLanguageServices(provider?.registrations ?? [], preferredLanguageID: languageID, conflictingLanguages: provider?.conflictingLanguages ?? [])
+        settingsWindow.onLanguageServiceSelected = { [weak self, weak settingsWindow, weak provider] registration in
+            guard let self, let provider else { return }
+            self.languageProjectResolution?.cancel()
+            let workspaceID = provider.currentWorkspaceID
+            let context = document.flatMap { provider.context(for: $0, languageID: registration.service.languageID) }
+            @MainActor func present(root: String?, context: LanguageServerLaunchContext?) {
+                var folders = provider.workspaceFolders
+                var selected = document.flatMap { provider.workspaceFolder(for: $0)?.id }
+                if selected == nil, let root {
+                    let fallback = LanguageServiceFolder.project(root)
+                    if !folders.contains(where: { $0.id == fallback.id }) { folders.append(fallback) }
+                    selected = fallback.id
+                }
+                settingsWindow?.configureLanguageWorkspace(id: workspaceID, folders: folders, selectedFolderID: selected,
+                    projectRoot: root, context: context, unavailable: provider.failedServices.contains(registration.settingsKey))
+            }
+            present(root: context?.rootPath, context: context)
+            if context == nil, let document {
+                self.languageProjectResolution = Task { @MainActor [weak settingsWindow, weak provider] in
+                    let root = await LanguageServerProjectRootResolver.resolve(document, registration: registration)
+                    guard !Task.isCancelled, settingsWindow?.selectedLanguageService == registration,
+                          provider?.currentWorkspaceID == workspaceID,
+                          provider?.registrations.contains(registration) == true else { return }
+                    present(root: root?.path, context: nil)
+                }
+            }
+        }
+        if provider == nil { settingsWindow.configureLanguageWorkspace(id: nil, folders: []) }
         settingsWindow.onShowUsageStatistics = { [weak self] in
             guard let self else { return }
             let controller = self.usageLogWindow ?? UsageStatisticsLogWindowController()
@@ -1431,6 +1761,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             }
             return outcome
         }
+        if let selected = settingsWindow.selectedLanguageService { settingsWindow.onLanguageServiceSelected?(selected) }
         return settingsWindow
     }
 
@@ -1445,6 +1776,9 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
         case .system: NSApplication.shared.appearance = nil
         case .light: NSApplication.shared.appearance = NSAppearance(named: .aqua)
         case .dark: NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        }
+        for provider in windowCompletionProviders.values {
+            provider.update(registrations: provider.registrations, settings: settings.languageServices)
         }
         for editor in windowEditors.values {
             editor.applyPreferences(settings)

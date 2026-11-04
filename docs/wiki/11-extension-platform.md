@@ -4,6 +4,13 @@ Status: **Phase 8 approved, committed and audited** (`1f60bedd`); Phase 26 XPC p
 
 ## Supported boundary
 
+Host API **1.5.0** adds signed, optional declarative language providers with
+`contributes.languageServices`, `language.servers` authorization, generic settings,
+and activation/disable/revoke/uninstall synchronization. See the
+[language plugin SDK](../../SDK/LanguageSupport/language-support.md). The command/runtime
+MVP description below remains applicable to WASM/native commands; language-server
+registrations are now an additional active contribution.
+
 Duckpad loads declarative `.duckpad-plugin` directories and runs a WebAssembly module in a separate runtime. SwiftPM development/tests use `DuckpadPluginHost`; packaged applications use the embedded `DuckpadPluginRuntime.xpc` service. The MVP supports commands, keybinding metadata, snippets, themes, and language metadata. Command execution is the only active contribution today; declarative metadata is parsed and bounded but runtime merge remains deferred until each subsystem has a conflict policy.
 
 User packages are disabled by default. They require explicit enablement and an immutable consent review bound to extension ID, publisher fingerprint, exact version/package digest, capability-schema digest, typed scope, and policy generation. An update or identity/capability change invalidates grants. Publisher revoke is a durable tombstone affecting every current package with that fingerprint; Reset only removes the tombstone and leaves packages disabled and ungranted.

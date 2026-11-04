@@ -166,8 +166,9 @@ public struct ExtensionRegistryState: Equatable, Sendable {
 
 @MainActor
 public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
+    public var onLanguageServicesChange: (([LanguageServerRegistration]) -> Void)?
     public var servicePolicyGeneration: UInt64 { policyGeneration }
-    public nonisolated static let apiVersion = SemanticVersion(major: 1, minor: 4, patch: 0)
+    public nonisolated static let apiVersion = SemanticVersion(major: 1, minor: 5, patch: 0)
 
     private let loader: any ExtensionPackageLoaderPort
     private let grants: any ExtensionGrantStorePort
@@ -404,6 +405,7 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
         } catch let failure as ExtensionFailure { throw failure }
         catch { throw .hostUnavailable("could not persist extension preference") }
         enabled = candidateEnabled; granted = candidateGrants; disabledPackageDigests = candidateDisabledDigests; policyGeneration = candidateGeneration
+        onLanguageServicesChange?(languageServerRegistrations())
         if !shouldEnable { await cancelActiveRequest(ifOwnedBy: [id]) }
         publish()
     }
@@ -489,6 +491,7 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
         catch let failure as ExtensionFailure { throw failure }
         catch { throw .hostUnavailable("could not persist publisher revocation") }
         revokedPublisherFingerprints = revoked; enabled = candidateEnabled; granted = candidateGrants; policyGeneration = next
+        onLanguageServicesChange?(languageServerRegistrations())
         await cancelActiveRequest(ifOwnedBy: publisherIDs)
         publish()
     }
@@ -626,6 +629,31 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
         return output
     }
 
+    public func languageServerRegistrations() -> [LanguageServerRegistration] {
+        guard !invocationsSuspended, !policyAuthorityRequiresRestart else { return [] }
+        return packages.values.sorted(by: packageOrder).flatMap { package -> [LanguageServerRegistration] in
+            guard enabled.contains(package.manifest.id), !revokedPublisherFingerprints.contains(package.publisherFingerprint),
+                  !disabledPackageDigests.contains(package.packageDigest), let files = package.languageServiceFiles,
+                  (try? require(.languageServers, scope: .application, package: package)) != nil,
+                  (try? require(.documentsRead, scope: .application, package: package)) != nil else { return [] }
+            return package.manifest.contributes.languageServices.map {
+                .init(extensionID: package.manifest.id, packageDigest: package.packageDigest, service: $0, packageFiles: files)
+            }
+        }
+    }
+
+    public func validateLanguageServiceAccess(_ registration: LanguageServerRegistration) async -> Bool {
+        guard languageServerRegistrations().contains(registration),
+              let package = packages[registration.extensionID] else { return false }
+        guard let policy = try? await grants.loadPolicy(), policy.enabled.contains(package.manifest.id),
+              !policy.revokedPublisherFingerprints.contains(package.publisherFingerprint),
+              !policy.disabledPackageDigests.contains(package.packageDigest),
+              [ExtensionCapability.languageServers, .documentsRead].allSatisfy({ capability in
+                  policy.grants.contains { $0.capability == capability && $0.scope == .application && grantMatchesPackage($0, package: package) }
+              }), languageServerRegistrations().contains(registration) else { return false }
+        return true
+    }
+
     public func serviceCommands() -> [ExtensionServiceRegistration] {
         packages.values.filter(serviceIsAuthorized).flatMap { package in
             package.manifest.contributes.commands.filter { $0.inputScope == .service }.map {
@@ -668,6 +696,7 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
     /// Termination callers must keep it closed through their final flush.
     public func suspendInvocationsAndWait() async {
         invocationsSuspended = true
+        onLanguageServicesChange?([])
         await cancelInvocationAndWait()
     }
 
@@ -804,7 +833,10 @@ public final class ExtensionWorkspaceUseCase: ExtensionServiceInvoking {
         return ExtensionRegistryState(items: items, discoveryFailures: discoveryFailures, operationStatus: status)
     }
 
-    private func publish(status: String? = nil) { onStateChange?(makeState(status: status)) }
+    private func publish(status: String? = nil) {
+        onLanguageServicesChange?(languageServerRegistrations())
+        onStateChange?(makeState(status: status))
+    }
 
     private func persist(_ snapshot: ExtensionPolicySnapshot) async throws {
         switch try await grants.savePolicy(snapshot) {

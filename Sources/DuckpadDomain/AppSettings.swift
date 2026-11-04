@@ -62,6 +62,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var markdownImageDropAction: Int
     public var keyboardShortcuts: [String: String]
     public var snippets: [TextSnippet]
+    public var languageServices: [String: LanguageServiceSettings]
     public var formatting: FormattingSettings
 
     public init(
@@ -114,6 +115,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         markdownImageDropAction: Int = 0,
         keyboardShortcuts: [String: String] = [:],
         snippets: [TextSnippet] = [],
+        languageServices: [String: LanguageServiceSettings] = [:],
         formatting: FormattingSettings = .init()
     ) {
         self.schemaVersion = schemaVersion
@@ -165,6 +167,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.markdownImageDropAction = markdownImageDropAction
         self.keyboardShortcuts = keyboardShortcuts
         self.snippets = snippets
+        self.languageServices = languageServices
         self.formatting = formatting
     }
 
@@ -219,6 +222,13 @@ public struct AppSettings: Codable, Equatable, Sendable {
         markdownImageDropAction = try values.decodeIfPresent(Int.self, forKey: .markdownImageDropAction) ?? 0
         keyboardShortcuts = try values.decodeIfPresent([String: String].self, forKey: .keyboardShortcuts) ?? [:]
         snippets = try values.decodeIfPresent([TextSnippet].self, forKey: .snippets) ?? []
+        languageServices = try values.decodeIfPresent([String: LanguageServiceSettings].self, forKey: .languageServices) ?? [:]
+        // Read the previous development archive without retaining Python policy in the host.
+        enum LegacyKey: String, CodingKey { case python }
+        let legacy = try decoder.container(keyedBy: LegacyKey.self)
+        if languageServices["com.duckpad.python/python"] == nil, let previous = try legacy.decodeIfPresent(LanguageServiceSettings.self, forKey: .python) {
+            languageServices["com.duckpad.python/python"] = previous
+        }
         formatting = try values.decodeIfPresent(FormattingSettings.self, forKey: .formatting) ?? .init()
     }
 }

@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "com.duckpad.ruby",
+  "name": "Ruby / Rails",
+  "version": {
+    "major": 0,
+    "minor": 1,
+    "patch": 0
+  },
+  "api": {
+    "minimum": {
+      "major": 1,
+      "minor": 5,
+      "patch": 0
+    },
+    "maximumExclusive": {
+      "major": 2,
+      "minor": 0,
+      "patch": 0
+    }
+  },
+  "publisher": {
+    "id": "com.duckpad",
+    "keyID": "language-support-preview-1"
+  },
+  "runtime": {
+    "kind": "language-provider",
+    "module": "plugin.json",
+    "abi": "duckpad-language-1"
+  },
+  "capabilities": [
+    {
+      "id": "language.servers",
+      "scope": "application"
+    },
+    {
+      "id": "documents.read",
+      "scope": "application"
+    }
+  ],
+  "contributes": {
+    "commands": [],
+    "keybindings": [],
+    "snippets": [],
+    "themes": [],
+    "languages": [
+      {
+        "id": "ruby",
+        "extensions": [
+          "rb",
+          "rake"
+        ]
+      }
+    ],
+    "languageServices": [
+      {
+        "languageID": "ruby",
+        "displayName": "Ruby / Rails",
+        "defaultServerID": "ruby-lsp",
+        "projectRootMarkers": [
+          "Gemfile",
+          ".git"
+        ],
+        "projectExecutableDirectories": [
+          "bin"
+        ],
+        "servers": [
+          {
+            "id": "ruby-lsp",
+            "command": [
+              "ruby-lsp"
+            ],
+            "installHint": "gem install ruby-lsp"
+          }
+        ]
+      }
+    ]
+  }
+}

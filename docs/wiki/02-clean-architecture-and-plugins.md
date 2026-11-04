@@ -417,14 +417,27 @@ Apple's [App Sandbox violation diagnostics](https://developer.apple.com/document
 - Replacing Lexilla styling with Tree-sitter would require an additional incremental parse-to-Scintilla-style pipeline, injection handling, error recovery policy, and duplicated language packaging before basic NPP parity is reached.
 - Tree-sitter remains valuable for structural selection, syntax-aware transformations, and languages where a concrete feature cannot be delivered reliably by Lexilla/LSP. It should be introduced behind an analysis port with measurements and a feature owner, not as a second universal syntax source.
 
-Language contributions declare extensions, filenames, shebangs, a bundled Lexilla lexer/theme mapping, comment/fold rules, semantic feature registrations, and an optional LSP descriptor. A third-party package cannot contain or inject a lexer dylib or native language-server executable. A new native lexer must be reviewed, pinned, licensed, signed, and shipped as a trusted Duckpad component; otherwise language-specific computation runs in the same capability-less WebAssembly runtime described in section 6.1.
+Host API 1.5 now provides optional, signed `language-provider` plugins. Their
+`contributes.languageServices` declarations supply server commands, project-root
+markers, environment discovery rules, settings templates and installation hints.
+The [language plugin SDK](../../SDK/LanguageSupport/language-support.md) is the current
+implementation contract; it supersedes the original bundled-only LSP proposal.
 
-LSP is owned by `LanguageServiceBroker`, not launched by plugin code. V1 supports two provider forms without adding a second plugin topology:
+The host owns LSP transport, process lifetime, document synchronization,
+UTF-8/UTF-16 mapping, bounded completion/resolve and edit application. Plugin
+Install/Enable authorizes the declared `language.servers` and `documents.read`
+capabilities. The authenticated helper independently verifies the signed package
+inventory before root discovery or launch. It accepts only commands from that
+verified declaration. External servers run under the existing unsandboxed helper;
+this is explicit language-server authority, not a generic `process.runTool` API
+or a filesystem sandbox for the server. Disable, uninstall, revocation and changed
+registrations invalidate connections and pending results across windows.
 
-1. a reviewed Duckpad-bundled, Developer-ID-signed language server launched as a signed helper under the app sandbox;
-2. a language provider compiled to the plugin WebAssembly ABI when its implementation supports that target.
-
-A language manifest may name a logical bundled-server requirement and initialization options, but never a raw executable or shell command. A user-installed external LSP is unavailable in v1 because `process.runTool` is Unavailable/Missing; it may be added only after the future enablement contract and every section 6.6 gate pass. If no approved provider is available, Lexilla highlighting/folding and plain-text editing still work while LSP features report unavailable; this preserves broad Notepad++-class language coverage without pretending every language has a shippable sandboxed server. The broker owns stdio framing, translates UTF-8 Scintilla positions to UTF-16 LSP positions, synchronizes by document revision/version, redacts paths outside granted workspace scope, debounces changes, bounds server output, and terminates servers on workspace/plugin shutdown. Diagnostics are mapped back only if their document version is current.
+Language plugins and server binaries are not bundled by this implementation.
+Python, Ruby/Rails and Rust are separate installable reference packages. Baseline
+Lexilla styling/folding and current-document word/keyword completion remain in the
+host. Runtime merging of arbitrary new syntax/lexer definitions, automatic server
+downloads and LSP editor features beyond completion/resolve remain separate work.
 
 ## 8. Compatibility and native UX ADRs
 

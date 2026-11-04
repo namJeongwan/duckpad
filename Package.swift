@@ -22,6 +22,9 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "6.2.4"),
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
+        .package(url: "https://github.com/groue/Semaphore", exact: "0.1.0"),
+        .package(url: "https://github.com/ChimeHQ/LanguageServerProtocol", from: "0.13.3"),
+        .package(url: "https://github.com/ChimeHQ/JSONRPC", from: "0.9.0"),
     ],
     targets: [
         .binaryTarget(name: "GhosttyKit", path: "Vendor/Ghostty/GhosttyKit.xcframework"),
@@ -193,15 +196,24 @@ let package = Package(
             ]
         ),
         .target(name: "DuckpadDomain"),
+        .target(name: "LanguageClient", dependencies: [
+            .product(name: "LanguageServerProtocol", package: "LanguageServerProtocol"),
+            .product(name: "JSONRPC", package: "JSONRPC"), .product(name: "Semaphore", package: "Semaphore")
+        ], path: "Vendor/LanguageClient", exclude: ["LICENSE", "PROVENANCE.md"], swiftSettings: [.swiftLanguageMode(.v5)]),
+        .target(name: "DuckpadCompletionUI", path: "Vendor/CodeEditCompletion", exclude: ["LICENSE.md", "PROVENANCE.md"]),
         .target(name: "DuckpadLocalization", dependencies: ["DuckpadDomain"], resources: [.process("Resources")]),
         .target(name: "DuckpadApplication", dependencies: ["DuckpadDomain"]),
         .target(
             name: "DuckpadInfrastructure",
-            dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadICUBridge", "DuckpadPluginSupport", "DuckpadArchiveBridge"],
+            dependencies: ["DuckpadApplication", "DuckpadDomain", "DuckpadICUBridge", "DuckpadPluginSupport", "DuckpadArchiveBridge",
+                           "LanguageClient",
+                           .product(name: "LanguageServerProtocol", package: "LanguageServerProtocol"),
+                           .product(name: "JSONRPC", package: "JSONRPC")],
             resources: [
                 .process("Resources/Languages.json"),
                 .copy("Resources/BundledExtensions"),
                 .copy("Resources/Formatter"),
+                .copy("Resources/CompletionMatching"),
             ]
         ),
         .target(
@@ -216,6 +228,7 @@ let package = Package(
                 "DuckpadDomain",
                 "DuckpadScintillaBridge",
                 "DuckpadLocalization",
+                "DuckpadCompletionUI",
             ],
             resources: [.copy("Resources/ScintillaCursors"), .copy("Resources/MarkdownEditor")]
         ),

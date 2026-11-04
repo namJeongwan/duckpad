@@ -72,6 +72,12 @@ typedef NS_ENUM(NSInteger, DPScintillaSelectionCommand) {
 @property(nonatomic, readonly) NSInteger metadataToken;
 @end
 
+typedef NS_ENUM(NSInteger, DPScintillaCompletionInput) {
+    DPScintillaCompletionInputCancel,
+    DPScintillaCompletionInputInsertion,
+    DPScintillaCompletionInputDeletion,
+};
+
 /// Narrow AppKit facade. No Scintilla message, pointer, or C++ type is public.
 @interface DPScintillaEditorView : NSView
 /// Stable command keys: undo, redo, cut, copy, paste, delete, selectAll.
@@ -89,6 +95,8 @@ typedef NS_ENUM(NSInteger, DPScintillaSelectionCommand) {
 - (BOOL)showDeclarationHoverRange:(NSRange)range expectedRevision:(uint64_t)revision expectedPosition:(NSUInteger)position;
 - (void)clearDeclarationHover;
 @property(nonatomic, copy, nullable) void (^onStatusChange)(void);
+/// Completed typing/deletion or cancellation of pending automatic completion.
+@property(nonatomic, copy, nullable) void (^onCompletionInput)(DPScintillaCompletionInput input);
 @property(nonatomic, copy, nullable) void (^onFoldStateChange)(void);
 @property(nonatomic, copy, nullable) void (^onFoldRecoveryProgress)(void);
 @property(nonatomic, copy, nullable) void (^onSmartIndentationStateChange)(BOOL isPending);
@@ -293,6 +301,8 @@ typedef NS_ENUM(NSInteger, DPScintillaSelectionCommand) {
 - (void)configureGuidesWithIndentation:(BOOL)indentation virtualSpace:(BOOL)virtualSpace edgeVisible:(BOOL)edgeVisible edgeColumn:(NSInteger)edgeColumn;
 - (void)applyPalette:(DPScintillaPalette)palette;
 - (NSInteger)styleAtUTF8Position:(NSUInteger)position;
+/// Lexer-backed context gate. Strings/comments (including unfinished strings) reject code completion.
+@property(nonatomic, readonly) BOOL allowsCodeCompletion;
 - (NSUInteger)foregroundColorForStyle:(NSInteger)style;
 - (NSInteger)foldLevelAtLine:(NSUInteger)line;
 - (BOOL)isFoldExpandedAtLine:(NSUInteger)line;

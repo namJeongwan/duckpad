@@ -17,7 +17,8 @@ struct SettingsLanguageRefreshTests {
         let window = try #require(controller.window)
         let content = try #require(window.contentView)
         let controls = descendants(content)
-        let labels = controls.compactMap { $0 as? NSTextField }.filter { !$0.isEditable && !$0.stringValue.isEmpty }
+        let labels = controls.compactMap { $0 as? NSTextField }.filter { !$0.isEditable && !$0.stringValue.isEmpty &&
+            !["duckpad.settings.language-services.active", "duckpad.settings.language-services.command"].contains($0.identifier?.rawValue ?? "") }
         let originalLabels = labels.map { ($0, $0.stringValue) }
         let buttons = controls.compactMap { $0 as? NSButton }.filter { !($0 is NSPopUpButton) }
         let originalButtons = buttons.map { ($0, $0.title, $0.state, $0.isEnabled) }
@@ -35,6 +36,8 @@ struct SettingsLanguageRefreshTests {
         let ko = LocalizationCatalog(language: .korean)
         controller.refreshLocalization(catalog: ko)
         controller.refreshLocalization(catalog: ko)
+        #expect((controls.first { $0.identifier?.rawValue == "duckpad.settings.language-services.active" } as? NSTextField)?.stringValue == ko.text("Active interpreter: %1$@", arguments: [ko.text("Automatic")]))
+        #expect((controls.first { $0.identifier?.rawValue == "duckpad.settings.language-services.command" } as? NSTextField)?.stringValue == "")
         #expect(controller.window === window)
         #expect(window.contentView === content)
         #expect(controller.selectedCategory == "Editing")

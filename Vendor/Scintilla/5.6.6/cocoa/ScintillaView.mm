@@ -940,9 +940,10 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		NSString *characters = theEvent.characters;
 		const BOOL isDirectNewline = commandModifiers == 0 &&
 			([characters isEqualToString: @"\r"] || [characters isEqualToString: @"\n"]);
-		id delegate = isDirectNewline ? mOwner.delegate : nil;
+        const BOOL isDirectDeletion = theEvent.keyCode == 51 || theEvent.keyCode == 117;
+		id delegate = (isDirectNewline || isDirectDeletion) ? mOwner.delegate : nil;
 		if ([delegate respondsToSelector: @selector(scintillaWillInsertTextFromSource:)])
-			[delegate scintillaWillInsertTextFromSource: SCITextInputSourceDirect];
+			[delegate scintillaWillInsertTextFromSource: isDirectDeletion ? SCITextInputSourceDeletion : SCITextInputSourceDirect];
 		handled = mOwner.backend->KeyboardInput(theEvent);
 		if ([delegate respondsToSelector: @selector(scintillaDidInsertText)])
 			[delegate scintillaDidInsertText];
@@ -1191,12 +1192,22 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 - (void) deleteBackward: (id) sender {
 #pragma unused(sender)
+    id delegate = mMarkedTextRange.length == 0 ? mOwner.delegate : nil;
+    if ([delegate respondsToSelector: @selector(scintillaWillInsertTextFromSource:)])
+        [delegate scintillaWillInsertTextFromSource: SCITextInputSourceDeletion];
 	mOwner.backend->DeleteBackward();
+    if ([delegate respondsToSelector: @selector(scintillaDidInsertText)])
+        [delegate scintillaDidInsertText];
 }
 
 - (void) cut: (id) sender {
 #pragma unused(sender)
+    id delegate = mMarkedTextRange.length == 0 ? mOwner.delegate : nil;
+    if ([delegate respondsToSelector: @selector(scintillaWillInsertTextFromSource:)])
+        [delegate scintillaWillInsertTextFromSource: SCITextInputSourceDeletion];
 	mOwner.backend->Cut();
+    if ([delegate respondsToSelector: @selector(scintillaDidInsertText)])
+        [delegate scintillaDidInsertText];
 }
 
 - (void) copy: (id) sender {

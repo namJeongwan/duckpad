@@ -130,6 +130,7 @@ public final class WorkspaceBrowserUseCase {
     private var reconciliationNeeded = false
     public private(set) var state: WorkspaceBrowserState = .idle
     public private(set) var acceptsCommands = false
+    public var onRootSetChange: (([WorkspaceRoot]) -> Void)?
     public var onStateChange: ((WorkspaceBrowserState) -> Void)?
 
     public init(store: any WorkspaceRootStore) {
@@ -305,6 +306,7 @@ public final class WorkspaceBrowserUseCase {
 
     private func publish(_ state: WorkspaceBrowserState) {
         self.state = state
+        if case .ready(let roots) = state { onRootSetChange?(roots) }
         onStateChange?(state)
     }
 

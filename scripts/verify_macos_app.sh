@@ -22,7 +22,7 @@ test -x "$APP/Contents/MacOS/Duckpad"
 test -x "$XPC/Contents/MacOS/DuckpadPluginRuntime"
 test ! -e "$APP/Contents/MacOS/DuckpadPluginHost"
 test -f "$APP/Contents/Resources/Duckpad.icns"
-for ENGINE in Scintilla Lexilla WAMR Sparkle Ghostty; do
+for ENGINE in Scintilla Lexilla WAMR Sparkle Ghostty CodeEditCompletion CodeMirrorCompletion LanguageClient LanguageServerProtocol JSONRPC Semaphore; do
     test -s "$APP/Contents/Resources/ThirdPartyLicenses/$ENGINE.txt"
 done
 # The statically linked gettext libintl notice must accompany the engine.
@@ -42,6 +42,9 @@ EDITOR_RESOURCES="$(resource_root DuckpadEditorAdapter)"
 PRESENTATION_RESOURCES="$(resource_root DuckpadPresentation)"
 LOCALIZATION_RESOURCES="$(resource_root DuckpadLocalization)"
 test -f "$INFRASTRUCTURE_RESOURCES/Languages.json"
+for ASSET in matcher.js LICENSE PROVENANCE.md; do
+    test -s "$INFRASTRUCTURE_RESOURCES/CompletionMatching/$ASSET"
+done
 test -d "$EDITOR_RESOURCES/ScintillaCursors"
 for ASSET in editor.js editor.css mermaid.js katex.css fonts/KaTeX_Main-Regular.woff2 THIRD_PARTY_NOTICES.txt; do
     test -s "$EDITOR_RESOURCES/MarkdownEditor/$ASSET"

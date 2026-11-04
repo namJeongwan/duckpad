@@ -1395,3 +1395,48 @@
 "Rendering diagram…" = "正在渲染图表…";
 
 "Diagram incomplete. Edit the source to continue." = "图表尚未完成。请编辑源码。";
+
+"Language server" = "语言服务器";
+
+"Keyword" = "关键字";
+
+"↑↓ select · Tab insert · Esc close" = "↑↓ 选择 · Tab 插入 · Esc 关闭";
+
+/* Python language server settings */
+"Python" = "Python";
+"Settings scope" = "设置范围";
+"All projects" = "所有项目";
+"Current project" = "当前项目";
+"Use default server" = "使用默认服务器";
+"Python interpreter" = "Python 解释器";
+"Automatic (.venv, then default Python)" = "自动（优先 .venv，然后使用默认 Python）";
+"Choose…" = "选择…";
+"Choose Python interpreter…" = "选择 Python 解释器…";
+"Apply Python settings" = "应用 Python 设置";
+"Select a saved Python file to configure its project." = "选择已保存的 Python 文件以配置其项目。";
+"Existing environments are used without creating or installing project packages. Install the selected language server separately." = "使用现有环境，不创建项目环境或安装项目依赖。请单独安装所选语言服务器。";
+"Active interpreter: %1$@" = "当前解释器：%1$@";
+"Automatic" = "自动";
+"Server command: %1$@" = "服务器命令：%1$@";
+"Enter an absolute Python interpreter path, or leave it empty for automatic detection." = "输入 Python 解释器的绝对路径，或留空以自动检测。";
+"Python language server is unavailable. Check the server installation and interpreter path." = "Python 语言服务器不可用。请检查服务器安装及解释器路径。";
+
+/* Language plugin settings */
+"Language Support" = "语言支持";
+"Interpreter" = "解释器";
+"Choose interpreter…" = "选择解释器…";
+"Apply language settings" = "应用语言设置";
+"Automatic environment detection" = "自动检测环境";
+"Install and enable a language support plugin in Extensions." = "请在扩展中安装并启用语言支持插件。";
+"Select a saved file to configure its project." = "选择已保存的文件以配置其项目。";
+"Existing environments are used. Project environments and packages are not created or installed automatically." = "使用现有环境。不会自动创建项目环境或安装项目依赖。";
+"Install command: %1$@" = "安装命令：%1$@";
+"Language server is unavailable. Check the server installation and interpreter path." = "语言服务器不可用。请检查服务器安装及解释器路径。";
+"Enter an absolute interpreter path, or leave it empty for automatic detection." = "输入解释器的绝对路径，或留空以自动检测。";
+"Multiple enabled plugins provide the same language. Disable one of them." = "多个已启用的插件提供同一语言的支持。请禁用其中一个。";
+
+"All defaults" = "全局默认值";
+
+"Current workspace" = "当前工作区";
+
+"Selected folder" = "所选文件夹";

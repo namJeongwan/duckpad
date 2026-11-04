@@ -43,6 +43,7 @@ typedef NS_ENUM(NSInteger, SCITextInputSource) {
 	SCITextInputSourceTentative,
 	SCITextInputSourceIMECommit,
 	SCITextInputSourceDirectNewline,
+    SCITextInputSourceDeletion,
 };
 
 @protocol ScintillaNotificationProtocol

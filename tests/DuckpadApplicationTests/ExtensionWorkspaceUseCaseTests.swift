@@ -782,3 +782,95 @@ func failedAutomaticActivationNeverPublishesPluginAccess() async throws {
     await useCase.refresh()
     #expect(useCase.serviceCommands().isEmpty)
 }
+
+private func languageProviderPackage(_ language: String = "python") async throws -> LoadedExtensionPackage {
+    let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let loader = LocalExtensionPackageLoader(root: FileManager.default.temporaryDirectory)
+    return try await loader.readPackage(at: repository.appendingPathComponent("LanguagePlugins/com.duckpad.\(language).duckpad-plugin")).0
+}
+
+@Test @MainActor
+func languagePluginRequiresExactGrantsAndWithdrawsOnDisableRemovalAndSuspension() async throws {
+    let package = try await languageProviderPackage()
+    let (useCase, _, _, loader, _, _) = await extensionFixture(package: package)
+    let provider = LanguageServerCompletionProvider { _ in nil }
+    useCase.onLanguageServicesChange = { provider.update(registrations: $0, settings: [:]) }
+    #expect(useCase.languageServerRegistrations().isEmpty)
+    try await useCase.setEnabled(package.manifest.id, enabled: true)
+    #expect(provider.registrations.isEmpty)
+    let token = try useCase.consentReviewToken(for: package.manifest.id)
+    try await useCase.grantReviewed(token, choices: token.requests)
+    let registration = try #require(provider.registrations.first)
+    #expect(await useCase.validateLanguageServiceAccess(registration))
+    await useCase.suspendInvocationsAndWait()
+    #expect(provider.registrations.isEmpty)
+    #expect(!(await useCase.validateLanguageServiceAccess(registration)))
+    useCase.resumeInvocations()
+    #expect(provider.registrations == [registration])
+    try await useCase.setEnabled(package.manifest.id, enabled: false)
+    #expect(provider.registrations.isEmpty)
+    try await useCase.setEnabled(package.manifest.id, enabled: true)
+    let nextToken = try useCase.consentReviewToken(for: package.manifest.id)
+    try await useCase.grantReviewed(nextToken, choices: nextToken.requests)
+    #expect(provider.registrations.count == 1)
+    await loader.replace([])
+    await useCase.refresh()
+    #expect(provider.registrations.isEmpty)
+    #expect(!(await useCase.validateLanguageServiceAccess(registration)))
+}
+
+@Test @MainActor
+func languagePluginDisableInAnotherWindowRejectsStaleAuthorityBeforeRefresh() async throws {
+    let package = try await languageProviderPackage()
+    let (first, workspace, editor, loader, policy, transport) = await extensionFixture(package: package)
+    try await first.setEnabled(package.manifest.id, enabled: true)
+    let token = try first.consentReviewToken(for: package.manifest.id)
+    try await first.grantReviewed(token, choices: token.requests)
+    let second = ExtensionWorkspaceUseCase(loader: loader, grants: policy, transport: transport, workspace: workspace, editor: editor, allowsUserExtensions: true)
+    await second.refresh()
+    let registration = try #require(second.languageServerRegistrations().first)
+    #expect(await second.validateLanguageServiceAccess(registration))
+    try await first.setEnabled(package.manifest.id, enabled: false)
+    // Its registry has not refreshed, but the persisted policy already withdraws access.
+    #expect(second.languageServerRegistrations().count == 1)
+    #expect(!(await second.validateLanguageServiceAccess(registration)))
+    await second.refresh()
+    #expect(second.languageServerRegistrations().isEmpty)
+}
+
+@Test @MainActor
+func languagePublisherRevocationWithdrawsItsRegistrationsAndDoesNotEnableOnReset() async throws {
+    let package = try await languageProviderPackage()
+    let (useCase, _, _, _, _, _) = await extensionFixture(package: package)
+    try await useCase.setEnabled(package.manifest.id, enabled: true)
+    let token = try useCase.consentReviewToken(for: package.manifest.id)
+    try await useCase.grantReviewed(token, choices: token.requests)
+    let provider = LanguageServerCompletionProvider { _ in nil }
+    provider.update(registrations: useCase.languageServerRegistrations(), settings: [:])
+    useCase.onLanguageServicesChange = { provider.update(registrations: $0, settings: [:]) }
+    try await useCase.revokePublisher(useCase.revocationReviewToken(for: package.manifest.id))
+    #expect(provider.registrations.isEmpty)
+    await useCase.refresh()
+    #expect(useCase.languageServerRegistrations().isEmpty)
+}
+
+@Test @MainActor
+func languagePluginUpdatedPackageCannotReuseAnOldGrant() async throws {
+    let original = try await languageProviderPackage()
+    let (useCase, _, _, loader, _, _) = await extensionFixture(package: original)
+    try await useCase.setEnabled(original.manifest.id, enabled: true)
+    let token = try useCase.consentReviewToken(for: original.manifest.id)
+    try await useCase.grantReviewed(token, choices: token.requests)
+    let old = try #require(useCase.languageServerRegistrations().first)
+    let manifest = ExtensionManifest(id: original.manifest.id, name: original.manifest.name,
+        version: .init(major: 0, minor: 2, patch: 0), api: original.manifest.api, publisher: original.manifest.publisher,
+        runtime: original.manifest.runtime, capabilities: original.manifest.capabilities, contributes: original.manifest.contributes)
+    // Fake discovery changes identity; the helper will still demand an independently signed snapshot.
+    let replacement = LoadedExtensionPackage(manifest: manifest, module: original.module,
+        packageDigest: String(repeating: "e", count: 64), publisherFingerprint: original.publisherFingerprint,
+        signatureDigest: original.signatureDigest, capabilitySchemaDigest: original.capabilitySchemaDigest,
+        trustSource: .userImported, languageServiceFiles: original.languageServiceFiles)
+    await loader.replace([replacement]); await useCase.refresh()
+    #expect(useCase.languageServerRegistrations().isEmpty)
+    #expect(!(await useCase.validateLanguageServiceAccess(old)))
+}
