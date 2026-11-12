@@ -1,10 +1,13 @@
 # Duckpad plugin development
 
-This is the developer entry point for the current source tree. Host API **1.4.0** and the native SDK are **unreleased development APIs**. An app's version (for example a local 0.5.0 test build) does not identify its host API version. Check `ExtensionWorkspaceUseCase.apiVersion` in the matching source revision.
+This is the developer entry point for the current source tree. Duckpad 0.18.0 provides host API **1.6.0**; Duckpad 0.17.0 provides API **1.5.0**. The native C ABI remains v1. App versions and host API versions are distinct; check `ExtensionWorkspaceUseCase.apiVersion` in the matching source revision. See the [complete plugin list](../../README.md#plugins) for available packages.
 
 - [Native plugin SDK](native-sdk.md): C ABI, Swift wrapper, plugin-owned UI/resources, lifecycle, and native Clipboard reference.
 - [Developer guide](developer-guide.md): package layout, first build, signing, installation, testing, and catalog submission.
 - [API reference](api-reference.md): manifest, command scopes, WASM ABI, capabilities, limits, and compatibility.
+- [D2 preview](d2.md): optional native plugin, verified local CLI setup and rendering limits.
+- [Mermaid preview](mermaid.md): optional standalone preview with the existing pinned embedded runtime.
+- [Shared diagram components](../../SDK/DiagramPreview/overview.md): renderer boundary, lifecycle and verification.
 - [Clipboard list service](list-services.md): current native dock and storage behavior.
 - [Platform architecture](../wiki/11-extension-platform.md): implementation history and trust model; some historical status statements predate this development branch.
 

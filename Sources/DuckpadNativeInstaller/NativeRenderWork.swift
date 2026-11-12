@@ -1,7 +1,7 @@
 import Foundation
 
 /// Each authenticated connection owns and cancels only its own render task.
-final class PlantUMLWork: @unchecked Sendable {
+final class NativeRenderWork: @unchecked Sendable {
     private let lock = NSLock()
     private var task: Task<Void, Never>?
     func start(_ operation: @escaping @Sendable () async -> Void) -> Bool {

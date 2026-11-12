@@ -723,7 +723,7 @@ public final class FileDocumentUseCase {
               match.range.length <= snapshot.text.utf8.count - match.range.location else {
             return .stale(document.path)
         }
-        selectionEditor.selectAndReveal(match.range)
+        selectionEditor.selectAndRevealSearchMatch(match.range)
         selectionEditor.focus()
         return .activated(tabID)
     }

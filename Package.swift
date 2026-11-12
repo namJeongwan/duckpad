@@ -68,6 +68,7 @@ let package = Package(
                 "bridge/DPScintillaBinaryDocument.mm",
                 "bridge/DPSearchOverviewView.mm",
                 "bridge/DPPlantUMLLexer.cxx",
+                "bridge/DPDiagramLexer.cxx",
                 "bridge/DPLogLexer.mm",
                 "bridge/DPAsyncLexer.mm",
                 "bridge/DPColorPreviewView.mm",

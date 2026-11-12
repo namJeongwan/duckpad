@@ -19,6 +19,7 @@
 #include "SciLexer.h"
 #include "DPScintillaLegacyStyleRoles.h"
 #include "DPPlantUMLLexer.h"
+#include "DPDiagramLexer.h"
 #include "DPLogLexer.h"
 #include "DPAsyncLexer.h"
 #include <chrono>
@@ -1669,6 +1670,38 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     [self scheduleWordHighlights:YES];
 }
 
+- (void)selectAndRevealSearchMatchInUTF8Range:(NSRange)range {
+    const NSUInteger length = self.documentByteLength;
+    if (!_scintilla || _binaryDocument || range.location > length || range.length > length - range.location) return;
+    const NSUInteger end = NSMaxRange(range);
+    for (NSUInteger position : {range.location, end}) {
+        if (position > 0 && position < length &&
+            [_scintilla message:SCI_POSITIONAFTER wParam:position - 1] != static_cast<sptr_t>(position)) return;
+    }
+    for (NSUInteger position : {range.location, end}) {
+        const NSInteger line = [_scintilla message:SCI_LINEFROMPOSITION wParam:position];
+        [_scintilla message:SCI_ENSUREVISIBLE wParam:line];
+    }
+    [self setPrimarySelectionUTF8Range:range];
+    // Fit both horizontal endpoints where possible, rather than just the caret.
+    [_scintilla message:SCI_SCROLLRANGE wParam:end lParam:range.location];
+    const NSInteger height = MAX(1, [_scintilla message:SCI_TEXTHEIGHT wParam:0]);
+    const NSInteger visibleRows = MAX(1, [_scintilla message:SCI_LINESONSCREEN]);
+    const NSInteger firstVisible = [_scintilla message:SCI_GETFIRSTVISIBLELINE];
+    NSInteger first = firstVisible + [_scintilla message:SCI_POINTYFROMPOSITION wParam:0 lParam:range.location] / height;
+    const NSInteger last = firstVisible + [_scintilla message:SCI_POINTYFROMPOSITION wParam:0 lParam:end] / height;
+    // A match larger than the viewport follows its caret; never scroll back to
+    // an off-screen anchor. Logical line numbers cannot describe wrapped rows.
+    if (last - first + 1 > visibleRows) first = last;
+    const NSInteger available = MAX(0, visibleRows - (last - first + 1));
+    const NSInteger above = MIN(3, available / 2);
+    const NSInteger below = MIN(3, available - available / 2);
+    NSInteger top = firstVisible;
+    if (first - above < top) top = MAX(0, first - above);
+    else if (last + below >= top + visibleRows) top = last + below - visibleRows + 1;
+    if (top != firstVisible) [_scintilla message:SCI_SETFIRSTVISIBLELINE wParam:top];
+}
+
 - (NSArray<NSDictionary<NSString *, NSNumber *> *> *)selectionUTF8Positions {
     const NSInteger count = [_scintilla message:SCI_GETSELECTIONS];
     if (count > 10000) return @[];
@@ -2387,7 +2420,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 + (BOOL)supportsLexerNamed:(NSString *)lexerName {
     if (lexerName.length == 0) return NO;
-    Scintilla::ILexer5 *lexer = [lexerName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : [lexerName isEqualToString:@"duckpadlog"] ? DPCreateLogLexer() : CreateLexer(lexerName.UTF8String);
+    Scintilla::ILexer5 *lexer = DPCreateDiagramLexer(lexerName.UTF8String);
+    if (lexer == nullptr) lexer = [lexerName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : [lexerName isEqualToString:@"duckpadlog"] ? DPCreateLogLexer() : CreateLexer(lexerName.UTF8String);
     if (lexer == nullptr) return NO;
     lexer->Release();
     return YES;
@@ -2405,7 +2439,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const BOOL overBudget = _binaryDocument || (self.documentByteLength > maximumStyleBytes && ![lexerName isEqualToString:@"duckpadlog"]);
     const BOOL nextBraceMatchingEnabled = braceMatching && !overBudget;
     NSString *effectiveName = overBudget ? @"null" : lexerName;
-    Scintilla::ILexer5 *lexer = [effectiveName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : [effectiveName isEqualToString:@"duckpadlog"] ? DPCreateLogLexer() : CreateLexer(effectiveName.UTF8String);
+    Scintilla::ILexer5 *lexer = DPCreateDiagramLexer(effectiveName.UTF8String);
+    if (lexer == nullptr) lexer = [effectiveName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : [effectiveName isEqualToString:@"duckpadlog"] ? DPCreateLogLexer() : CreateLexer(effectiveName.UTF8String);
     if (lexer == nullptr) return NO;
     [self cancelPendingSmartIndentation];
     _pendingSmartCaretPosition = -1;

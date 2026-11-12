@@ -80,3 +80,26 @@ Final verification commands for this implementation run are recorded in the Agen
 - **Presentation:** Find/Find All report “Select a non-empty range to search” or “Selection changed; select a range again”; Replace/Replace All use the corresponding replace message. These cases are no longer presented as “No matches” or a successful zero replacement.
 - **Regression evidence:** Initial empty-selection tests invoke Find, Find All, Replace Current, and Replace All and assert typed failure plus exact text/revision/undo/recovery invariance. A revision-invalidated retained selection followed by a collapsed caret proves Replace All cannot modify the whole document; the pre-existing native undo still removes only the accepted edit.
 - **Validation:** focused follow-up 2/2 PASS; debug full 132/132 PASS in 13.959 s; release full 132/132 PASS in 5.945 s; fresh scratch `/tmp/duckpad-p6-scope-final.BL0Ptb` rebuilt dependencies and passed 132/132 in 14.003 s. Production search smoke and 50-tab/8-row/active-visible smoke passed. Final hygiene remained README/NPP/gitlink/cache/staging clean.
+
+## Search result viewport context
+
+Find Next/Previous, activating an open-document result, and opening a folder
+search result use `EditorSelectionPort.selectAndRevealSearchMatch`. Production
+Scintilla reveals both match endpoints, unfolds containing regions and reserves
+up to three display rows above and below, reduced to fit short panes or multiline
+selections. A selection taller than the pane follows its caret. A match already
+inside the safe area keeps the existing viewport. The general selection API used
+by typing/completion retains its existing policy.
+
+The behavior follows Zed's distinction between fitting selections with scroll
+margins and centering explicit navigation. References at upstream revision
+`985bbf42e684ef5b5a9312a6abf075aeafbaf5b9`:
+[fit autoscroll](https://github.com/zed-industries/zed/blob/985bbf42e684ef5b5a9312a6abf075aeafbaf5b9/crates/editor/src/scroll/autoscroll.rs#L237)
+and [search result selection](https://github.com/zed-industries/zed/blob/985bbf42e684ef5b5a9312a6abf075aeafbaf5b9/crates/search/src/project_search.rs#L2267).
+Duckpad implements the viewport calculation in its own native bridge. No Zed
+editor dependency or source files are included.
+
+Native regressions exercise next/previous/result activation, forward/backward
+jumps, wrapped Korean text, multiline matches, folds, horizontal scrolling,
+short panes, empty matches, document boundaries and invalid UTF-8 ranges.
+Navigation preserves source, revision, Undo and snapshot-read counts.

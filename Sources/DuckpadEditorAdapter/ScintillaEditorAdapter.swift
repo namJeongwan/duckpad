@@ -1728,6 +1728,11 @@ public final class ScintillaEditorAdapter: ObservedFileEditorPort, EditorFileFor
         bufferViews.values.forEach { $0.clearSearchHighlights() }
     }
 
+    public func selectAndRevealSearchMatch(_ range: SearchUTF8Range) {
+        guard range.location >= 0, range.length >= 0 else { return }
+        activeScintillaView?.selectAndRevealSearchMatch(.init(location: range.location, length: range.length))
+    }
+
     public func selectAndReveal(_ range: SearchUTF8Range) {
         guard range.location >= 0, range.length >= 0 else { return }
         activeScintillaView?.setPrimarySelectionUTF8Range(
