@@ -94,6 +94,12 @@ public struct SearchReplacementEdit: Equatable, Sendable {
 @MainActor
 public protocol EditorSelectionPort: EditorPort {
     func selectAndReveal(_ range: SearchUTF8Range)
+    /// Search navigation keeps the full match and surrounding context visible.
+    func selectAndRevealSearchMatch(_ range: SearchUTF8Range)
+}
+
+public extension EditorSelectionPort {
+    func selectAndRevealSearchMatch(_ range: SearchUTF8Range) { selectAndReveal(range) }
 }
 
 @MainActor
@@ -672,7 +678,7 @@ public final class SearchWorkspaceUseCase {
             found = try editor.findActive(ActiveSearchRequest(patternUTF8: data, options: query.options, restrictTo: restriction))
         }
         if let found {
-            editor.selectAndReveal(found)
+            editor.selectAndRevealSearchMatch(found)
             if let tab = workspace.snapshot().tabs.first(where: \.isActive) {
                 lastFind = LastFind(
                     tabID: tab.id, bufferID: tab.buffer.bufferID,
@@ -1055,7 +1061,7 @@ public final class SearchWorkspaceUseCase {
               after.activeBuffer?.revision == match.revision else {
             throw .staleRevision(expected: match.revision, actual: after.activeBuffer?.revision ?? 0)
         }
-        editor.selectAndReveal(match.range)
+        editor.selectAndRevealSearchMatch(match.range)
     }
 
     private nonisolated static func scan(

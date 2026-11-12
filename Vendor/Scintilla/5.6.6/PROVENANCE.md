@@ -1,5 +1,13 @@
 # Scintilla 5.6.6 provenance
 
+2026-11-11 search navigation: the maintained bridge/header add a dedicated
+search-match reveal operation. It unfolds containing regions, fits horizontal
+endpoints and keeps up to three rendered rows of vertical context, clamped to
+the pane and selection size. Wrapped display rows, oversized matches and UTF-8
+boundaries are handled without changing the general caret/typing scroll policy,
+copying document text or changing Undo/revision state. This is Duckpad-owned
+bridge code; upstream editor sources and generated files are unchanged.
+
 2026-11-02 completion context: the bridge caches Lexilla's named-style metadata
 separately from palette roles, suppressing code completion for strings (including
 STRINGEOL), characters, regexes, comments, and Ruby POD/data. Dirty styles refresh
