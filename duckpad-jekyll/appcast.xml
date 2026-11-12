@@ -3,48 +3,109 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.17.0</title>
-            <pubDate>Wed, 04 Nov 2026 16:44:35 +0900</pubDate>
-            <sparkle:version>70</sparkle:version>
-            <sparkle:shortVersionString>0.17.0</sparkle:shortVersionString>
+            <title>0.18.0</title>
+            <pubDate>Thu, 12 Nov 2026 09:55:29 +0900</pubDate>
+            <sparkle:version>71</sparkle:version>
+            <sparkle:shortVersionString>0.18.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.17.0
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.18.0
 
-Duckpad now offers native automatic completion from the first committed character, with current-document words and language keywords available without installing a language server. The compact popup follows the editor theme, refreshes while deleting, and stays quiet at empty prefixes, inside strings/comments and while declaring new class names.
+Duckpad adds optional D2 and standalone Mermaid previews and keeps search matches
+comfortably visible in the main text/code editor. The README now lists all eight
+bundled and optional plugins, their installation paths and runtime requirements.
 
-## Language support
+## Diagram plugins
 
-Optional Python, Ruby/Rails and Rust support packages share a common LSP client. Install the corresponding **0.1.0 language plugin** from Plugins Admin → Available Plugins, or download and extract its separate ZIP, then select the extracted `.duckpad-plugin` folder with Install Plugin. The packages are not bundled into the app.
+Install the separate **0.1.0** packages from **Plugins → Plugins Admin → Available
+Plugins**, or download a plugin ZIP, extract it and choose the `.duckpad-plugin`
+folder with **Install Plugin**:
 
-- [Python 0.1.0](https://github.com/namJeongwan/duckpad-plugin-python/releases/tag/v0.1.0)
-- [Ruby/Rails 0.1.0](https://github.com/namJeongwan/duckpad-plugin-ruby/releases/tag/v0.1.0)
-- [Rust 0.1.0](https://github.com/namJeongwan/duckpad-plugin-rust/releases/tag/v0.1.0)
+- [D2 0.1.0](https://github.com/namJeongwan/duckpad-plugin-d2/releases/tag/v0.1.0)
+- [Mermaid 0.1.0](https://github.com/namJeongwan/duckpad-plugin-mermaid/releases/tag/v0.1.0)
 
-Python defaults to basedpyright and also supports Pyright and ty. Ruby uses Ruby LSP, and Rust uses rust-analyzer. Server binaries and project dependencies remain separately installed tools; Duckpad does not download them automatically. Configure server and interpreter choices in Preferences → Language Support for all defaults, the current workspace or a selected folder. Recovered workspaces keep independent choices, even when two windows open the same project.
+Both plugins preview the active unsaved buffer or a selected UTF-8 file in a
+native dock, with fit-width, zoom, a larger window and PNG/SVG export. Ctrl+W
+closes the dock. They do not edit the source or its Undo history. Source is
+rendered locally; rendering is explicit rather than repeated on every keystroke.
+Both packages include all eight Duckpad UI languages.
 
-Python method-name completion uses actual server results. In a class, basedpyright and Pyright suggest methods such as `__init__` and `__repr__` after `def __`. Inserted method bodies retain indentation and line endings; completion and additional imports form one Undo operation. The tested ty version does not return candidates in that method-name slot.
+D2 requires Duckpad 0.18.0's **host API 1.6.0**. Its Settings panel can explicitly
+download and verify official D2 0.9.0, or use a compatible local executable.
+Rendering uses the authenticated helper and a private job with network denied
+and file access limited to runtime/system/job resources. The first version uses
+Dagre and renders the root board; external imports, images and alternate layouts
+are unsupported.
 
-Plugin definitions are signed and checked again by the authenticated helper before server launch. Disabling or removing a provider withdraws its registrations and pending results. Language servers run through the existing unsandboxed helper; this capability is not a filesystem sandbox.
+Mermaid embeds the existing pinned Mermaid 12.0.0 runtime in its signed native
+module. It needs no external Node.js, CLI or browser download after installation.
+WebKit uses a nonpersistent page, strict Mermaid configuration, network-blocking
+CSP and SVG cleanup. Existing Mermaid fenced blocks in Markdown remain built in.
+The standalone plugin accepts Mermaid source without Markdown fences.
 
-## File reload
+The editor recognizes `.d2`, `.mmd` and `.mermaid` independently of the plugins,
+with structural highlighting using its current palette. These lexers do not add
+syntax validation or folding.
 
-Reload from Disk now explains missing-file, permission and I/O failures and provides a working Retry action. Keep Editing acknowledges the observed external version or outage without hiding later changes or new outages. Unsaved edits retain the existing revision and discard-confirmation safeguards.
+## Search visibility
+
+Find next/previous, result activation and folder-search activation use a dedicated
+reveal operation. It unfolds containing regions, fits horizontal endpoints and
+keeps up to three display rows of context above and below the match. Wrapped
+lines and small panes use available space; a match larger than the viewport
+follows its caret. Already comfortably visible results do not move the viewport,
+and only the focused split pane scrolls. This follows Zed's fit/context behavior
+without importing Zed source. Typing and completion scrolling retain their
+existing behavior.
 
 ## Compatibility and installation
 
-The app and all three helpers are **0.17.0 (70)**, upgrading **0.16.1 (69)**. Requires macOS 13 or later. The universal build includes Apple Silicon and Intel. Existing documents, recovery data, native plugin ABI and settings remain compatible; legacy Python settings migrate to the common workspace-aware language settings. Language plugins require host API 1.5.0 and keep their separate version 0.1.0.
+The app and all three helpers are **0.18.0 (71)**, upgrading **0.17.0 (70)**.
+Requires macOS 13 or later; universal app and plugin packages include Apple Silicon
+and Intel. The native C ABI remains v1; host API advances to 1.6.0. Existing
+language support packages remain compatible. D2 and Mermaid are not bundled into
+the app and keep their independent 0.1.0 versions.
 
-Download `Duckpad-0.17.0-universal.dmg` or `Duckpad-0.17.0-universal.zip` and verify against `SHA256SUMS.txt`. Homebrew installations can run `brew update` followed by `brew upgrade --cask namjeongwan/duckpad/duckpad` after the tap update. Existing installations can use Check for Updates after the signed feed is published.
+Download `Duckpad-0.18.0-universal.dmg` or `Duckpad-0.18.0-universal.zip` and verify
+against `SHA256SUMS.txt`. After the tap update, Homebrew installations can run:
+
+```sh
+brew update
+brew upgrade --cask --greedy namjeongwan/duckpad/duckpad
+```
+
+Check for Updates becomes available after the signed Sparkle feed is published.
+App and plugin Mach-O files use ad-hoc signatures; plugin inventories also carry
+publisher signatures. This release is not Developer ID signed or Apple notarized.
 
 ## Validation and limits
 
-164 focused Swift test functions passed in Release configuration, covering native committed input/IME/context, atomic edits and Undo, language-provider authority/lifecycle, independent workspace settings and file-reload regressions. Actual basedpyright, Pyright, ty, Ruby LSP and rust-analyzer integrations passed. The final universal app checks exercised signed installation, member completion, first-character/deletion behavior, method-stub Tab/Undo/Redo and reload controls. All eight localization resources parse with identical key sets; English/Korean preferences and dark/light completion panels were visually inspected.
+29 focused Swift test functions passed in Release configuration from merged main: 20 runtime,
+syntax/detection and viewport tests, plus nine package/activation/installation
+checks. Actual D2 setup/checksums/cache reuse, Korean rendering and denied
+external imports were exercised with a successful unsandboxed control. Tests also
+covered WebKit PNG pixels and SVG cleanup, Mermaid flowchart/sequence/class
+rendering, errors, cancellation, stale replies/exports, native ABI loading, all
+eight locale resources and narrow 300/560-point translated controls.
 
-The universal app was built from merged release commit `bdf63dd7dd79d833f5193763308a640ab3212a8a`. App and all three helper versions/architectures, bundle/resources/XPC/ad-hoc signatures, isolated application/Markdown smoke, all eight packaged localization smokes and DMG/ZIP integrity passed. Public language-plugin ZIPs were downloaded, checked against their signed definitions and installed in isolated smoke profiles. Native Save-panel automation was skipped. Uploaded app assets are hash-verified before publication.
+The universal release app passed bundle/signature verification, default isolated app
+smokes and sandboxed D2 XPC-to-WebKit plus embedded Mermaid rendering checks.
+The universal app was rebuilt from merged commit `479982117b6283fc937b20b119756c01dff59908`. App/helper versions and architectures, all eight packaged locales, Markdown/Mermaid, DMG/ZIP integrity and published plugin downloads were verified. Uploaded release assets were hash-checked before publication; public ZIP and plugin downloads were checked again after publication.
+Optional native Save-panel automation was skipped. Two broader search presentation
+tests also fail on the unchanged baseline (`incrementalFindDoesNotExpandTheResultsList`
+and `routedFolderSearchOpensIdentityCheckedResultAndSelectsUTF8Range`); the ten
+native viewport regressions pass.
 
-Intel hardware execution, macOS 13 runtime, a full Rails application, six locale preference windows, physical Korean keyboard interaction and full repository suite completion are not claimed. Server indexing and third-party type information affect semantic results. The distribution is ad-hoc signed, without Developer ID signing or Apple notarization.
+Diagram input is limited to 512 KiB, output to 32 MiB, and PNG snapshots to 8192
+pixels per axis and 16 million pixels. D2 rendering has a 90-second process limit;
+Mermaid rendering has a 30-second limit and 5000-edge bound. Extreme aspect ratios
+report an error. Native plugin installation remains a code-trust authorization,
+not isolation for arbitrary native code.
+
+Intel hardware execution, macOS 13 runtime and every Mermaid diagram family were
+not individually tested. See [D2](../plugins/d2.md), [Mermaid](../plugins/mermaid.md)
+and [verification details](../../SDK/DiagramPreview/overview.md).
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.17.0/Duckpad-0.17.0-universal.zip" length="64863066" type="application/octet-stream" sparkle:edSignature="Y7k08vb7jTSYfoHoyZtzac88Ix9TfhRJ+wmVRtjKVh4aYoXyHb5nib3v7o7v5EIpUxTo9zFLRxPqKP96sZXfDQ=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.18.0/Duckpad-0.18.0-universal.zip" length="65031010" type="application/octet-stream" sparkle:edSignature="L0zjDmZvvkAFdAC2IgQ38pWElDd9SzhaT0g7Qxh3Oaud1mULtbZQATa27M3tkCucrjWAE6kUWiyogUD5OAKKBw=="/>
         </item>
     </channel>
 </rss>
