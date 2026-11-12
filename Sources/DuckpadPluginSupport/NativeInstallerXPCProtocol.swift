@@ -6,6 +6,8 @@ import Security
     func installTerminalCommand(withReply reply: @escaping (String?) -> Void)
     /// Only PNG/SVG PlantUML input and runtime paths, never arbitrary commands.
     func renderPlantUML(_ request: Data, withReply reply: @escaping (Data?, String?) -> Void)
+    /// Host API 1.6: fixed D2-to-SVG rendering and optional verified runtime setup.
+    func renderD2(_ request: Data, withReply reply: @escaping (Data?, String?) -> Void)
 }
 
 public enum NativeInstallerXPC {

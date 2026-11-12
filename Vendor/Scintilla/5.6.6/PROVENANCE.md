@@ -1,5 +1,11 @@
 # Scintilla 5.6.6 provenance
 
+2026-11-11 diagram languages: `bridge/DPDiagramLexer.*` supplies Duckpad-owned
+structural D2/Mermaid styling, including comments, quoted/block labels, colors,
+keywords and arrows. The bridge factory registers both lexers; the upstream
+Lexilla/Scintilla core and generated vendoring files are unchanged. Line state
+propagates block comments/strings after edits; rendering validates diagram syntax.
+
 2026-11-11 search navigation: the maintained bridge/header add a dedicated
 search-match reveal operation. It unfolds containing regions, fits horizontal
 endpoints and keeps up to three rendered rows of vertical context, clamped to

@@ -13,8 +13,11 @@ private final class Installer: NSObject, DuckpadNativeInstallerProtocol {
     let store: ManagedNativePackageStore
     let terminalCommand: TerminalCommandInstaller
     let plantUML: PlantUMLRuntime
-    let renderWork = PlantUMLWork()
+    let d2: D2Runtime
+    let d2Work = NativeRenderWork()
+    let renderWork = NativeRenderWork()
     init(root: URL, home: URL, app: URL) {
+        d2 = D2Runtime(root: home.appendingPathComponent("Library/Application Support/Duckpad/D2Runtime"))
         store = ManagedNativePackageStore(root: root)
         terminalCommand = TerminalCommandInstaller(home: home, app: app)
         plantUML = PlantUMLRuntime(root: home.appendingPathComponent("Library/Application Support/Duckpad/PlantUMLRuntime")) { active in
@@ -23,11 +26,11 @@ private final class Installer: NSObject, DuckpadNativeInstallerProtocol {
         }
     }
     init(copying other: Installer) {
-        store = other.store; terminalCommand = other.terminalCommand; plantUML = other.plantUML
+        store = other.store; terminalCommand = other.terminalCommand; plantUML = other.plantUML; d2 = other.d2
     }
     func renderPlantUML(_ request: Data, withReply reply: @escaping (Data?, String?) -> Void) {
         guard request.count <= 1024 * 1024 else { reply(nil, "invalidInput"); return }
-        let response = PlantUMLReply(reply)
+        let response = NativeRenderReply(reply)
         let runtime = plantUML
         guard renderWork.start({
             do {
@@ -40,6 +43,20 @@ private final class Installer: NSObject, DuckpadNativeInstallerProtocol {
             } catch {
                 response.send(nil, "renderFailed")
             }
+        }) else { reply(nil, "busy"); return }
+    }
+    func renderD2(_ request: Data, withReply reply: @escaping (Data?, String?) -> Void) {
+        guard request.count <= D2Request.maximumFrameBytes else { reply(nil, "invalidInput"); return }
+        let response = NativeRenderReply(reply), runtime = d2
+        guard d2Work.start({
+            do {
+                try Task.checkCancellation()
+                let input = try JSONDecoder().decode(D2Request.self, from: request)
+                response.send(try await runtime.perform(input), nil)
+            } catch let error as D2Failure {
+                let data = try? JSONSerialization.data(withJSONObject: ["code": error.code, "detail": error.detail])
+                response.send(nil, data.flatMap { String(data: $0, encoding: .utf8) } ?? "renderFailed")
+            } catch { response.send(nil, "renderFailed") }
         }) else { reply(nil, "busy"); return }
     }
     func installTerminalCommand(withReply reply: @escaping (String?) -> Void) {
@@ -78,9 +95,9 @@ private final class Listener: NSObject, NSXPCListenerDelegate {
         connection.exportedInterface = NSXPCInterface(with: DuckpadNativeInstallerProtocol.self)
         let session = Installer(copying: installer)
         connection.exportedObject = session
-        let work = session.renderWork
-        connection.invalidationHandler = { work.cancel() }
-        connection.interruptionHandler = { work.cancel() }
+        let work = session.renderWork, d2Work = session.d2Work
+        connection.invalidationHandler = { work.cancel(); d2Work.cancel() }
+        connection.interruptionHandler = { work.cancel(); d2Work.cancel() }
         connection.resume()
         return true
     }

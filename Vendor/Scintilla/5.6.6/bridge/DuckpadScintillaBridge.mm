@@ -19,6 +19,7 @@
 #include "SciLexer.h"
 #include "DPScintillaLegacyStyleRoles.h"
 #include "DPPlantUMLLexer.h"
+#include "DPDiagramLexer.h"
 #include "DPLogLexer.h"
 #include "DPAsyncLexer.h"
 #include <chrono>
@@ -2419,7 +2420,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
 
 + (BOOL)supportsLexerNamed:(NSString *)lexerName {
     if (lexerName.length == 0) return NO;
-    Scintilla::ILexer5 *lexer = [lexerName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : [lexerName isEqualToString:@"duckpadlog"] ? DPCreateLogLexer() : CreateLexer(lexerName.UTF8String);
+    Scintilla::ILexer5 *lexer = DPCreateDiagramLexer(lexerName.UTF8String);
+    if (lexer == nullptr) lexer = [lexerName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : [lexerName isEqualToString:@"duckpadlog"] ? DPCreateLogLexer() : CreateLexer(lexerName.UTF8String);
     if (lexer == nullptr) return NO;
     lexer->Release();
     return YES;
@@ -2437,7 +2439,8 @@ static BOOL DPContentCanPerform(SCIContentView *content, SEL action) {
     const BOOL overBudget = _binaryDocument || (self.documentByteLength > maximumStyleBytes && ![lexerName isEqualToString:@"duckpadlog"]);
     const BOOL nextBraceMatchingEnabled = braceMatching && !overBudget;
     NSString *effectiveName = overBudget ? @"null" : lexerName;
-    Scintilla::ILexer5 *lexer = [effectiveName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : [effectiveName isEqualToString:@"duckpadlog"] ? DPCreateLogLexer() : CreateLexer(effectiveName.UTF8String);
+    Scintilla::ILexer5 *lexer = DPCreateDiagramLexer(effectiveName.UTF8String);
+    if (lexer == nullptr) lexer = [effectiveName isEqualToString:@"plantuml"] ? DPCreatePlantUMLLexer() : [effectiveName isEqualToString:@"duckpadlog"] ? DPCreateLogLexer() : CreateLexer(effectiveName.UTF8String);
     if (lexer == nullptr) return NO;
     [self cancelPendingSmartIndentation];
     _pendingSmartCaretPosition = -1;
