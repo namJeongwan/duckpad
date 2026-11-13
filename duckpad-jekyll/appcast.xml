@@ -3,69 +3,33 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.18.0</title>
-            <pubDate>Thu, 12 Nov 2026 09:55:29 +0900</pubDate>
-            <sparkle:version>71</sparkle:version>
-            <sparkle:shortVersionString>0.18.0</sparkle:shortVersionString>
+            <title>0.18.1</title>
+            <pubDate>Fri, 13 Nov 2026 16:25:36 +0900</pubDate>
+            <sparkle:version>72</sparkle:version>
+            <sparkle:shortVersionString>0.18.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.18.0
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.18.1
 
-Duckpad adds optional D2 and standalone Mermaid previews and keeps search matches
-comfortably visible in the main text/code editor. The README now lists all eight
-bundled and optional plugins, their installation paths and runtime requirements.
+Markdown Live editing now places the caret on the clicked list item and moves
+through rendered rows one at a time with Up/Down. Previously, lists below a
+rendered table could reject clicks on some items or jump over every other item.
+The table's 12px top/bottom margins appeared on screen but were missing from
+CodeMirror's measured height, leaving following text coordinates 24px out of sync.
 
-## Diagram plugins
-
-Install the separate **0.1.0** packages from **Plugins → Plugins Admin → Available
-Plugins**, or download a plugin ZIP, extract it and choose the `.duckpad-plugin`
-folder with **Install Plugin**:
-
-- [D2 0.1.0](https://github.com/namJeongwan/duckpad-plugin-d2/releases/tag/v0.1.0)
-- [Mermaid 0.1.0](https://github.com/namJeongwan/duckpad-plugin-mermaid/releases/tag/v0.1.0)
-
-Both plugins preview the active unsaved buffer or a selected UTF-8 file in a
-native dock, with fit-width, zoom, a larger window and PNG/SVG export. Ctrl+W
-closes the dock. They do not edit the source or its Undo history. Source is
-rendered locally; rendering is explicit rather than repeated on every keystroke.
-Both packages include all eight Duckpad UI languages.
-
-D2 requires Duckpad 0.18.0's **host API 1.6.0**. Its Settings panel can explicitly
-download and verify official D2 0.9.0, or use a compatible local executable.
-Rendering uses the authenticated helper and a private job with network denied
-and file access limited to runtime/system/job resources. The first version uses
-Dagre and renders the root board; external imports, images and alternate layouts
-are unsupported.
-
-Mermaid embeds the existing pinned Mermaid 12.0.0 runtime in its signed native
-module. It needs no external Node.js, CLI or browser download after installation.
-WebKit uses a nonpersistent page, strict Mermaid configuration, network-blocking
-CSP and SVG cleanup. Existing Mermaid fenced blocks in Markdown remain built in.
-The standalone plugin accepts Mermaid source without Markdown fences.
-
-The editor recognizes `.d2`, `.mmd` and `.mermaid` independently of the plugins,
-with structural highlighting using its current palette. These lexers do not add
-syntax validation or folding.
-
-## Search visibility
-
-Find next/previous, result activation and folder-search activation use a dedicated
-reveal operation. It unfolds containing regions, fits horizontal endpoints and
-keeps up to three display rows of context above and below the match. Wrapped
-lines and small panes use available space; a match larger than the viewport
-follows its caret. Already comfortably visible results do not move the viewport,
-and only the focused split pane scrolls. This follows Zed's fit/context behavior
-without importing Zed source. Typing and completion scrolling retain their
-existing behavior.
+Block previews now contain their existing vertical margins in a measured wrapper.
+This preserves their spacing while aligning text hit testing and cursor movement.
+The same handling covers tables, standalone images, rules, code headers and inline
+Mermaid diagrams. Inline images retain their existing DOM shape. The fix does not
+modify Markdown bytes, dirty state, file formats or the native Undo history.
 
 ## Compatibility and installation
 
-The app and all three helpers are **0.18.0 (71)**, upgrading **0.17.0 (70)**.
-Requires macOS 13 or later; universal app and plugin packages include Apple Silicon
-and Intel. The native C ABI remains v1; host API advances to 1.6.0. Existing
-language support packages remain compatible. D2 and Mermaid are not bundled into
-the app and keep their independent 0.1.0 versions.
+The app and all three helpers are **0.18.1 (72)**, upgrading **0.18.0 (71)**.
+Requires macOS 13 or later; the universal app includes Apple Silicon and Intel.
+Host API **1.6.0**, native ABI v1 and all independently released plugin versions
+remain unchanged. No runtime dependencies were added or upgraded.
 
-Download `Duckpad-0.18.0-universal.dmg` or `Duckpad-0.18.0-universal.zip` and verify
+Download `Duckpad-0.18.1-universal.dmg` or `Duckpad-0.18.1-universal.zip` and verify
 against `SHA256SUMS.txt`. After the tap update, Homebrew installations can run:
 
 ```sh
@@ -73,39 +37,38 @@ brew update
 brew upgrade --cask --greedy namjeongwan/duckpad/duckpad
 ```
 
-Check for Updates becomes available after the signed Sparkle feed is published.
-App and plugin Mach-O files use ad-hoc signatures; plugin inventories also carry
-publisher signatures. This release is not Developer ID signed or Apple notarized.
+Existing installations can use **Check for Updates** after the signed feed is
+published. The distribution is ad-hoc signed, without Developer ID signing or
+Apple notarization.
 
 ## Validation and limits
 
-29 focused Swift test functions passed in Release configuration from merged main: 20 runtime,
-syntax/detection and viewport tests, plus nine package/activation/installation
-checks. Actual D2 setup/checksums/cache reuse, Korean rendering and denied
-external imports were exercised with a successful unsandboxed control. Tests also
-covered WebKit PNG pixels and SVG cleanup, Mermaid flowchart/sequence/class
-rendering, errors, cancellation, stale replies/exports, native ABI loading, all
-eight locale resources and narrow 300/560-point translated controls.
+The unchanged baseline fails the real-browser regression with the same 24px
+coordinate offset. The fix passed **27 Node tests**, **24 Chrome viewport/zoom
+cases** and **12 native WebKit input cases**. Tests cover Korean text and inline
+code in five-item lists after tables, images, rules, code, Mermaid and mixed
+blocks. They verify the measured height map, every item's click target, Up/Down
+navigation, unchanged source and no document-edit messages during navigation.
 
-The universal release app passed bundle/signature verification, default isolated app
-smokes and sandboxed D2 XPC-to-WebKit plus embedded Mermaid rendering checks.
-The universal app was rebuilt from merged commit `479982117b6283fc937b20b119756c01dff59908`. App/helper versions and architectures, all eight packaged locales, Markdown/Mermaid, DMG/ZIP integrity and published plugin downloads were verified. Uploaded release assets were hash-checked before publication; public ZIP and plugin downloads were checked again after publication.
-Optional native Save-panel automation was skipped. Two broader search presentation
-tests also fail on the unchanged baseline (`incrementalFindDoesNotExpandTheResultsList`
-and `routedFolderSearchOpensIdentityCheckedResultAndSelectsUTF8Range`); the ten
-native viewport regressions pass.
+In addition, **28 existing CodeMirror integration cases** passed in Release
+configuration, covering table controls, edits, Undo/Redo, save/recovery, modes,
+shared panes and simulated Korean composition. The opt-in typing/drag benchmark
+was skipped.
 
-Diagram input is limited to 512 KiB, output to 32 MiB, and PNG snapshots to 8192
-pixels per axis and 16 million pixels. D2 rendering has a 90-second process limit;
-Mermaid rendering has a 30-second limit and 5000-edge bound. Extreme aspect ratios
-report an error. Native plugin installation remains a code-trust authorization,
-not isolation for arbitrary native code.
+The universal release app passed bundle/signature verification and the packaged Markdown
+smoke, including table controls, stable cell widths, Source/Live switching,
+Mermaid/math, links and source/revision preservation. The release app was rebuilt from merged main commit
+`5b3749dbc75d1d64e5eaf13fe93be4b05d72dbea`; app/helper versions, both
+architectures, packaged fixed resources, all eight UI locales, default app
+smokes and DMG/ZIP integrity were verified before publication. Tests use isolated profiles or
+windows; the reported original document was only read.
 
-Intel hardware execution, macOS 13 runtime and every Mermaid diagram family were
-not individually tested. See [D2](../plugins/d2.md), [Mermaid](../plugins/mermaid.md)
-and [verification details](../../SDK/DiagramPreview/overview.md).
+Intel hardware execution, macOS 13 runtime, physical Korean IME interaction and a
+full repository test-suite run are not claimed. Optional native Save-panel
+automation is not part of this patch validation. See the
+[Markdown verification instructions](../wiki/40-markdown-preview.md#block-layout-and-caret-regression-2026-11-13).
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.18.0/Duckpad-0.18.0-universal.zip" length="65031010" type="application/octet-stream" sparkle:edSignature="L0zjDmZvvkAFdAC2IgQ38pWElDd9SzhaT0g7Qxh3Oaud1mULtbZQATa27M3tkCucrjWAE6kUWiyogUD5OAKKBw=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.18.1/Duckpad-0.18.1-universal.zip" length="65031101" type="application/octet-stream" sparkle:edSignature="xd+YF/KLi52XXoYyF+UCaMFgtG1rjZECQWXtzmCBMT8+MDaYQ+lYwDDgV3Zp0hFiTU0796JdrJZQ3TeBoTiQAQ=="/>
         </item>
     </channel>
 </rss>
