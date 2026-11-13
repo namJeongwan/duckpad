@@ -5,6 +5,7 @@ import {EditableTable} from './editor-table.mjs';
 import {DiagramPreview} from './editor-diagram.mjs';
 import {MathPreview} from './editor-math.mjs';
 import {updateDecorations} from './editor-decoration-updates.mjs';
+import {blockWidget} from './editor-block-widget.mjs';
 
 export const setLive = StateEffect.define(), setComposing = StateEffect.define(), setDragging = StateEffect.define();
 export const liveMode = StateField.define({create: () => true, update(value, tr) {
@@ -53,7 +54,7 @@ class CodeHeader extends WidgetType {
     language.addEventListener('mousedown',e=>{e.preventDefault();moveTo(view,view.posAtDOM(header)+(this.position-this.anchor));});
     const copy=document.createElement('button');copy.textContent=window.DuckpadEditorLabels?.copy||'Copy';
     copy.addEventListener('mousedown', e=>{ e.preventDefault();window.DuckpadEditorHost?.({type:'copy',text:this.text}); });
-    header.append(language,copy);return header;
+    header.append(language,copy);return blockWidget(header);
   }
   ignoreEvent() { return false; }
 }
@@ -63,13 +64,13 @@ class RenderedBlock extends WidgetType {
   toDOM(view) {
     const wrapper=document.createElement('div');wrapper.className=this.kind==='table'?'md-table':'md-rule';
     wrapper.addEventListener('mousedown', event=>{event.preventDefault();moveTo(view,view.posAtDOM(wrapper));});
-    return wrapper;
+    return blockWidget(wrapper);
   }
   ignoreEvent() { return false; }
 }
 class ImageWidget extends WidgetType {
-  constructor(source, alt, position) { super(); Object.assign(this,{source,alt,position,base:window.DuckpadEditorDocumentURL}); }
-  eq(other) { return this.source===other.source&&this.alt===other.alt&&this.position===other.position&&this.base===other.base; }
+  constructor(source, alt, position, block) { super(); Object.assign(this,{source,alt,position,block,base:window.DuckpadEditorDocumentURL}); }
+  eq(other) { return this.source===other.source&&this.alt===other.alt&&this.position===other.position&&this.block===other.block&&this.base===other.base; }
   toDOM(view) {
     const image=document.createElement('img');image.className='md-image';image.alt=this.alt;
     try {
@@ -77,7 +78,7 @@ class ImageWidget extends WidgetType {
       if(url.protocol==='file:') image.src='duckpad-editor://local?url='+encodeURIComponent(url.href);
       else if(url.protocol==='data:'&&/^data:image\/(png|jpeg|gif|webp);base64,/i.test(this.source)) image.src=url.href;
     } catch {}
-    image.addEventListener('mousedown',e=>{e.preventDefault();moveTo(view,view.posAtDOM(image));});return image;
+    image.addEventListener('mousedown',e=>{e.preventDefault();moveTo(view,view.posAtDOM(image));});return this.block?blockWidget(image):image;
   }
   ignoreEvent() { return false; }
 }
@@ -178,7 +179,7 @@ function decorations(state,start=0,end=state.doc.length) {
       const url=node.getChild('URL');if(url){
         const source=doc.sliceString(from,to),alt=source.match(/^!\[([^\]]*)\]/)?.[1]||'';
         const block=doc.lineAt(from).from===from&&doc.lineAt(to).to===to;
-        output.push(Decoration.replace({block,widget:new ImageWidget(doc.sliceString(url.from,url.to),alt,from)}).range(from,to));
+        output.push(Decoration.replace({block,widget:new ImageWidget(doc.sliceString(url.from,url.to),alt,from,block)}).range(from,to));
       }return false;
     } else if((name==='Link'||name==='Autolink')&&!active(state,from,to)) {
       const markers=marks(node,'LinkMark');

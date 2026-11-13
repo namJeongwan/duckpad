@@ -6,6 +6,7 @@ import DOMPurify from 'dompurify';
 import {tableModel,changeCell,changeTable,displayCell,encodeCell} from './editor-table-model.mjs';
 import {inputCaret,placeInputCaret} from './editor-table-caret.mjs';
 import {linkMouseDown,linkClick} from './editor-link.mjs';
+import {blockWidget} from './editor-block-widget.mjs';
 
 const markdown=new MarkdownIt({html:false,linkify:false,breaks:false}).use(katexPlugin.default??katexPlugin,{throwOnError:false,trust:false,maxExpand:1000,maxSize:20});
 // Native selection echoes carry offsets only. Keep the exit column for an
@@ -348,7 +349,8 @@ export class EditableTable extends WidgetType {
   eq(other) {return this.source===other.source&&this.position===other.position&&this.readOnly===other.readOnly&&this.labels===other.labels;}
   toDOM(view) {
     const controller=new TableController(view,tableModel(this.source,this.position));
-    controller.root.tableController=controller;return controller.root;
+    controller.root.tableController=controller;
+    const root=blockWidget(controller.root);root.tableController=controller;return root;
   }
   updateDOM(dom) {dom.tableController.sync(tableModel(this.source,this.position));return true;}
   destroy(dom) {dom.tableController.destroy();}

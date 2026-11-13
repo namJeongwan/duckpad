@@ -5,6 +5,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-se
 .cm-editor .cm-scroller{font:var(--body-size,16px)/1.65 -apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;overflow:auto;overscroll-behavior:contain}
 .cm-editor .cm-content{width:100%;max-width:780px;flex:0 0 auto;margin:0 auto;padding:36px 40px 160px;caret-color:var(--fg)}
 .cm-line{padding:0;min-height:1.65em;white-space:pre-wrap;overflow-wrap:anywhere}
+.md-block-widget{display:flow-root}
 .cm-selectionBackground,.cm-focused .cm-selectionBackground,::selection{background:var(--selection)!important}
 .cm-cursor{border-left-color:var(--fg)}.cm-activeLine{background:transparent}
 .cm-line.md-paragraph-start{padding-top:4px}.cm-line.md-paragraph-end{padding-bottom:8px}

@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
+    "test:browser": "node editor-browser.test.mjs",
+    "test:webkit": "node editor-browser.test.mjs --prepare-only && swiftc -parse-as-library -swift-version 6 editor-webkit.test.swift -o ../../.build/markdown-editor-browser/webkit-smoke && ../../.build/markdown-editor-browser/webkit-smoke",
     "test": "node --test preview.test.mjs editor-math.test.mjs editor-decoration-updates.test.mjs editor-raw-document.test.mjs editor-table-model.test.mjs"
   },
   "dependencies": {
