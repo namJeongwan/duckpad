@@ -7,6 +7,7 @@ import DuckpadDomain
 final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
     var onClose: (() -> Void)?
     var onAddRoot: (() -> Void)?
+    var onRefresh: (() -> Void)?
     var onRemoveRoot: ((WorkspaceRootID) -> Void)?
     var onOpenFile: ((WorkspaceBrowserEntry) -> Void)?
     var onLoadChildren: ((WorkspaceRootID, String) -> Void)?
@@ -21,6 +22,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     private let title = NSTextField(labelWithString: L10n.text("Workspace"))
     private let addButton = StatusBarButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: L10n.text("Add Folder"))!, target: nil, action: nil)
     private let removeButton = StatusBarButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: L10n.text("Remove Folder"))!, target: nil, action: nil)
+    private let refreshButton = StatusBarButton(image: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)!, target: nil, action: nil)
     private let closeButton = StatusBarButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)!, target: nil, action: nil)
     private var contentWidth: CGFloat = 0
     private let outline = WorkspaceOutlineView(frame: .zero)
@@ -52,7 +54,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         title.translatesAutoresizingMaskIntoConstraints = false
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        for button in [addButton, removeButton, closeButton] {
+        for button in [refreshButton, addButton, removeButton, closeButton] {
             button.bezelStyle = .inline
             button.isBordered = false
             button.imagePosition = .imageOnly
@@ -69,6 +71,10 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         removeButton.target = self
         removeButton.action = #selector(removePressed)
         removeButton.isEnabled = false
+        refreshButton.target = self
+        refreshButton.action = #selector(refreshPressed)
+        refreshButton.isEnabled = false
+        refreshButton.setAccessibilityIdentifier("duckpad.workspace.refresh")
         closeButton.target = self
         closeButton.action = #selector(closePressed)
         closeButton.setAccessibilityIdentifier("duckpad.workspace.close")
@@ -134,8 +140,11 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             header.topAnchor.constraint(equalTo: topAnchor),
             header.heightAnchor.constraint(equalToConstant: 32),
             title.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 9),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: removeButton.leadingAnchor, constant: -6),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: refreshButton.leadingAnchor, constant: -6),
             title.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            refreshButton.trailingAnchor.constraint(equalTo: removeButton.leadingAnchor, constant: -2),
+            refreshButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            refreshButton.widthAnchor.constraint(equalToConstant: 24),
             removeButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: -2),
             removeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             removeButton.widthAnchor.constraint(equalToConstant: 24),
@@ -203,6 +212,25 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         return navigation
     }
 
+    func refreshLoadedChildren() {
+        guard interactionsEnabled else { return }
+        // Keep node identities and navigation while re-reading cached directories.
+        // Unvisited folders remain lazy; pending reads are replaced as well.
+        var directories: [WorkspaceSidebarNode] = []
+        for root in rootNodes {
+            traverse(root) { node in
+                if node.isExpandable, node.children != nil || node.isLoading || outline.isItemExpanded(node) {
+                    directories.append(node)
+                }
+            }
+        }
+        for node in directories {
+            node.isLoading = true
+            onLoadChildren?(node.rootID, node.relativePath)
+        }
+        search.refresh()
+    }
+
     private func captureNavigation() -> [WorkspaceRoot] {
         roots.map { root in
             var expanded: [String] = []
@@ -246,6 +274,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
             }
         }
         updateRemoveButton()
+        refreshButton.isEnabled = interactionsEnabled && !roots.isEmpty
         return structureChanged
     }
 
@@ -289,6 +318,7 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         search.setEnabled(enabled)
         outline.isEnabled = enabled
         addButton.isEnabled = enabled
+        refreshButton.isEnabled = enabled && !roots.isEmpty
         updateRemoveButton()
     }
 
@@ -321,6 +351,8 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         addButton.toolTip = catalog.text("Add Folder")
         removeButton.setAccessibilityLabel(catalog.text("Remove Folder"))
         removeButton.toolTip = catalog.text("Remove Folder")
+        refreshButton.setAccessibilityLabel(catalog.text("Refresh"))
+        refreshButton.toolTip = catalog.text("Refresh")
         outline.setAccessibilityLabel(catalog.text("Workspace files"))
         outline.tableColumns.first?.title = catalog.text("Workspace")
         outline.menu?.title = catalog.text("Workspace")
@@ -485,6 +517,13 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
         menu.removeAllItems()
         let row = outline.clickedRow
         contextNode = row >= 0 ? outline.item(atRow: row) as? WorkspaceSidebarNode : selectedNode
+        defer {
+            if !menu.items.isEmpty { menu.addItem(.separator()) }
+            let refresh = menu.addItem(withTitle: localizationCatalog.text("Refresh"), action: #selector(refreshPressed), keyEquivalent: "")
+            refresh.target = self
+            refresh.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+            refresh.isEnabled = interactionsEnabled && !roots.isEmpty
+        }
         guard let contextNode else { return }
         let reveal = menu.addItem(withTitle: localizationCatalog.text("Reveal in Finder"), action: #selector(revealContextPath), keyEquivalent: "")
         reveal.target = self
@@ -511,6 +550,11 @@ final class WorkspaceSidebarView: NSView, NSOutlineViewDataSource, NSOutlineView
     @objc private func closePressed() { onClose?() }
 
     @objc private func addPressed() { if interactionsEnabled { onAddRoot?() } }
+
+    @objc private func refreshPressed() {
+        guard interactionsEnabled, !roots.isEmpty else { return }
+        onRefresh?()
+    }
 
     @objc private func removePressed() {
         guard interactionsEnabled, let rootID = selectedNode?.rootID else { return }
