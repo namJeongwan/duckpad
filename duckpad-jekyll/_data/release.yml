@@ -1,10 +1,10 @@
 ---
-version: 0.18.1
+version: 0.18.2
 date: November 13, 2026
 minimum_macos: '13'
 dmg_size: 63.9 MB
 zip_size: 65.0 MB
-url: https://github.com/namJeongwan/duckpad/releases/tag/v0.18.1
-dmg: https://github.com/namJeongwan/duckpad/releases/download/v0.18.1/Duckpad-0.18.1-universal.dmg
-zip: https://github.com/namJeongwan/duckpad/releases/download/v0.18.1/Duckpad-0.18.1-universal.zip
-checksums: https://github.com/namJeongwan/duckpad/releases/download/v0.18.1/SHA256SUMS.txt
+url: https://github.com/namJeongwan/duckpad/releases/tag/v0.18.2
+dmg: https://github.com/namJeongwan/duckpad/releases/download/v0.18.2/Duckpad-0.18.2-universal.dmg
+zip: https://github.com/namJeongwan/duckpad/releases/download/v0.18.2/Duckpad-0.18.2-universal.zip
+checksums: https://github.com/namJeongwan/duckpad/releases/download/v0.18.2/SHA256SUMS.txt
