@@ -1,5 +1,6 @@
 import {WidgetType} from '@codemirror/view';
 import DOMPurify from 'dompurify';
+import {blockWidget} from './editor-block-widget.mjs';
 
 let loading, running=false, sequence=0, runtimeTheme;
 const pending=new Map(), owners=new Set(), cache=new Map();
@@ -116,7 +117,7 @@ export class DiagramPreview extends WidgetType {
     this.labels=window.DuckpadEditorLabels;
   }
   eq(other) {return this.source===other.source&&this.position===other.position&&this.anchor===other.anchor&&this.editing===other.editing&&this.themeKey===other.themeKey&&this.labels===other.labels;}
-  toDOM(view) {const controller=new DiagramController(view,this);controller.root.diagramController=controller;return controller.root;}
+  toDOM(view) {const controller=new DiagramController(view,this);controller.root.diagramController=controller;const root=blockWidget(controller.root);root.diagramController=controller;return root;}
   updateDOM(dom) {dom.diagramController.update(this);return true;}
   destroy(dom) {dom.diagramController.destroy();}
   ignoreEvent() {return true;}

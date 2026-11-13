@@ -136,6 +136,35 @@ images are referenced without copying or modifying them. Their sandbox bookmarks
 are retained for preview access. A document or editor-group change while the
 prompt is open cancels insertion to prevent edits to a different target.
 
+## Block layout and caret regression (2026-11-13)
+
+Live block widgets contain their existing vertical margins in a `flow-root`
+wrapper. CodeMirror measures the widget root's border box; an outer margin was
+visible but missing from its height map. A table's 12px top/bottom margins could
+therefore offset every following row by 24px: clicks landed on another list item
+and vertical arrows skipped items. The wrapper keeps the rendered spacing while
+including it in the measured height. Tables, diagrams, code headers, rules and
+standalone images use it; inline images retain their original DOM shape.
+
+After building the pinned Markdown resources, run:
+
+```sh
+npm run build --prefix scripts/markdown-preview
+npm test --prefix scripts/markdown-preview
+npm run test:browser --prefix scripts/markdown-preview
+npm run test:webkit --prefix scripts/markdown-preview
+```
+
+The browser test uses installed Chrome and an isolated profile; `CHROME_PATH`
+can select its executable. The macOS WebKit smoke needs Swift 6 and opens an
+isolated test window. Both use synthetic Korean/inline-code lists after tables,
+images, rules, code, Mermaid and mixed blocks, without loading user sessions.
+They check the height map, every list-item click, Up/Down navigation and unchanged
+source. WebKit sends native AppKit mouse/key events and checks that navigation
+posts no document edits. The unchanged baseline fails with the 24px offset;
+the fixed bundle passes 24 Chrome viewport/zoom cases and 12 WebKit input cases.
+The existing 27 Node tests and packaged Markdown smoke also pass.
+
 ## Input performance verification (2026-10-27)
 
 Typing no longer rescans/re-encodes the entire raw document for UTF-16/UTF-8
