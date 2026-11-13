@@ -221,6 +221,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private(set) var editorGroupCachedTabLookupCount = 0
     private(set) var editorGroupLinearTabInspectionCount = 0
     private var workspaceRestoreTask: Task<Void, Never>?
+    private var workspaceRestoreGeneration = UUID()
+    private var workspaceListingGeneration = UUID()
     private var workspaceNavigationRevisions: [WorkspaceRootID: UInt64] = [:]
     private var accessibilityDisplayObserver: WorkspaceNotificationObservation?
 
@@ -400,6 +402,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         commandBar.onToggleWorkspace = { [weak self] in self?.performToggleWorkspaceSidebar() }
         workspaceSidebar.onClose = { [weak self] in self?.performToggleWorkspaceSidebar() }
         workspaceSidebar.onAddRoot = { [weak self] in self?.performAddWorkspaceFolder(nil) }
+        workspaceSidebar.onRefresh = { [weak self] in self?.performRefreshWorkspace() }
         workspaceSidebar.onRemoveRoot = { [weak self] id in self?.routeRemoveWorkspaceRoot(id) }
         workspaceSidebar.onOpenFile = { [weak self] entry in self?.routeOpenWorkspaceEntry(entry) }
         workspaceSidebar.search.onLoad = { [weak self] query in
@@ -1351,6 +1354,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         workspaceBrowserUseCase?.showHiddenFiles = settings.showHiddenFiles
         searchExperienceStorage?.applyPreferences(settings)
         if visibilityChanged {
+            workspaceListingGeneration = UUID()
             workspaceRestoreTask?.cancel()
             let navigation = workspaceSidebar.invalidateChildren()
             if case .ready = workspaceBrowserUseCase?.state { renderWorkspaceBrowser(.ready(navigation)) }
@@ -3014,30 +3018,56 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    @objc public func performRefreshWorkspace(_ sender: Any? = nil) {
+        guard workspaceInteractionsAreActionable, let workspaceBrowserUseCase else { return }
+        let resumeNavigationRestore = workspaceRestoreTask != nil
+        workspaceRestoreTask?.cancel()
+        // Keep the pending-restore marker across overlapping refresh requests.
+        // The replacement restore clears it when it completes.
+        workspaceRestoreGeneration = UUID()
+        workspaceListingGeneration = UUID()
+        let generation = workspaceListingGeneration
+        beginWorkspaceBrowserTask { [weak self] in
+            guard !Task.isCancelled else { return }
+            // Revalidate registered roots too, including disconnected/reconnected folders.
+            await workspaceBrowserUseCase.start()
+            guard let self, !Task.isCancelled, self.workspaceListingGeneration == generation,
+                  self.workspaceBrowserCommandsAreActionable, case .ready = workspaceBrowserUseCase.state else { return }
+            if resumeNavigationRestore {
+                self.renderWorkspaceBrowser(.ready(workspaceBrowserUseCase.roots), restoreEvenIfUnchanged: true)
+            }
+            self.workspaceSidebar.refreshLoadedChildren()
+        }
+    }
+
     private func routeLoadWorkspaceChildren(rootID: WorkspaceRootID, relativeDirectory: String) {
         guard workspaceBrowserCommandsAreActionable, let workspaceBrowserUseCase else { return }
         let visibility = appPreferences.showHiddenFiles
+        let generation = workspaceListingGeneration
         beginWorkspaceBrowserTask { [weak self] in
             do {
                 let children = try await workspaceBrowserUseCase.children(
                     rootID: rootID,
                     relativeDirectory: relativeDirectory
                 )
-                guard let self, !Task.isCancelled, self.appPreferences.showHiddenFiles == visibility else { return }
+                guard let self, !Task.isCancelled, self.workspaceListingGeneration == generation,
+                      self.appPreferences.showHiddenFiles == visibility else { return }
                 self.workspaceSidebar.applyChildren(
                     rootID: rootID,
                     relativeDirectory: relativeDirectory,
                     entries: children
                 )
             } catch let failure as WorkspaceBrowserFailure {
-                guard let self, !Task.isCancelled, self.appPreferences.showHiddenFiles == visibility else { return }
+                guard let self, !Task.isCancelled, self.workspaceListingGeneration == generation,
+                      self.appPreferences.showHiddenFiles == visibility else { return }
                 self.workspaceSidebar.applyChildrenFailure(
                     rootID: rootID,
                     relativeDirectory: relativeDirectory,
                     failure: failure
                 )
             } catch {
-                guard let self, !Task.isCancelled, self.appPreferences.showHiddenFiles == visibility else { return }
+                guard let self, !Task.isCancelled, self.workspaceListingGeneration == generation,
+                      self.appPreferences.showHiddenFiles == visibility else { return }
                 self.workspaceSidebar.applyChildrenFailure(
                     rootID: rootID,
                     relativeDirectory: relativeDirectory,
@@ -4185,7 +4215,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         editorGroupRouter.activateEditorGroup(layout.focusedGroup)
     }
 
-    private func renderWorkspaceBrowser(_ state: WorkspaceBrowserState) {
+    private func renderWorkspaceBrowser(_ state: WorkspaceBrowserState, restoreEvenIfUnchanged: Bool = false) {
         switch state {
         case .idle, .loading:
             workspaceSidebar.setInteractionsEnabled(false)
@@ -4196,11 +4226,17 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
             workspaceSidebar.presentFailure(failure)
         case .ready(let roots):
             workspaceSidebar.setInteractionsEnabled(workspaceInteractionsAreActionable)
-            guard workspaceSidebar.apply(roots: roots) else { return }
+            let structureChanged = workspaceSidebar.apply(roots: roots)
+            guard structureChanged || restoreEvenIfUnchanged else { return }
             workspaceSidebar.search.refresh()
             workspaceRestoreTask?.cancel()
+            workspaceRestoreGeneration = UUID()
+            let restoreGeneration = workspaceRestoreGeneration
             workspaceRestoreTask = Task { @MainActor [weak self] in
                 guard let self, let useCase = self.workspaceBrowserUseCase else { return }
+                defer {
+                    if self.workspaceRestoreGeneration == restoreGeneration { self.workspaceRestoreTask = nil }
+                }
                 for root in roots where root.isAvailable {
                     for path in root.expandedRelativePaths.sorted(by: { lhs, rhs in
                         let left = lhs.split(separator: "/").count

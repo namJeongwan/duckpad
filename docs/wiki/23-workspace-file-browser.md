@@ -42,3 +42,33 @@ README files and the ignored Notepad++ reference are outside this work. The pre-
 ## Next slice
 
 Native multiple-window lifecycle follows. Macro recording/playback remains excluded.
+
+## External filesystem changes (2026-11-13)
+
+Use the **Refresh** arrow in the workspace header or **Refresh** in the outline's
+context menu after adding, deleting or renaming files outside Duckpad. Refresh
+revalidates registered roots and reloads cached/expanded directories, including
+pending reads. Unvisited directories remain lazy. Retained nodes preserve their
+expansion, selection and scroll position; the active filename filter is rerun
+without clearing its query. Missing entries disappear. Open documents, dirty
+buffers and their undo history are independent of this tree refresh.
+
+Refresh and hidden-file preference changes invalidate earlier directory requests,
+so a delayed success or failure cannot overwrite the new listing. Startup,
+termination and window-close admission/cancellation rules still apply. The button
+is disabled while the browser is unavailable or has no registered roots. Its
+tooltip, accessibility label and menu use the existing eight-locale `Refresh` key.
+
+This is manual refresh, not a new directory watcher. Zed's worktree instead
+registers a filesystem watcher, batches events with a 100ms latency, and sends
+changed paths to its background scanner. Reference:
+[Zed worktree watcher](https://github.com/zed-industries/zed/blob/48741fd17d0dec28be6ad664b0a06dc7202086be/crates/worktree/src/worktree.rs#L1363)
+and [path refresh requests](https://github.com/zed-industries/zed/blob/48741fd17d0dec28be6ad664b0a06dc7202086be/crates/worktree/src/worktree.rs#L2121).
+No Zed code or new runtime dependency is included.
+
+Regression coverage lives in `WorkspaceRefreshTests`. Before the fix, all three
+initial cases fail because no refresh control exists. The tests use temporary
+project folders and an isolated document session rather than user files. They
+exercise external create/delete/rename, expanded selection and dirty-buffer
+preservation, active filtering, all eight translations and no-root controls, plus
+delayed success/failure responses through the real controller route.
