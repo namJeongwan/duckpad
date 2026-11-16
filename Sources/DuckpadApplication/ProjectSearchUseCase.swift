@@ -61,14 +61,21 @@ public final class ProjectSearchUseCase {
                 searchedByteCount: bytes + (active?.searchedByteCount ?? 0)), context: .init(scope: scope, roots: roots, folder: folder))
         }
         if !paths.isEmpty { onProgress?(result(partial: true)) }
-        for path in paths {
+        for (index, path) in paths.enumerated() {
             try Task.checkCancellation()
             guard !open.isTruncated, remaining.maximumMatches > 0, remaining.maximumResultBytes > 0,
                   remaining.maximumFiles > 0, remaining.maximumTotalBytes > 0 else { incomplete = true; break }
             // Freeze this cumulative value before crossing into a Sendable callback.
             let base = result()
+            // Share discovery capacity across registered roots. A large early
+            // project must not consume every file/byte before later roots start.
+            // Unused capacity remains available to subsequent roots.
+            let rootsLeft = paths.count - index
+            var rootBudget = remaining
+            rootBudget.maximumFiles = max(1, remaining.maximumFiles / rootsLeft)
+            rootBudget.maximumTotalBytes = max(1, remaining.maximumTotalBytes / rootsLeft)
             let value = try await folderSearch.search(rootPath: path, query: query,
-                excluding: .init(paths: openPaths, directories: completedRoots), budget: remaining, onProgress: { active in
+                excluding: .init(paths: openPaths, directories: completedRoots), budget: rootBudget, onProgress: { active in
                     onProgress?(.init(open: base.open, folder: .init(rootPath: base.folder.rootPath,
                         documents: base.folder.documents + active.documents, isTruncated: true,
                         searchedFileCount: base.folder.searchedFileCount + active.searchedFileCount,

@@ -29,8 +29,10 @@ public final class UsageStatisticsTransport: NSObject, URLSessionTaskDelegate, S
         configuration.timeoutIntervalForRequest = 5
         configuration.timeoutIntervalForResource = 10
         configuration.waitsForConnectivity = false
-        configuration.allowsExpensiveNetworkAccess = false
-        configuration.allowsConstrainedNetworkAccess = false
+        // Sharing is controlled by the user's privacy setting. These bounded
+        // batches should also work on metered and Low Data Mode connections.
+        configuration.allowsExpensiveNetworkAccess = true
+        configuration.allowsConstrainedNetworkAccess = true
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         var request = URLRequest(url: endpoint)

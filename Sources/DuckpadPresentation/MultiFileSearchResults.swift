@@ -9,8 +9,23 @@ enum MultiFileSearchResults: Sendable {
 
     static let maximumDisplayedRows = 5000
 
-    struct Row: Sendable {
-        enum Target: Sendable { case open(SearchMatch); case folder(FolderSearchDocumentResult, FolderSearchMatch); case document(TabID) }
+    struct Row: Sendable, Equatable {
+        enum Target: Sendable, Equatable {
+            case open(SearchMatch)
+            case folder(FolderSearchDocumentResult, FolderSearchMatch)
+            case document(TabID)
+
+            static func == (lhs: Self, rhs: Self) -> Bool {
+                switch (lhs, rhs) {
+                case let (.open(a), .open(b)): return a == b
+                case let (.document(a), .document(b)): return a == b
+                case let (.folder(a, matchA), .folder(b, matchB)):
+                    // Sibling matches grow during streaming without changing this row.
+                    return a.path == b.path && a.relativePath == b.relativePath && a.identity == b.identity && matchA == matchB
+                default: return false
+                }
+            }
+        }
         let title: String
         let detail: String
         let snippet: String?

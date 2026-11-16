@@ -31,3 +31,27 @@ The full Debug and Release suites each pass 254/254 tests; `git diff --check` pa
 ## Next slice
 
 Persistent per-document bookmarks, next/previous bookmark navigation, and clear-all behavior follow. Macro recording/playback remains excluded.
+
+## Project search result stability (2026-11-16)
+
+Find/Replace in Files retains its last visible rows and preview while the next
+query is debouncing or scanning. The old result is immediately invalidated for
+activation, replacement and opening in the classic Find window. An empty initial
+open-buffer progress update cannot blank retained filesystem results. Clearing
+the query, a completed zero-match search or a search error clears the view;
+pending preview work is invalidated too. Identical progress avoids table/preview
+rewrites, and appended rows preserve the selected match and preview selection.
+
+Across multiple roots, the remaining file and input-byte discovery budgets are
+shared among roots that have not yet started. This prevents a large earlier root
+from consuming the complete 10,000-file/256-MiB allowance before later roots are
+visited. Unused capacity carries forward. Earlier roots may be truncated at their
+share even if later roots leave spare capacity; capacity is not redistributed
+backward. Partial results remain explicitly truncated and cannot enable Replace
+All. Global file, byte, match and result-memory bounds still apply. Single-root
+search retains its existing budget.
+
+Regression tests cover a literal `hongyoung` inside a URL through the actual
+Replace-in-Files controller and native unsaved buffer, stale-action rejection,
+preview stability and late failure callbacks, and later-root matches under both
+file-count and byte limits. User documents are not edited by these tests.
