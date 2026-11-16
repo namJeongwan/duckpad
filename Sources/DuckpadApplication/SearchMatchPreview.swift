@@ -6,12 +6,24 @@ public struct SearchMatchPreview: Sendable, Equatable {
     public let firstLine: Int
     public let matchLine: Int
     public let highlight: SearchUTF8Range
+    public let syntaxContextPrefix: String
+    public let languageDetectionPrefix: Data?
+    public let syntax: [SearchPreviewSyntaxSpan]
 
-    public init(text: String, firstLine: Int, matchLine: Int, highlight: SearchUTF8Range) {
+    public init(text: String, firstLine: Int, matchLine: Int, highlight: SearchUTF8Range,
+                syntaxContextPrefix: String = "", languageDetectionPrefix: Data? = nil,
+                syntax: [SearchPreviewSyntaxSpan] = []) {
         self.text = text; self.firstLine = firstLine; self.matchLine = matchLine; self.highlight = highlight
+        self.syntaxContextPrefix = syntaxContextPrefix; self.syntax = syntax
+        self.languageDetectionPrefix = languageDetectionPrefix
     }
 
-    /// At most 32 KiB around the match, aligned to UTF-8 and logical line boundaries.
+    public func withSyntax(_ syntax: [SearchPreviewSyntaxSpan]) -> Self {
+        .init(text: text, firstLine: firstLine, matchLine: matchLine, highlight: highlight,
+              syntaxContextPrefix: syntaxContextPrefix, languageDetectionPrefix: languageDetectionPrefix, syntax: syntax)
+    }
+
+    /// At most 32 KiB visible text, plus 64 KiB preceding lexer context and a 64 KiB BOF language probe.
     public static func extract(utf8: Data, range: SearchUTF8Range, line: Int) -> Self? {
         guard range.location >= 0, range.length >= 0, range.upperBound <= utf8.count, line > 0 else { return nil }
         let lowerBound = max(0, range.location - 16 * 1_024)
@@ -38,8 +50,12 @@ public struct SearchMatchPreview: Sendable, Equatable {
         }
         while end > range.location, end < utf8.count, utf8[end] & 0xc0 == 0x80 { end -= 1 }
         guard let text = String(data: utf8.subdata(in: start..<end), encoding: .utf8) else { return nil }
+        var contextStart = max(0, start - 64 * 1_024)
+        while contextStart < start, utf8[contextStart] & 0xc0 == 0x80 { contextStart += 1 }
+        let prefix = String(data: utf8.subdata(in: contextStart..<start), encoding: .utf8) ?? ""
         return .init(text: text, firstLine: max(1, line - preceding), matchLine: line,
-                     highlight: .init(location: range.location - start, length: min(range.length, end - range.location)))
+                     highlight: .init(location: range.location - start, length: min(range.length, end - range.location)),
+                     syntaxContextPrefix: prefix, languageDetectionPrefix: Data(utf8.prefix(64 * 1_024)))
     }
 }
 

@@ -1274,6 +1274,7 @@ final class DuckpadAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValid
             searchUseCase: searchUseCase,
             folderSearchUseCase: folderSearchUseCase,
             folderFileNameIndex: LocalFolderFileNameIndex(),
+            searchPreviewHighlighter: ScintillaSearchPreviewHighlighter(registry: languageRegistry),
             workspaceBrowserUseCase: workspaceBrowserUseCase,
             languageUseCase: languageUseCase,
             documentIntelligenceUseCase: documentIntelligenceUseCase,

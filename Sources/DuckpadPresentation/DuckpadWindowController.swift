@@ -29,6 +29,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
     private let editorGroupRouter: (any EditorGroupRoutingPort)?
     let searchPanel = SearchPanelView(frame: .zero)
     private var searchExperienceStorage: SearchExperienceCoordinator?
+    private let searchPreviewHighlighter: (any SearchPreviewSyntaxHighlighting)?
     var searchExperience: SearchExperienceCoordinator {
         if let searchExperienceStorage { return searchExperienceStorage }
         let coordinator = SearchExperienceCoordinator(workspace: workspace, search: searchUseCase,
@@ -43,7 +44,8 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
                 }
             },
             onGesture: { [weak self] in self?.performSearchFiles() },
-            chooseFolder: { [weak self] window in await self?.filePanels?.chooseFolderURL(attachedTo: window) })
+            chooseFolder: { [weak self] window in await self?.filePanels?.chooseFolderURL(attachedTo: window) },
+            previewHighlighter: searchPreviewHighlighter)
         if editorGroupRouter != nil {
             coordinator.prepareFileSplit = { [weak self] in
                 guard let self else { return nil }
@@ -251,6 +253,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         searchUseCase: SearchWorkspaceUseCase? = nil,
         folderSearchUseCase: FolderSearchUseCase? = nil,
         folderFileNameIndex: (any FolderFileNameIndexing)? = nil,
+        searchPreviewHighlighter: (any SearchPreviewSyntaxHighlighting)? = nil,
         workspaceBrowserUseCase: WorkspaceBrowserUseCase? = nil,
         languageUseCase: LanguageWorkspaceUseCase? = nil,
         documentIntelligenceUseCase: DocumentIntelligenceUseCase? = nil,
@@ -262,6 +265,7 @@ public final class DuckpadWindowController: NSWindowController, NSWindowDelegate
         automaticallyStarts: Bool = true
     ) {
         self.workspace = workspace
+        self.searchPreviewHighlighter = searchPreviewHighlighter
         self.markdownImageAccess = markdownImageAccess
         self.framePersistence = framePersistence
         let fallback = editorAdapter == nil ? TextViewEditorAdapter() : nil
