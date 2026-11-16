@@ -3,44 +3,33 @@
     <channel>
         <title>Duckpad</title>
         <item>
-            <title>0.18.3</title>
-            <pubDate>Mon, 16 Nov 2026 11:05:43 +0900</pubDate>
-            <sparkle:version>74</sparkle:version>
-            <sparkle:shortVersionString>0.18.3</sparkle:shortVersionString>
+            <title>0.19.0</title>
+            <pubDate>Mon, 16 Nov 2026 19:47:22 +0900</pubDate>
+            <sparkle:version>75</sparkle:version>
+            <sparkle:shortVersionString>0.19.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.18.3
+            <description sparkle:format="markdown"><![CDATA[# Duckpad 0.19.0
 
-Find/Replace in Files keeps results and their preview visible while a new query
-is being typed and searched. Previously, each edit cleared both views twice,
-causing a blank flash. Old results cannot activate or replace anything while the
-next query is pending. Empty final results and errors clear the view, and late
-preview responses cannot restore results after a failure. Repeated or growing
-progress preserves the selected match and preview text selection.
+Find/Replace in Files now highlights the syntax in its read-only code preview.
+Keywords, strings, comments, numbers and operators use the editor's existing
+Lexilla language definitions and light/dark colors. The yellow search match
+remains visible above syntax colors. Open buffers respect manual language
+selection; closed files use filename and document-start detection, including
+extensionless Python and Ruby scripts with shebangs.
 
-Multi-root searches share the remaining file-count and input-byte budgets across
-roots that have not started. A large earlier project can no longer consume the
-whole 10,000-file/256-MiB allowance before later projects are visited. This fixes
-missing later-root matches such as `hongyoung` in a configuration URL. Unused
-capacity carries forward; earlier roots can remain partial even if later roots
-leave spare capacity. Truncation stays visible and disables Replace All. Global
-file, byte, match and result-memory bounds remain in force.
-
-When **Share usage statistics** is enabled, bounded background batches can also
-use metered and Low Data Mode connections. Previously, those network restrictions
-could produce an offline error even while the collection API was reachable.
-Turning sharing off still cancels delivery and clears queued counters. Existing
-timeouts, batch/request limits, ephemeral sessions and redirect rejection remain.
-The statistics service's database memory limits were repaired separately. Earlier
-missing events may remain absent; the fix does not fabricate historical activity.
+The preview uses a separate lexer without sharing the source document or its
+Undo history. Theme updates preserve selection and scrolling. Switching between
+canonically equivalent Unicode text with different underlying bytes replaces
+the exact source before applying attributes, avoiding a range exception.
 
 ## Compatibility and installation
 
-The app and all three helpers are **0.18.3 (74)**, upgrading **0.18.2 (73)**.
+The app and all three helpers are **0.19.0 (75)**, upgrading **0.18.3 (74)**.
 Requires macOS 13 or later; the universal app includes Apple Silicon and Intel.
 Host API **1.6.0**, native ABI v1 and independently released plugins are unchanged.
-No runtime dependencies were added or upgraded.
+No dependencies were added or upgraded.
 
-Download `Duckpad-0.18.3-universal.dmg` or `Duckpad-0.18.3-universal.zip` and verify
+Download `Duckpad-0.19.0-universal.dmg` or `Duckpad-0.19.0-universal.zip` and verify
 against `SHA256SUMS.txt`. After the tap update, Homebrew installations can run:
 
 ```sh
@@ -54,33 +43,30 @@ notarization.
 
 ## Validation and limits
 
-Search validation passed **42 focused test functions**, including five new UI
-regressions, file/byte fairness variants, native unsaved-buffer searching, stale
-actions, streamed progress, replacement boundaries and simulated Korean input.
-Before the fixes, the flicker and both later-root fairness cases fail. Search
-scope methods passed in isolated processes; combined-suite completion was not
-verified. User documents were not modified by these tests.
+The Release arm64 build and **20 focused test functions** passed: native syntax
+colors for Rust, Python, Ruby, JSON and YAML; multiline comments; distant shebang
+detection; malformed UTF-8 ranges; NFC/NFD preview transitions; light/dark search
+overlays; actual closed-file and unsaved manual-language search paths; and
+existing preview, query-stability and streamed-result regressions. Light/dark
+preview snapshots were inspected. Source bytes, language and Undo history were
+preserved. Independent adversarial review reproduced the Unicode crash before
+the fix and successful transitions after it, with no unresolved findings.
 
-An additional **13 statistics tests** passed. The unchanged native transport
-reproduced an offline failure on the current restricted connection; the fixed
-transport sent a Debug diagnostic through the public endpoint, and its exact
-record was verified in ClickHouse. Debug records are separate from Release
-usage. The opt-in `scripts/smoke_usage_statistics.swift` repeats this check without
-opening user sessions or changing preferences. Live Release-user ingestion and
-the authenticated dashboard UI are not claimed as tested by this diagnostic.
+Visible text is capped at 32 KiB, preceding lexer context at 64 KiB, and the
+separate document-start language probe at 64 KiB. Multiline constructs beginning
+before the preceding-context window may have approximate colors. Plain text
+and unsupported lexers keep the normal preview foreground.
 
-The universal release app was rebuilt from clean merged main commit
-`8783ad4fee075cee903e21474d8c13fb913f6dff`. Bundle/signature/resources,
+The universal release app was built from clean merged main commit
+`d1be412342da56c32f8f4003411385fc5aedaa9b`. Bundle/resources/signatures,
 app and all three helper versions/architectures, default app smokes, all eight
 packaged locales and DMG/ZIP integrity passed. Packaged Markdown resources retain
-the earlier caret fix. A Debug diagnostic using the packaged 0.18.3 configuration
-also sent successfully through the native Swift transport and was verified in
-the database exactly once.
+the earlier caret fix.
 
 Intel hardware, macOS 13 runtime, physical Korean IME and a full repository suite
-are not claimed. Optional native Save-panel automation was skipped.
+are not claimed as tested. Optional native Save-panel automation was skipped.
 ]]></description>
-            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.18.3/Duckpad-0.18.3-universal.zip" length="65062808" type="application/octet-stream" sparkle:edSignature="uVk/nRR39sapjCLttVxhrNQ8pPqVI2iTek66x1n8jb95ECIDS4QK2du9pXk8NRQ6xm9kr3vRbon03rDtA/tCAQ=="/>
+            <enclosure url="https://github.com/namJeongwan/duckpad/releases/download/v0.19.0/Duckpad-0.19.0-universal.zip" length="65097989" type="application/octet-stream" sparkle:edSignature="kD/mRRlAilY5dIdNMm3UJxo3QxLqVzr+DbowpH43eK7UvaHqtxb6DUyCdQcVyCAPqP44X2ONNGgwdrEDxkJqBA=="/>
         </item>
     </channel>
 </rss>
