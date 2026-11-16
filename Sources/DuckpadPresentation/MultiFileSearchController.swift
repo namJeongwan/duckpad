@@ -64,6 +64,8 @@ final class MultiFileSearchController: NSWindowController, NSWindowDelegate, NST
     private var summary: OpenDocumentsReplacementResult?
     private var statusKey: String = "Type to search in files"
     private var statusArguments: [CVarArg] = []
+    private var displayedQuery: SearchQuery?
+    private var updatingRows = false
 
     init() {
         let panel = SearchPopupPanel(size: .init(width: 960, height: 680), identifier: "duckpad.multifile.window")
@@ -370,9 +372,13 @@ final class MultiFileSearchController: NSWindowController, NSWindowDelegate, NST
         resultCount.toolTip = status.stringValue
     }
     private func invalidateAndSearch() {
-        cancel(); result = nil; summary = nil; rows = []; table.reloadData(); preview.clear()
-        setStatus("Type to search in files"); updateControls()
-        guard !find.stringValue.isEmpty else { return }
+        cancel(); result = nil; summary = nil
+        guard !find.stringValue.isEmpty else {
+            clearResults(); setStatus("Type to search in files"); updateControls(); return
+        }
+        // Keep the last visible snapshot during debounce and background scanning.
+        // result=nil disables actions against the previous query immediately.
+        running = true; setStatus("Searching…"); updateControls()
         task = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(80))
             guard !Task.isCancelled else { return }
@@ -381,9 +387,9 @@ final class MultiFileSearchController: NSWindowController, NSWindowDelegate, NST
     }
     @objc func searchPressed() {
         guard !applying, !find.stringValue.isEmpty else { return }
-        cancel(); result = nil; summary = nil; rows = []; table.reloadData(); preview.clear()
+        cancel(); result = nil; summary = nil
         let token = generation, query = currentQuery(), selectedScope = selectedScope, root = selectedScope == .folder ? folder : nil
-        if selectedScope == .folder && root == nil { setStatus("Choose a folder…"); return }
+        if selectedScope == .folder && root == nil { clearResults(); setStatus("Choose a folder…"); updateControls(); return }
         running = true; setStatus("Searching…"); updateControls()
         task = Task { [weak self] in
             guard let self else { return }
@@ -406,7 +412,7 @@ final class MultiFileSearchController: NSWindowController, NSWindowDelegate, NST
                     }
                 } else { result = try await self.onSearch?(query, root) }
                 guard let result, !Task.isCancelled, self.generation == token else { return }
-                self.display(result)
+                self.display(result, completed: true)
                 if result.matchCount > self.rows.count {
                     self.setStatus("Matches: %1$@ · Files: %2$@ · Skipped: %3$@ · Showing first %4$@ matches",
                         [String(result.matchCount) + (result.isTruncated ? "+" : ""), String(result.documentCount), String(result.skippedCount), String(self.rows.count)])
@@ -417,19 +423,39 @@ final class MultiFileSearchController: NSWindowController, NSWindowDelegate, NST
                 }
             } catch {
                 guard !Task.isCancelled, self.generation == token else { return }
+                self.clearResults()
                 self.setStatus("Search failed: %1$@", [PresentationErrorText.message(error, catalog: self.catalog)])
             }
         }
     }
-    private func display(_ value: MultiFileSearchResults) {
+    private func clearResults() {
+        previewTask?.cancel(); previewTask = nil; previewGeneration = UUID()
+        result = nil; summary = nil; rows = []; displayedQuery = nil; table.reloadData(); preview.clear()
+    }
+
+    private func display(_ value: MultiFileSearchResults, completed: Bool = false) {
+        // Project search can first report an empty open-document phase. It must
+        // not blank the retained snapshot before filesystem results arrive.
+        if !completed, value.matchCount == 0, result == nil, !rows.isEmpty { return }
         let selection = table.selectedRow
-        result = value; rows = value.rows(catalog: catalog); table.reloadData()
-        if rows.indices.contains(selection) {
-            table.selectRowIndexes(IndexSet(integer: selection), byExtendingSelection: false)
-        } else if let first = rows.firstIndex(where: { $0.target != nil }) {
-            table.selectRowIndexes(IndexSet(integer: first), byExtendingSelection: false)
-            updatePreview()
-        }
+        let selectedTarget = rows.indices.contains(selection) ? rows[selection].target : nil
+        let previousRows = rows, query = currentQuery(), sameQuery = displayedQuery == query
+        result = value
+        let nextRows = value.rows(catalog: catalog)
+        guard nextRows != rows || !sameQuery else { return }
+        rows = nextRows; displayedQuery = query
+        updatingRows = true
+        if sameQuery, !previousRows.isEmpty, rows.starts(with: previousRows) {
+            table.beginUpdates()
+            table.insertRows(at: IndexSet(integersIn: previousRows.count..<rows.count), withAnimation: [])
+            table.endUpdates()
+        } else { table.reloadData() }
+        let retained = selectedTarget.flatMap { target in rows.firstIndex { $0.target == target } }
+        let nextSelection = retained ?? (rows.indices.contains(selection) ? selection : rows.firstIndex { $0.target != nil })
+        if let nextSelection { table.selectRowIndexes(IndexSet(integer: nextSelection), byExtendingSelection: false) }
+        updatingRows = false
+        let target = nextSelection.flatMap { rows[$0].target }
+        if !sameQuery || target != selectedTarget || rows.isEmpty { updatePreview() }
     }
     @objc func replacePressed() {
         guard replaceButton.isEnabled, let result, let window else { return }
@@ -523,8 +549,9 @@ final class MultiFileSearchController: NSWindowController, NSWindowDelegate, NST
         cell.apply(title: rows[row].title, detail: rows[row].detail, query: currentQuery())
         return cell
     }
-    func tableViewSelectionDidChange(_ notification: Notification) { updatePreview() }
+    func tableViewSelectionDidChange(_ notification: Notification) { if !updatingRows { updatePreview() } }
     private func updatePreview() {
+        guard result != nil || summary != nil else { return }
         previewTask?.cancel(); previewGeneration = UUID()
         updateControls()
         guard rows.indices.contains(table.selectedRow), let snippet = rows[table.selectedRow].snippet,
@@ -549,7 +576,8 @@ final class MultiFileSearchController: NSWindowController, NSWindowDelegate, NST
         }
     }
     @objc func activateSelection() {
-        guard rows.indices.contains(table.selectedRow), let target = rows[table.selectedRow].target else { return }
+        guard result != nil || summary != nil,
+              rows.indices.contains(table.selectedRow), let target = rows[table.selectedRow].target else { return }
         dismiss(); onActivate?(target)
     }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
