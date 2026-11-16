@@ -13,6 +13,7 @@ final class MultiFileSearchController: NSWindowController, NSWindowDelegate, NST
     var onReplace: ((SearchQuery, MultiFileSearchResults) async throws -> OpenDocumentsReplacementResult)?
     var onActivate: ((MultiFileSearchResults.Row.Target) -> Void)?
     var onPreview: ((MultiFileSearchResults.Row.Target) async -> SearchMatchPreview?)?
+    var onStylePreview: ((SearchMatchPreview, MultiFileSearchResults.Row.Target) -> SearchMatchPreview)?
     var onOpenResults: ((SearchQuery, MultiFileSearchResults) -> Void)?
     var onChooseFolder: (() async -> URL?)?
     private let find = SearchInputField()
@@ -566,7 +567,8 @@ final class MultiFileSearchController: NSWindowController, NSWindowDelegate, NST
         let found = currentQuery().options.mode == .normal ? source.range(of: find.stringValue, options: matchCase.isOn ? [] : .caseInsensitive) : NSRange(location: NSNotFound, length: 0)
         let start = found.location == NSNotFound ? 0 : source.substring(to: found.location).utf8.count
         let length = found.location == NSNotFound ? 0 : source.substring(with: found).utf8.count
-        preview.apply(.init(text: snippet, firstLine: line, matchLine: line, highlight: .init(location: start, length: length)))
+        let initial = SearchMatchPreview(text: snippet, firstLine: line, matchLine: line, highlight: .init(location: start, length: length))
+        preview.apply(onStylePreview?(initial, target) ?? initial)
         let token = previewGeneration
         previewTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(60))

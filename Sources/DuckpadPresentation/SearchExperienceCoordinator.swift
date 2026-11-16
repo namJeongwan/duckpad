@@ -19,6 +19,7 @@ final class SearchExperienceCoordinator {
     private let activate: (MultiFileSearchResults.Row.Target) -> Void
     private let onGesture: () -> Void
     private let chooseFolder: (NSWindow?) async -> URL?
+    private let previewHighlighter: (any SearchPreviewSyntaxHighlighting)?
     private var filePanelStorage: FileNameSearchController?
     private var multiPanelStorage: MultiFileSearchController?
     private var monitor: Any?
@@ -45,10 +46,12 @@ final class SearchExperienceCoordinator {
          actionable: @escaping () -> Bool, openWorkspace: @escaping (WorkspaceBrowserEntry) -> Void,
          activate: @escaping (MultiFileSearchResults.Row.Target) -> Void,
          onGesture: @escaping () -> Void,
-         chooseFolder: @escaping (NSWindow?) async -> URL?) {
+         chooseFolder: @escaping (NSWindow?) async -> URL?,
+         previewHighlighter: (any SearchPreviewSyntaxHighlighting)? = nil) {
         self.workspace = workspace; self.search = search; self.folderSearch = folderSearch; self.files = files
         self.browser = browser; self.folderFileNames = folderFileNames; self.parent = parent; self.actionable = actionable; self.openWorkspace = openWorkspace
         self.activate = activate; self.chooseFolder = chooseFolder; self.onGesture = onGesture
+        self.previewHighlighter = previewHighlighter
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown]) { [weak self] event in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -237,18 +240,37 @@ final class SearchExperienceCoordinator {
         }
         panel.onPreview = { [weak self] target in
             guard let self, self.actionable() else { return nil }
+            let content: SearchMatchPreview?
             switch target {
-            case .open(let match): return await self.search?.preview(match)
-            case .folder(let document, let match): return await self.folderSearch?.preview(document: document, match: match)
+            case .open(let match): content = await self.search?.preview(match)
+            case .folder(let document, let match): content = await self.folderSearch?.preview(document: document, match: match)
             case .document: return nil
             }
+            guard !Task.isCancelled, let content else { return nil }
+            return self.highlightPreview(content, target: target)
         }
+        panel.onStylePreview = { [weak self] content, target in self?.highlightPreview(content, target: target) ?? content }
         panel.onOpenResults = { [weak self] query, result in
             guard let self, self.actionable() else { return }; self.onOpenResults?(query, result)
         }
         panel.onActivate = { [weak self] target in guard let self, self.actionable() else { return }; self.activate(target) }
         panel.onChooseFolder = { [weak self, weak panel] in await self?.chooseFolder(panel?.window) }
         multiPanelStorage = panel; return panel
+    }
+
+    private func highlightPreview(_ content: SearchMatchPreview, target: MultiFileSearchResults.Row.Target) -> SearchMatchPreview {
+        guard let previewHighlighter else { return content }
+        let filename: String?
+        let languageOverride: LanguageOverride
+        switch target {
+        case .open(let match):
+            let tab = workspace.snapshot().tabs.first { $0.id == match.tabID }
+            filename = tab?.fullPath ?? tab?.title
+            languageOverride = (try? workspace.recoverySession().languageOverride(for: match.tabID)) ?? .automatic
+        case .folder(let document, _): filename = document.path; languageOverride = .automatic
+        case .document: return content
+        }
+        return previewHighlighter.highlight(content, filename: filename, languageOverride: languageOverride)
     }
 
     private func replace(_ query: SearchQuery, result: MultiFileSearchResults) async throws -> OpenDocumentsReplacementResult {

@@ -55,3 +55,26 @@ Regression tests cover a literal `hongyoung` inside a URL through the actual
 Replace-in-Files controller and native unsaved buffer, stale-action rejection,
 preview stability and late failure callbacks, and later-root matches under both
 file-count and byte limits. User documents are not edited by these tests.
+
+## Syntax colors in search previews (2026-11-16)
+
+Find/Replace in Files uses the editor's existing Lexilla language definitions and
+light/dark palettes to color the read-only code preview. The yellow search match
+remains above syntax colors. Open buffers respect manual language selection;
+closed files use filename and content detection. Plain text and unsupported
+lexers retain the normal preview foreground.
+
+A dedicated native lexer receives at most 32 KiB of visible text and 64 KiB of
+preceding context. A separate 64 KiB document-start probe preserves shebang and
+signature detection for matches far into a file. Lexer work stays synchronous
+and bounded; multiline constructs starting before the preceding-context window
+can have approximate colors. The preview never shares an editable document or
+undo stack. Theme updates preserve the preview selection and scroll position.
+
+Focused tests exercise Rust, Python, Ruby, JSON and YAML colors, preceding
+multiline comments, distant extensionless shebang scripts, UTF-8 scalar
+boundaries, light/dark search overlays, and the actual closed-file and unsaved
+manual-language search paths. Native source bytes, language and Undo history
+remain unchanged. Canonically equivalent Unicode previews with different byte
+and UTF-16 lengths replace their exact source before applying attributes.
+Light/dark preview snapshots are inspected separately.

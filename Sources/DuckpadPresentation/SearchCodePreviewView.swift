@@ -42,21 +42,62 @@ final class SearchCodePreviewView: NSView {
     }
     func clear() { content = nil; textView.string = ""; gutter.needsDisplay = true }
     func apply(_ content: SearchMatchPreview) {
+        let sameText = textView.string.utf8.elementsEqual(content.text.utf8)
+        let preserveView = sameText && self.content?.firstLine == content.firstLine
+            && self.content?.matchLine == content.matchLine && self.content?.highlight == content.highlight
+        let selection = textView.selectedRanges, origin = scroll.contentView.bounds.origin
         self.content = content
-        textView.string = content.text
+        if !sameText { textView.string = content.text }
         let length = (content.text as NSString).length
-        textView.textStorage?.setAttributes([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .foregroundColor: NSColor.labelColor], range: NSRange(location: 0, length: length))
-        let bytes = Data(content.text.utf8), highlight = content.highlight
-        if highlight.location >= 0, highlight.length >= 0, highlight.upperBound <= bytes.count {
-            let location = String(decoding: bytes.prefix(highlight.location), as: UTF8.self).utf16.count
-            let count = String(decoding: bytes.subdata(in: highlight.location..<highlight.upperBound), as: UTF8.self).utf16.count
-            let range = NSRange(location: location, length: count)
+        let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let palette: EditorThemePalette = dark ? .dark : .light
+        let offsets = Self.utf16Offsets(content.text)
+        func range(_ source: SearchUTF8Range) -> NSRange? {
+            guard source.location >= 0, source.length >= 0, source.location < offsets.count,
+                  source.length <= offsets.count - 1 - source.location else { return nil }
+            let start = offsets[source.location], end = offsets[source.location + source.length]
+            guard start >= 0, end >= start else { return nil }
+            return .init(location: start, length: end - start)
+        }
+        textView.textStorage?.beginEditing()
+        textView.textStorage?.setAttributes([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+            .foregroundColor: Self.color(palette.colors.foreground)], range: NSRange(location: 0, length: length))
+        for span in content.syntax {
+            guard let range = range(span.range) else { continue }
+            textView.textStorage?.addAttribute(.foregroundColor,
+                value: Self.color(dark ? span.darkForeground : span.lightForeground), range: range)
+        }
+        let highlightRange = range(content.highlight)
+        if let range = highlightRange {
             let line = (content.text as NSString).lineRange(for: range)
             textView.textStorage?.addAttribute(.backgroundColor, value: WorkspaceColors.selection.withAlphaComponent(0.35), range: line)
             textView.textStorage?.addAttributes([.backgroundColor: NSColor.systemYellow.withAlphaComponent(0.6), .foregroundColor: NSColor.black], range: range)
-            textView.scrollRangeToVisible(range)
         }
+        textView.textStorage?.endEditing()
+        if preserveView {
+            textView.selectedRanges = selection
+            scroll.contentView.scroll(to: scroll.contentView.constrainBoundsRect(.init(origin: origin, size: scroll.contentView.bounds.size)).origin)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        } else if let highlightRange { textView.scrollRangeToVisible(highlightRange) }
         gutter.firstLine = content.firstLine; gutter.needsDisplay = true
+    }
+
+    private static func color(_ rgb: Int) -> NSColor {
+        NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255,
+                blue: CGFloat(rgb & 255) / 255, alpha: 1)
+    }
+
+    /// Valid scalar boundaries only; byte offsets inside a UTF-8 scalar remain -1.
+    private static func utf16Offsets(_ text: String) -> [Int] {
+        var result = Array(repeating: -1, count: text.utf8.count + 1), byte = 0, utf16 = 0
+        result[0] = 0
+        for scalar in text.unicodeScalars {
+            let value = scalar.value
+            byte += value <= 0x7F ? 1 : value <= 0x7FF ? 2 : value <= 0xFFFF ? 3 : 4
+            utf16 += value <= 0xFFFF ? 1 : 2
+            result[byte] = utf16
+        }
+        return result
     }
 }
 
